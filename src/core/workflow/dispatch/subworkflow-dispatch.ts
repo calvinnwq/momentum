@@ -1,5 +1,5 @@
 /**
- * Daemon-lane entry point for the `subworkflow` executor family (RC-4, NGX-497).
+ * Daemon-lane entry point for the `subworkflow` executor family.
  *
  * The async sibling of `dispatch/external-apply-dispatch.ts`'s
  * {@link createExternalApplyWorkflowDispatch}: it wraps the production base

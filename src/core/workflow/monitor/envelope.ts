@@ -1,5 +1,5 @@
 /**
- * Read-only machine envelope for `workflow run monitor` (NGX-328, M8-05).
+ * Read-only machine envelope for `workflow run monitor`.
  *
  * The OpenClaw `coding-workflow-pipeline` skill's `monitor_runner.py` consumes
  * one stable JSON shape per monitor tick instead of parsing prose or scraping
@@ -117,7 +117,7 @@ export type WorkflowMonitorEnvelope = {
   recovery: WorkflowMonitorRecovery | null;
   evidence: readonly WorkflowEvidenceLink[];
   /**
-   * Durable workflow / step / executor gates for the run (M10-08, NGX-352),
+   * Durable workflow / step / executor gates for the run,
    * oldest first, open and resolved alike. Surfacing them in the monitor
    * envelope makes the run's approval-required / operator-decision pauses
    * explicit and inspectable to the monitor runner alongside the derived
@@ -128,7 +128,7 @@ export type WorkflowMonitorEnvelope = {
   /**
    * The digest of the last *emitted* native progress tick for this run, read
    * verbatim from the durable `monitor_last_emitted_digest` advisory column
-   * (NGX-511). It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
+   *. It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
    * reducer compares against: an equal digest means the operator-facing state
    * has not changed since the last surfaced tick. `null` means no tick has been
    * emitted yet (a first observation always emits).

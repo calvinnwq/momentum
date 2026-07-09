@@ -1,6 +1,6 @@
 /**
  * Async dispatched-step run path for the `subworkflow` executor family
- * (RC-4, NGX-497).
+ *.
  *
  * This is the daemon-dispatchable *producer* that makes `subworkflow` runnable by
  * the workflow lane. It is the async sibling of

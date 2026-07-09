@@ -9,10 +9,10 @@
  * transaction over git + verification, mirroring how `iteration-finalize.ts` stays
  * a pure transaction the foreground caller composes.
  *
- * It was introduced by NGX-334 (M9-03) as the M9 live-step lane's
- * `live-step/finalize.ts`, then extracted here under NGX-494 so the
- * finalization consumers depend on one shared seam instead of the M10
- * executor-loop families reaching into an M9-named module for it. The consumers:
+ * It began as the live-step lane's
+ * `live-step/finalize.ts`, then was extracted here so the
+ * finalization consumers depend on one shared seam instead of the
+ * executor-loop families reaching into a live-step module for it. The consumers:
  *
  *   - the M9 live wrappers — `live-step/advance.ts` and
  *     `live-step/run-recovery.ts`, via the `live-step/finalize.ts` back-compat
@@ -20,7 +20,7 @@
  *     `*LiveWorkflowStep*` names;
  *   - the M10 goal-loop executor family — `goal-loop/mechanism.ts`,
  *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
- *     directly (NGX-494, RC-1b); and
+ *     directly; and
  *   - the M10 single-shot executor family — `single-shot/mechanism.ts`, which
  *     still reaches the seam through the `live-step/finalize.ts` back-compat
  *     alias until its own migration.
@@ -378,7 +378,7 @@ type ReadNormalizedResultFile =
  * The `live step ...` wording in these `result_missing` / `result_invalid`
  * errors is the preserved durable contract — it surfaces in `goal-status`
  * output, `recovery.md` artifacts, and is pinned by the M9 finalize tests — so it
- * is intentionally kept verbatim across the NGX-494 relocation, not updated to
+ * is intentionally kept verbatim across the relocation, not updated to
  * match the neutral symbol names.
  */
 function readNormalizedResultFile(
@@ -450,7 +450,7 @@ function errnoCode(error: unknown): string | undefined {
 
 // The `live workflow step ...` reason wording is the preserved durable contract
 // (pinned by the M9 finalize / run-recovery tests and surfaced in recovery
-// artifacts); it is kept verbatim across the NGX-494 relocation.
+// artifacts); it is kept verbatim across the relocation.
 function manualRecovery(
   trigger: WorkflowStepFinalizeRecoveryTrigger,
   expectedHead: string,

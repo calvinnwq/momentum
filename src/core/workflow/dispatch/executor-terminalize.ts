@@ -1,5 +1,5 @@
 /**
- * Dispatched executor-evidence terminalization seam (RC-5b, NGX-492).
+ * Dispatched executor-evidence terminalization seam.
  *
  * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the

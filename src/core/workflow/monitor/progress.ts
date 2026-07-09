@@ -1,5 +1,5 @@
 /**
- * Pure native progress-monitor digest reducer (NGX-511).
+ * Pure native progress-monitor digest reducer.
  *
  * CWFP's cron monitor gives Calvin progressive updates without burning a large
  * agent turn per heartbeat. This module is the Momentum-native equivalent: it
@@ -10,7 +10,7 @@
  * whether *anything meaningful changed since the last emitted tick* so repeated
  * unchanged heartbeats are suppressed instead of spamming the operator.
  *
- * Design constraints pinned by NGX-511 and SPEC.md "Workflow Safety":
+ * Design constraints pinned by SPEC.md "Workflow Safety":
  *
  * - **Durable state is the source of truth.** The reducer derives everything
  *   from the envelope, which is itself built from durable rows; it never reads
@@ -44,7 +44,7 @@ import type {
 
 /**
  * Coarse progress phase for a native monitor tick. The four phases named in the
- * NGX-511 acceptance criteria — advancing, idle, blocked/manual-recovery, and
+ * Acceptance criteria — advancing, idle, blocked/manual-recovery, and
  * terminal — are all distinguishable here; `awaiting_approval` is split out of
  * the broad waiting family because a planned approval gate needs operator eyes
  * and is materially different from a run that is merely idle.

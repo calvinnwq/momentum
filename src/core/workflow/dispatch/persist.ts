@@ -1,6 +1,6 @@
 /**
  * Durable resolution twin of the production workflow-lane dispatch brain
- * (M10-09a, NGX-367).
+ *.
  *
  * `dispatch.ts` owns the *pure* dispatch decision: given a claimed
  * step's already-resolved executor family (a {@link WorkflowStepDispatchResolution}),

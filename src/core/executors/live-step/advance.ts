@@ -1,5 +1,5 @@
 /**
- * Run-level composition for a single live workflow step (NGX-334, M9-03).
+ * Run-level composition for a single live workflow step.
  *
  * The M9-03 slice ships three primitives that are deliberately separate so each
  * stays a focused, independently testable unit:

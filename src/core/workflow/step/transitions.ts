@@ -1,6 +1,5 @@
 /**
- * Durable `workflow_steps` live-transition primitives introduced by NGX-333
- * (M9-02).
+ * Durable `workflow_steps` live-transition primitives.
  *
  * Iteration 1-3 of M9-02 added the live execution core (`live-step-wrapper.ts`),
  * the M7 executor bridge (`live-step/executor.ts`), and the durable

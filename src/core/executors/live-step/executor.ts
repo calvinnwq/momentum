@@ -1,5 +1,5 @@
 /**
- * Live workflow-step executor bridge introduced by NGX-333 (M9-02).
+ * Live workflow-step executor bridge.
  *
  * Iteration 1 of M9-02 added `runLiveStepWrapper` (`live-step-wrapper.ts`): the
  * pure execution core that runs a resolved M9-01 `LiveWrapperConfig` as an

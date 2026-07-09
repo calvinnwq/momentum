@@ -1,5 +1,5 @@
 /**
- * Production workflow-step reconciliation decision domain (RC-2, NGX-480).
+ * Production workflow-step reconciliation decision domain.
  *
  * This module owns the *pure* half of the single reconciliation seam the
  * runtime-consolidation plan names RC-2: the deterministic decision that turns a

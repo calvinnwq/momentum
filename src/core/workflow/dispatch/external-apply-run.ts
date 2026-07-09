@@ -1,6 +1,6 @@
 /**
  * Async dispatched-step run path for the `external-apply` executor family
- * (RC-3, NGX-496).
+ *.
  *
  * This is the daemon-dispatchable *producer* that makes `external-apply`
  * runnable by the workflow lane. It is the async sibling of

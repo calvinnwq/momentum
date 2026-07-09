@@ -1,5 +1,5 @@
 /**
- * Persistence layer for M10-01 (NGX-345) workflow / step definition primitives.
+ * Persistence layer for workflow / step definition primitives.
  *
  * Takes the pure {@link WorkflowDefinition} shape owned by
  * `definition/definition.ts` and writes it into the durable

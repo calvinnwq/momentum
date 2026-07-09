@@ -1,6 +1,5 @@
 /**
- * Workflow definition primitives for the workflow-first runtime (M10-01,
- * NGX-345).
+ * Workflow definition primitives for the workflow-first runtime.
  *
  * This module owns the *pure* `WorkflowDefinition` / `StepDefinition` shape,
  * a deterministic validator, and the built-in coding workflow definition. It
@@ -18,7 +17,7 @@
  *
  *   - `StepDefinition.executor` names an executor *family* only. The rich
  *     per-step executor configuration (agent / model / effort / policy) is the
- *     `ExecutorDefinition` record owned by M10-03 (NGX-347); naming the family
+ *     `ExecutorDefinition` record owned by the executor-loop spine; naming the family
  *     keeps a step "configured" without pulling that schema forward.
  *   - `StepDefinition.kind` reuses the canonical M7 `WorkflowStepKind`
  *     vocabulary so the built-in coding workflow stays wire-compatible with the

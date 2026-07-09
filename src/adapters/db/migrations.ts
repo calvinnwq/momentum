@@ -56,7 +56,7 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
   { name: "monitor_last_emitted_at", type: "INTEGER" }
 ];
 
-// M10-02 (NGX-346): link a workflow run back to the WorkflowDefinition recipe it
+// Link a workflow run back to the WorkflowDefinition recipe it
 // was started from, so a workflow-first run start records its (key, version)
 // provenance. Nullable because pre-M10 runs (e.g. imported coding-workflow
 // artifacts) have no persisted definition link.
@@ -458,7 +458,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
   ON workflow_runs(repo_path) WHERE repo_path IS NOT NULL;
 `;
 
-// M10-01 (NGX-345): durable WorkflowDefinition / StepDefinition primitives.
+// Durable WorkflowDefinition / StepDefinition primitives.
 // A definition is identified by (key, version) so recipes can evolve without
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
@@ -501,7 +501,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
   ON jobs(state, type);
 `;
 
-// M10-03 (NGX-347): durable executor-loop spine nested below a `StepRun` so
+// Durable executor-loop spine nested below a `StepRun` so
 // bounded autonomy never flattens into top-level workflow steps:
 //
 //   StepRun -> ExecutorInvocation -> ExecutorRound[]
@@ -674,7 +674,7 @@ CREATE INDEX IF NOT EXISTS idx_executor_decisions_round
   ON executor_decisions(round_id);
 `;
 
-// M10-08 (NGX-352): durable workflow gates and operator decisions. A gate is the
+// Durable workflow gates and operator decisions. A gate is the
 // contract "Human Gates" record — a durable pause record, not a prompt hidden
 // inside an executor. Each gate hangs from exactly one layer of the workflow-first
 // tree named by `target_scope` (workflow -> step -> invocation -> round), so the

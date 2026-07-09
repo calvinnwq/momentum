@@ -1,5 +1,5 @@
 /**
- * Project rollup (NGX-292 / M5-05; pending-intent surfaces added in NGX-293 / M5-06).
+ * Project rollup.
  *
  * Computes an operator-facing summary of SourceItem / Goal / evidence /
  * reconciliation state from local durable records only. Never calls source

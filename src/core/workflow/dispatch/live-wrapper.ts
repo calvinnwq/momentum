@@ -1,5 +1,5 @@
 /**
- * Live-wrapper daemon dispatch composition (RC-5b, NGX-492).
+ * Live-wrapper daemon dispatch composition.
  *
  * The production dispatch lane is assembled from landed, individually-tested seams:
  *

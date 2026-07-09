@@ -1,6 +1,5 @@
 /**
- * Pure state model for the executor loop nested below a `StepRun` (M10-03,
- * NGX-347).
+ * Pure state model for the executor loop nested below a `StepRun`.
  *
  * This module owns only the canonical vocabulary, the transition reducers, and
  * the record *shapes* for the `ExecutorDefinition` / `ExecutorInvocation` /

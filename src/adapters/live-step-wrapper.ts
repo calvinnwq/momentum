@@ -1,9 +1,9 @@
 /**
- * Live workflow-step execution wrapper introduced by NGX-333 (M9-02).
+ * Live workflow-step execution wrapper.
  *
- * Milestone 9 lets Momentum invoke live workflow steps that wrap the existing
- * OpenClaw engines. NGX-332 (M9-01) added the typed live-wrapper config plus a
- * `WorkflowStepKind`-keyed registry (`live-wrapper-registry.ts`). This module
+ * Momentum invokes live workflow steps that wrap the existing
+ * OpenClaw engines. The typed live-wrapper config plus a
+ * `WorkflowStepKind`-keyed registry live in `live-wrapper-registry.ts`. This module
  * adds the next layer: actually running a resolved live wrapper as an explicit
  * local child process and normalizing its outcome.
  *

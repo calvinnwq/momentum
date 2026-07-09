@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Runtime `MOMENTUM.md` policy loader introduced by NGX-284 (M4-05).
+ * Runtime `MOMENTUM.md` policy loader.
  *
  * The policy file is a repo-owned, opt-in defaults layer sitting between
  * goal-frontmatter values and built-in Momentum defaults. It contains a
@@ -34,8 +34,7 @@ import path from "node:path";
 export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
 
 /**
- * Policy values for the `intent_apply_policy` MOMENTUM.md field introduced by
- * NGX-293 (M5-06). The field gates whether the `momentum intent apply` CLI is
+ * Policy values for the `intent_apply_policy` MOMENTUM.md field. The field gates whether the `momentum intent apply` CLI is
  * allowed to perform an external write through an adapter.
  *
  * - `create_intents_only` (default): the safe default. The apply CLI may

@@ -1,5 +1,5 @@
 /**
- * HTTP-backed `LinearReconciliationClient` (NGX-289 / M5-02 CLI slice).
+ * HTTP-backed `LinearReconciliationClient`.
  *
  * Drives a single read-only Linear GraphQL `issues` query per page and adapts the
  * response into the orchestrator's `LinearReconciliationFetchPageResult`

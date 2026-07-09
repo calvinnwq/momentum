@@ -1,5 +1,5 @@
 /**
- * Run-scoped recovery artifact renderer (NGX-327, M8-04).
+ * Run-scoped recovery artifact renderer.
  *
  * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
  * either the M7 monitor reducer's recovery classification, the M9 live
@@ -15,8 +15,8 @@
  * fields (run id, step id, classification, evidence pointers, recommended next
  * action, safe next steps, safety notes). There is no field through which raw
  * chat transcripts, runner stdout, or secrets can flow, which structurally
- * keeps the artifact free of secrets and private data per the NGX-327
- * acceptance criteria.
+ * keeps the artifact free of secrets and private data per the recovery
+ * safety contract.
  */
 
 import fs from "node:fs";
@@ -105,7 +105,7 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
 
 /**
  * Shared safety / rollback guidance rendered for every recovery classification.
- * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
+ * Encodes the recovery safety contract: prefer blocking over guessing, never
  * auto-clear from elapsed time, no automatic repair or live process killing,
  * and the rollback is reverting the flag/artifact wiring without disturbing the
  * upstream monitor-derived, live-run, or scheduler-lane recovery source.

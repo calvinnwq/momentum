@@ -1,5 +1,5 @@
 /**
- * Single-shot executor adapter — single-round driver (M10-06, NGX-350).
+ * Single-shot executor adapter — single-round driver.
  *
  * `single-shot/executor.ts` owns the *pure* projections for one single-shot
  * invocation: the durable invocation/round identity, the deterministic

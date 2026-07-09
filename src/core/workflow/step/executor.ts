@@ -1,5 +1,5 @@
 /**
- * WorkflowStepExecutor boundary introduced by NGX-315 (M7-03).
+ * WorkflowStepExecutor boundary.
  *
  * The executor boundary is the seam Momentum exposes to the OpenClaw
  * `coding-workflow-pipeline` skill (and any future trusted runtime binding)
@@ -17,9 +17,9 @@
  * merge-cleanup implementation details into Momentum core.
  *
  * This M7 module owns the dispatch boundary (input validation, executor
- * resolution, thrown-executor trapping, stable error codes). RC-5 (NGX-485)
- * flipped the production default away from the deterministic fake the
- * NGX-434 runtime consolidation plan classified as deprecate-later: the default
+ * resolution, thrown-executor trapping, stable error codes). Runtime
+ * consolidation flipped the production default away from the deterministic
+ * fake it had classified as deprecate-later: the default
  * registry is now built from real adapters (the honest unconfigured adapter
  * below, which refuses with `runtime_unavailable` rather than fabricating a
  * success), and `step/executor-real-adapters.ts` wires configured kinds to real

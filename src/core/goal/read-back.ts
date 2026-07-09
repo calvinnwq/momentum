@@ -1,5 +1,5 @@
 /**
- * Shared goal-first read-back primitives (RC-1c, NGX-495).
+ * Shared goal-first read-back primitives.
  *
  * `loadGoalStatus` (`./status.ts`) and `loadGoalLogs` (`./logs.ts`) are the two
  * goal-first read-back loaders. Before this seam each owned a private, byte-for-byte

@@ -1,6 +1,6 @@
 /**
  * Auto-set wiring for the run-scoped manual-recovery flag + artifact
- * (NGX-327, M8-04).
+ *.
  *
  * The symmetric sibling of {@link ../run/recovery.ts}'s
  * `clearWorkflowRunManualRecoveryGuarded`: where the guarded clear re-derives
@@ -20,7 +20,7 @@
  *
  * - Reconcile only ever *sets*. It never clears, even when the substrate no
  *   longer shows a blocking condition — clearing stays explicit and operator-
- *   driven per the NGX-327 safety contract ("Do not auto-clear recovery from
+ *   driven per the recovery safety contract ("Do not auto-clear recovery from
  *   elapsed time alone"). An already-flagged run with a now-resolved substrate
  *   is reported `no_recovery_required` with the durable flag left untouched.
  * - The advisory-only `monitor_drift_stale` code never triggers a set: it is a
@@ -236,7 +236,7 @@ export function reconcileWorkflowRunManualRecovery(
  * Map the run's best-effort evidence links into bounded artifact pointers. Only
  * source, type, and an artifact-path / record-id reference flow through — never
  * raw summaries, transcripts, or secrets — keeping the rendered artifact within
- * the NGX-327 no-secrets contract.
+ * the recovery no-secrets contract.
  */
 function evidencePointersFromDetail(
   detail: WorkflowRunDetail

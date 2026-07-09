@@ -1,6 +1,6 @@
 /**
  * Daemon-lane child-run context deriver for the `subworkflow` executor family
- * (RC-4b, NGX-498).
+ *.
  *
  * The landed RC-4 entry-point factory (`dispatch/subworkflow-dispatch.ts`) takes its
  * child-run derivation by injection — a {@link DeriveDispatchedSubworkflowContext}
@@ -46,9 +46,9 @@
  *     `{ ok: true }`. The child run itself is not started here — that is the
  *     returned runner's job on the first producer tick.
  *
- * Wiring: RC-4b (NGX-498) injects this deriver into the daemon dispatch
+ * Wiring: this deriver is injected into the daemon dispatch
  * composition (`withSubworkflowDispatch` in `cli.ts`, wrapping the base dispatch
- * via {@link createSubworkflowWorkflowDispatch}) and flipped `subworkflow` into
+ * via {@link createSubworkflowWorkflowDispatch}), with `subworkflow` flipped into
  * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so a configured `subworkflow` step now
  * dispatches its child run through bounded `daemon start`.
  */

@@ -1,5 +1,5 @@
 /**
- * Persistence layer for the executor-loop spine (M10-03, NGX-347).
+ * Persistence layer for the executor-loop spine.
  *
  * Takes the pure {@link ExecutorDefinitionRecord} / {@link ExecutorInvocationRecord}
  * / {@link ExecutorRoundRecord} shapes owned by `loop/reducer.ts` and

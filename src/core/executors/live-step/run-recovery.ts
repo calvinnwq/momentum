@@ -1,6 +1,6 @@
 /**
  * Run-level durable recovery for live finalization and dispatch failures
- * (NGX-334, M9-03).
+ *.
  *
  * The shared `shared/step-finalize.ts` transaction, re-exported through
  * `live-step/finalize.ts` for this M9 lane, returns a rich in-memory outcome

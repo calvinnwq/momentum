@@ -1,5 +1,5 @@
 /**
- * Live workflow-step orchestrator introduced by NGX-333 (M9-02).
+ * Live workflow-step orchestrator.
  *
  * Iterations 1-4 of M9-02 added the caller-side building blocks: the live
  * execution core (`live-step-wrapper.ts`), the M7 executor bridge

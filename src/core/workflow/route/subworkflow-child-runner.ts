@@ -1,6 +1,6 @@
 /**
  * Production start-or-attach child-run runner builder for the `subworkflow`
- * executor family (RC-4b, NGX-498).
+ * executor family.
  *
  * The RC-4 producer (`dispatch/subworkflow-run.ts`) drives a dispatched
  * `subworkflow` step through an injected {@link DispatchedSubworkflowChildRunner}
@@ -18,7 +18,7 @@
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
  * and nothing else: it does not itself touch
  * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
- * (NGX-498) flipped `subworkflow` into that allowlist and wired the production
+ * flipped `subworkflow` into that allowlist and wired the production
  * lane that injects this runner once the configured lane was proven.
  *
  * Discipline (the same pure-decision / injected-IO split

@@ -1,5 +1,5 @@
 /**
- * Daemon-lane dispatched-step execution-context derivation (RC-5b, NGX-492).
+ * Daemon-lane dispatched-step execution-context derivation.
  *
  * The live-wrapper dispatch composition (`dispatch/live-wrapper.ts`) runs a
  * dispatched step's executor through `executeAndReconcileDispatchedWorkflowStep`

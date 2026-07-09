@@ -1,5 +1,5 @@
 /**
- * no-mistakes executor mirror — polling orchestrator (M10-07, NGX-351).
+ * no-mistakes executor mirror — polling orchestrator.
  *
  * `no-mistakes-executor.ts` owns the *pure* half of the mirror: the
  * {@link NoMistakesExternalState} snapshot shape, the daemon classification

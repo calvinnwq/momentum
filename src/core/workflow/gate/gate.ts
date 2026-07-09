@@ -1,6 +1,5 @@
 /**
- * Workflow gate decision domain for the workflow-first runtime (M10-08,
- * NGX-352).
+ * Workflow gate decision domain for the workflow-first runtime.
  *
  * This module owns the *pure* half of workflow gates and operator decisions: the
  * durable gate-type and target-scope vocabularies plus the delegated-policy /

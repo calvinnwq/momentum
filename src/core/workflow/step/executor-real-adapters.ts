@@ -1,5 +1,5 @@
 /**
- * Real `WorkflowStepExecutor` production adapter registry (RC-5, NGX-485).
+ * Real `WorkflowStepExecutor` production adapter registry.
  *
  * The M7 executor boundary (`step/executor.ts`) shipped a fake `ADAPTERS` map:
  * `getWorkflowStepExecutor` / `dispatchWorkflowStepExecutor` resolved to a

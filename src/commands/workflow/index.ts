@@ -389,7 +389,7 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
 
 /**
  * `momentum workflow run start` — the first-class workflow-first start surface
- * (M10-02, NGX-346). Resolves a validated {@link WorkflowDefinition} (persisted
+ *. Resolves a validated {@link WorkflowDefinition} (persisted
  * first, then the built-in coding workflow fallback), loads repo policy, and
  * durably materializes a `WorkflowRun` + `StepRun` plan via
  * {@link persistWorkflowRunStart}. `goal start` stays the compatibility path for
@@ -404,7 +404,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
 
 /**
  * `momentum workflow run start-coding` - the explicit Momentum-native coding
- * workflow start door (NGX-508). It is a thin, unmistakable selector over the
+ * workflow start door. It is a thin, unmistakable selector over the
  * same durable {@link persistWorkflowRunStart} machinery as `workflow run
  * start`, adding five coding-specific guarantees:
  *
@@ -436,8 +436,8 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
 }
 
 /**
- * `momentum workflow run preview-coding` - the native plan-preview door
- * (NGX-509). It runs the exact same precondition checks and built-in definition
+ * `momentum workflow run preview-coding` - the native plan-preview door.
+ * It runs the exact same precondition checks and built-in definition
  * resolution as `workflow run start-coding` but stops before any durable write:
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
@@ -589,7 +589,7 @@ function runWorkflowStartCommand(
     implementationEngine = normalizedEngine;
   }
 
-  // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
+  // Native per-step coding route reconfiguration: an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
   // --steps-json. The validated, normalized overrides, including provider-aware
   // model alias rewrites for known harness mappings, are embedded durably under
@@ -1550,7 +1550,7 @@ function isGateDecisionMode(value: string): value is GateDecisionMode {
 
 /**
  * `momentum workflow run decide` — the durable operator decision surface for a
- * workflow / step / executor human gate (M10-08, NGX-352). It resolves a single
+ * workflow / step / executor human gate. It resolves a single
  * persisted gate by routing the requested action through the same pure
  * {@link resolveWorkflowGate} brain the daemon uses: an operator may pick any
  * allowed action, while `--mode delegated` may only auto-apply an action inside
@@ -2170,7 +2170,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  // Project the durable envelope into a native progress tick (NGX-511),
+  // Project the durable envelope into a native progress tick,
   // suppressing against the last emitted digest. The default read stays
   // read-only: the emitted digest is read as the baseline but not advanced.
   const progress = deriveWorkflowMonitorProgress(envelope, {
@@ -2379,7 +2379,7 @@ async function workflowRunWatch(
 }
 
 /**
- * `momentum workflow run watch <run-id> --stream --jsonl` (SUP-05 / NGX-552).
+ * `momentum workflow run watch <run-id> --stream --jsonl`.
  *
  * The durable, replay-safe streaming counterpart to `--once`: it drives
  * {@link runWorkflowWatchStream} over {@link createWorkflowWatchStreamDbPoll} and

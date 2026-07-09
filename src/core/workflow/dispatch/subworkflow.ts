@@ -1,5 +1,5 @@
 /**
- * Pure half of the daemon-dispatchable `subworkflow` adapter (RC-4, NGX-497).
+ * Pure half of the daemon-dispatchable `subworkflow` adapter.
  *
  * RC-4 makes the `subworkflow` executor family daemon-dispatchable by connecting
  * a child workflow run's terminal classification to the workflow dispatch /

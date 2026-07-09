@@ -1,7 +1,7 @@
 /**
- * Daemon-default live-wrapper profile source resolution (RC-5b, NGX-492).
+ * Daemon-default live-wrapper profile source resolution.
  *
- * RC-5 (NGX-485) made the production `WorkflowStepExecutor` default real: with no
+ * The production `WorkflowStepExecutor` default is real: with no
  * live-wrapper profile wired, every canonical kind resolves to the honest
  * `runtime_unavailable` adapter rather than a fabricated success
  * (`step/executor-real-adapters.ts`). RC-5b lets the daemon run dispatched

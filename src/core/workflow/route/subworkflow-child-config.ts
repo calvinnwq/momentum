@@ -1,8 +1,8 @@
 /**
  * Production child-definition config + recursion-safety decider for the
- * `subworkflow` executor family (RC-4b, NGX-498).
+ * `subworkflow` executor family.
  *
- * RC-4 (NGX-497) landed the daemon-dispatchable `subworkflow` *mechanism* — the
+ * The daemon-dispatchable `subworkflow` *mechanism* landed first — the
  * pure child-mirror mapping (`dispatch/subworkflow.ts`), the async producer
  * (`dispatch/subworkflow-run.ts`), and the daemon-lane entry-point factory
  * (`dispatch/subworkflow-dispatch.ts`) — but production stayed fail-closed because the
@@ -10,7 +10,7 @@
  * step's child run, and what keeps recursion bounded?* This module owns exactly
  * that keystone decision. It does not itself touch
  * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
- * (NGX-498) flipped `subworkflow` into that allowlist and wired the production
+ * flipped `subworkflow` into that allowlist and wired the production
  * lane that composes this decision once the configured lane was proven.
  *
  * Two pure, total halves (no SQLite, no file system, no clock, no network — the

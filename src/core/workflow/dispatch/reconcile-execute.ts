@@ -1,5 +1,5 @@
 /**
- * Side-effecting twin of the RC-2 workflow-step reconciliation decider (NGX-480).
+ * Side-effecting twin of the pure workflow-step reconciliation decider.
  *
  * `dispatch/reconcile.ts` owns the *pure* half — the deterministic decision that
  * maps a dispatched step's terminal executor-invocation state to a finalization

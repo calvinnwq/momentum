@@ -1,6 +1,6 @@
 /**
  * Pure workflow run-start materialization for the workflow-first runtime
- * (M10-02, NGX-346).
+ *.
  *
  * This module owns the *pure* translation of a validated
  * {@link WorkflowDefinition} graph into the in-memory `WorkflowRun` /

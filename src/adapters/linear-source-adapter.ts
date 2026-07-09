@@ -1,5 +1,5 @@
 /**
- * Linear source adapter (NGX-289 / M5-02).
+ * Linear source adapter.
  *
  * This module owns the read-only normalization of Linear issue payloads into
  * Momentum's SourceAdapterItem vocabulary, plus the in-process list/get

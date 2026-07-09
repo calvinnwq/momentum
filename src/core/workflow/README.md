@@ -56,7 +56,7 @@ Other domains reach workflow behavior through these modules:
   caller-owned mutation), `step/executor` (registry/dispatch boundary),
   `step/executor-real-adapters` (RC-5 production registry builder backed by
   live wrappers or honest `runtime_unavailable` adapters),
-  `live-wrapper/coding-workflow` (the NGX-499 wrapper-command seam used by the
+  `live-wrapper/coding-workflow` (the wrapper-command seam used by the
   checked-in dogfood live-wrapper profile), `live-wrapper/merge-cleanup-preflight`
   and `live-wrapper/merge-cleanup-lifecycle` (GitHub auth, target, readback,
   safe-apply, and already-applied reconciliation for the merge-cleanup tail
@@ -80,8 +80,8 @@ A single curated module seam (barrel) is intentionally **not** part of ARCH-08;
 importers keep direct typed module paths. ARCH-08 only introduces the
 `run/runtime-state.ts` seam around the mechanical finalization / status / monitor
 refresh shared by dispatch, reconciliation, dogfood terminalization, and operator/recovery
-callers. It does **not** choose the RC-2 reconciliation seam (that landed separately
-as NGX-480: `dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`), delete
+callers. It does **not** choose the reconciliation seam (that lives separately
+in `dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`), delete
 the dogfood stand-in, or narrow M9/M10 compatibility paths.
 
 RC-5 fake demotion has since landed in this folder: the production
@@ -89,7 +89,7 @@ RC-5 fake demotion has since landed in this folder: the production
 deterministic fake registry lives under `test/helpers/` and is injected only by
 tests that need substrate smoke coverage.
 
-RC-5b (NGX-492) has since added the dispatched-step execution path producer:
+The dispatched-step execution path producer has since landed:
 `dispatch/executor-terminalize.ts` records a finished
 `WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
 `dispatch/executor-run.ts` composes "run the dispatched step's executor (through
@@ -131,15 +131,15 @@ The bounded `daemon start` workflow lane now wires the resolved profile,
 registry, and deriver by composing `dispatch/live-wrapper.ts` around the base
 workflow dispatcher for configured daemon-default profiles.
 
-RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:
-`dispatch/external-apply.ts` maps the M6 apply result into executor evidence,
-`dispatch/external-apply-run.ts` runs the injected M6 write path and reconciles
-through RC-2, and `dispatch/external-apply-dispatch.ts` gates the producer by scaffold
+The daemon-dispatchable `external-apply` adapter:
+`dispatch/external-apply.ts` maps the external-apply result into executor evidence,
+`dispatch/external-apply-run.ts` runs the injected external write path and reconciles
+through the reconciliation seam, and `dispatch/external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
 `dispatch/linear-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `linear-refresh` step: it proves issue scope, auth, policy, source item, one pending `status_update` intent or deterministic seed evidence for the expected `Done` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the M6 write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
 The Linear apply preflight helpers live in `src/core/intent/` so workflow code continues to consume the intent-owned apply path instead of importing policy or auth checks back from workflow modules.
 
-RC-4 (NGX-497) added the `subworkflow` adapter mechanism, and RC-4b (NGX-498)
+The `subworkflow` adapter mechanism landed first, and a follow-up
 flipped the configured production lane: `dispatch/subworkflow.ts` maps a child
 workflow run's observed state into defer / mirror evidence,
 `dispatch/subworkflow-run.ts` starts or attaches to the child through an injected
@@ -151,7 +151,7 @@ lineage from `route.subworkflow`, resolves the child definition by key, refuses
 unsafe recursion / unsupported attachment, and keeps manual-recovery behavior for
 missing or ambiguous child state.
 
-NGX-499 adds `live-wrapper/coding-workflow.ts` as an opt-in dogfood helper for
+`live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
 `profiles/ngx-499-coding-workflow-live-wrapper.profile.json`: the daemon live
 profile still owns process supervision and result-file placement, while this
 helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
@@ -173,14 +173,14 @@ External-side-effect tail failures (`merge-cleanup` / `linear-refresh`) use the 
 Renderer next-action shapes expose this as `actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`; interrupted no-mistakes evidence reconciliation exposes `actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 Ordinary failed no-mistakes steps remain `retry_failed_step` with `recoveryDetail: null`, even though guarded `clear-recovery` can still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
 
-NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
+`workflow run start-coding` is the explicit Momentum-native start door.
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, stores the selected implementation path under `route.implementationEngine`, and keeps CWFP/default switching explicit.
 The coding doors accept `native-goal-loop` and `current-gnhf-cwfp`, default to persisted `native-goal-loop`, and fail closed before implementation dispatch when a persisted current-GNHF/CWFP route is selected because that compatibility lane is not wired into native dispatch yet.
 
-NGX-509 adds the read-only `workflow run preview-coding` door.
+`workflow run preview-coding` is the read-only native plan-preview door.
 It shares the `start-coding` preconditions and built-in definition resolution but writes nothing, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` - a pure projection of the version-pinned built-in definition plus inputs, including `route.implementationEngine`, so a later `start-coding` from the same inputs persists a matching run.
 
-NGX-510 adds the pure `route/coding.ts` keystone for native per-step coding route/config overrides: it validates, normalizes, reads, writes, and projects operator `harness`/`model`/`effort` selections per configurable coding step (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) under a byte-stable `route.steps` namespace on the run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`.
+`route/coding.ts` is the pure keystone for native per-step coding route/config overrides: it validates, normalizes, reads, writes, and projects operator `harness`/`model`/`effort` selections per configurable coding step (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) under a byte-stable `route.steps` namespace on the run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`.
 The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and embeds them in the durable run route (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
 Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
@@ -192,16 +192,16 @@ It also exposes wrapper config validation for canonical snake_case keys, env all
 Native `goal-loop` round evidence is currently consumed by `workflow run logs` from executor invocation / round rows and child evidence.
 Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
 
-NGX-549 and NGX-550 add the GUI-safe supervisor contract for `workflow run watch --once`.
+The GUI-safe supervisor contract sits behind `workflow run watch --once`.
 The command builds on the monitor projection, optionally performs one bounded non-tail target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, `nextAction.actionClass`, `nextAction.recoveryDetail`, and optional `humanAction`.
 Approved `merge-cleanup` and `linear-refresh` tail steps stay human-required and surface as operator-decision actions instead of being started by the supervisor poller.
 Plain `workflow run monitor` remains read-only, while `workflow run monitor --advance` and `workflow run watch --once` are the explicit write-limited polling modes that can update advisory baselines for `momentum-native-coding` runs.
 `test/fixtures/workflow-gui-contract.json` freezes the watch envelope keys, next-action operator classes, recovery-detail presence, common GUI scenarios, event envelope keys, event keys, and event types so app clients can branch without terminal scraping.
 
-NGX-551 adds `run/events.ts` as the durable workflow event replay seam behind `workflow run events`.
+`run/events.ts` is the durable workflow event replay seam behind `workflow run events`.
 It projects stable semantic events from workflow rows, combines them with append-only `workflow_events` rows for overwritten transitions and supervisor advisories, and returns opaque replay cursors so reconnecting clients can continue from the previous response cursor without relying on stdout or process state.
 
-NGX-552 adds `monitor/watch-stream.ts` and `monitor/watch-stream-source.ts` as the read-only JSONL stream seam behind `workflow run watch --stream --jsonl`.
+`monitor/watch-stream.ts` and `monitor/watch-stream-source.ts` are the read-only JSONL stream seam behind `workflow run watch --stream --jsonl`.
 The driver polls the durable event cursor API on its bounded interval, writes each stream record immediately, retains only the cursor and counters between polls, emits `emit: true` records only for semantic events, emits `emit: false` heartbeats for liveness, and exits when the run row is terminal.
 The source layer uses incremental event reads plus the durable run row terminal state so a reconnecting stream resumed past the terminal event still observes completion without dispatching work or mutating monitor advisory baselines.
 The stream seam does not deliver to OpenClaw or invoke an LLM; clients decide how to consume the durable JSONL records.

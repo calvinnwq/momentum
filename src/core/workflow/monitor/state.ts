@@ -1,5 +1,5 @@
 /**
- * Pure workflow monitor / recovery reducer introduced by NGX-316 (M7-04).
+ * Pure workflow monitor / recovery reducer.
  *
  * Derives a normalized monitor / recovery view from the durable substrate
  * (steps, leases, advisory monitor snapshot, last checkpoint) without touching

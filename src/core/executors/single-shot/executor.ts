@@ -1,5 +1,5 @@
 /**
- * Single-shot executor adapter — decision brain and identity (M10-06, NGX-350).
+ * Single-shot executor adapter — decision brain and identity.
  *
  * The executor-loop contract (SPEC.md) pins two
  * single-invocation executor families that this module serves together:

@@ -458,7 +458,7 @@ function recommendedActionForRunStartError(
       if (error.path === "issueScope.identifier") {
         return "Set issueScope.identifier to the target issue identifier, or omit issueScope.";
       }
-      return 'Set issueScope to a plain object such as { identifier: "NGX-123" }, or omit it.';
+      return 'Set issueScope to a plain object such as { identifier: "ABC-123" }, or omit it.';
     case "route_invalid":
       return "Set route to a plain object containing only validated coding workflow route fields.";
   }

@@ -1,6 +1,5 @@
 /**
- * Daemon workflow scheduler lane: durable runnable-work selection (M10-04,
- * NGX-348).
+ * Daemon workflow scheduler lane: durable runnable-work selection.
  *
  * The workflow-first runtime daemon contract opens with:
  *

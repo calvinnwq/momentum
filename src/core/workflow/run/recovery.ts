@@ -1,5 +1,5 @@
 /**
- * Durable run-scoped manual-recovery flag (NGX-327, M8-04).
+ * Durable run-scoped manual-recovery flag.
  *
  * The run-scoped sibling of {@link ./goal-recovery.ts}'s goal-scoped flag. It
  * owns the durable `workflow_runs.needs_manual_recovery` /

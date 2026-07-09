@@ -5,7 +5,7 @@ import type {
 } from "../run/events.js";
 
 /**
- * SUP-05 (NGX-552) JSONL watch-stream record kinds.
+ * JSONL watch-stream record kinds.
  *
  * `event` records carry one durable semantic event; `heartbeat` records are
  * synthetic liveness ticks emitted when a poll observed no new events.

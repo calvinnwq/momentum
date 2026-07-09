@@ -1,5 +1,5 @@
 /**
- * Goal-loop executor adapter — single-round driver (M10-05, NGX-349).
+ * Goal-loop executor adapter — single-round driver.
  *
  * `goal-loop/executor.ts` owns the *pure* projections for one bounded round: the
  * round-start record ({@link planGoalLoopRoundStart}), the daemon classification

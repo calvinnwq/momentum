@@ -1,6 +1,6 @@
 /**
- * WorkflowRun import normalizer for NGX-314 (M7-02 import current
- * agent-workflow plans).
+ * WorkflowRun import normalizer for current
+ * agent-workflow plans.
  *
  * Reads a `.agent-workflows/<run-id>/` directory and normalizes the durable
  * artifacts (`plan.json`, `ledger.jsonl`, `approval-*.json`, advisory

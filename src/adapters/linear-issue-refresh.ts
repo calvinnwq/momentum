@@ -1,5 +1,5 @@
 /**
- * Targeted Linear issue refresh primitive (NGX-300 / M6-05).
+ * Targeted Linear issue refresh primitive.
  *
  * Fetches a single Linear issue plus all of its comments without leaning on the
  * project-/milestone-wide reconciliation pipeline. The result feeds the
@@ -8,7 +8,7 @@
  *
  * The client is intentionally narrow:
  *
- *  - It accepts an explicit target keyed by issue id, identifier (e.g. NGX-1),
+ *  - It accepts an explicit target keyed by issue id, identifier (e.g. ABC-1),
  *    or URL. The Linear GraphQL `issue(id: ...)` field accepts any of the
  *    three, so the caller does not have to know which form to pass.
  *  - It does not persist credentials. The caller supplies an `apiKey` it
@@ -18,7 +18,7 @@
  *    target failures to a small stable code taxonomy.
  *
  * The orchestrator (`post-apply-reconcile.ts`) translates these into the
- * NGX-300 reconciliation outcome taxonomy. Tests inject a mock fetch and the
+ * post-apply reconciliation outcome taxonomy. Tests inject a mock fetch and the
  * M6 contract forbids real `api.linear.app` calls from this slice's tests.
  */
 

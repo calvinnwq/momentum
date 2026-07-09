@@ -1,5 +1,5 @@
 /**
- * Post-apply reconciliation orchestrator (NGX-300 / M6-05).
+ * Post-apply reconciliation orchestrator.
  *
  * After the two-phase external apply path mutates Linear, this module performs
  * a targeted refresh of just the touched issue, confirms the apply idempotency

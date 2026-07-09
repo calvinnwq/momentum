@@ -1,5 +1,5 @@
 /**
- * Durable `workflow_leases` lifecycle primitives introduced by NGX-333 (M9-02).
+ * Durable `workflow_leases` lifecycle primitives.
  *
  * M7 added the `workflow_leases` table (PK `(run_id, lease_kind)`) and the pure
  * `classifyWorkflowLease` / `deriveWorkflowRunState` reducers, but no `src`

@@ -1,5 +1,5 @@
 /**
- * Source adapter boundary introduced by NGX-288 (M5-01).
+ * Source adapter boundary.
  *
  * Source adapters read external/source-system items and normalize them into
  * Momentum's SourceItem vocabulary. They do not create or complete Goals, do

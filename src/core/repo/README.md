@@ -23,6 +23,6 @@ and `verification.ts` kept their names.
 | Iteration finalization | `iteration-finalize.ts` |
 | Project rollup | `project-rollup.ts` |
 
-The M9/M10 step-finalization reconciliation seam (RC-2, landed as NGX-480) is not
+The step-finalization reconciliation seam is not
 part of this mechanical regrouping; `iteration-finalize.ts` keeps its existing
 behavior.

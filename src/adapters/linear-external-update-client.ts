@@ -1,8 +1,8 @@
 /**
- * Linear external update client (NGX-297 / M6-02).
+ * Linear external update client.
  *
  * Performs the credential-handling Linear GraphQL mutations that sit behind the
- * NGX-296 external update adapter boundary. The client is intentionally narrow:
+ * external update adapter boundary. The client is intentionally narrow:
  *
  *  - It does not read or persist credentials. The caller supplies an
  *    `apiKey` it sourced from operator-controlled env/config.
@@ -18,9 +18,9 @@
  *  - It maps HTTP, GraphQL, auth, timeout/network, malformed JSON, missing
  *    target, ambiguous status, and validation failures to stable result codes.
  *
- * The CLI execution path (`intent apply --external-apply`) is not wired in
- * this slice; NGX-299 lands the audit ledger and NGX-298 wires the CLI flow.
- * Tests inject a mock fetch and the M6 contract prohibits real
+ * The CLI execution path (`intent apply --external-apply`) is wired
+ * separately, together with the audit ledger.
+ * Tests inject a mock fetch and the adapter-test contract prohibits real
  * `api.linear.app` calls from this slice's tests.
  */
 

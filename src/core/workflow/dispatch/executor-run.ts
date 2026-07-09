@@ -1,5 +1,5 @@
 /**
- * Dispatched-step execution path (RC-5b, NGX-492).
+ * Dispatched-step execution path.
  *
  * The production dispatch lane is built from three landed halves that, before
  * this module, were never composed in production:

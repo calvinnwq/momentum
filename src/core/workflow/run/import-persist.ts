@@ -1,5 +1,5 @@
 /**
- * Persistence layer for NGX-314 (M7-02 import current agent-workflow plans).
+ * Persistence layer for importing current agent-workflow plans.
  *
  * Takes the pure {@link WorkflowRunImport} shape produced by
  * `parseWorkflowRunImport` and writes it into the durable

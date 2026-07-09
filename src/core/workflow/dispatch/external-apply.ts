@@ -1,5 +1,5 @@
 /**
- * Pure half of the daemon-dispatchable `external-apply` adapter (RC-3, NGX-496).
+ * Pure half of the daemon-dispatchable `external-apply` adapter.
  *
  * RC-3 makes the `external-apply` executor family daemon-dispatchable by
  * connecting the existing M6 external-apply write path (`executeExternalApply`,

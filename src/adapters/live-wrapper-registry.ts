@@ -6,10 +6,9 @@ import {
 } from "../core/workflow/run/reducer.js";
 
 /**
- * Live workflow-step wrapper configuration and registry introduced by
- * NGX-332 (M9-01).
+ * Live workflow-step wrapper configuration and registry.
  *
- * Milestone 9 lets Momentum invoke live workflow steps that wrap the existing
+ * Momentum invokes live workflow steps that wrap the existing
  * OpenClaw engines (GNHF, postflight, no-mistakes, merge-cleanup,
  * linear-refresh). The M9-00 decision gate pinned a *wrapper registry keyed by
  * `WorkflowStepKind`* whose entries resolve from durable per-profile
