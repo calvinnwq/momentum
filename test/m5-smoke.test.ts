@@ -4,14 +4,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
-import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/adapters/fake-runner.js";
 import { DOCTOR_SCOPE } from "../src/cli.js";
+import { openDb } from "../src/adapters/db.js";
 
 import {
-  SMOKE_GOAL_SPEC,
   buildCli,
   cleanupTempRoots,
-  initDisposableRepo,
   makeTempDir,
   runCliBinary,
   runCliBinaryAsync
@@ -22,6 +20,40 @@ beforeAll(buildCli, 60_000);
 afterEach(cleanupTempRoots);
 
 const M5_SMOKE_RUN_ID = "smoke-m5-workflow-run-1";
+
+/**
+ * Seed a goal row directly in durable SQLite state against the same
+ * --data-dir the built CLI subprocess uses. The goal-first CLI lane
+ * (`goal start`, `status`, `logs`, `handoff`, `worker run`) is retired
+ * (NGX-600), so the kept surfaces exercised here — `source link`, intent
+ * generation, and `project status` — operate on goal rows created via direct
+ * insert. They only read the goals table (id / state / needs_manual_recovery),
+ * never the retired iteration mechanism.
+ */
+function seedGoalRow(
+  dataDir: string,
+  input: { goalId: string; title: string; state: "queued" | "completed" }
+): void {
+  const db = openDb(dataDir);
+  try {
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO goals
+         (id, title, branch, state, artifact_dir, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      input.goalId,
+      input.title,
+      "momentum/smoke",
+      input.state,
+      path.join(dataDir, "goals", input.goalId),
+      now,
+      now
+    );
+  } finally {
+    db.close();
+  }
+}
 
 function writeM5WorkflowFixture(rootDir: string): string {
   const runDir = path.join(rootDir, ".agent-workflows", M5_SMOKE_RUN_ID);
@@ -530,12 +562,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
   );
 
   it(
-    "links a reconciled SourceItem to a queued Goal and surfaces it through status and handoff",
+    "links a reconciled SourceItem to a goal and surfaces the link through source get",
     async () => {
       const dataDir = makeTempDir("momentum-smoke-m5-link-data-");
-      const repo = initDisposableRepo();
-      const goalFile = path.join(dataDir, "goal.md");
-      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
 
       const issue = {
         id: "issue-smoke-ngx-294-link",
@@ -616,24 +645,14 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         expect(sourceItemId.length).toBeGreaterThan(0);
         expect(initialListedItems[0]?.["goalId"]).toBeNull();
 
-        const goalStart = runCliBinary([
-          "goal",
-          "start",
-          goalFile,
-          "--repo",
-          repo,
-          "--data-dir",
-          dataDir,
-          "--runner",
-          "fake",
-          "--json"
-        ]);
-        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
-        const goalPayload = JSON.parse(goalStart.stdout) as Record<string, unknown>;
-        const goalId = goalPayload["goalId"] as string;
-        expect(typeof goalId).toBe("string");
-        expect(goalId.length).toBeGreaterThan(0);
-        expect(goalPayload["goalState"]).toBe("queued");
+        // The goal-first CLI lane is retired (NGX-600): seed the goal row the
+        // kept `source link` surface targets directly in durable state.
+        const goalId = "goal-smoke-m5-link";
+        seedGoalRow(dataDir, {
+          goalId,
+          title: "M5 smoke link goal",
+          state: "queued"
+        });
 
         const link = runCliBinary([
           "source",
@@ -683,71 +702,60 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
           skippedReason: "already_linked_to_target"
         });
 
-        const status = runCliBinary([
-          "status",
-          goalId,
+        // `source get` surfaces the durable link through a kept surface.
+        const get = runCliBinary([
+          "source",
+          "get",
+          sourceItemId,
           "--data-dir",
           dataDir,
           "--json"
         ]);
-        expect(status.code, `status stderr: ${status.stderr}`).toBe(0);
-        const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
-        expect(statusPayload).toMatchObject({
+        expect(get.code, `source get stderr: ${get.stderr}`).toBe(0);
+        const getPayload = JSON.parse(get.stdout) as Record<string, unknown>;
+        expect(getPayload).toMatchObject({
           ok: true,
-          command: "status",
-          goalId
+          command: "source get",
+          dataDir
         });
-        const statusSourceItems = statusPayload["sourceItems"] as Array<
-          Record<string, unknown>
-        >;
-        expect(Array.isArray(statusSourceItems)).toBe(true);
-        expect(statusSourceItems).toHaveLength(1);
-        expect(statusSourceItems[0]).toMatchObject({
+        const fetchedItem = getPayload["item"] as Record<string, unknown>;
+        expect(fetchedItem).toMatchObject({
           id: sourceItemId,
           adapterKind: "linear",
           externalId: "issue-smoke-ngx-294-link",
           externalKey: "NGX-294",
           title: "M5-07 M5 smoke, docs, and milestone closeout",
           status: "In Progress",
-          url: "https://linear.app/ngxcalvin/issue/NGX-294"
+          url: "https://linear.app/ngxcalvin/issue/NGX-294",
+          goalId
         });
-        expect(typeof statusSourceItems[0]?.["lastObservedAt"]).toBe("number");
+        expect(typeof fetchedItem["lastObservedAt"]).toBe("number");
 
-        const handoff = runCliBinary([
-          "handoff",
-          goalId,
+        // `source list` reports the same goal linkage for the item.
+        const linkedList = runCliBinary([
+          "source",
+          "list",
           "--data-dir",
           dataDir,
           "--json"
         ]);
-        expect(handoff.code, `handoff stderr: ${handoff.stderr}`).toBe(0);
-        const handoffPayload = JSON.parse(handoff.stdout) as Record<string, unknown>;
-        expect(handoffPayload).toMatchObject({
-          ok: true,
-          command: "handoff",
-          goalId
-        });
-        const handoffSourceItems = handoffPayload["sourceItems"] as Array<
+        expect(
+          linkedList.code,
+          `linked source list stderr: ${linkedList.stderr}`
+        ).toBe(0);
+        const linkedListPayload = JSON.parse(linkedList.stdout) as Record<
+          string,
+          unknown
+        >;
+        const linkedListItems = linkedListPayload["items"] as Array<
           Record<string, unknown>
         >;
-        expect(Array.isArray(handoffSourceItems)).toBe(true);
-        expect(handoffSourceItems).toHaveLength(1);
-        expect(handoffSourceItems[0]).toMatchObject({
+        expect(linkedListItems).toHaveLength(1);
+        expect(linkedListItems[0]).toMatchObject({
           id: sourceItemId,
-          adapterKind: "linear",
           externalKey: "NGX-294",
-          title: "M5-07 M5 smoke, docs, and milestone closeout"
+          goalId
         });
-
-        // handoff.md on disk surfaces the linked source item as well.
-        const handoffMdPath = handoffPayload["handoffMdPath"] as string;
-        expect(typeof handoffMdPath).toBe("string");
-        const handoffMd = fs.readFileSync(handoffMdPath, "utf-8");
-        expect(handoffMd).toContain("## Source items");
-        expect(handoffMd).toContain("linear/NGX-294");
-        expect(handoffMd).toContain(
-          "M5-07 M5 smoke, docs, and milestone closeout"
-        );
 
         // doctor --json now reports the linked source item, not the unlinked one.
         const doctor = runCliBinary([
@@ -773,12 +781,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
   );
 
   it(
-    "generates a source_satisfied update intent through source link after a goal completes and refuses --external-apply",
+    "generates a source_satisfied update intent through source link for a completed goal and refuses --external-apply",
     async () => {
       const dataDir = makeTempDir("momentum-smoke-m5-intent-gen-data-");
-      const repo = initDisposableRepo();
-      const goalFile = path.join(dataDir, "goal.md");
-      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
 
       const issue = {
         id: "issue-smoke-ngx-294-intent",
@@ -841,66 +846,17 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         expect(typeof sourceItemId).toBe("string");
         expect(sourceItemId.length).toBeGreaterThan(0);
 
-        const goalStart = runCliBinary([
-          "goal",
-          "start",
-          goalFile,
-          "--repo",
-          repo,
-          "--data-dir",
-          dataDir,
-          "--runner",
-          "fake",
-          "--json"
-        ]);
-        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
-        const goalStartPayload = JSON.parse(goalStart.stdout) as Record<
-          string,
-          unknown
-        >;
-        const goalId = goalStartPayload["goalId"] as string;
-        expect(typeof goalId).toBe("string");
-        expect(goalStartPayload["goalState"]).toBe("queued");
-
-        // Drain the queued goal to completion. FAKE_RUNNER_GOAL_COMPLETE makes
-        // the single iteration mark goal_complete so the reducer transitions
-        // the goal to the `completed` state — required by the intent generator.
-        const drain = runCliBinary(
-          [
-            "daemon",
-            "start",
-            "--max-idle-cycles",
-            "2",
-            "--poll-interval-ms",
-            "0",
-            "--data-dir",
-            dataDir,
-            "--json"
-          ],
-          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
-        );
-        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
-        const drainPayload = JSON.parse(drain.stdout) as Record<string, unknown>;
-        const loop = drainPayload["loop"] as Record<string, unknown>;
-        expect(loop).toMatchObject({
-          workSucceeded: true,
-          jobsRun: 1,
-          jobsFailed: 0
-        });
-
-        const completedStatus = runCliBinary([
-          "status",
+        // The goal-first CLI lane is retired (NGX-600): seed a goal row that
+        // is already `completed`. The intent generator gates on the goal's
+        // durable `state` column plus the linked open SourceItem and accepted
+        // verification evidence, so a direct insert satisfies its
+        // completed-goal precondition without the retired iteration mechanism.
+        const goalId = "goal-smoke-m5-intent";
+        seedGoalRow(dataDir, {
           goalId,
-          "--data-dir",
-          dataDir,
-          "--json"
-        ]);
-        expect(completedStatus.code).toBe(0);
-        expect(
-          (JSON.parse(completedStatus.stdout) as Record<string, unknown>)[
-            "state"
-          ]
-        ).toBe("completed");
+          title: "M5 smoke intent goal",
+          state: "completed"
+        });
 
         // Ingest a workflow evidence fixture with `no-mistakes complete` so
         // the intent generator finds an accepted verification evidence type.
@@ -1195,12 +1151,9 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     "computes a project rollup with mismatches and pending intents through the built CLI",
     async () => {
       const dataDir = makeTempDir("momentum-smoke-m5-rollup-data-");
-      const repo = initDisposableRepo();
-      const goalFile = path.join(dataDir, "goal.md");
-      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
 
       // SourceItem stays in a non-terminal state ("In Progress") while the
-      // Goal completes; that asymmetry is what produces the
+      // Goal is completed; that asymmetry is what produces the
       // `goal_done_source_not_done` mismatch the rollup must surface.
       const issue = {
         id: "issue-smoke-ngx-294-rollup",
@@ -1262,48 +1215,16 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         const sourceItemId = sourceItems[0]?.["id"] as string;
         expect(typeof sourceItemId).toBe("string");
 
-        const goalStart = runCliBinary([
-          "goal",
-          "start",
-          goalFile,
-          "--repo",
-          repo,
-          "--data-dir",
-          dataDir,
-          "--runner",
-          "fake",
-          "--json"
-        ]);
-        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
-        const goalStartPayload = JSON.parse(goalStart.stdout) as Record<
-          string,
-          unknown
-        >;
-        const goalId = goalStartPayload["goalId"] as string;
-        expect(typeof goalId).toBe("string");
-        expect(goalStartPayload["goalState"]).toBe("queued");
-
-        const drain = runCliBinary(
-          [
-            "daemon",
-            "start",
-            "--max-idle-cycles",
-            "2",
-            "--poll-interval-ms",
-            "0",
-            "--data-dir",
-            dataDir,
-            "--json"
-          ],
-          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
-        );
-        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
-        const drainPayload = JSON.parse(drain.stdout) as Record<string, unknown>;
-        const loop = drainPayload["loop"] as Record<string, unknown>;
-        expect(loop).toMatchObject({
-          workSucceeded: true,
-          jobsRun: 1,
-          jobsFailed: 0
+        // The goal-first CLI lane is retired (NGX-600): seed a completed goal
+        // row directly. The rollup reads only id / state /
+        // needs_manual_recovery from the goals table, so the direct insert
+        // produces the same goal-completed / source-in-progress asymmetry the
+        // retired `goal start` + daemon-drain path used to.
+        const goalId = "goal-smoke-m5-rollup";
+        seedGoalRow(dataDir, {
+          goalId,
+          title: "M5 smoke rollup goal",
+          state: "completed"
         });
 
         // Ingest workflow evidence with a no-mistakes complete entry so the

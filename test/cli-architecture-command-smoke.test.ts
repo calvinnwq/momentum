@@ -52,53 +52,11 @@ describe("M11 closeout command-family smoke matrix", () => {
       match: Record<string, unknown>;
     }> = [
       {
-        label: "status family: status",
-        args: ["status", ...dataDirArgs(dataDir)],
-        code: 1,
-        stream: "stderr",
-        match: { ok: false, command: "status", code: "no_goals" }
-      },
-      {
-        label: "status family: logs",
-        args: ["logs", "missing-goal", ...dataDirArgs(dataDir)],
-        code: 1,
-        stream: "stderr",
-        match: {
-          ok: false,
-          command: "logs",
-          code: "goal_not_found",
-          goalId: "missing-goal"
-        }
-      },
-      {
-        label: "status family: handoff",
-        args: ["handoff", "missing-goal", ...dataDirArgs(dataDir)],
-        code: 1,
-        stream: "stderr",
-        match: {
-          ok: false,
-          command: "handoff",
-          code: "goal_not_found",
-          goalId: "missing-goal"
-        }
-      },
-      {
         label: "workflow family",
         args: ["workflow", "status", ...dataDirArgs(dataDir)],
         code: 0,
         stream: "stdout",
         match: { ok: true, command: "workflow status", count: 0, runs: [] }
-      },
-      {
-        label: "goal family",
-        args: ["goal", "start", "--json"],
-        code: 2,
-        stream: "stderr",
-        match: {
-          ok: false,
-          code: "usage_error",
-          message: "Missing required <goal.md> for goal start."
-        }
       },
       {
         label: "source family",
@@ -146,13 +104,6 @@ describe("M11 closeout command-family smoke matrix", () => {
           code: "goal_not_found",
           goalId: "missing-goal"
         }
-      },
-      {
-        label: "worker compatibility surface",
-        args: ["worker", "run", ...dataDirArgs(dataDir)],
-        code: 0,
-        stream: "stdout",
-        match: { ok: true, command: "worker run", code: "no_work" }
       },
       {
         label: "doctor compatibility surface",

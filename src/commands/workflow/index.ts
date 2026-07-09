@@ -392,8 +392,8 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
  *. Resolves a validated {@link WorkflowDefinition} (persisted
  * first, then the built-in coding workflow fallback), loads repo policy, and
  * durably materializes a `WorkflowRun` + `StepRun` plan via
- * {@link persistWorkflowRunStart}. `goal start` stays the compatibility path for
- * the old Goal loop and is untouched by this command.
+ * {@link persistWorkflowRunStart}. The retired goal-first lane no longer has a
+ * CLI start surface; durable Goal rows remain readable compatibility state.
  */
 function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {
@@ -663,7 +663,7 @@ function runWorkflowStartCommand(
   }
 
   // Preserve repo policy loading: a present-but-malformed MOMENTUM.md refuses
-  // the start (consistent with goal start) rather than being silently ignored.
+  // the start rather than being silently ignored.
   const policy = loadMomentumPolicy(repoPath);
   if (!policy.ok) {
     return emitWorkflowRunStartFailure(parsed, io, {

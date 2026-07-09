@@ -10,8 +10,6 @@ import {
   createMomentumCommandRegistry,
   dispatchMomentumCommand
 } from "./commands/index.js";
-import { handoff, logs, status } from "./commands/status.js";
-import { goalStart } from "./commands/goal/index.js";
 import { source } from "./commands/source/index.js";
 import { project } from "./commands/project/index.js";
 import { evidence } from "./commands/evidence/index.js";
@@ -34,7 +32,6 @@ import {
   emitRecoveryClear,
   emitRecoveryClearDataDirFailure
 } from "./renderers/recovery.js";
-import { emitWorkerRunResult } from "./renderers/worker.js";
 import {
   emitDoctor,
   type DoctorEvidencePayload,
@@ -44,8 +41,7 @@ import {
 } from "./renderers/doctor.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "./adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "./config/data-dir.js";
-import { runWorkerOnce } from "./core/daemon/worker-run.js";
-import { loadDaemonStatus, loadStaleLeasePreCheck } from "./core/daemon/status.js";
+import { loadDaemonStatus } from "./core/daemon/status.js";
 import {
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
   DEFAULT_DAEMON_STALE_AFTER_MS
@@ -141,7 +137,6 @@ export type CliDeps = {
 type ParsedFlags = {
   args: string[];
   json: boolean;
-  foreground: boolean;
   now: boolean;
   dryRun: boolean;
   externalApply: boolean;
@@ -150,10 +145,7 @@ type ParsedFlags = {
   stream: boolean;
   jsonl: boolean;
   repo?: string;
-  runner?: string;
-  workerId?: string;
   dataDir?: string;
-  iteration?: number;
   reason?: string;
   maxLoopIterations?: number;
   maxIdleCycles?: number;
@@ -165,7 +157,6 @@ type ParsedFlags = {
   linearPageSize?: number;
   maxPages?: number;
   goal?: string;
-  fromSource?: string;
   path?: string;
   sourceItem?: string;
   source?: string;
@@ -254,9 +245,6 @@ export async function runCli(
 
   const commandRegistry = createMomentumCommandRegistry<ParsedFlags, CliIo, CliDeps>({
     doctor,
-    status,
-    logs,
-    handoff,
     extraRoutes: [
       { command: "workflow", run: workflow },
       { command: "openclaw", run: openclaw }
@@ -271,16 +259,8 @@ export async function runCli(
     return routedCommand.code;
   }
 
-  if (command === "goal" && subcommand === "start") {
-    return goalStart(parsed, io);
-  }
-
   if (command === "source") {
     return source(parsed, io, deps);
-  }
-
-  if (command === "worker" && subcommand === "run") {
-    return workerRun(parsed, io);
   }
 
   if (command === "daemon") {
@@ -699,33 +679,6 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
   }
 }
 
-function workerRun(parsed: ParsedFlags, io: CliIo): number {
-  if (parsed.args.length > 2) {
-    return usageError(`Unexpected argument for worker run: ${parsed.args[2]}`, parsed, io);
-  }
-
-  const dataDirOptions: DataDirOptions = {};
-  if (io.env !== undefined) dataDirOptions.env = io.env;
-  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
-  const dataDir = resolveDataDir(dataDirOptions);
-
-  const workerId = parsed.workerId ?? `worker-${process.pid}`;
-
-  const db = openDb(dataDir);
-  try {
-    const stalePreCheck = loadStaleLeasePreCheck({ db });
-    const result = runWorkerOnce({
-      db,
-      dataDir,
-      workerId,
-      leaseDurationMs: 30_000
-    });
-    return emitWorkerRunResult(parsed, io, result, stalePreCheck);
-  } finally {
-    db.close();
-  }
-}
-
 function doctor(parsed: ParsedFlags, io: CliIo): number {
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
@@ -1003,7 +956,6 @@ function isExistingDaemonRunStale(
 function parseFlags(argv: string[]): ParsedFlags {
   const args: string[] = [];
   let json = false;
-  let foreground = false;
   let now = false;
   let dryRun = false;
   let externalApply = false;
@@ -1012,10 +964,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let stream = false;
   let jsonl = false;
   let repo: string | undefined;
-  let runner: string | undefined;
-  let workerId: string | undefined;
   let dataDir: string | undefined;
-  let iteration: number | undefined;
   let reason: string | undefined;
   let maxLoopIterations: number | undefined;
   let maxIdleCycles: number | undefined;
@@ -1027,7 +976,6 @@ function parseFlags(argv: string[]): ParsedFlags {
   let linearPageSize: number | undefined;
   let maxPages: number | undefined;
   let goal: string | undefined;
-  let fromSource: string | undefined;
   let pathFlag: string | undefined;
   let sourceItem: string | undefined;
   let source: string | undefined;
@@ -1075,11 +1023,6 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
-    if (arg === "--foreground") {
-      foreground = true;
-      continue;
-    }
-
     if (arg === "--now") {
       now = true;
       continue;
@@ -1121,28 +1064,6 @@ function parseFlags(argv: string[]): ParsedFlags {
         error ??= "Missing required value for --repo.";
       } else {
         repo = value;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (arg === "--runner") {
-      const value = readFlagValue(argv, index);
-      if (value === undefined) {
-        error ??= "Missing required value for --runner.";
-      } else {
-        runner = value;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (arg === "--worker-id") {
-      const value = readFlagValue(argv, index);
-      if (value === undefined) {
-        error ??= "Missing required value for --worker-id.";
-      } else {
-        workerId = value;
         index += 1;
       }
       continue;
@@ -1245,17 +1166,6 @@ function parseFlags(argv: string[]): ParsedFlags {
         error ??= "Missing required value for --goal.";
       } else {
         goal = value;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (arg === "--from-source") {
-      const value = readFlagValue(argv, index);
-      if (value === undefined) {
-        error ??= "Missing required value for --from-source.";
-      } else {
-        fromSource = value;
         index += 1;
       }
       continue;
@@ -1688,24 +1598,6 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
-    if (arg === "--iteration") {
-      const value = readFlagValue(argv, index);
-      if (value === undefined) {
-        error ??= "Missing required value for --iteration.";
-      } else {
-        const parsedIteration = /^\d+$/.test(value)
-          ? Number.parseInt(value, 10)
-          : NaN;
-        if (!Number.isInteger(parsedIteration) || parsedIteration < 1) {
-          error ??= `Invalid value for --iteration: ${value}`;
-        } else {
-          iteration = parsedIteration;
-        }
-        index += 1;
-      }
-      continue;
-    }
-
     if (arg === "--max-loop-iterations") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -1766,7 +1658,6 @@ function parseFlags(argv: string[]): ParsedFlags {
   const parsed: ParsedFlags = {
     args,
     json,
-    foreground,
     now,
     dryRun,
     externalApply,
@@ -1776,10 +1667,7 @@ function parseFlags(argv: string[]): ParsedFlags {
     jsonl
   };
   if (repo !== undefined) parsed.repo = repo;
-  if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
-  if (workerId !== undefined) parsed.workerId = workerId;
-  if (iteration !== undefined) parsed.iteration = iteration;
   if (reason !== undefined) parsed.reason = reason;
   if (maxLoopIterations !== undefined) parsed.maxLoopIterations = maxLoopIterations;
   if (maxIdleCycles !== undefined) parsed.maxIdleCycles = maxIdleCycles;
@@ -1791,7 +1679,6 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (linearPageSize !== undefined) parsed.linearPageSize = linearPageSize;
   if (maxPages !== undefined) parsed.maxPages = maxPages;
   if (goal !== undefined) parsed.goal = goal;
-  if (fromSource !== undefined) parsed.fromSource = fromSource;
   if (pathFlag !== undefined) parsed.path = pathFlag;
   if (sourceItem !== undefined) parsed.sourceItem = sourceItem;
   if (source !== undefined) parsed.source = source;

@@ -23,11 +23,10 @@ async function run(args: string[]): Promise<CliResult> {
   return { code, stdout, stderr };
 }
 
-describe("goal/source/evidence/project/intent command family extraction", () => {
+describe("source/evidence/project/intent command family extraction", () => {
   it("keeps migrated command implementation handlers out of src/cli.ts", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src/cli.ts"), "utf8");
     const expectations: Array<[string, string]> = [
-      ["function goalStart(", "src/commands/goal/index.ts"],
       ["function source(", "src/commands/source/index.ts"],
       ["function project(", "src/commands/project/index.ts"],
       ["function evidence(", "src/commands/evidence/index.ts"],
@@ -67,7 +66,7 @@ describe("goal/source/evidence/project/intent command family extraction", () => 
     });
   });
 
-  it("preserves goal start validation without touching storage", async () => {
+  it("refuses the retired goal start command with an unknown-command usage error", async () => {
     const result = await run(["goal", "start", "--json"]);
 
     expect(result.code).toBe(2);
@@ -75,13 +74,11 @@ describe("goal/source/evidence/project/intent command family extraction", () => 
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "Missing required <goal.md> for goal start."
+      message: "Unknown command: goal"
     });
   });
 
   it("renders the shared Momentum help block for text-mode usage errors", async () => {
-    const footer =
-      "Default goal start enqueues a goal_iteration job for a worker; pass --foreground to run the iteration in the current process.";
     const cases: Array<{ args: string[]; message: string }> = [
       {
         args: ["source"],
@@ -103,12 +100,11 @@ describe("goal/source/evidence/project/intent command family extraction", () => 
         `${args.join(" ")} renders the Momentum help header`
       ).toBe(true);
       expect(result.stderr, `${args.join(" ")} indents the command list`).toMatch(
-        /\n {2}momentum goal start /
+        /\n {2}momentum workflow status /
       );
-      expect(
-        result.stderr.trimEnd().endsWith(footer),
-        `${args.join(" ")} ends with the help footer`
-      ).toBe(true);
+      expect(result.stderr, `${args.join(" ")} omits retired goal-first commands`).not.toContain(
+        "momentum goal start"
+      );
     }
   });
 });
