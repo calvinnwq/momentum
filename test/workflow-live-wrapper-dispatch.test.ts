@@ -13,46 +13,45 @@ import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext,
-  type WorkflowStepDispatchResult
+  type WorkflowStepDispatchResult,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import {
   getWorkflowLease,
-  releaseWorkflowLease
+  releaseWorkflowLease,
 } from "../src/core/workflow/leases.js";
 import { acquireRepoLock, getActiveRepoLock } from "../src/core/repo/locks.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
-  getWorkflowRunManualRecoveryState
+  getWorkflowRunManualRecoveryState,
 } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
-  listExecutorRoundsForInvocation
+  listExecutorRoundsForInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
-import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import {
   WORKFLOW_STEP_EXECUTOR_KINDS,
   type WorkflowStepExecutor,
   type WorkflowStepExecutorDispatchResult,
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind,
-  type WorkflowStepExecutorRegistry
+  type WorkflowStepExecutorRegistry,
 } from "../src/core/workflow/step/executor.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 import {
   parseLiveWrapperProfile,
-  type LiveWrapperProfile
+  type LiveWrapperProfile,
 } from "../src/adapters/live-wrapper-registry.js";
 import type { DispatchedStepExecutorContext } from "../src/core/workflow/dispatch/executor-run.js";
 import {
   createLiveWrapperWorkflowDispatch,
-  shouldRunDispatchedExecutor
+  shouldRunDispatchedExecutor,
 } from "../src/core/workflow/dispatch/live-wrapper.js";
 
 /**
@@ -93,7 +92,7 @@ function makeTempDir(prefix = "momentum-livewrap-"): string {
 function runGit(repoPath: string, args: string[]): string {
   return execFileSync("git", ["-C", repoPath, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
 
@@ -118,12 +117,14 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-492",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
 
-function openNativeCodingDbWithRoute(route: Record<string, unknown>): MomentumDb {
+function openNativeCodingDbWithRoute(
+  route: Record<string, unknown>,
+): MomentumDb {
   const db = openDb(makeTempDir());
   persistWorkflowRunStart(db, {
     definition: CODING_WORKFLOW_DEFINITION,
@@ -132,7 +133,7 @@ function openNativeCodingDbWithRoute(route: Record<string, unknown>): MomentumDb
     objective: "Dogfood route retry",
     now: NOW,
     source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
-    route
+    route,
   });
   return db;
 }
@@ -140,17 +141,17 @@ function openNativeCodingDbWithRoute(route: Record<string, unknown>): MomentumDb
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -158,7 +159,7 @@ function approveAndClaim(
 
 function tickContext(
   db: MomentumDb,
-  now: number = TICK_AT
+  now: number = TICK_AT,
 ): WorkflowStepDispatchContext {
   return { db, workerId: WORKER, now };
 }
@@ -172,7 +173,7 @@ function stepState(db: MomentumDb, stepId: string): string {
 function dispatchRounds(db: MomentumDb, stepId: string) {
   return listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId)
+    deriveDispatchInvocationId(RUN_ID, stepId),
   );
 }
 
@@ -182,7 +183,7 @@ const EXEC_CONTEXT: DispatchedStepExecutorContext = {
   resultJsonPath:
     "/repos/momentum/.agent-workflows/run-livewrap-001/result.json",
   executorLogPath:
-    "/repos/momentum/.agent-workflows/run-livewrap-001/executor.log"
+    "/repos/momentum/.agent-workflows/run-livewrap-001/executor.log",
 };
 
 /**
@@ -192,7 +193,9 @@ const EXEC_CONTEXT: DispatchedStepExecutorContext = {
 function countingRegistry(
   result:
     | WorkflowStepExecutorDispatchResult
-    | ((input: WorkflowStepExecutorInput) => WorkflowStepExecutorDispatchResult)
+    | ((
+        input: WorkflowStepExecutorInput,
+      ) => WorkflowStepExecutorDispatchResult),
 ): { registry: WorkflowStepExecutorRegistry; calls: () => number } {
   let calls = 0;
   const registry = new Map<WorkflowStepExecutorKind, WorkflowStepExecutor>(
@@ -204,15 +207,15 @@ function countingRegistry(
         execute: (input: WorkflowStepExecutorInput) => {
           calls += 1;
           return typeof result === "function" ? result(input) : result;
-        }
-      }
-    ])
+        },
+      },
+    ]),
   );
   return { registry, calls: () => calls };
 }
 
 function succeededResult(
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: true,
@@ -225,15 +228,15 @@ function succeededResult(
       errorCode: null,
       errorMessage: null,
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     },
     executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath
+    resultJsonPath: input.resultJsonPath,
   };
 }
 
 function failedResult(
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: true,
@@ -246,22 +249,22 @@ function failedResult(
       errorCode: "command_failed",
       errorMessage: "live step runner reported success=false",
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     },
     executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath
+    resultJsonPath: input.resultJsonPath,
   };
 }
 
 function wrapperBootstrapFailure(
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: false,
     code: "runtime_unavailable",
     error: `live step runtime is unavailable: ${input.kind} wrapper dist path is stale`,
     executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath
+    resultJsonPath: input.resultJsonPath,
   };
 }
 
@@ -272,13 +275,13 @@ const VALID_RESULT_JSON = JSON.stringify({
   key_learnings: [],
   remaining_work: [],
   goal_complete: false,
-  commit: { type: "chore", subject: "do the thing", body: "", breaking: false }
+  commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
 function profileWith(
   kind: WorkflowStepExecutorKind,
-  args: string[]
+  args: string[],
 ): LiveWrapperProfile {
   const parsed = parseLiveWrapperProfile({
     name: "rc5b-livewrap-test",
@@ -289,9 +292,9 @@ function profileWith(
         cwd: "iteration",
         timeout_sec: 30,
         env_allow: [],
-        result_file: "result.json"
-      }
-    }
+        result_file: "result.json",
+      },
+    },
   });
   if (!parsed.ok) throw new Error(`test setup: bad profile: ${parsed.error}`);
   return parsed.profile;
@@ -300,23 +303,23 @@ function profileWith(
 describe("shouldRunDispatchedExecutor", () => {
   it("runs the executor only for a genuinely-started or re-entered dispatch", () => {
     expect(
-      shouldRunDispatchedExecutor(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched)
+      shouldRunDispatchedExecutor(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched),
     ).toBe(true);
     expect(
       shouldRunDispatchedExecutor(
-        WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
-      )
+        WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
+      ),
     ).toBe(true);
   });
 
   it("never runs the executor for a fail-closed or not-startable dispatch", () => {
     expect(
-      shouldRunDispatchedExecutor(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed)
+      shouldRunDispatchedExecutor(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed),
     ).toBe(false);
     expect(
       shouldRunDispatchedExecutor(
-        WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable
-      )
+        WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
+      ),
     ).toBe(false);
   });
 });
@@ -328,7 +331,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -342,7 +345,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("succeeded");
     const rounds = dispatchRounds(db, "preflight");
@@ -356,7 +359,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const { registry } = countingRegistry(failedResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     dispatch(claim, tickContext(db));
@@ -373,8 +376,8 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const registry = buildRealWorkflowStepExecutorRegistry({
       profile: profileWith("preflight", [
         "-c",
-        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
-      ])
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`,
+      ]),
     });
     const exec: DispatchedStepExecutorContext = {
       repoPath,
@@ -385,12 +388,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["test -f live-edit.txt"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -410,8 +417,8 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const registry = buildRealWorkflowStepExecutorRegistry({
       profile: profileWith("preflight", [
         "-c",
-        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
-      ])
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`,
+      ]),
     });
     const exec: DispatchedStepExecutorContext = {
       repoPath,
@@ -422,12 +429,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["false"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -436,9 +447,9 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     expect(stepState(db, "preflight")).toBe("failed");
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
     expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(false);
-    expect(fs.readFileSync(path.join(runDir, "verification.log"), "utf-8")).toContain(
-      "exit_code: 1"
-    );
+    expect(
+      fs.readFileSync(path.join(runDir, "verification.log"), "utf-8"),
+    ).toContain("exit_code: 1");
   });
 
   it("fails the step without manual recovery when finalization has nothing to commit", () => {
@@ -460,19 +471,23 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["true"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(stepState(db, "preflight")).toBe("failed");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBeNull();
@@ -492,7 +507,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         leaseKind: claim.lease.leaseKind,
         holder: claim.lease.holder,
         acquiredAt: claim.lease.acquiredAt,
-        now: TICK_AT + 1
+        now: TICK_AT + 1,
       });
       return succeededResult(input);
     });
@@ -505,22 +520,26 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["test -f live-edit.txt"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(stepState(db, "preflight")).toBe("running");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
-      "repo_lock_lost"
+      "repo_lock_lost",
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
     expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
@@ -546,8 +565,8 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["test -f live-edit.txt"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     // The wrapper "ran" past the claim's 30s lease: the wall clock at mutation
     // time is a minute after the claim. The stale tick timestamp
@@ -559,18 +578,18 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
       {
         registry,
         deriveExec: () => ({ ok: true, exec }),
-        nowMs: () => NOW + 60_000
-      }
+        nowMs: () => NOW + 60_000,
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(stepState(db, "preflight")).toBe("running");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
-      "repo_lock_lost"
+      "repo_lock_lost",
     );
     // Neither a commit nor a destructive reset happened after expiry.
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
@@ -597,10 +616,10 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
           errorCode: null,
           errorMessage: null,
           retryHint: null,
-          recoveryHint: null
+          recoveryHint: null,
         },
         executorLogPath: input.executorLogPath,
-        resultJsonPath: input.resultJsonPath
+        resultJsonPath: input.resultJsonPath,
       };
     });
     const exec: DispatchedStepExecutorContext = {
@@ -612,12 +631,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["true"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
@@ -625,10 +648,10 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     // Terminalization parks the unexpected skip for manual recovery, and
     // finalization never verified, committed, or reset over it.
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
-      "unexpected_skipped_terminal"
+      "unexpected_skipped_terminal",
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
     expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
@@ -648,7 +671,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
       iteration: 1,
       jobId: "run-other::implementation::dispatch",
       leaseExpiresAt: TICK_AT + 600_000,
-      now: NOW
+      now: NOW,
     });
     expect(foreign.ok).toBe(true);
     const exec: DispatchedStepExecutorContext = {
@@ -660,12 +683,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead: "unused",
         verificationCommands: ["true"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
@@ -674,12 +701,15 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     // other run's changes can never be swept into this step's commit.
     expect(calls()).toBe(0);
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     const rounds = dispatchRounds(db, "preflight");
     expect(rounds[0]?.recoveryCode).toBe("repo_lock_lost");
     expect(rounds[0]?.summary).toContain("is locked by other-worker");
-    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    const recoveryMd = fs.readFileSync(
+      path.join(runDir, "recovery.md"),
+      "utf-8",
+    );
     expect(recoveryMd).toContain("repo_lock_lost");
     expect(recoveryMd).toContain(`Repo path: ${repoPath}`);
   });
@@ -706,12 +736,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["test -f live-edit.txt"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
@@ -735,7 +769,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
       fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
       fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
       db.prepare(
-        "UPDATE repo_locks SET state = 'released', released_at = ?, updated_at = ? WHERE repo_root = ? AND state = 'active'"
+        "UPDATE repo_locks SET state = 'released', released_at = ?, updated_at = ? WHERE repo_root = ? AND state = 'active'",
       ).run(TICK_AT + 1, TICK_AT + 1, repoPath);
       return succeededResult(input);
     });
@@ -748,21 +782,25 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["test -f live-edit.txt"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
-      "repo_lock_lost"
+      "repo_lock_lost",
     );
     // No commit and no destructive reset over a worktree Momentum may not own.
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
@@ -791,24 +829,30 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead: runGit(repoPath, ["rev-parse", "HEAD"]),
         verificationCommands: ["true"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     // The dirty worktree stays guarded: the lock is marked for manual recovery
     // instead of released, so another run cannot acquire the repository and
     // sweep the leftover edit into its own commit.
     const lockRow = db
-      .prepare("SELECT state, recovery_status FROM repo_locks WHERE repo_root = ?")
+      .prepare(
+        "SELECT state, recovery_status FROM repo_locks WHERE repo_root = ?",
+      )
       .get(repoPath) as { state: string; recovery_status: string | null };
     expect(lockRow.state).toBe("needs_manual_recovery");
     expect(lockRow.recovery_status).toContain("unproven worktree");
@@ -819,7 +863,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
       iteration: 1,
       jobId: "run-other::implementation::dispatch",
       leaseExpiresAt: TICK_AT + 600_000,
-      now: TICK_AT + 2
+      now: TICK_AT + 2,
     });
     expect(blocked.ok).toBe(false);
   });
@@ -843,12 +887,16 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
         baseHead,
         verificationCommands: ["true"],
         verificationTimeoutSec: 30,
-        verificationLogPath: path.join(runDir, "verification.log")
-      }
+        verificationLogPath: path.join(runDir, "verification.log"),
+      },
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     dispatch(claim, tickContext(db));
@@ -857,9 +905,12 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     expect(recovery?.needsManualRecovery).toBe(true);
     expect(recovery?.reason).toContain("result_invalid");
     expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
-      "result_invalid"
+      "result_invalid",
     );
-    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    const recoveryMd = fs.readFileSync(
+      path.join(runDir, "recovery.md"),
+      "utf-8",
+    );
     expect(recoveryMd).toContain("result_invalid");
   });
 });
@@ -873,14 +924,18 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
       ...EXEC_CONTEXT,
       runDir,
       resultJsonPath: path.join(runDir, "result.json"),
-      executorLogPath: path.join(runDir, "executor.log")
+      executorLogPath: path.join(runDir, "executor.log"),
     };
     // The real registry with NO profile resolves every kind to the honest
     // unconfigured adapter that refuses with runtime_unavailable.
     const registry = buildRealWorkflowStepExecutorRegistry();
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => TICK_AT,
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -889,21 +944,24 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
     // a durable side effect, NOT a fabricated clean terminal.
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db, "preflight")).toBe("running");
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: "preflight"
+      stepRunId: "preflight",
     });
-    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    const recoveryMd = fs.readFileSync(
+      path.join(runDir, "recovery.md"),
+      "utf-8",
+    );
     expect(recoveryMd).toContain("runtime_unavailable");
     expect(recoveryMd).toContain(`executor-log: ${exec.executorLogPath}`);
     expect(recoveryMd).toContain(`result-file: ${exec.resultJsonPath}`);
@@ -917,7 +975,7 @@ describe("createLiveWrapperWorkflowDispatch — idempotent re-entry", () => {
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     const first = dispatch(claim, tickContext(db, TICK_AT));
@@ -930,7 +988,7 @@ describe("createLiveWrapperWorkflowDispatch — idempotent re-entry", () => {
     // invocation, so the executor is NEVER run a second time.
     const second = dispatch(claim, tickContext(db, TICK_AT + 100));
     expect(second.status).toBe(
-      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
     expect(calls()).toBe(1);
     expect(dispatchRounds(db, "preflight")).toHaveLength(1);
@@ -944,7 +1002,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     db.prepare(
       `UPDATE workflow_steps
           SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
-        WHERE run_id = ? AND step_order < 4`
+        WHERE run_id = ? AND step_order < 4`,
     ).run(NOW, NOW, "test-predecessor", RUN_ID);
     const firstClaim = approveAndClaim(db, "merge-cleanup");
     let repaired = false;
@@ -955,7 +1013,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     });
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     const first = dispatch(firstClaim, tickContext(db, TICK_AT));
@@ -964,7 +1022,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(calls()).toBe(1);
     expect(stepState(db, "merge-cleanup")).toBe("running");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(dispatchRounds(db, "merge-cleanup")).toHaveLength(1);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
@@ -972,14 +1030,14 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     repaired = true;
     const cleared = clearWorkflowRunManualRecoveryGuarded(db, {
       runId: RUN_ID,
-      now: TICK_AT + 100
+      now: TICK_AT + 100,
     });
 
     expect(cleared.ok).toBe(true);
     if (!cleared.ok) throw new Error("clear failed");
     expect(cleared.retryPrepared).toEqual({
       stepId: "merge-cleanup",
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(stepState(db, "merge-cleanup")).toBe("approved");
     const retryClaim = claimRunnableWorkflowStep(db, {
@@ -987,7 +1045,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
       stepId: "merge-cleanup",
       holder: WORKER,
       leaseExpiresAt: TICK_AT + 30_000,
-      now: TICK_AT + 101
+      now: TICK_AT + 101,
     });
     expect(retryClaim.ok).toBe(true);
     if (!retryClaim.ok) throw new Error("retry claim failed");
@@ -999,7 +1057,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(attempts).toEqual([1, 2]);
     expect(stepState(db, "merge-cleanup")).toBe("succeeded");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
     const rounds = dispatchRounds(db, "merge-cleanup");
     expect(rounds).toHaveLength(2);
@@ -1015,23 +1073,23 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
         "merge-cleanup": {
           harness: "codex",
           model: "gpt-5.1",
-          effort: "high"
-        }
-      }
+          effort: "high",
+        },
+      },
     });
     db.prepare(
       `UPDATE workflow_steps
           SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
-        WHERE run_id = ? AND step_order < 4`
+        WHERE run_id = ? AND step_order < 4`,
     ).run(NOW, NOW, "test-predecessor", RUN_ID);
     const firstClaim = approveAndClaim(db, "merge-cleanup");
     let repaired = false;
     const { registry } = countingRegistry((input) =>
-      repaired ? succeededResult(input) : wrapperBootstrapFailure(input)
+      repaired ? succeededResult(input) : wrapperBootstrapFailure(input),
     );
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     dispatch(firstClaim, tickContext(db, TICK_AT));
@@ -1041,13 +1099,13 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(rounds[0]).toMatchObject({
       agentProvider: "codex",
       model: "gpt-5.1",
-      effort: "high"
+      effort: "high",
     });
 
     repaired = true;
     const cleared = clearWorkflowRunManualRecoveryGuarded(db, {
       runId: RUN_ID,
-      now: TICK_AT + 100
+      now: TICK_AT + 100,
     });
     expect(cleared.ok).toBe(true);
     const retryClaim = claimRunnableWorkflowStep(db, {
@@ -1055,7 +1113,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
       stepId: "merge-cleanup",
       holder: WORKER,
       leaseExpiresAt: TICK_AT + 30_000,
-      now: TICK_AT + 101
+      now: TICK_AT + 101,
     });
     expect(retryClaim.ok).toBe(true);
     if (!retryClaim.ok) throw new Error("retry claim failed");
@@ -1067,7 +1125,7 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(rounds[1]).toMatchObject({
       agentProvider: "codex",
       model: "gpt-5.1",
-      effort: "high"
+      effort: "high",
     });
   });
 
@@ -1077,14 +1135,14 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
         "merge-cleanup": {
           harness: "codex",
           model: "gpt-5.1",
-          effort: "high"
-        }
-      }
+          effort: "high",
+        },
+      },
     });
     db.prepare(
       `UPDATE workflow_steps
           SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
-        WHERE run_id = ? AND step_order < 4`
+        WHERE run_id = ? AND step_order < 4`,
     ).run(NOW, NOW, "test-predecessor", RUN_ID);
     const claim = approveAndClaim(db, "merge-cleanup");
     const observed: Array<{
@@ -1096,13 +1154,13 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
       observed.push({
         agentProvider: input.agentProvider,
         model: input.model,
-        effort: input.effort
+        effort: input.effort,
       });
       return succeededResult(input);
     });
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     dispatch(claim, tickContext(db, TICK_AT));
@@ -1111,8 +1169,8 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
       {
         agentProvider: "codex",
         model: "gpt-5.1",
-        effort: "high"
-      }
+        effort: "high",
+      },
     ]);
   });
 
@@ -1121,20 +1179,20 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     db.prepare(
       `UPDATE workflow_steps
           SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
-        WHERE run_id = ? AND step_order < 4`
+        WHERE run_id = ? AND step_order < 4`,
     ).run(NOW, NOW, "test-predecessor", RUN_ID);
     const claim = approveAndClaim(db, "merge-cleanup");
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
     );
 
     dispatch(claim, tickContext(db, TICK_AT));
     const reentered = dispatch(claim, tickContext(db, TICK_AT + 100));
 
     expect(reentered.status).toBe(
-      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
     expect(calls()).toBe(1);
     expect(stepState(db, "merge-cleanup")).toBe("succeeded");
@@ -1151,8 +1209,8 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
       executeWorkflowStepDispatch,
       {
         registry,
-        deriveExec: () => ({ ok: false, reason: "missing_repo_path" })
-      }
+        deriveExec: () => ({ ok: false, reason: "missing_repo_path" }),
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -1167,12 +1225,12 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
     // The run is parked with the derivation failure as honest evidence — NOT a
     // fabricated clean terminal, and NOT a generic input-validation failure.
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db, "preflight")).toBe("running");
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const rounds = dispatchRounds(db, "preflight");
@@ -1183,7 +1241,7 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: "preflight"
+      stepRunId: "preflight",
     });
     // No stranded lease: RC-2 released the held dispatch lease while parking.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -1199,17 +1257,18 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
         registry,
         deriveExec: () => ({
           ok: false,
-          reason: "verification_policy_invalid: (policy_schema_invalid) bad MOMENTUM.md",
-          recoveryCode: "invalid_input"
-        })
-      }
+          reason:
+            "verification_policy_invalid: (policy_schema_invalid) bad MOMENTUM.md",
+          recoveryCode: "invalid_input",
+        }),
+      },
     );
 
     dispatch(claim, tickContext(db));
 
     expect(calls()).toBe(0);
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     const rounds = dispatchRounds(db, "preflight");
     expect(rounds).toHaveLength(1);
@@ -1228,8 +1287,8 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
       executeWorkflowStepDispatch,
       {
         registry,
-        deriveExec: () => ({ ok: false, reason: "missing_repo_path" })
-      }
+        deriveExec: () => ({ ok: false, reason: "missing_repo_path" }),
+      },
     );
 
     const first = dispatch(claim, tickContext(db, TICK_AT));
@@ -1237,7 +1296,7 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
     const second = dispatch(claim, tickContext(db, TICK_AT + 100));
 
     expect(second.status).toBe(
-      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
     expect(calls()).toBe(0);
     const rounds = dispatchRounds(db, "preflight");
@@ -1254,14 +1313,14 @@ describe("createLiveWrapperWorkflowDispatch — does not execute over a non-star
     const claim = approveAndClaim(db, "preflight");
     const baseResult: WorkflowStepDispatchResult = {
       status: WORKFLOW_DISPATCH_RESULT_STATUS.failClosed,
-      detail: "parked for manual recovery"
+      detail: "parked for manual recovery",
     };
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(() => baseResult, {
       registry,
       deriveExec: () => {
         throw new Error("deriveExec must not run for a fail-closed dispatch");
-      }
+      },
     });
 
     const result = dispatch(claim, tickContext(db));
@@ -1274,19 +1333,21 @@ describe("createLiveWrapperWorkflowDispatch — does not execute over a non-star
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
     const baseResult: WorkflowStepDispatchResult = {
-      status: WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable
+      status: WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
     };
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(() => baseResult, {
       registry,
       deriveExec: () => {
         throw new Error("deriveExec must not run for a not-startable dispatch");
-      }
+      },
     });
 
     const result = dispatch(claim, tickContext(db));
 
-    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable);
+    expect(result.status).toBe(
+      WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
+    );
     expect(calls()).toBe(0);
   });
 });
@@ -1296,8 +1357,12 @@ describe("createLiveWrapperWorkflowDispatch — family-owned lanes", () => {
     const db = openSeededDb();
     db.prepare(
       `UPDATE step_definitions SET executor = 'subworkflow'
-         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
-    ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, "preflight");
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
+    ).run(
+      CODING_WORKFLOW_DEFINITION.key,
+      CODING_WORKFLOW_DEFINITION.version,
+      "preflight",
+    );
     const claim = approveAndClaim(db, "preflight");
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
@@ -1306,8 +1371,8 @@ describe("createLiveWrapperWorkflowDispatch — family-owned lanes", () => {
         registry,
         deriveExec: () => {
           throw new Error("deriveExec must not run for a subworkflow scaffold");
-        }
-      }
+        },
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -1317,7 +1382,7 @@ describe("createLiveWrapperWorkflowDispatch — family-owned lanes", () => {
     expect(stepState(db, "preflight")).toBe("running");
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.executorFamily).toBe("subworkflow");
     expect(invocation?.state).toBe("running");
@@ -1332,7 +1397,7 @@ describe("createLiveWrapperWorkflowDispatch — M9 direct-finalize lane preserve
     // Sever the run's definition link so the production base dispatch fail-closes
     // (an M7-imported / M9 direct-finalize-style run has no dispatchable family).
     db.prepare(
-      "UPDATE workflow_runs SET workflow_definition_key = NULL WHERE id = ?"
+      "UPDATE workflow_runs SET workflow_definition_key = NULL WHERE id = ?",
     ).run(RUN_ID);
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
@@ -1341,8 +1406,8 @@ describe("createLiveWrapperWorkflowDispatch — M9 direct-finalize lane preserve
         registry,
         deriveExec: () => {
           throw new Error("deriveExec must not run for a fail-closed dispatch");
-        }
-      }
+        },
+      },
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -1352,7 +1417,10 @@ describe("createLiveWrapperWorkflowDispatch — M9 direct-finalize lane preserve
     // reconcile — RC-2 stays the single finalization owner of dispatched steps.
     expect(calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, "preflight"))
+      loadExecutorInvocation(
+        db,
+        deriveDispatchInvocationId(RUN_ID, "preflight"),
+      ),
     ).toBeUndefined();
     expect(stepState(db, "preflight")).not.toBe("succeeded");
   });

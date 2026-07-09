@@ -50,7 +50,7 @@ describe("momentum CLI scaffold", () => {
     expect(result).toEqual({
       code: 0,
       stdout: `${VERSION}\n`,
-      stderr: ""
+      stderr: "",
     });
   });
 
@@ -63,7 +63,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain(`scope: ${DOCTOR_SCOPE}`);
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stdout).toContain(
-      "evidence: total=0 goal_linked=0 source_item_linked=0"
+      "evidence: total=0 goal_linked=0 source_item_linked=0",
     );
     expect(result.stdout).toContain("evidence: no records ingested yet");
     expect(result.stderr).toBe("");
@@ -79,7 +79,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: DOCTOR_SCOPE
+      milestone: DOCTOR_SCOPE,
     });
     expect(payload["daemon"]).toEqual({
       ok: true,
@@ -92,7 +92,7 @@ describe("momentum CLI scaffold", () => {
       staleRepoLockCount: 0,
       staleClaimedJobCount: 0,
       goalsNeedingRecoveryCount: 0,
-      runId: null
+      runId: null,
     });
     expect(payload["runners"]).toEqual({
       supported: ["fake", "trusted-shell", "acp"],
@@ -103,30 +103,30 @@ describe("momentum CLI scaffold", () => {
           name: "fake",
           description:
             "Built-in compatibility fake runner profile retained for stored goal-first data and diagnostics; the retired lane wrote a fixture file and reported a normalized result.",
-          executes: true
+          executes: true,
         },
         {
           kind: "trusted-shell",
           name: "trusted-shell",
           description:
             "Operator-trusted executable-plus-argv compatibility profile retained for stored goal-first data and diagnostics; the retired lane ran the configured command with no implicit shell, no sandbox, and no privilege drop.",
-          executes: true
+          executes: true,
         },
         {
           kind: "acp",
           name: "acp",
           description:
             "ACP/acpx-style compatibility profile retained for stored goal-first data and diagnostics; the retired lane spawned the configured external agent runtime and reported missing runtime/auth as `runtime_unavailable` without corrupting Goal state.",
-          executes: true
-        }
-      ]
+          executes: true,
+        },
+      ],
     });
     expect(payload["evidence"]).toEqual({
       ok: true,
       totalRecords: 0,
       goalLinkedRecords: 0,
       sourceItemLinkedRecords: 0,
-      lastRecord: null
+      lastRecord: null,
     });
     expect(result.stderr).toBe("");
   });
@@ -134,47 +134,39 @@ describe("momentum CLI scaffold", () => {
   it("doctor --json counts goals needing manual recovery from durable state", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-recovery-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { markGoalNeedsManualRecovery } = await import(
-      "../src/core/goal/recovery.js"
-    );
+    const { markGoalNeedsManualRecovery } =
+      await import("../src/core/goal/recovery.js");
 
     const db = openDb(dataDir);
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
         "g-doctor-recovery",
         "Doctor CLI recovery goal",
         "momentum/test",
         "/tmp/test",
         1,
-        1
+        1,
       );
       markGoalNeedsManualRecovery(db, {
         goalId: "g-doctor-recovery",
         reason: "repo_dirty",
-        now: 2
+        now: 2,
       });
     } finally {
       db.close();
     }
 
-    const jsonResult = await run([
-      "doctor",
-      "--data-dir", dataDir,
-      "--json"
-    ]);
+    const jsonResult = await run(["doctor", "--data-dir", dataDir, "--json"]);
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
     const daemon = payload["daemon"] as Record<string, unknown>;
     expect(daemon["goalsNeedingRecoveryCount"]).toBe(1);
 
-    const textResult = await run([
-      "doctor",
-      "--data-dir", dataDir
-    ]);
+    const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("goals needing manual recovery: 1");
   });
@@ -185,7 +177,7 @@ describe("momentum CLI scaffold", () => {
     fs.writeFileSync(
       path.join(repo, "MOMENTUM.md"),
       `---\nrunner: trusted-shell\nverification:\n  - pnpm test\nverification_timeout_sec: 1200\n---\nPolicy notes body.\n`,
-      "utf-8"
+      "utf-8",
     );
 
     const result = await run([
@@ -194,7 +186,7 @@ describe("momentum CLI scaffold", () => {
       repo,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -203,7 +195,7 @@ describe("momentum CLI scaffold", () => {
       repoConfigured: true,
       present: true,
       hasNotes: true,
-      error: null
+      error: null,
     });
     expect(policy["path"]).toBe(path.join(path.resolve(repo), "MOMENTUM.md"));
     const cfg = policy["config"] as Record<string, unknown>;
@@ -211,11 +203,11 @@ describe("momentum CLI scaffold", () => {
       runner: "trusted-shell",
       verification: ["pnpm test"],
       verificationTimeoutSec: 1200,
-      intentApplyPolicy: null
+      intentApplyPolicy: null,
     });
     expect(policy["effectiveIntentApply"]).toEqual({
       value: "create_intents_only",
-      source: "builtin_default"
+      source: "builtin_default",
     });
   });
 
@@ -230,7 +222,7 @@ describe("momentum CLI scaffold", () => {
       present: false,
       path: null,
       error: null,
-      config: null
+      config: null,
     });
   });
 
@@ -240,7 +232,7 @@ describe("momentum CLI scaffold", () => {
     fs.writeFileSync(
       path.join(repo, "MOMENTUM.md"),
       `---\nrunner: 42\n---\n`,
-      "utf-8"
+      "utf-8",
     );
     const result = await run([
       "doctor",
@@ -248,14 +240,14 @@ describe("momentum CLI scaffold", () => {
       repo,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     const policy = payload["policy"] as Record<string, unknown>;
     expect(policy).toMatchObject({
       repoConfigured: true,
-      present: false
+      present: false,
     });
     const error = policy["error"] as Record<string, unknown>;
     expect(error["code"]).toBe("policy_schema_invalid");
@@ -265,22 +257,28 @@ describe("momentum CLI scaffold", () => {
   it("doctor surfaces an ingested-evidence summary with last record details", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-evidence-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { ingestEvidenceRecord } = await import(
-      "../src/core/evidence/records.js"
-    );
+    const { ingestEvidenceRecord } =
+      await import("../src/core/evidence/records.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run("goal-doctor", "doctor evidence goal", "momentum/test", "/tmp/test", 1, 1);
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "goal-doctor",
+        "doctor evidence goal",
+        "momentum/test",
+        "/tmp/test",
+        1,
+        1,
+      );
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title,
             status, metadata_json, last_observed_at, goal_id,
             created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         "si-doctor",
         "linear",
@@ -293,7 +291,7 @@ describe("momentum CLI scaffold", () => {
         1,
         null,
         1,
-        1
+        1,
       );
 
       ingestEvidenceRecord(
@@ -307,9 +305,9 @@ describe("momentum CLI scaffold", () => {
           occurredAt: 1_000,
           summary: "Plan created",
           metadata: { mode: "execute-ready" },
-          ingestKey: "agent-workflow:cwfp-doc:plan_created"
+          ingestKey: "agent-workflow:cwfp-doc:plan_created",
         },
-        { now: () => 1_100 }
+        { now: () => 1_100 },
       );
       ingestEvidenceRecord(
         db,
@@ -324,9 +322,9 @@ describe("momentum CLI scaffold", () => {
           metadata: { pr: "https://example/pull/1" },
           ingestKey: "agent-workflow:cwfp-doc:merge_complete",
           goalId: "goal-doctor",
-          sourceItemId: "si-doctor"
+          sourceItemId: "si-doctor",
         },
-        { now: () => 9_100 }
+        { now: () => 9_100 },
       );
     } finally {
       db.close();
@@ -347,20 +345,20 @@ describe("momentum CLI scaffold", () => {
         occurredAt: 9_000,
         summary: "Merge complete",
         goalId: "goal-doctor",
-        sourceItemId: "si-doctor"
-      }
+        sourceItemId: "si-doctor",
+      },
     });
-    expect(typeof (evidence["lastRecord"] as Record<string, unknown>)["id"]).toBe(
-      "string"
-    );
+    expect(
+      typeof (evidence["lastRecord"] as Record<string, unknown>)["id"],
+    ).toBe("string");
 
     const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "evidence: total=2 goal_linked=1 source_item_linked=1"
+      "evidence: total=2 goal_linked=1 source_item_linked=1",
     );
     expect(textResult.stdout).toContain(
-      "evidence: last agent-workflow/merge_complete at 9000 (goal=goal-doctor, source_item=si-doctor)"
+      "evidence: last agent-workflow/merge_complete at 9000 (goal=goal-doctor, source_item=si-doctor)",
     );
   });
 
@@ -377,30 +375,32 @@ describe("momentum CLI scaffold", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
       totalAttempts: 0,
-      latestAttempt: null
+      latestAttempt: null,
     });
 
     const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "external apply: intents idle=0 in_flight=0 blocked=0"
+      "external apply: intents idle=0 in_flight=0 blocked=0",
     );
     expect(textResult.stdout).toContain(
-      "external apply: attempts total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0"
+      "external apply: attempts total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0",
     );
-    expect(textResult.stdout).toContain("external apply: no attempts recorded yet");
+    expect(textResult.stdout).toContain(
+      "external apply: no attempts recorded yet",
+    );
   });
 
   it("doctor --json surfaces audit lifecycle counts and the latest attempt across intents", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-counts-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
-    const { claimIntentApply, finalizeIntentApply } = await import(
-      "../src/core/intent/apply-audits.js"
-    );
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } =
+      await import("../src/core/intent/apply-audits.js");
 
     const db = openDb(dataDir);
     let succeededIntentId = "";
@@ -414,9 +414,9 @@ describe("momentum CLI scaffold", () => {
           targetExternalId: "NGX-failed",
           intentType: "source_satisfied",
           reason: "failed attempt",
-          idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1"
+          idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       failedIntentId = failed.intent.id;
       const succeeded = createUpdateIntent(
@@ -426,9 +426,9 @@ describe("momentum CLI scaffold", () => {
           targetExternalId: "NGX-succeeded",
           intentType: "source_satisfied",
           reason: "succeeded attempt",
-          idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-2"
+          idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-2",
         },
-        { now: () => 1_500 }
+        { now: () => 1_500 },
       );
       succeededIntentId = succeeded.intent.id;
 
@@ -440,7 +440,7 @@ describe("momentum CLI scaffold", () => {
           externalId: "NGX-failed",
           externalKey: "NGX-failed",
           url: "https://linear.app/example/issue/NGX-failed",
-          title: "Failed issue"
+          title: "Failed issue",
         },
         operatorReason: "verified done",
         intentApplyPolicy: "external_apply_allowed",
@@ -448,7 +448,7 @@ describe("momentum CLI scaffold", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment on NGX-failed",
         idempotencyMarker: "momentum-intent:linear:NGX-failed:f1",
-        now: 2_000
+        now: 2_000,
       });
       if (!failClaim.ok) throw new Error("expected failed claim ok");
       const failFinalize = finalizeIntentApply(db, {
@@ -456,7 +456,7 @@ describe("momentum CLI scaffold", () => {
         lifecycleState: "failed",
         resultCode: "write_rejected",
         resultMessage: "Linear rejected",
-        now: 2_100
+        now: 2_100,
       });
       if (!failFinalize.ok) throw new Error("expected failed finalize ok");
 
@@ -468,7 +468,7 @@ describe("momentum CLI scaffold", () => {
           externalId: "NGX-succeeded",
           externalKey: "NGX-succeeded",
           url: "https://linear.app/example/issue/NGX-succeeded",
-          title: "Succeeded issue"
+          title: "Succeeded issue",
         },
         operatorReason: "verified done",
         intentApplyPolicy: "external_apply_allowed",
@@ -476,7 +476,7 @@ describe("momentum CLI scaffold", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment on NGX-succeeded",
         idempotencyMarker: "momentum-intent:linear:NGX-succeeded:s1",
-        now: 3_000
+        now: 3_000,
       });
       if (!succClaim.ok) throw new Error("expected succeeded claim ok");
       const succFinalize = finalizeIntentApply(db, {
@@ -486,9 +486,9 @@ describe("momentum CLI scaffold", () => {
         resultMessage: "linear comment created",
         externalRefs: {
           commentId: "linear_comment_77",
-          commentUrl: "https://linear.app/example/comment/77"
+          commentUrl: "https://linear.app/example/comment/77",
         },
-        now: 3_100
+        now: 3_100,
       });
       if (!succFinalize.ok) throw new Error("expected succeeded finalize ok");
       latestAuditId = succClaim.audit.id;
@@ -518,14 +518,14 @@ describe("momentum CLI scaffold", () => {
     expect(externalApply.intentApplyStateCounts).toEqual({
       idle: 2,
       in_flight: 0,
-      blocked: 0
+      blocked: 0,
     });
     expect(externalApply.auditCounts).toEqual({
       claimed: 0,
       succeeded: 1,
       failed: 1,
       blocked: 0,
-      audit_incomplete: 0
+      audit_incomplete: 0,
     });
     expect(externalApply.totalAttempts).toBe(2);
     expect(externalApply.latestAttempt).not.toBeNull();
@@ -535,32 +535,32 @@ describe("momentum CLI scaffold", () => {
     expect(externalApply.latestAttempt?.resultStatus).toBe("succeeded");
     expect(externalApply.latestAttempt?.resultCode).toBe("comment_created");
     expect(externalApply.latestAttempt?.externalRefs.commentId).toBe(
-      "linear_comment_77"
+      "linear_comment_77",
     );
     expect(
-      externalApply.latestAttempt?.idempotencyMarker.toLowerCase()
+      externalApply.latestAttempt?.idempotencyMarker.toLowerCase(),
     ).not.toContain("token");
 
     const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "external apply: intents idle=2 in_flight=0 blocked=0"
+      "external apply: intents idle=2 in_flight=0 blocked=0",
     );
     expect(textResult.stdout).toContain(
-      "external apply: attempts total=2 succeeded=1 failed=1 claimed=0 blocked=0 audit_incomplete=0"
+      "external apply: attempts total=2 succeeded=1 failed=1 claimed=0 blocked=0 audit_incomplete=0",
     );
     expect(textResult.stdout).toContain(
-      `external apply: latest ${latestAuditId} intent=${succeededIntentId} succeeded`
+      `external apply: latest ${latestAuditId} intent=${succeededIntentId} succeeded`,
     );
   });
 
   it("doctor --json reflects in_flight and blocked intent counts from the CAS column", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-states-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
-    const { claimIntentApply, finalizeIntentApply } = await import(
-      "../src/core/intent/apply-audits.js"
-    );
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } =
+      await import("../src/core/intent/apply-audits.js");
 
     const db = openDb(dataDir);
     try {
@@ -571,9 +571,9 @@ describe("momentum CLI scaffold", () => {
           targetExternalId: "NGX-blocked",
           intentType: "source_satisfied",
           reason: "audit incomplete",
-          idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1"
+          idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       const inflight = createUpdateIntent(
         db,
@@ -582,9 +582,9 @@ describe("momentum CLI scaffold", () => {
           targetExternalId: "NGX-inflight",
           intentType: "source_satisfied",
           reason: "still claimed",
-          idempotencyKey: "linear:NGX-inflight:source_satisfied:goal-2"
+          idempotencyKey: "linear:NGX-inflight:source_satisfied:goal-2",
         },
-        { now: () => 1_500 }
+        { now: () => 1_500 },
       );
 
       const blockedClaim = claimIntentApply(db, {
@@ -595,7 +595,7 @@ describe("momentum CLI scaffold", () => {
           externalId: "NGX-blocked",
           externalKey: "NGX-blocked",
           url: "https://linear.app/example/issue/NGX-blocked",
-          title: "Blocked issue"
+          title: "Blocked issue",
         },
         operatorReason: "verified done",
         intentApplyPolicy: "external_apply_allowed",
@@ -603,14 +603,14 @@ describe("momentum CLI scaffold", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment on NGX-blocked",
         idempotencyMarker: "momentum-intent:linear:NGX-blocked:b1",
-        now: 2_000
+        now: 2_000,
       });
       if (!blockedClaim.ok) throw new Error("expected blocked claim ok");
       const blockedFinalize = finalizeIntentApply(db, {
         auditId: blockedClaim.audit.id,
         lifecycleState: "audit_incomplete",
         resultCode: "audit_finalize_failed",
-        now: 2_100
+        now: 2_100,
       });
       if (!blockedFinalize.ok) throw new Error("expected blocked finalize ok");
 
@@ -622,7 +622,7 @@ describe("momentum CLI scaffold", () => {
           externalId: "NGX-inflight",
           externalKey: "NGX-inflight",
           url: "https://linear.app/example/issue/NGX-inflight",
-          title: "Inflight issue"
+          title: "Inflight issue",
         },
         operatorReason: "verified done",
         intentApplyPolicy: "external_apply_allowed",
@@ -630,7 +630,7 @@ describe("momentum CLI scaffold", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment on NGX-inflight",
         idempotencyMarker: "momentum-intent:linear:NGX-inflight:i1",
-        now: 3_000
+        now: 3_000,
       });
       if (!inflightClaim.ok) throw new Error("expected inflight claim ok");
     } finally {
@@ -649,14 +649,14 @@ describe("momentum CLI scaffold", () => {
     expect(externalApply.intentApplyStateCounts).toEqual({
       idle: 0,
       in_flight: 1,
-      blocked: 1
+      blocked: 1,
     });
     expect(externalApply.auditCounts).toEqual({
       claimed: 1,
       succeeded: 0,
       failed: 0,
       blocked: 0,
-      audit_incomplete: 1
+      audit_incomplete: 1,
     });
     expect(externalApply.totalAttempts).toBe(2);
     expect(externalApply.latestAttempt?.lifecycleState).toBe("claimed");
@@ -664,10 +664,10 @@ describe("momentum CLI scaffold", () => {
     const textResult = await run(["doctor", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "external apply: intents idle=0 in_flight=1 blocked=1"
+      "external apply: intents idle=0 in_flight=1 blocked=1",
     );
     expect(textResult.stdout).toContain(
-      "external apply: attempts total=2 succeeded=0 failed=0 claimed=1 blocked=0 audit_incomplete=1"
+      "external apply: attempts total=2 succeeded=0 failed=0 claimed=1 blocked=0 audit_incomplete=1",
     );
   });
 
@@ -694,24 +694,20 @@ describe("momentum CLI scaffold", () => {
       state: "running",
       isActive: true,
       stale: false,
-      staleRunCount: 0
+      staleRunCount: 0,
     });
     expect(typeof daemon["runId"]).toBe("string");
   });
 
   it("rejects --data-dir without a value", async () => {
-    const result = await run([
-      "doctor",
-      "--data-dir",
-      "--json"
-    ]);
+    const result = await run(["doctor", "--data-dir", "--json"]);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
 
     expect(result.code).toBe(2);
     expect(payload).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "Missing required value for --data-dir."
+      message: "Missing required value for --data-dir.",
     });
     expect(result.stdout).toBe("");
   });
@@ -727,9 +723,11 @@ describe("momentum CLI scaffold", () => {
   it("daemon status (no-daemon) exits 0 with hasRun=false in json mode", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
 
@@ -740,7 +738,7 @@ describe("momentum CLI scaffold", () => {
       dataDir,
       hasRun: false,
       daemonRun: null,
-      staleRuns: []
+      staleRuns: [],
     });
     expect(typeof payload["staleAfterMs"]).toBe("number");
     expect(typeof payload["observedAt"]).toBe("number");
@@ -749,10 +747,7 @@ describe("momentum CLI scaffold", () => {
 
   it("daemon status (no-daemon) text mode prints 'never started'", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["daemon", "status", "--data-dir", dataDir]);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Daemon: never started");
@@ -763,31 +758,32 @@ describe("momentum CLI scaffold", () => {
   it("daemon status surfaces an active running daemon", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, setDaemonRunActiveJob } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, setDaemonRunActiveJob } =
+      await import("../src/core/daemon/runs.js");
     const db = openDb(dataDir);
     let runId: string;
     try {
       ({ runId } = startDaemonRun(db, {
         pid: 12345,
         host: "node-test",
-        now: 1_000
+        now: 1_000,
       }));
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "job-1",
         lockId: "lock-1",
-        now: 1_000
+        now: 1_000,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
 
@@ -795,7 +791,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "daemon status",
-      hasRun: true
+      hasRun: true,
     });
     const run0 = payload["daemonRun"] as Record<string, unknown>;
     expect(run0).toMatchObject({
@@ -805,7 +801,7 @@ describe("momentum CLI scaffold", () => {
       state: "running",
       isActive: true,
       isTerminal: false,
-      startedAt: 1_000
+      startedAt: 1_000,
     });
     expect(run0["activeJob"]).toEqual({ jobId: "job-1", lockId: "lock-1" });
     expect(run0["stopRequest"]).toBeNull();
@@ -816,25 +812,26 @@ describe("momentum CLI scaffold", () => {
   it("daemon status surfaces stop-requested state with reason", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, requestDaemonRunStop } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, requestDaemonRunStop } =
+      await import("../src/core/daemon/runs.js");
     const db = openDb(dataDir);
     try {
       const { runId } = startDaemonRun(db, { now: 1_000 });
       requestDaemonRunStop(db, {
         runId,
         reason: "operator-shutdown",
-        now: 2_000
+        now: 2_000,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -843,20 +840,19 @@ describe("momentum CLI scaffold", () => {
     expect(run0).toMatchObject({
       state: "stop_requested",
       isActive: true,
-      isTerminal: false
+      isTerminal: false,
     });
     expect(run0["stopRequest"]).toEqual({
       requestedAt: 2_000,
-      reason: "operator-shutdown"
+      reason: "operator-shutdown",
     });
   });
 
   it("daemon status surfaces terminal error state with last error", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, finishDaemonRun } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, finishDaemonRun } =
+      await import("../src/core/daemon/runs.js");
     const db = openDb(dataDir);
     try {
       const { runId } = startDaemonRun(db, { now: 1_000 });
@@ -864,16 +860,18 @@ describe("momentum CLI scaffold", () => {
         runId,
         terminalState: "error",
         error: "kaboom",
-        now: 2_000
+        now: 2_000,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -884,7 +882,7 @@ describe("momentum CLI scaffold", () => {
       state: "error",
       isActive: false,
       isTerminal: true,
-      finishedAt: 2_000
+      finishedAt: 2_000,
     });
     expect(run0["error"]).toEqual({ message: "kaboom", at: 2_000 });
   });
@@ -902,9 +900,11 @@ describe("momentum CLI scaffold", () => {
 
     // Far enough in the future that the default 90s stale cutoff triggers.
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -917,36 +917,37 @@ describe("momentum CLI scaffold", () => {
     expect(staleRuns).toHaveLength(1);
     expect(staleRuns[0]).toMatchObject({
       runId: run0["runId"],
-      stale: true
+      stale: true,
     });
   });
 
   it("daemon status keeps in-flight active work fresh until the active-job cutoff", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, setDaemonRunActiveJob } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, setDaemonRunActiveJob } =
+      await import("../src/core/daemon/runs.js");
     const db = openDb(dataDir);
     try {
       const { runId } = startDaemonRun(db, {
         pid: 1,
-        now: Date.now() - 100_000
+        now: Date.now() - 100_000,
       });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "job-1",
         lockId: "lock-1",
-        now: Date.now() - 100_000
+        now: Date.now() - 100_000,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -963,7 +964,7 @@ describe("momentum CLI scaffold", () => {
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
-      code: "usage_error"
+      code: "usage_error",
     });
     expect((payload["message"] as string).toLowerCase()).toContain("daemon");
     expect(result.stdout).toBe("");
@@ -980,18 +981,21 @@ describe("momentum CLI scaffold", () => {
     const startResult = await run(["daemon", "start", "--now", "--json"]);
     expect(startResult.code).toBe(2);
     expect(startResult.stdout).toBe("");
-    const startPayload = JSON.parse(startResult.stderr) as Record<string, unknown>;
+    const startPayload = JSON.parse(startResult.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(startPayload).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "--now is only supported by `momentum daemon stop`."
+      message: "--now is only supported by `momentum daemon stop`.",
     });
 
     const doctorResult = await run(["doctor", "--now"]);
     expect(doctorResult.code).toBe(2);
     expect(doctorResult.stdout).toBe("");
     expect(doctorResult.stderr).toContain(
-      "--now is only supported by `momentum daemon stop`."
+      "--now is only supported by `momentum daemon stop`.",
     );
   });
 
@@ -1006,10 +1010,8 @@ describe("momentum CLI scaffold", () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
     const { openDb } = await import("../src/adapters/db.js");
     const { acquireRepoLock } = await import("../src/core/repo/locks.js");
-    const {
-      claimPendingGoalIterationJob,
-      enqueueGoalIterationJob
-    } = await import("../src/core/daemon/queue-jobs.js");
+    const { claimPendingGoalIterationJob, enqueueGoalIterationJob } =
+      await import("../src/core/daemon/queue-jobs.js");
     const db = openDb(dataDir);
     let lockId: string;
     let jobId: string;
@@ -1017,7 +1019,7 @@ describe("momentum CLI scaffold", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g1", "test goal", "momentum/test", "/tmp/test", 1, 1);
       const acquired = acquireRepoLock(db, {
         repoRoot: "/tmp/repo",
@@ -1026,7 +1028,7 @@ describe("momentum CLI scaffold", () => {
         iteration: 1,
         jobId: "preexisting-job",
         leaseExpiresAt: 1_000,
-        now: 500
+        now: 500,
       });
       if (!acquired.ok) throw new Error("seed lock did not acquire");
       lockId = acquired.lockId;
@@ -1036,12 +1038,12 @@ describe("momentum CLI scaffold", () => {
         iteration: 1,
         idempotencyKey: "g1:1",
         artifactPath: "/tmp/test/iterations/1",
-        now: 100
+        now: 100,
       });
       const claimed = claimPendingGoalIterationJob(db, {
         workerId: "worker-b",
         leaseDurationMs: 1_000,
-        now: 200
+        now: 200,
       });
       if (!claimed.ok) throw new Error("seed claim failed");
       jobId = claimed.job.id;
@@ -1050,14 +1052,18 @@ describe("momentum CLI scaffold", () => {
     }
 
     const jsonResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
     expect(typeof payload["staleLeaseGraceMs"]).toBe("number");
-    const staleLocks = payload["staleRepoLocks"] as Array<Record<string, unknown>>;
+    const staleLocks = payload["staleRepoLocks"] as Array<
+      Record<string, unknown>
+    >;
     expect(staleLocks).toHaveLength(1);
     expect(staleLocks[0]).toMatchObject({
       lockId,
@@ -1067,9 +1073,11 @@ describe("momentum CLI scaffold", () => {
       iteration: 1,
       jobId: "preexisting-job",
       state: "active",
-      leaseExpiresAt: 1_000
+      leaseExpiresAt: 1_000,
     });
-    const staleJobs = payload["staleClaimedJobs"] as Array<Record<string, unknown>>;
+    const staleJobs = payload["staleClaimedJobs"] as Array<
+      Record<string, unknown>
+    >;
     expect(staleJobs).toHaveLength(1);
     expect(staleJobs[0]).toMatchObject({
       jobId,
@@ -1079,13 +1087,10 @@ describe("momentum CLI scaffold", () => {
       attemptCount: 1,
       workerId: "worker-b",
       leaseAcquiredAt: 200,
-      leaseExpiresAt: 1_200
+      leaseExpiresAt: 1_200,
     });
 
-    const textResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir
-    ]);
+    const textResult = await run(["daemon", "status", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Stale repo locks: 1");
     expect(textResult.stdout).toContain("Stale claimed jobs: 1");
@@ -1094,21 +1099,21 @@ describe("momentum CLI scaffold", () => {
   it("daemon status surfaces goals needing manual recovery in JSON and text", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-recovery-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { writeRecoveryArtifact } = await import("../src/core/goal/recovery-artifact.js");
-    const { markGoalNeedsManualRecovery } = await import(
-      "../src/core/goal/recovery.js"
-    );
+    const { writeRecoveryArtifact } =
+      await import("../src/core/goal/recovery-artifact.js");
+    const { markGoalNeedsManualRecovery } =
+      await import("../src/core/goal/recovery.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g-needs", "Stuck goal", "momentum/test", "/tmp/test", 1, 1);
       markGoalNeedsManualRecovery(db, {
         goalId: "g-needs",
         reason: "repo_dirty",
-        now: 1
+        now: 1,
       });
       writeRecoveryArtifact({
         dataDir,
@@ -1127,20 +1132,22 @@ describe("momentum CLI scaffold", () => {
             promptPath: "/tmp/test/iterations/1/prompt.md",
             runnerLog: null,
             verificationLog: null,
-            resultJson: null
+            resultJson: null,
           },
           safeNextSteps: ["Inspect the repo working tree"],
-          classifiedAt: 1_700_000_000_000
-        }
+          classifiedAt: 1_700_000_000_000,
+        },
       });
     } finally {
       db.close();
     }
 
     const jsonResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
@@ -1152,16 +1159,11 @@ describe("momentum CLI scaffold", () => {
       goalId: "g-needs",
       title: "Stuck goal",
       goalState: "initialized",
-      recoveryMdExists: true
+      recoveryMdExists: true,
     });
-    expect(entries[0]?.["recoveryMdPath"]).toMatch(
-      /g-needs\/recovery\.md$/
-    );
+    expect(entries[0]?.["recoveryMdPath"]).toMatch(/g-needs\/recovery\.md$/);
 
-    const textResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir
-    ]);
+    const textResult = await run(["daemon", "status", "--data-dir", dataDir]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Goals needing manual recovery: 1");
     expect(textResult.stdout).toContain("g-needs");
@@ -1171,16 +1173,14 @@ describe("momentum CLI scaffold", () => {
     const dataDir = makeTempDir("momentum-cli-doctor-stale-");
     const { openDb } = await import("../src/adapters/db.js");
     const { acquireRepoLock } = await import("../src/core/repo/locks.js");
-    const {
-      claimPendingGoalIterationJob,
-      enqueueGoalIterationJob
-    } = await import("../src/core/daemon/queue-jobs.js");
+    const { claimPendingGoalIterationJob, enqueueGoalIterationJob } =
+      await import("../src/core/daemon/queue-jobs.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g1", "test goal", "momentum/test", "/tmp/test", 1, 1);
       const acquired = acquireRepoLock(db, {
         repoRoot: "/tmp/repo",
@@ -1189,7 +1189,7 @@ describe("momentum CLI scaffold", () => {
         iteration: 1,
         jobId: "preexisting-job",
         leaseExpiresAt: 1_000,
-        now: 500
+        now: 500,
       });
       if (!acquired.ok) throw new Error("seed lock did not acquire");
       enqueueGoalIterationJob(db, {
@@ -1197,23 +1197,19 @@ describe("momentum CLI scaffold", () => {
         iteration: 1,
         idempotencyKey: "g1:1",
         artifactPath: "/tmp/test/iterations/1",
-        now: 100
+        now: 100,
       });
       const claimed = claimPendingGoalIterationJob(db, {
         workerId: "worker-b",
         leaseDurationMs: 1_000,
-        now: 200
+        now: 200,
       });
       if (!claimed.ok) throw new Error("seed claim failed");
     } finally {
       db.close();
     }
 
-    const result = await run([
-      "doctor",
-      "--data-dir", dataDir,
-      "--json"
-    ]);
+    const result = await run(["doctor", "--data-dir", dataDir, "--json"]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     const daemon = payload["daemon"] as Record<string, unknown>;
@@ -1222,7 +1218,7 @@ describe("momentum CLI scaffold", () => {
       hasRun: false,
       staleRunCount: 0,
       staleRepoLockCount: 1,
-      staleClaimedJobCount: 1
+      staleClaimedJobCount: 1,
     });
   });
 
@@ -1230,9 +1226,11 @@ describe("momentum CLI scaffold", () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
     const before = Date.now();
     const result = await run([
-      "daemon", "start",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const after = Date.now();
 
@@ -1242,7 +1240,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "daemon start",
       dataDir,
-      state: "running"
+      state: "running",
     });
     expect(typeof payload["runId"]).toBe("string");
     expect((payload["runId"] as string).length).toBeGreaterThan(0);
@@ -1256,12 +1254,17 @@ describe("momentum CLI scaffold", () => {
 
     // The new record should also be visible via `daemon status`.
     const statusResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
-    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<
+      string,
+      unknown
+    >;
     const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
     expect(daemonRun["runId"]).toBe(payload["runId"]);
     expect(daemonRun["state"]).toBe("running");
@@ -1270,10 +1273,7 @@ describe("momentum CLI scaffold", () => {
 
   it("daemon start text mode prints the recorded run summary", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
-    const result = await run([
-      "daemon", "start",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["daemon", "start", "--data-dir", dataDir]);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Daemon run started:");
@@ -1293,16 +1293,18 @@ describe("momentum CLI scaffold", () => {
       ({ runId: existingRunId } = startDaemonRun(db, {
         pid: 77,
         host: "node-existing",
-        now: Date.now()
+        now: Date.now(),
       }));
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "start",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1311,7 +1313,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "daemon start",
-      code: "daemon_already_active"
+      code: "daemon_already_active",
     });
     expect(payload["message"]).toContain(existingRunId);
     const existing = payload["existing"] as Record<string, unknown>;
@@ -1320,7 +1322,7 @@ describe("momentum CLI scaffold", () => {
       state: "running",
       pid: 77,
       host: "node-existing",
-      stale: false
+      stale: false,
     });
   });
 
@@ -1338,22 +1340,24 @@ describe("momentum CLI scaffold", () => {
     }
 
     const result = await run([
-      "daemon", "start",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
-      code: "daemon_already_active"
+      code: "daemon_already_active",
     });
     expect(payload["message"]).toContain("stale heartbeat");
     const existing = payload["existing"] as Record<string, unknown>;
     expect(existing).toMatchObject({
       runId: existingRunId,
-      stale: true
+      stale: true,
     });
     expect(existing["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
   });
@@ -1361,9 +1365,8 @@ describe("momentum CLI scaffold", () => {
   it("daemon start allows a new run once the previous one terminates", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, finishDaemonRun } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, finishDaemonRun } =
+      await import("../src/core/daemon/runs.js");
     const db = openDb(dataDir);
     try {
       const { runId } = startDaemonRun(db, { now: Date.now() });
@@ -1373,9 +1376,11 @@ describe("momentum CLI scaffold", () => {
     }
 
     const result = await run([
-      "daemon", "start",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1383,7 +1388,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "daemon start",
-      state: "running"
+      state: "running",
     });
   });
 
@@ -1404,7 +1409,7 @@ describe("momentum CLI scaffold", () => {
       ({ runId: activeRunId } = startDaemonRun(db, {
         pid: 4242,
         host: "node-stop",
-        now: Date.now()
+        now: Date.now(),
       }));
     } finally {
       db.close();
@@ -1412,10 +1417,13 @@ describe("momentum CLI scaffold", () => {
 
     const before = Date.now();
     const result = await run([
-      "daemon", "stop",
-      "--reason", "operator-shutdown",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--reason",
+      "operator-shutdown",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const after = Date.now();
 
@@ -1432,7 +1440,7 @@ describe("momentum CLI scaffold", () => {
       alreadyStopRequested: false,
       pid: 4242,
       host: "node-stop",
-      stale: false
+      stale: false,
     });
     expect(payload["stopRequestedAt"]).toBeGreaterThanOrEqual(before);
     expect(payload["stopRequestedAt"]).toBeLessThanOrEqual(after);
@@ -1441,18 +1449,23 @@ describe("momentum CLI scaffold", () => {
 
     // Status round-trip should reflect the recorded stop request.
     const statusResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
-    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<
+      string,
+      unknown
+    >;
     const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
     expect(daemonRun["runId"]).toBe(activeRunId);
     expect(daemonRun["state"]).toBe("stop_requested");
     expect(daemonRun["stopRequest"]).toEqual({
       requestedAt: payload["stopRequestedAt"],
-      reason: "operator-shutdown"
+      reason: "operator-shutdown",
     });
   });
 
@@ -1467,10 +1480,7 @@ describe("momentum CLI scaffold", () => {
       db.close();
     }
 
-    const result = await run([
-      "daemon", "stop",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["daemon", "stop", "--data-dir", dataDir]);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Daemon stop requested:");
@@ -1484,9 +1494,8 @@ describe("momentum CLI scaffold", () => {
   it("daemon stop is idempotent and refreshes the reason on a stop_requested run", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, requestDaemonRunStop } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, requestDaemonRunStop } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const firstRequestedAt = Date.now() - 5_000;
     const db = openDb(dataDir);
@@ -1495,17 +1504,20 @@ describe("momentum CLI scaffold", () => {
       requestDaemonRunStop(db, {
         runId,
         reason: "initial",
-        now: firstRequestedAt
+        now: firstRequestedAt,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "stop",
-      "--reason", "second-call",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--reason",
+      "second-call",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1517,7 +1529,7 @@ describe("momentum CLI scaffold", () => {
       previousState: "stop_requested",
       state: "stop_requested",
       alreadyStopRequested: true,
-      stopReason: "second-call"
+      stopReason: "second-call",
     });
     // The original stop_requested_at is preserved (COALESCE in the primitive).
     expect(payload["stopRequestedAt"]).toBe(firstRequestedAt);
@@ -1527,9 +1539,11 @@ describe("momentum CLI scaffold", () => {
   it("daemon stop refuses when no daemon has ever started", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const result = await run([
-      "daemon", "stop",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1539,40 +1553,41 @@ describe("momentum CLI scaffold", () => {
       ok: false,
       command: "daemon stop",
       code: "no_active_daemon",
-      latest: null
+      latest: null,
     });
     expect((payload["message"] as string).toLowerCase()).toContain(
-      "no active daemon"
+      "no active daemon",
     );
   });
 
   it("daemon stop refuses when the latest run is already terminal and surfaces it", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, finishDaemonRun } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, finishDaemonRun } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const db = openDb(dataDir);
     try {
       ({ runId } = startDaemonRun(db, {
         pid: 33,
         host: "node-old",
-        now: Date.now() - 1_000
+        now: Date.now() - 1_000,
       }));
       finishDaemonRun(db, {
         runId,
         terminalState: "stopped",
-        now: Date.now()
+        now: Date.now(),
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "stop",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1580,14 +1595,14 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "daemon stop",
-      code: "no_active_daemon"
+      code: "no_active_daemon",
     });
     const latest = payload["latest"] as Record<string, unknown>;
     expect(latest).toMatchObject({
       runId,
       state: "stopped",
       pid: 33,
-      host: "node-old"
+      host: "node-old",
     });
     expect((payload["message"] as string).toLowerCase()).toContain("stopped");
   });
@@ -1606,9 +1621,11 @@ describe("momentum CLI scaffold", () => {
     }
 
     const result = await run([
-      "daemon", "stop",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1617,7 +1634,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       runId,
       state: "stop_requested",
-      stale: true
+      stale: true,
     });
     expect(payload["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
   });
@@ -1625,30 +1642,31 @@ describe("momentum CLI scaffold", () => {
   it("daemon stop uses active-job freshness when reporting staleness", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, setDaemonRunActiveJob } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, setDaemonRunActiveJob } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const db = openDb(dataDir);
     try {
       ({ runId } = startDaemonRun(db, {
         pid: 45,
-        now: Date.now() - 100_000
+        now: Date.now() - 100_000,
       }));
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "job-1",
         lockId: "lock-1",
-        now: Date.now() - 100_000
+        now: Date.now() - 100_000,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "stop",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "stop",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1657,7 +1675,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       runId,
       state: "stop_requested",
-      stale: false
+      stale: false,
     });
     expect(payload["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
   });
@@ -1686,7 +1704,7 @@ describe("momentum CLI scaffold", () => {
       ({ runId: activeRunId } = startDaemonRun(db, {
         pid: 7171,
         host: "node-stop-now",
-        now: Date.now()
+        now: Date.now(),
       }));
     } finally {
       db.close();
@@ -1694,10 +1712,12 @@ describe("momentum CLI scaffold", () => {
 
     const before = Date.now();
     const result = await run([
-      "daemon", "stop",
+      "daemon",
+      "stop",
       "--now",
-      "--data-dir", dataDir,
-      "--json"
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const after = Date.now();
 
@@ -1712,58 +1732,65 @@ describe("momentum CLI scaffold", () => {
       immediate: true,
       alreadyStopNow: false,
       alreadyStopRequested: false,
-      stopReason: "operator-requested-immediate"
+      stopReason: "operator-requested-immediate",
     });
     expect(payload["stopNowRequestedAt"]).toBeGreaterThanOrEqual(before);
     expect(payload["stopNowRequestedAt"]).toBeLessThanOrEqual(after);
 
     const statusResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
-    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<
+      string,
+      unknown
+    >;
     const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
     expect(daemonRun["stopNowRequest"]).toEqual({
       requestedAt: payload["stopNowRequestedAt"],
-      reason: "operator-requested-immediate"
+      reason: "operator-requested-immediate",
     });
     expect(daemonRun["stopRequest"]).toEqual({
       requestedAt: payload["stopNowRequestedAt"],
-      reason: "operator-requested-immediate"
+      reason: "operator-requested-immediate",
     });
   });
 
   it("daemon stop --now is idempotent and preserves the first stop-now reason", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, requestDaemonRunImmediateStop } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const firstNowAt = Date.now() - 5_000;
     const db = openDb(dataDir);
     try {
       ({ runId } = startDaemonRun(db, {
         pid: 8181,
-        now: firstNowAt - 100
+        now: firstNowAt - 100,
       }));
       requestDaemonRunImmediateStop(db, {
         runId,
         reason: "first-now",
-        now: firstNowAt
+        now: firstNowAt,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "stop",
+      "daemon",
+      "stop",
       "--now",
-      "--reason", "second-now",
-      "--data-dir", dataDir,
-      "--json"
+      "--reason",
+      "second-now",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -1775,7 +1802,7 @@ describe("momentum CLI scaffold", () => {
       immediate: true,
       alreadyStopNow: true,
       alreadyStopRequested: true,
-      stopReason: "first-now"
+      stopReason: "first-now",
     });
     expect(payload["stopNowRequestedAt"]).toBe(firstNowAt);
   });
@@ -1783,9 +1810,8 @@ describe("momentum CLI scaffold", () => {
   it("daemon stop --now text output reports the preserved reason on a repeat call", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, requestDaemonRunImmediateStop } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const db = openDb(dataDir);
     try {
@@ -1793,29 +1819,32 @@ describe("momentum CLI scaffold", () => {
       requestDaemonRunImmediateStop(db, {
         runId,
         reason: "first",
-        now: Date.now() - 500
+        now: Date.now() - 500,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "stop",
+      "daemon",
+      "stop",
       "--now",
-      "--data-dir", dataDir
+      "--data-dir",
+      dataDir,
     ]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(`Daemon stop-now request refreshed: ${runId}`);
+    expect(result.stdout).toContain(
+      `Daemon stop-now request refreshed: ${runId}`,
+    );
     expect(result.stdout).toContain("Stop-now requested at:");
   });
 
   it("daemon stop --now upgrades a graceful stop_requested run to stop_now", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { startDaemonRun, requestDaemonRunStop } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { startDaemonRun, requestDaemonRunStop } =
+      await import("../src/core/daemon/runs.js");
     let runId: string;
     const gracefulAt = Date.now() - 3_000;
     const db = openDb(dataDir);
@@ -1827,11 +1856,14 @@ describe("momentum CLI scaffold", () => {
     }
 
     const result = await run([
-      "daemon", "stop",
+      "daemon",
+      "stop",
       "--now",
-      "--reason", "upgrade",
-      "--data-dir", dataDir,
-      "--json"
+      "--reason",
+      "upgrade",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -1843,7 +1875,7 @@ describe("momentum CLI scaffold", () => {
       immediate: true,
       alreadyStopRequested: true,
       alreadyStopNow: false,
-      stopReason: "upgrade"
+      stopReason: "upgrade",
     });
     expect(payload["stopRequestedAt"]).toBe(gracefulAt);
     expect(typeof payload["stopNowRequestedAt"]).toBe("number");
@@ -1853,10 +1885,12 @@ describe("momentum CLI scaffold", () => {
   it("daemon stop --now refuses when there is no active daemon", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const result = await run([
-      "daemon", "stop",
+      "daemon",
+      "stop",
       "--now",
-      "--data-dir", dataDir,
-      "--json"
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1864,17 +1898,20 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "daemon stop",
-      code: "no_active_daemon"
+      code: "no_active_daemon",
     });
   });
 
   it("daemon start with --max-idle-cycles 0 registers a run and exits with terminalState=stopped", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1885,7 +1922,7 @@ describe("momentum CLI scaffold", () => {
       workSucceeded: true,
       command: "daemon start",
       dataDir,
-      state: "stopped"
+      state: "stopped",
     });
     expect(typeof payload["runId"]).toBe("string");
     const loop = payload["loop"] as Record<string, unknown>;
@@ -1898,16 +1935,21 @@ describe("momentum CLI scaffold", () => {
       jobsRun: 0,
       jobsFailed: 0,
       jobsNotExecuted: 0,
-      idleCycles: 0
+      idleCycles: 0,
     });
 
     // The recorded run should be terminal in status afterwards.
     const statusResult = await run([
-      "daemon", "status",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
-    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<
+      string,
+      unknown
+    >;
     const run0 = statusPayload["daemonRun"] as Record<string, unknown>;
     expect(run0["state"]).toBe("stopped");
     expect(run0["isActive"]).toBe(false);
@@ -1916,11 +1958,15 @@ describe("momentum CLI scaffold", () => {
   it("daemon start bounded loop keeps the frozen envelope keys and idle drain values", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-envelope-");
     const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "1",
-      "--poll-interval-ms", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "1",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1937,7 +1983,7 @@ describe("momentum CLI scaffold", () => {
       "startedAt",
       "state",
       "workSucceeded",
-      "workerId"
+      "workerId",
     ]);
 
     const loop = payload["loop"] as Record<string, unknown>;
@@ -1955,7 +2001,7 @@ describe("momentum CLI scaffold", () => {
       "startupRecovery",
       "terminalState",
       "workSucceeded",
-      "workflowStepsDispatched"
+      "workflowStepsDispatched",
     ]);
     // The retired goal-iteration drain lane must keep reporting its idle
     // envelope values so operators and wrappers see an unchanged wire shape.
@@ -1972,7 +2018,7 @@ describe("momentum CLI scaffold", () => {
       workflowStepsDispatched: 0,
       lastWorkflowCode: "idle",
       lastObservedState: "running",
-      lastWorkerCode: "no_work"
+      lastWorkerCode: "no_work",
     });
     const startupRecovery = loop["startupRecovery"] as Record<string, unknown>;
     expect(Object.keys(startupRecovery).sort()).toEqual([
@@ -1983,14 +2029,18 @@ describe("momentum CLI scaffold", () => {
       "recoveredRepoLockCount",
       "skippedClaimedJobs",
       "skippedDaemonRuns",
-      "skippedRepoLocks"
+      "skippedRepoLocks",
     ]);
 
     const textResult = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "1",
-      "--poll-interval-ms", "0",
-      "--data-dir", makeTempDir("momentum-cli-daemon-loop-envelope-text-")
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "1",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      makeTempDir("momentum-cli-daemon-loop-envelope-text-"),
     ]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Jobs run: 0");
@@ -2003,42 +2053,47 @@ describe("momentum CLI scaffold", () => {
   it("daemon start rejects --poll-interval-ms without a loop bound", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const result = await run([
-      "daemon", "start",
-      "--poll-interval-ms", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(
-      "--poll-interval-ms requires --max-loop-iterations or --max-idle-cycles."
+      "--poll-interval-ms requires --max-loop-iterations or --max-idle-cycles.",
     );
   });
 
   it("managed daemon start recovers a stale idle active run before registering", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { getDaemonRun, startDaemonRun } = await import(
-      "../src/core/daemon/runs.js"
-    );
+    const { getDaemonRun, startDaemonRun } =
+      await import("../src/core/daemon/runs.js");
     let staleRunId: string;
     const db = openDb(dataDir);
     try {
       ({ runId: staleRunId } = startDaemonRun(db, {
         pid: 5151,
         host: "stale-existing-loop",
-        now: 100
+        now: 100,
       }));
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -2047,7 +2102,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "daemon start",
-      state: "stopped"
+      state: "stopped",
     });
     expect(payload["runId"]).not.toBe(staleRunId);
 
@@ -2072,17 +2127,20 @@ describe("momentum CLI scaffold", () => {
       ({ runId: existingRunId } = startDaemonRun(db, {
         pid: 4242,
         host: "node-existing-loop",
-        now: Date.now()
+        now: Date.now(),
       }));
     } finally {
       db.close();
     }
 
     const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "1",
-      "--data-dir", dataDir,
-      "--json"
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "1",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -2091,7 +2149,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "daemon start",
-      code: "daemon_already_active"
+      code: "daemon_already_active",
     });
     expect(payload["message"]).toContain(existingRunId);
   });
@@ -2099,9 +2157,12 @@ describe("momentum CLI scaffold", () => {
   it("daemon start text mode prints a loop summary when bounded", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles", "0",
-      "--data-dir", dataDir
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "0",
+      "--data-dir",
+      dataDir,
     ]);
 
     expect(result.code).toBe(0);
@@ -2115,72 +2176,67 @@ describe("momentum CLI scaffold", () => {
 
   it("daemon start rejects --max-loop-iterations with a non-integer value", async () => {
     const result = await run([
-      "daemon", "start",
-      "--max-loop-iterations", "abc"
+      "daemon",
+      "start",
+      "--max-loop-iterations",
+      "abc",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Invalid value for --max-loop-iterations: abc"
+      "Invalid value for --max-loop-iterations: abc",
     );
     expect(result.stdout).toBe("");
   });
 
   it("daemon start rejects --max-idle-cycles without a value", async () => {
-    const result = await run([
-      "daemon", "start",
-      "--max-idle-cycles"
-    ]);
+    const result = await run(["daemon", "start", "--max-idle-cycles"]);
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("Missing required value for --max-idle-cycles");
+    expect(result.stderr).toContain(
+      "Missing required value for --max-idle-cycles",
+    );
     expect(result.stdout).toBe("");
   });
-
 });
 
 describe("momentum recovery clear", () => {
   it("requires a goal-id argument", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const result = await run([
-      "recovery", "clear",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["recovery", "clear", "--data-dir", dataDir]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Missing required <goal-id> for recovery clear."
+      "Missing required <goal-id> for recovery clear.",
     );
   });
 
   it("rejects unexpected positional arguments", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
     const result = await run([
-      "recovery", "clear", "g1", "extra",
-      "--data-dir", dataDir
+      "recovery",
+      "clear",
+      "g1",
+      "extra",
+      "--data-dir",
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for recovery clear: extra"
+      "Unexpected argument for recovery clear: extra",
     );
   });
 
   it("rejects unknown recovery subcommand", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const result = await run([
-      "recovery", "nope",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["recovery", "nope", "--data-dir", dataDir]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unknown recovery subcommand: nope");
   });
 
   it("rejects missing recovery subcommand", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const result = await run([
-      "recovery",
-      "--data-dir", dataDir
-    ]);
+    const result = await run(["recovery", "--data-dir", dataDir]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Missing required subcommand for recovery. Expected: clear."
+      "Missing required subcommand for recovery. Expected: clear.",
     );
   });
 
@@ -2191,9 +2247,12 @@ describe("momentum recovery clear", () => {
     openDb(dataDir).close();
 
     const result = await run([
-      "recovery", "clear", "missing-goal",
-      "--data-dir", dataDir,
-      "--json"
+      "recovery",
+      "clear",
+      "missing-goal",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -2201,7 +2260,7 @@ describe("momentum recovery clear", () => {
       ok: false,
       command: "recovery clear",
       code: "goal_not_found",
-      goalId: "missing-goal"
+      goalId: "missing-goal",
     });
   });
 
@@ -2213,16 +2272,19 @@ describe("momentum recovery clear", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g-clean", "clean goal", "momentum/test", "/tmp/test", 1, 1);
     } finally {
       db.close();
     }
 
     const result = await run([
-      "recovery", "clear", "g-clean",
-      "--data-dir", dataDir,
-      "--json"
+      "recovery",
+      "clear",
+      "g-clean",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -2230,17 +2292,17 @@ describe("momentum recovery clear", () => {
       ok: false,
       command: "recovery clear",
       code: "not_flagged",
-      goalId: "g-clean"
+      goalId: "g-clean",
     });
   });
 
   it("returns job_active with activeJobIds when a claimed iteration job still holds the goal", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { enqueueGoalIterationJob } = await import("../src/core/daemon/queue-jobs.js");
-    const { markGoalNeedsManualRecovery } = await import(
-      "../src/core/goal/recovery.js"
-    );
+    const { enqueueGoalIterationJob } =
+      await import("../src/core/daemon/queue-jobs.js");
+    const { markGoalNeedsManualRecovery } =
+      await import("../src/core/goal/recovery.js");
 
     const db = openDb(dataDir);
     let jobId: string;
@@ -2248,32 +2310,35 @@ describe("momentum recovery clear", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g-stuck", "stuck goal", "momentum/test", "/tmp/test", 1, 1);
       const enq = enqueueGoalIterationJob(db, {
         goalId: "g-stuck",
         iteration: 1,
         idempotencyKey: "g-stuck:1",
         artifactPath: "/tmp/test/g-stuck/iterations/1",
-        now: 1
+        now: 1,
       });
       jobId = enq.jobId;
       db.prepare(
-        `UPDATE jobs SET state = 'claimed', worker_id = 'worker-x' WHERE id = ?`
+        `UPDATE jobs SET state = 'claimed', worker_id = 'worker-x' WHERE id = ?`,
       ).run(jobId);
       markGoalNeedsManualRecovery(db, {
         goalId: "g-stuck",
         reason: "repo_dirty",
-        now: 2
+        now: 2,
       });
     } finally {
       db.close();
     }
 
     const result = await run([
-      "recovery", "clear", "g-stuck",
-      "--data-dir", dataDir,
-      "--json"
+      "recovery",
+      "clear",
+      "g-stuck",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -2281,7 +2346,7 @@ describe("momentum recovery clear", () => {
       ok: false,
       command: "recovery clear",
       code: "job_active",
-      goalId: "g-stuck"
+      goalId: "g-stuck",
     });
     expect(payload["activeJobIds"]).toEqual([jobId]);
   });
@@ -2289,38 +2354,34 @@ describe("momentum recovery clear", () => {
   it("clears a flagged goal and surfaces the event id in JSON+text output", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
     const { openDb } = await import("../src/adapters/db.js");
-    const { markGoalNeedsManualRecovery } = await import(
-      "../src/core/goal/recovery.js"
-    );
+    const { markGoalNeedsManualRecovery } =
+      await import("../src/core/goal/recovery.js");
 
     const db = openDb(dataDir);
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(
-        "g-flagged",
-        "flagged goal",
-        "momentum/test",
-        "/tmp/test",
-        1,
-        1
-      );
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("g-flagged", "flagged goal", "momentum/test", "/tmp/test", 1, 1);
       markGoalNeedsManualRecovery(db, {
         goalId: "g-flagged",
         reason: "repo_dirty",
-        now: 1_700_000_000_000
+        now: 1_700_000_000_000,
       });
     } finally {
       db.close();
     }
 
     const jsonResult = await run([
-      "recovery", "clear", "g-flagged",
-      "--reason", "operator inspected",
-      "--data-dir", dataDir,
-      "--json"
+      "recovery",
+      "clear",
+      "g-flagged",
+      "--reason",
+      "operator inspected",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
@@ -2329,7 +2390,7 @@ describe("momentum recovery clear", () => {
       command: "recovery clear",
       goalId: "g-flagged",
       previousReason: "repo_dirty",
-      previousMarkedAt: 1_700_000_000_000
+      previousMarkedAt: 1_700_000_000_000,
     });
     expect(typeof payload["clearedAt"]).toBe("number");
     expect(typeof payload["eventId"]).toBe("number");
@@ -2337,9 +2398,12 @@ describe("momentum recovery clear", () => {
     // Reflagging is required to repeat the clear; second clear should now
     // refuse with not_flagged.
     const secondResult = await run([
-      "recovery", "clear", "g-flagged",
-      "--data-dir", dataDir,
-      "--json"
+      "recovery",
+      "clear",
+      "g-flagged",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(secondResult.code).toBe(1);
     const secondPayload = JSON.parse(secondResult.stderr) as Record<
@@ -2347,7 +2411,7 @@ describe("momentum recovery clear", () => {
       unknown
     >;
     expect(secondPayload).toMatchObject({
-      code: "not_flagged"
+      code: "not_flagged",
     });
 
     // Now re-flag and check the text path surfaces the audit-friendly fields.
@@ -2356,19 +2420,22 @@ describe("momentum recovery clear", () => {
       markGoalNeedsManualRecovery(reflagDb, {
         goalId: "g-flagged",
         reason: "job_running",
-        now: 1_700_000_500_000
+        now: 1_700_000_500_000,
       });
     } finally {
       reflagDb.close();
     }
 
     const textResult = await run([
-      "recovery", "clear", "g-flagged",
-      "--data-dir", dataDir
+      "recovery",
+      "clear",
+      "g-flagged",
+      "--data-dir",
+      dataDir,
     ]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain(
-      "Manual recovery cleared for goal: g-flagged"
+      "Manual recovery cleared for goal: g-flagged",
     );
     expect(textResult.stdout).toContain("Previous reason: job_running");
   });
@@ -2389,9 +2456,9 @@ describe("momentum recovery clear", () => {
           title: "Fixture source item",
           status: "In Progress",
           metadata: { opaque: { priority: "high" } },
-          observedAt: 1_700_000_000_000
+          observedAt: 1_700_000_000_000,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       upsertSourceItem(
         db,
@@ -2402,9 +2469,9 @@ describe("momentum recovery clear", () => {
           title: "Manual source item",
           status: "Todo",
           metadata: { note: "kept opaque" },
-          observedAt: 1_700_000_000_200
+          observedAt: 1_700_000_000_200,
         },
-        { now: () => 1_700_000_000_300 }
+        { now: () => 1_700_000_000_300 },
       );
     } finally {
       db.close();
@@ -2417,16 +2484,19 @@ describe("momentum recovery clear", () => {
       "local-fixture",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(listResult.code).toBe(0);
     expect(listResult.stderr).toBe("");
-    const listPayload = JSON.parse(listResult.stdout) as Record<string, unknown>;
+    const listPayload = JSON.parse(listResult.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(listPayload).toMatchObject({
       ok: true,
       command: "source list",
       adapter: "local-fixture",
-      count: 1
+      count: 1,
     });
     const items = listPayload["items"] as Record<string, unknown>[];
     expect(items).toHaveLength(1);
@@ -2442,7 +2512,7 @@ describe("momentum recovery clear", () => {
     expect(firstItem).toMatchObject({
       externalId: "fixture-1",
       goalId: null,
-      metadata: { opaque: { priority: "high" } }
+      metadata: { opaque: { priority: "high" } },
     });
 
     const sourceId = firstItem!["id"] as string;
@@ -2452,7 +2522,7 @@ describe("momentum recovery clear", () => {
       sourceId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(getResult.code).toBe(0);
     const getPayload = JSON.parse(getResult.stdout) as Record<string, unknown>;
@@ -2464,8 +2534,8 @@ describe("momentum recovery clear", () => {
       command: "source get",
       item: {
         id: sourceId,
-        metadata: { opaque: { priority: "high" } }
-      }
+        metadata: { opaque: { priority: "high" } },
+      },
     });
   });
 
@@ -2477,7 +2547,7 @@ describe("momentum recovery clear", () => {
       "source_item_missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -2486,7 +2556,7 @@ describe("momentum recovery clear", () => {
       ok: false,
       command: "source get",
       code: "source_item_not_found",
-      sourceItemId: "source_item_missing"
+      sourceItemId: "source_item_missing",
     });
   });
 
@@ -2502,8 +2572,15 @@ describe("momentum recovery clear", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(goalId, "Link target goal", "momentum/link-target", "/tmp/link-target", 1, 1);
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        goalId,
+        "Link target goal",
+        "momentum/link-target",
+        "/tmp/link-target",
+        1,
+        1,
+      );
       const item = upsertSourceItem(
         db,
         {
@@ -2512,9 +2589,9 @@ describe("momentum recovery clear", () => {
           externalKey: "SRC-LINK-1",
           title: "Linkable source item",
           status: "Todo",
-          observedAt: 1_700_000_000_000
+          observedAt: 1_700_000_000_000,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       sourceItemId = item.id;
     } finally {
@@ -2522,13 +2599,20 @@ describe("momentum recovery clear", () => {
     }
 
     const firstLink = await run([
-      "source", "link", sourceItemId,
-      "--goal", goalId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      goalId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(firstLink.code).toBe(0);
-    const firstPayload = JSON.parse(firstLink.stdout) as Record<string, unknown>;
+    const firstPayload = JSON.parse(firstLink.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(firstPayload).toMatchObject({
       ok: true,
       command: "source link",
@@ -2536,17 +2620,24 @@ describe("momentum recovery clear", () => {
       sourceItemId,
       changed: true,
       previousGoalId: null,
-      skippedReason: null
+      skippedReason: null,
     });
 
     const secondLink = await run([
-      "source", "link", sourceItemId,
-      "--goal", goalId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      goalId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(secondLink.code).toBe(0);
-    const secondPayload = JSON.parse(secondLink.stdout) as Record<string, unknown>;
+    const secondPayload = JSON.parse(secondLink.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(secondPayload).toMatchObject({
       ok: true,
       command: "source link",
@@ -2554,7 +2645,7 @@ describe("momentum recovery clear", () => {
       sourceItemId,
       changed: false,
       skippedReason: "already_linked_to_target",
-      previousGoalId: goalId
+      previousGoalId: goalId,
     });
   });
 
@@ -2564,15 +2655,17 @@ describe("momentum recovery clear", () => {
 
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { ingestEvidenceRecord } = await import("../src/core/evidence/records.js");
-    const { listUpdateIntents } = await import("../src/core/intent/update-intents.js");
+    const { ingestEvidenceRecord } =
+      await import("../src/core/evidence/records.js");
+    const { listUpdateIntents } =
+      await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     let sourceItemId: string;
     try {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         goalId,
         "Link intent goal",
@@ -2580,7 +2673,7 @@ describe("momentum recovery clear", () => {
         "/tmp/link-intent",
         "completed",
         1,
-        1
+        1,
       );
       ingestEvidenceRecord(db, {
         source: "agent-workflow",
@@ -2588,7 +2681,7 @@ describe("momentum recovery clear", () => {
         occurredAt: 1_700_000_000_200,
         summary: "verification passed",
         goalId,
-        ingestKey: `source-link-intent:${goalId}`
+        ingestKey: `source-link-intent:${goalId}`,
       });
       const item = upsertSourceItem(
         db,
@@ -2598,9 +2691,9 @@ describe("momentum recovery clear", () => {
           externalKey: "SRC-LINK-INTENT",
           title: "Intent linkable source item",
           status: "Todo",
-          observedAt: 1_700_000_000_000
+          observedAt: 1_700_000_000_000,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       sourceItemId = item.id;
     } finally {
@@ -2608,24 +2701,28 @@ describe("momentum recovery clear", () => {
     }
 
     const link = await run([
-      "source", "link", sourceItemId,
-      "--goal", goalId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      goalId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(link.code).toBe(0);
     const payload = JSON.parse(link.stdout) as Record<string, unknown>;
     expect(payload["counts"]).toMatchObject({
       intentsCreated: 1,
       intentsReplayed: 0,
-      intentWarnings: 0
+      intentWarnings: 0,
     });
 
     const verifyDb = openDb(dataDir);
     try {
       const intents = listUpdateIntents(verifyDb, {
         status: "pending",
-        goalId
+        goalId,
       });
       expect(intents).toHaveLength(1);
       expect(intents[0]?.sourceItemId).toBe(sourceItemId);
@@ -2647,12 +2744,12 @@ describe("momentum recovery clear", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(goalAId, "Goal A", "momentum/goal-a", "/tmp/goal-a", 1, 1);
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(goalBId, "Goal B", "momentum/goal-b", "/tmp/goal-b", 1, 1);
       const item = upsertSourceItem(
         db,
@@ -2662,9 +2759,9 @@ describe("momentum recovery clear", () => {
           externalKey: "SRC-LINK-ERR-1",
           title: "Link errors source item",
           status: "Todo",
-          observedAt: 1_700_000_000_000
+          observedAt: 1_700_000_000_000,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       sourceItemId = item.id;
     } finally {
@@ -2672,60 +2769,85 @@ describe("momentum recovery clear", () => {
     }
 
     const missingGoal = await run([
-      "source", "link", sourceItemId,
-      "--goal", "goal-missing",
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      "goal-missing",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(missingGoal.code).toBe(1);
-    const missingGoalPayload = JSON.parse(missingGoal.stderr) as Record<string, unknown>;
+    const missingGoalPayload = JSON.parse(missingGoal.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingGoalPayload).toMatchObject({
       ok: false,
       command: "source link",
       code: "goal_not_found",
       goalId: "goal-missing",
-      sourceItemId
+      sourceItemId,
     });
 
     const missingItem = await run([
-      "source", "link", "source_item_missing",
-      "--goal", goalAId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      "source_item_missing",
+      "--goal",
+      goalAId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(missingItem.code).toBe(1);
-    const missingItemPayload = JSON.parse(missingItem.stderr) as Record<string, unknown>;
+    const missingItemPayload = JSON.parse(missingItem.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingItemPayload).toMatchObject({
       ok: false,
       command: "source link",
       code: "source_item_not_found",
       sourceItemId: "source_item_missing",
-      goalId: goalAId
+      goalId: goalAId,
     });
 
     const linkA = await run([
-      "source", "link", sourceItemId,
-      "--goal", goalAId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      goalAId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(linkA.code).toBe(0);
 
     const collision = await run([
-      "source", "link", sourceItemId,
-      "--goal", goalBId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "link",
+      sourceItemId,
+      "--goal",
+      goalBId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(collision.code).toBe(1);
-    const collisionPayload = JSON.parse(collision.stderr) as Record<string, unknown>;
+    const collisionPayload = JSON.parse(collision.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(collisionPayload).toMatchObject({
       ok: false,
       command: "source link",
       code: "linked_to_other_goal",
       sourceItemId,
       goalId: goalBId,
-      currentGoalId: goalAId
+      currentGoalId: goalAId,
     });
   });
 
@@ -2741,8 +2863,15 @@ describe("momentum recovery clear", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(goalId, "Unlink target goal", "momentum/unlink-target", "/tmp/unlink-target", 1, 1);
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        goalId,
+        "Unlink target goal",
+        "momentum/unlink-target",
+        "/tmp/unlink-target",
+        1,
+        1,
+      );
       const item = upsertSourceItem(
         db,
         {
@@ -2752,9 +2881,9 @@ describe("momentum recovery clear", () => {
           title: "Unlinkable source item",
           status: "Todo",
           observedAt: 1_700_000_000_000,
-          goalId
+          goalId,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       sourceItemId = item.id;
     } finally {
@@ -2762,47 +2891,65 @@ describe("momentum recovery clear", () => {
     }
 
     const firstUnlink = await run([
-      "source", "unlink", sourceItemId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "unlink",
+      sourceItemId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(firstUnlink.code).toBe(0);
-    const firstPayload = JSON.parse(firstUnlink.stdout) as Record<string, unknown>;
+    const firstPayload = JSON.parse(firstUnlink.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(firstPayload).toMatchObject({
       ok: true,
       command: "source unlink",
       sourceItemId,
       changed: true,
-      previousGoalId: goalId
+      previousGoalId: goalId,
     });
 
     const secondUnlink = await run([
-      "source", "unlink", sourceItemId,
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "unlink",
+      sourceItemId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(secondUnlink.code).toBe(0);
-    const secondPayload = JSON.parse(secondUnlink.stdout) as Record<string, unknown>;
+    const secondPayload = JSON.parse(secondUnlink.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(secondPayload).toMatchObject({
       ok: true,
       command: "source unlink",
       sourceItemId,
       changed: false,
-      previousGoalId: null
+      previousGoalId: null,
     });
 
     const missing = await run([
-      "source", "unlink", "source_item_missing",
-      "--data-dir", dataDir,
-      "--json"
+      "source",
+      "unlink",
+      "source_item_missing",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(missing.code).toBe(1);
-    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    const missingPayload = JSON.parse(missing.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(missingPayload).toMatchObject({
       ok: false,
       command: "source unlink",
       code: "source_item_not_found",
-      sourceItemId: "source_item_missing"
+      sourceItemId: "source_item_missing",
     });
   });
 
@@ -2810,7 +2957,7 @@ describe("momentum recovery clear", () => {
     const result = await run(["--help"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]"
+      "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
     );
   });
 
@@ -2827,9 +2974,12 @@ describe("momentum recovery clear", () => {
       labels: { nodes: [] },
       assignee: null,
       priority: 0,
-      updatedAt: "2026-04-01T00:00:00.000Z"
+      updatedAt: "2026-04-01T00:00:00.000Z",
     };
-    const factoryCalls: Array<{ apiKey: string | null; endpoint: string | null }> = [];
+    const factoryCalls: Array<{
+      apiKey: string | null;
+      endpoint: string | null;
+    }> = [];
     const fetchCalls: Array<{ filters: Record<string, unknown> }> = [];
     const deps = {
       buildLinearReconciliationClient: (input: {
@@ -2842,11 +2992,11 @@ describe("momentum recovery clear", () => {
             fetchCalls.push({ filters: input.filters });
             return {
               ok: true as const,
-              page: { issues: [fakeIssue], nextCursor: null }
+              page: { issues: [fakeIssue], nextCursor: null },
             };
-          }
+          },
         };
-      }
+      },
     };
 
     const result = await runWithDeps(
@@ -2861,10 +3011,10 @@ describe("momentum recovery clear", () => {
         "Milestone One",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -2874,15 +3024,17 @@ describe("momentum recovery clear", () => {
       command: "source reconcile linear",
       adapter: "linear",
       dryRun: true,
-      counts: { itemsObserved: 1, itemsCreated: 1 }
+      counts: { itemsObserved: 1, itemsCreated: 1 },
     });
     const run0 = payload["run"] as Record<string, unknown>;
     expect(run0["state"]).toBe("succeeded");
     expect(run0["adapterKind"]).toBe("linear");
-    const itemsSampled = payload["itemsSampled"] as Array<Record<string, unknown>>;
+    const itemsSampled = payload["itemsSampled"] as Array<
+      Record<string, unknown>
+    >;
     expect(itemsSampled[0]).toMatchObject({
       classification: "created",
-      externalKey: "NGX-DR-1"
+      externalKey: "NGX-DR-1",
     });
     expect(factoryCalls).toHaveLength(1);
     expect(factoryCalls[0]?.apiKey).toBe("test-key");
@@ -2890,9 +3042,9 @@ describe("momentum recovery clear", () => {
       {
         filters: {
           projectName: "Project One",
-          milestoneName: "Milestone One"
-        }
-      }
+          milestoneName: "Milestone One",
+        },
+      },
     ]);
 
     const { openDb } = await import("../src/adapters/db.js");
@@ -2918,36 +3070,32 @@ describe("momentum recovery clear", () => {
       labels: { nodes: [{ id: "label-1", name: "infra" }] },
       assignee: null,
       priority: 1,
-      updatedAt: "2026-04-02T00:00:00.000Z"
+      updatedAt: "2026-04-02T00:00:00.000Z",
     };
     const deps = {
       buildLinearReconciliationClient: () => ({
         fetchPage: async () => ({
           ok: true as const,
-          page: { issues: [fakeIssue], nextCursor: null }
-        })
-      })
+          page: { issues: [fakeIssue], nextCursor: null },
+        }),
+      }),
     };
 
     const reconcile = await runWithDeps(
-      [
-        "source",
-        "reconcile",
-        "linear",
-        "--data-dir",
-        dataDir,
-        "--json"
-      ],
+      ["source", "reconcile", "linear", "--data-dir", dataDir, "--json"],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
     expect(reconcile.code).toBe(0);
-    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<string, unknown>;
+    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(reconcilePayload).toMatchObject({
       ok: true,
       command: "source reconcile linear",
       dryRun: false,
-      counts: { itemsObserved: 1, itemsCreated: 1 }
+      counts: { itemsObserved: 1, itemsCreated: 1 },
     });
 
     const listResult = await run([
@@ -2957,14 +3105,21 @@ describe("momentum recovery clear", () => {
       "linear",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(listResult.code).toBe(0);
-    const listPayload = JSON.parse(listResult.stdout) as Record<string, unknown>;
+    const listPayload = JSON.parse(listResult.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(listPayload).toMatchObject({
       ok: true,
       count: 1,
-      lastReconciliation: { state: "succeeded", itemsSeen: 1, itemsUpserted: 1 }
+      lastReconciliation: {
+        state: "succeeded",
+        itemsSeen: 1,
+        itemsUpserted: 1,
+      },
     });
     const items = listPayload["items"] as Array<Record<string, unknown>>;
     expect(items[0]).toMatchObject({
@@ -2972,21 +3127,19 @@ describe("momentum recovery clear", () => {
       externalId: "lin-live-1",
       externalKey: "NGX-LV-1",
       title: "Live linear issue",
-      status: "Todo"
+      status: "Todo",
     });
 
-    const doctorResult = await run([
-      "doctor",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
+    const doctorResult = await run(["doctor", "--data-dir", dataDir, "--json"]);
     expect(doctorResult.code).toBe(0);
-    const doctorPayload = JSON.parse(doctorResult.stdout) as Record<string, unknown>;
+    const doctorPayload = JSON.parse(doctorResult.stdout) as Record<
+      string,
+      unknown
+    >;
     const sources = doctorPayload["sources"] as Record<string, unknown>;
     expect(sources).toMatchObject({
       ok: true,
-      lastReconciliation: { adapterKind: "linear", state: "succeeded" }
+      lastReconciliation: { adapterKind: "linear", state: "succeeded" },
     });
   });
 
@@ -3003,14 +3156,14 @@ describe("momentum recovery clear", () => {
       labels: { nodes: [] },
       assignee: null,
       priority: 0,
-      updatedAt: "2026-04-02T00:00:00.000Z"
+      updatedAt: "2026-04-02T00:00:00.000Z",
     };
     const issueB = {
       ...issueA,
       id: "lin-cap-2",
       identifier: "NGX-CAP-2",
       title: "Second capped issue",
-      updatedAt: "2026-04-03T00:00:00.000Z"
+      updatedAt: "2026-04-03T00:00:00.000Z",
     };
     let pageIndex = 0;
     const deps = {
@@ -3018,10 +3171,16 @@ describe("momentum recovery clear", () => {
         fetchPage: async () => {
           pageIndex += 1;
           return pageIndex === 1
-            ? { ok: true as const, page: { issues: [issueA], nextCursor: "next-page" } }
-            : { ok: true as const, page: { issues: [issueB], nextCursor: null } };
-        }
-      })
+            ? {
+                ok: true as const,
+                page: { issues: [issueA], nextCursor: "next-page" },
+              }
+            : {
+                ok: true as const,
+                page: { issues: [issueB], nextCursor: null },
+              };
+        },
+      }),
     };
 
     const reconcile = await runWithDeps(
@@ -3033,17 +3192,20 @@ describe("momentum recovery clear", () => {
         dataDir,
         "--max-pages",
         "1",
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
     expect(reconcile.code).toBe(0);
-    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<string, unknown>;
+    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(reconcilePayload).toMatchObject({
       ok: true,
       run: { state: "succeeded" },
-      paginationStopped: { reason: "max_pages", pageIndex: 1 }
+      paginationStopped: { reason: "max_pages", pageIndex: 1 },
     });
 
     const listJson = await run([
@@ -3053,7 +3215,7 @@ describe("momentum recovery clear", () => {
       "linear",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(listJson.code).toBe(0);
     const listPayload = JSON.parse(listJson.stdout) as Record<string, unknown>;
@@ -3062,8 +3224,8 @@ describe("momentum recovery clear", () => {
       count: 1,
       lastReconciliation: {
         state: "succeeded",
-        paginationStopped: { reason: "max_pages", pageIndex: 1 }
-      }
+        paginationStopped: { reason: "max_pages", pageIndex: 1 },
+      },
     });
 
     const listText = await run([
@@ -3072,7 +3234,7 @@ describe("momentum recovery clear", () => {
       "--adapter",
       "linear",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(listText.code).toBe(0);
     expect(listText.stdout).toContain("Last reconciliation: linear succeeded");
@@ -3080,49 +3242,50 @@ describe("momentum recovery clear", () => {
 
     const doctorJson = await run(["doctor", "--data-dir", dataDir, "--json"]);
     expect(doctorJson.code).toBe(0);
-    const doctorPayload = JSON.parse(doctorJson.stdout) as Record<string, unknown>;
+    const doctorPayload = JSON.parse(doctorJson.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(doctorPayload).toMatchObject({
       sources: {
         ok: true,
         lastReconciliation: {
           adapterKind: "linear",
           state: "succeeded",
-          paginationStopped: { reason: "max_pages", pageIndex: 1 }
-        }
-      }
+          paginationStopped: { reason: "max_pages", pageIndex: 1 },
+        },
+      },
     });
 
     const doctorText = await run(["doctor", "--data-dir", dataDir]);
     expect(doctorText.code).toBe(0);
-    expect(doctorText.stdout).toContain("sources: last linear reconciliation succeeded");
+    expect(doctorText.stdout).toContain(
+      "sources: last linear reconciliation succeeded",
+    );
     expect(doctorText.stdout).toContain("stopped=max_pages");
   });
 
   it("source reconcile linear without LINEAR_API_KEY returns source_auth_unavailable from the default client", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-noauth-");
     const result = await runWithDeps(
-      [
-        "source",
-        "reconcile",
-        "linear",
-        "--data-dir",
-        dataDir,
-        "--json"
-      ],
+      ["source", "reconcile", "linear", "--data-dir", dataDir, "--json"],
       {},
-      {}
+      {},
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "source reconcile linear",
-      adapter: "linear"
+      adapter: "linear",
     });
-    const paginationStopped = payload["paginationStopped"] as Record<string, unknown>;
+    const paginationStopped = payload["paginationStopped"] as Record<
+      string,
+      unknown
+    >;
     expect(paginationStopped).toMatchObject({
       reason: "auth_unavailable",
-      code: "source_auth_unavailable"
+      code: "source_auth_unavailable",
     });
     const runPayload = payload["run"] as Record<string, unknown>;
     expect(runPayload["state"]).toBe("failed");
@@ -3131,23 +3294,16 @@ describe("momentum recovery clear", () => {
   it("source reconcile rejects unknown adapter kinds with unsupported_source_adapter", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-bad-");
     const result = await runWithDeps(
-      [
-        "source",
-        "reconcile",
-        "github",
-        "--data-dir",
-        dataDir,
-        "--json"
-      ],
+      ["source", "reconcile", "github", "--data-dir", dataDir, "--json"],
       { LINEAR_API_KEY: "x" },
-      {}
+      {},
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "source reconcile linear",
-      code: "unsupported_source_adapter"
+      code: "unsupported_source_adapter",
     });
   });
 });
@@ -3162,11 +3318,11 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES (?, 'linear', ?, 'NGX-CLI', ?, 'CLI issue', 'Todo', '{}',
-                 1, NULL, 1, 1)`
+                 1, NULL, 1, 1)`,
       ).run(
         "source_cli_external_apply",
         "linear-issue-cli",
-        "https://linear.app/example/issue/NGX-CLI"
+        "https://linear.app/example/issue/NGX-CLI",
       );
       db.prepare(
         `INSERT INTO update_intents
@@ -3175,12 +3331,12 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES (?, 'linear', ?, 'source_satisfied', '{"kind":"comment"}',
                  'evidence says done', ?, 'pending', ?, 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run(
         "intent_cli_external_apply",
         "linear-issue-cli",
         "source_cli_external_apply",
-        "idemp:intent_cli_external_apply"
+        "idemp:intent_cli_external_apply",
       );
     } finally {
       db.close();
@@ -3200,22 +3356,22 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
             issue: {
               id: "linear-issue-cli",
               key: "NGX-CLI",
-              url: "https://linear.app/example/issue/NGX-CLI"
+              url: "https://linear.app/example/issue/NGX-CLI",
             },
             comment: {
               id: "comment-cli",
-              url: "https://linear.app/example/comment/cli"
+              url: "https://linear.app/example/comment/cli",
             },
             status: {
               transitioned: false as const,
               previousStateId: "state-todo",
               previousStateName: "Todo",
               nextStateId: null,
-              nextStateName: null
+              nextStateName: null,
             },
-            idempotencyMarker: marker
+            idempotencyMarker: marker,
           };
-        }
+        },
       }),
       buildLinearIssueRefreshClient: () => ({
         async refresh() {
@@ -3227,18 +3383,18 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
               title: "CLI issue",
               url: "https://linear.app/example/issue/NGX-CLI",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "comment-cli",
                 body: reconcileComment().replace("{marker}", marker),
-                url: "https://linear.app/example/comment/cli"
-              }
-            ]
+                url: "https://linear.app/example/comment/cli",
+              },
+            ],
           };
-        }
-      })
+        },
+      }),
     };
   }
 
@@ -3248,21 +3404,26 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
     fs.writeFileSync(
       path.join(repo, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf-8"
+      "utf-8",
     );
     const intentId = await seedExternalApplyFixture(dataDir);
 
     const result = await runWithDeps(
       [
-        "intent", "apply", intentId,
-        "--reason", "operator verified",
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator verified",
         "--external-apply",
-        "--repo", repo,
-        "--data-dir", dataDir,
-        "--json"
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      makeExternalApplyDeps(() => "Applied {marker}")
+      makeExternalApplyDeps(() => "Applied {marker}"),
     );
 
     expect(result.code).toBe(0);
@@ -3270,12 +3431,11 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
     const externalApply = payload["externalApply"] as Record<string, unknown>;
     expect(externalApply["reconcile"]).toEqual({
       status: "success",
-      warning: null
+      warning: null,
     });
 
-    const { getLatestIntentApplyAudit } = await import(
-      "../src/core/intent/apply-audits.js"
-    );
+    const { getLatestIntentApplyAudit } =
+      await import("../src/core/intent/apply-audits.js");
     const { openDb } = await import("../src/adapters/db.js");
     const db = openDb(dataDir);
     try {
@@ -3292,20 +3452,25 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
     fs.writeFileSync(
       path.join(repo, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf-8"
+      "utf-8",
     );
     const intentId = await seedExternalApplyFixture(dataDir);
 
     const result = await runWithDeps(
       [
-        "intent", "apply", intentId,
-        "--reason", "operator verified",
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator verified",
         "--external-apply",
-        "--repo", repo,
-        "--data-dir", dataDir
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
       ],
       { LINEAR_API_KEY: "test-key" },
-      makeExternalApplyDeps(() => "unrelated comment")
+      makeExternalApplyDeps(() => "unrelated comment"),
     );
 
     expect(result.code).toBe(0);
@@ -3320,7 +3485,11 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
 
     const result = await run([
-      "project", "status", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -3334,7 +3503,7 @@ describe("momentum project status", () => {
         projectId: null,
         projectName: null,
         milestoneId: null,
-        milestoneName: null
+        milestoneName: null,
       },
       staleThresholdMs: 24 * 60 * 60 * 1000,
       totalSourceItemCount: 0,
@@ -3344,11 +3513,13 @@ describe("momentum project status", () => {
       totalMismatchCount: 0,
       truncatedMismatches: false,
       reconciliationWarnings: [],
-      pendingUpdateIntents: []
+      pendingUpdateIntents: [],
     });
-    expect((payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"]).toBe(0);
+    expect(
+      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+    ).toBe(0);
     expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
-      "no_action_required"
+      "no_action_required",
     );
     expect(result.stderr).toBe("");
   });
@@ -3369,24 +3540,29 @@ describe("momentum project status", () => {
           status: "Todo",
           metadata: {
             project: { id: "proj-1", name: "Alpha" },
-            milestone: { id: "ms-1", name: "Mile 1" }
+            milestone: { id: "ms-1", name: "Mile 1" },
           },
           observedAt: 1_700_000_000_000,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status",
-      "--source", "linear",
-      "--project", "Alpha",
-      "--milestone", "Mile 1",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--project",
+      "Alpha",
+      "--milestone",
+      "Mile 1",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -3396,10 +3572,12 @@ describe("momentum project status", () => {
       projectId: "Alpha",
       projectName: "Alpha",
       milestoneId: "Mile 1",
-      milestoneName: "Mile 1"
+      milestoneName: "Mile 1",
     });
-    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
-      total: 1
+    expect(
+      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+    ).toMatchObject({
+      total: 1,
     });
   });
 
@@ -3418,12 +3596,12 @@ describe("momentum project status", () => {
           title: "Legacy stale issue",
           status: "In Review",
           metadata: {
-            project: { id: "proj-momentum", name: "Momentum" }
+            project: { id: "proj-momentum", name: "Momentum" },
           },
           observedAt: 1_700_000_000_000,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
       upsertSourceItem(
         db,
@@ -3434,12 +3612,12 @@ describe("momentum project status", () => {
           title: "Canonical fresh issue",
           status: "Done",
           metadata: {
-            project: { id: "proj-momentum", name: "Momentum" }
+            project: { id: "proj-momentum", name: "Momentum" },
           },
           observedAt: 1_700_000_000_200,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_700_000_000_200 }
+        { now: () => 1_700_000_000_200 },
       );
       upsertSourceItem(
         db,
@@ -3450,34 +3628,45 @@ describe("momentum project status", () => {
           title: "Canonical newer issue",
           status: "Todo",
           metadata: {
-            project: { id: "proj-momentum", name: "Momentum" }
+            project: { id: "proj-momentum", name: "Momentum" },
           },
           observedAt: 1_700_000_000_400,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_700_000_000_400 }
+        { now: () => 1_700_000_000_400 },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status",
-      "--source", "linear",
-      "--project", "Momentum",
-      "--intent-stale-threshold-days", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--project",
+      "Momentum",
+      "--intent-stale-threshold-days",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const sourceItems = payload["sourceItems"] as Array<Record<string, unknown>>;
+    const sourceItems = payload["sourceItems"] as Array<
+      Record<string, unknown>
+    >;
     expect(sourceItems).toHaveLength(1);
-    expect(sourceItems[0]?.["externalId"]).toBe("00000000-0000-4000-8000-000000000004");
+    expect(sourceItems[0]?.["externalId"]).toBe(
+      "00000000-0000-4000-8000-000000000004",
+    );
     expect(sourceItems[0]?.["status"]).toBe("Todo");
-    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
-      total: 1
+    expect(
+      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+    ).toMatchObject({
+      total: 1,
     });
   });
 
@@ -3497,24 +3686,29 @@ describe("momentum project status", () => {
           status: "Todo",
           metadata: {
             project: { id: "proj-1", name: "Alpha" },
-            milestone: { id: "ms-1", name: "Mile 1" }
+            milestone: { id: "ms-1", name: "Mile 1" },
           },
           observedAt: 1_700_000_000_000,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status",
-      "--source", "linear",
-      "--project", "proj-1",
-      "--milestone", "ms-1",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--project",
+      "proj-1",
+      "--milestone",
+      "ms-1",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -3524,10 +3718,12 @@ describe("momentum project status", () => {
       projectId: "proj-1",
       projectName: "proj-1",
       milestoneId: "ms-1",
-      milestoneName: "ms-1"
+      milestoneName: "ms-1",
     });
-    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
-      total: 1
+    expect(
+      (payload["counts"] as Record<string, unknown>)["sourceItems"],
+    ).toMatchObject({
+      total: 1,
     });
   });
 
@@ -3535,10 +3731,8 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const {
-      startSourceReconciliationRun,
-      finishSourceReconciliationRun
-    } = await import("../src/core/source/reconciliation-runs.js");
+    const { startSourceReconciliationRun, finishSourceReconciliationRun } =
+      await import("../src/core/source/reconciliation-runs.js");
     const db = openDb(dataDir);
     try {
       upsertSourceItem(
@@ -3551,15 +3745,15 @@ describe("momentum project status", () => {
           status: "Todo",
           metadata: {},
           observedAt: 1_000,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       const longAgo = Date.now() - 48 * 60 * 60 * 1000;
       const reconRun = startSourceReconciliationRun(
         db,
         { adapterKind: "linear" },
-        { now: () => longAgo }
+        { now: () => longAgo },
       );
       finishSourceReconciliationRun(
         db,
@@ -3567,30 +3761,39 @@ describe("momentum project status", () => {
           runId: reconRun.id,
           state: "succeeded",
           itemsSeen: 1,
-          itemsUpserted: 1
+          itemsUpserted: 1,
         },
-        { now: () => longAgo + 1_000 }
+        { now: () => longAgo + 1_000 },
       );
     } finally {
       db.close();
     }
 
     const generous = await run([
-      "project", "status",
-      "--stale-threshold-hours", "72",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--stale-threshold-hours",
+      "72",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(generous.code).toBe(0);
-    const generousPayload = JSON.parse(generous.stdout) as Record<string, unknown>;
+    const generousPayload = JSON.parse(generous.stdout) as Record<
+      string,
+      unknown
+    >;
     expect(generousPayload["staleThresholdMs"]).toBe(72 * 60 * 60 * 1000);
     expect(generousPayload["reconciliationWarnings"]).toEqual([]);
 
     const tight = await run([
-      "project", "status",
-      "--stale-threshold-hours", "1",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--stale-threshold-hours",
+      "1",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     const tightPayload = JSON.parse(tight.stdout) as Record<string, unknown>;
     const warnings = tightPayload["reconciliationWarnings"] as Array<{
@@ -3613,7 +3816,7 @@ describe("momentum project status", () => {
            (id, title, branch, artifact_dir, state, current_iteration,
             needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
             created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         "goal-recover-cli",
         "Recover CLI Goal",
@@ -3625,7 +3828,7 @@ describe("momentum project status", () => {
         "head_mismatch",
         1_700_000_000_500,
         1_700_000_000_000,
-        1_700_000_000_500
+        1_700_000_000_500,
       );
       upsertSourceItem(
         db,
@@ -3637,28 +3840,34 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: 1_700_000_000_000,
-          goalId: "goal-recover-cli"
+          goalId: "goal-recover-cli",
         },
-        { now: () => 1_700_000_000_100 }
+        { now: () => 1_700_000_000_100 },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     const counts = payload["counts"] as Record<string, unknown>;
-    expect((counts["goals"] as Record<string, unknown>)["needingManualRecovery"]).toBe(1);
+    expect(
+      (counts["goals"] as Record<string, unknown>)["needingManualRecovery"],
+    ).toBe(1);
     expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
-    const mismatchKinds = (payload["mismatches"] as Array<{ kind: string }>).map(
-      (m) => m.kind
-    );
+    const mismatchKinds = (
+      payload["mismatches"] as Array<{ kind: string }>
+    ).map((m) => m.kind);
     expect(mismatchKinds).toContain("manual_recovery_required");
   });
 
@@ -3680,18 +3889,16 @@ describe("momentum project status", () => {
             status: "Todo",
             metadata: {},
             observedAt: 1_700_000_000_000 + i,
-            goalId: null
+            goalId: null,
           },
-          { now: () => 1_700_000_000_000 + i }
+          { now: () => 1_700_000_000_000 + i },
         );
       }
     } finally {
       db.close();
     }
 
-    const result = await run([
-      "project", "status", "--data-dir", dataDir
-    ]);
+    const result = await run(["project", "status", "--data-dir", dataDir]);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Project status");
@@ -3706,19 +3913,24 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
 
     const result = await run([
-      "project", "status", "stray-arg", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "stray-arg",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
 
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("Unexpected argument for project status: stray-arg");
+    expect(result.stderr).toContain(
+      "Unexpected argument for project status: stray-arg",
+    );
   });
 
   it("rejects unknown project subcommands", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
 
-    const result = await run([
-      "project", "explode", "--data-dir", dataDir
-    ]);
+    const result = await run(["project", "explode", "--data-dir", dataDir]);
 
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unknown project subcommand: explode");
@@ -3731,7 +3943,7 @@ describe("momentum project status", () => {
 
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Missing required subcommand for project. Expected: status."
+      "Missing required subcommand for project. Expected: status.",
     );
   });
 
@@ -3739,9 +3951,12 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
 
     const result = await run([
-      "project", "status",
-      "--stale-threshold-hours", "not-a-number",
-      "--data-dir", dataDir
+      "project",
+      "status",
+      "--stale-threshold-hours",
+      "not-a-number",
+      "--data-dir",
+      dataDir,
     ]);
 
     expect(result.code).toBe(2);
@@ -3752,7 +3967,8 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -3766,9 +3982,9 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: recentNow,
-          goalId: null
+          goalId: null,
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
       createUpdateIntent(
         db,
@@ -3778,29 +3994,39 @@ describe("momentum project status", () => {
           reason: "Goal completed",
           targetExternalId: "issue-cli-intent",
           sourceItemId: item.id,
-          idempotencyKey: "linear:issue-cli-intent:source_satisfied:cli"
+          idempotencyKey: "linear:issue-cli-intent:source_satisfied:cli",
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
     expect(intents).toHaveLength(1);
     expect(intents[0]).toMatchObject({
       adapterKind: "linear",
       intentType: "source_satisfied",
       targetExternalId: "issue-cli-intent",
-      stale: false
+      stale: false,
     });
-    expect((payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"]).toBe(1);
-    expect((payload["counts"] as Record<string, unknown>)["staleUpdateIntents"]).toBe(0);
+    expect(
+      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+    ).toBe(1);
+    expect(
+      (payload["counts"] as Record<string, unknown>)["staleUpdateIntents"],
+    ).toBe(0);
     expect(payload["intentStaleThresholdMs"]).toBe(30 * 24 * 60 * 60 * 1000);
     expect(payload["totalPendingUpdateIntentCount"]).toBe(1);
     expect(payload["truncatedPendingUpdateIntents"]).toBe(false);
@@ -3810,7 +4036,8 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -3824,12 +4051,12 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {
             project: "Momentum",
-            milestone: "Momentum-Native Coding Workflow Adoption"
+            milestone: "Momentum-Native Coding Workflow Adoption",
           },
           observedAt: recentNow,
-          goalId: null
+          goalId: null,
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
       createUpdateIntent(
         db,
@@ -3840,35 +4067,45 @@ describe("momentum project status", () => {
           targetExternalId: "NGX-LEGACY-META",
           sourceItemId: item.id,
           idempotencyKey:
-            "linear:issue-cli-legacy-metadata:source_satisfied:legacy"
+            "linear:issue-cli-legacy-metadata:source_satisfied:legacy",
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status",
-      "--source", "linear",
-      "--project", "Momentum",
-      "--milestone", "Momentum-Native Coding Workflow Adoption",
-      "--intent-stale-threshold-days", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--source",
+      "linear",
+      "--project",
+      "Momentum",
+      "--milestone",
+      "Momentum-Native Coding Workflow Adoption",
+      "--intent-stale-threshold-days",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
     expect(intents).toHaveLength(1);
     expect(payload["filters"]).toMatchObject({
       source: "linear",
       projectName: "Momentum",
-      milestoneName: "Momentum-Native Coding Workflow Adoption"
+      milestoneName: "Momentum-Native Coding Workflow Adoption",
     });
-    expect((payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"]).toBe(1);
+    expect(
+      (payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"],
+    ).toBe(1);
     expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
-      "review_pending_intents"
+      "review_pending_intents",
     );
   });
 
@@ -3876,7 +4113,8 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     const recentNow = Date.now();
     try {
@@ -3890,9 +4128,9 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: recentNow,
-          goalId: null
+          goalId: null,
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
       createUpdateIntent(
         db,
@@ -3902,16 +4140,20 @@ describe("momentum project status", () => {
           reason: "Goal completed",
           targetExternalId: "issue-no-audit",
           sourceItemId: item.id,
-          idempotencyKey: "linear:issue-no-audit:source_satisfied:cli"
+          idempotencyKey: "linear:issue-no-audit:source_satisfied:cli",
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -3923,12 +4165,14 @@ describe("momentum project status", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
       totalAttempts: 0,
-      latestAttempt: null
+      latestAttempt: null,
     });
-    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
     expect(intents).toHaveLength(1);
     expect(intents[0]?.["externalApply"]).toEqual({
       applyState: "idle",
@@ -3938,20 +4182,18 @@ describe("momentum project status", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
+        audit_incomplete: 0,
       },
-      latestAttempt: null
+      latestAttempt: null,
     });
 
-    const text = await run([
-      "project", "status", "--data-dir", dataDir
-    ]);
+    const text = await run(["project", "status", "--data-dir", dataDir]);
     expect(text.code).toBe(0);
     expect(text.stdout).toContain(
-      "Pending external apply state: idle=1, in_flight=0, blocked=0"
+      "Pending external apply state: idle=1, in_flight=0, blocked=0",
     );
     expect(text.stdout).toContain(
-      "Pending external apply audits: total=0, succeeded=0, failed=0, claimed=0, blocked=0, audit_incomplete=0"
+      "Pending external apply audits: total=0, succeeded=0, failed=0, claimed=0, blocked=0, audit_incomplete=0",
     );
     expect(text.stdout).toContain("Latest external apply: (none)");
     expect(text.stdout).toContain("apply=idle attempts=0");
@@ -3961,10 +4203,10 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
-    const { claimIntentApply, finalizeIntentApply } = await import(
-      "../src/core/intent/apply-audits.js"
-    );
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } =
+      await import("../src/core/intent/apply-audits.js");
     const db = openDb(dataDir);
     const recentNow = 1_700_000_000_000;
     let succeededIntentId = "";
@@ -3980,9 +4222,9 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: recentNow,
-          goalId: null
+          goalId: null,
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
       const succeeded = createUpdateIntent(
         db,
@@ -3992,9 +4234,9 @@ describe("momentum project status", () => {
           reason: "Goal completed",
           targetExternalId: "issue-succeeded",
           sourceItemId: itemSucceeded.id,
-          idempotencyKey: "linear:issue-succeeded:source_satisfied:cli"
+          idempotencyKey: "linear:issue-succeeded:source_satisfied:cli",
         },
-        { now: () => recentNow }
+        { now: () => recentNow },
       );
       succeededIntentId = succeeded.intent.id;
       const itemBlocked = upsertSourceItem(
@@ -4007,9 +4249,9 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: recentNow + 1,
-          goalId: null
+          goalId: null,
         },
-        { now: () => recentNow + 1 }
+        { now: () => recentNow + 1 },
       );
       const blocked = createUpdateIntent(
         db,
@@ -4019,9 +4261,9 @@ describe("momentum project status", () => {
           reason: "Followup",
           targetExternalId: "issue-blocked",
           sourceItemId: itemBlocked.id,
-          idempotencyKey: "linear:issue-blocked:comment_requested:cli"
+          idempotencyKey: "linear:issue-blocked:comment_requested:cli",
         },
-        { now: () => recentNow + 1 }
+        { now: () => recentNow + 1 },
       );
       blockedIntentId = blocked.intent.id;
 
@@ -4033,7 +4275,7 @@ describe("momentum project status", () => {
           externalId: "issue-succeeded",
           externalKey: "NGX-SUCCEEDED",
           url: "https://linear.app/example/issue/issue-succeeded",
-          title: "Succeeded issue"
+          title: "Succeeded issue",
         },
         operatorReason: "verified done",
         operatorActor: "operator@example.com",
@@ -4042,11 +4284,11 @@ describe("momentum project status", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment: source_satisfied",
         idempotencyMarker: `momentum-intent:linear:${succeededIntentId}:deadbeef`,
-        now: recentNow + 10
+        now: recentNow + 10,
       });
       if (!claimSucceeded.ok) {
         throw new Error(
-          `seed: claim succeeded failed (${claimSucceeded.code})`
+          `seed: claim succeeded failed (${claimSucceeded.code})`,
         );
       }
       const finalizeSucceeded = finalizeIntentApply(db, {
@@ -4058,13 +4300,13 @@ describe("momentum project status", () => {
         externalRefs: {
           commentId: "linear_comment_ok",
           commentUrl: "https://linear.app/example/issue/issue-succeeded#c1",
-          stateTransitionId: null
+          stateTransitionId: null,
         },
-        now: recentNow + 11
+        now: recentNow + 11,
       });
       if (!finalizeSucceeded.ok) {
         throw new Error(
-          `seed: finalize succeeded failed (${finalizeSucceeded.code})`
+          `seed: finalize succeeded failed (${finalizeSucceeded.code})`,
         );
       }
 
@@ -4076,7 +4318,7 @@ describe("momentum project status", () => {
           externalId: "issue-blocked",
           externalKey: "NGX-BLOCKED",
           url: "https://linear.app/example/issue/issue-blocked",
-          title: "Blocked issue"
+          title: "Blocked issue",
         },
         operatorReason: "needs followup",
         operatorActor: "operator@example.com",
@@ -4085,12 +4327,10 @@ describe("momentum project status", () => {
         mutationKind: "comment",
         previewSummary: "Linear comment: comment_requested",
         idempotencyMarker: `momentum-intent:linear:${blockedIntentId}:deadbeef`,
-        now: recentNow + 20
+        now: recentNow + 20,
       });
       if (!claimBlocked.ok) {
-        throw new Error(
-          `seed: claim blocked failed (${claimBlocked.code})`
-        );
+        throw new Error(`seed: claim blocked failed (${claimBlocked.code})`);
       }
       const finalizeBlocked = finalizeIntentApply(db, {
         auditId: claimBlocked.audit.id,
@@ -4101,13 +4341,13 @@ describe("momentum project status", () => {
         externalRefs: {
           commentId: "linear_comment_late",
           commentUrl: "https://linear.app/example/issue/issue-blocked#c2",
-          stateTransitionId: null
+          stateTransitionId: null,
         },
-        now: recentNow + 21
+        now: recentNow + 21,
       });
       if (!finalizeBlocked.ok) {
         throw new Error(
-          `seed: finalize blocked failed (${finalizeBlocked.code})`
+          `seed: finalize blocked failed (${finalizeBlocked.code})`,
         );
       }
     } finally {
@@ -4115,7 +4355,11 @@ describe("momentum project status", () => {
     }
 
     const json = await run([
-      "project", "status", "--data-dir", dataDir, "--json"
+      "project",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(json.code).toBe(0);
     const payload = JSON.parse(json.stdout) as Record<string, unknown>;
@@ -4127,19 +4371,21 @@ describe("momentum project status", () => {
         succeeded: 1,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 1
+        audit_incomplete: 1,
       },
-      totalAttempts: 2
+      totalAttempts: 2,
     });
     const latest = externalApply["latestAttempt"] as Record<string, unknown>;
     expect(latest["intentId"]).toBe(blockedIntentId);
     expect(latest["lifecycleState"]).toBe("audit_incomplete");
     expect(latest["resultCode"]).toBe("audit_finalize_failed");
 
-    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
     expect(intents).toHaveLength(2);
     const succeededRow = intents.find(
-      (intent) => intent["intentId"] === succeededIntentId
+      (intent) => intent["intentId"] === succeededIntentId,
     );
     expect(succeededRow?.["externalApply"]).toMatchObject({
       applyState: "idle",
@@ -4149,17 +4395,18 @@ describe("momentum project status", () => {
         succeeded: 1,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 0
-      }
+        audit_incomplete: 0,
+      },
     });
-    const succeededLatest = (succeededRow?.["externalApply"] as Record<string, unknown>)[
-      "latestAttempt"
-    ] as Record<string, unknown>;
+    expect(succeededRow).toBeDefined();
+    const succeededLatest = (
+      succeededRow!["externalApply"] as Record<string, unknown>
+    )["latestAttempt"] as Record<string, unknown>;
     expect(succeededLatest["lifecycleState"]).toBe("succeeded");
     expect(succeededLatest["resultCode"]).toBe("ok");
 
     const blockedRow = intents.find(
-      (intent) => intent["intentId"] === blockedIntentId
+      (intent) => intent["intentId"] === blockedIntentId,
     );
     expect(blockedRow?.["externalApply"]).toMatchObject({
       applyState: "blocked",
@@ -4169,32 +4416,33 @@ describe("momentum project status", () => {
         succeeded: 0,
         failed: 0,
         blocked: 0,
-        audit_incomplete: 1
-      }
+        audit_incomplete: 1,
+      },
     });
 
-    const text = await run([
-      "project", "status", "--data-dir", dataDir
-    ]);
+    const text = await run(["project", "status", "--data-dir", dataDir]);
     expect(text.code).toBe(0);
     expect(text.stdout).toContain(
-      "Pending external apply state: idle=1, in_flight=0, blocked=1"
+      "Pending external apply state: idle=1, in_flight=0, blocked=1",
     );
     expect(text.stdout).toContain(
-      "Pending external apply audits: total=2, succeeded=1, failed=0, claimed=0, blocked=0, audit_incomplete=1"
+      "Pending external apply audits: total=2, succeeded=1, failed=0, claimed=0, blocked=0, audit_incomplete=1",
     );
     expect(text.stdout).toContain(
-      `Latest external apply: ${latest["id"]} audit_incomplete intent=${blockedIntentId}`
+      `Latest external apply: ${latest["id"]} audit_incomplete intent=${blockedIntentId}`,
     );
     expect(text.stdout).toContain("apply=idle attempts=1 latest=succeeded");
-    expect(text.stdout).toContain("apply=blocked attempts=1 latest=audit_incomplete");
+    expect(text.stdout).toContain(
+      "apply=blocked attempts=1 latest=audit_incomplete",
+    );
   });
 
   it("honors --intent-stale-threshold-days to flag pending intents stale", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/core/source/items.js");
-    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
+    const { createUpdateIntent } =
+      await import("../src/core/intent/update-intents.js");
     const db = openDb(dataDir);
     try {
       const item = upsertSourceItem(
@@ -4207,9 +4455,9 @@ describe("momentum project status", () => {
           status: "In Progress",
           metadata: {},
           observedAt: 1_000,
-          goalId: null
+          goalId: null,
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
       createUpdateIntent(
         db,
@@ -4218,25 +4466,32 @@ describe("momentum project status", () => {
           intentType: "source_satisfied",
           reason: "Older intent",
           sourceItemId: item.id,
-          idempotencyKey: "linear:issue-cli-stale:source_satisfied:cli"
+          idempotencyKey: "linear:issue-cli-stale:source_satisfied:cli",
         },
-        { now: () => 1_000 }
+        { now: () => 1_000 },
       );
     } finally {
       db.close();
     }
 
     const result = await run([
-      "project", "status",
-      "--intent-stale-threshold-days", "0",
-      "--data-dir", dataDir,
-      "--json"
+      "project",
+      "status",
+      "--intent-stale-threshold-days",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["intentStaleThresholdMs"]).toBe(0);
-    expect((payload["counts"] as Record<string, unknown>)["staleUpdateIntents"]).toBe(1);
-    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    expect(
+      (payload["counts"] as Record<string, unknown>)["staleUpdateIntents"],
+    ).toBe(1);
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
     expect(intents[0]?.["stale"]).toBe(true);
   });
 
@@ -4244,9 +4499,12 @@ describe("momentum project status", () => {
     const dataDir = makeTempDir("momentum-cli-project-");
 
     const result = await run([
-      "project", "status",
-      "--intent-stale-threshold-days", "not-a-number",
-      "--data-dir", dataDir
+      "project",
+      "status",
+      "--intent-stale-threshold-days",
+      "not-a-number",
+      "--data-dir",
+      dataDir,
     ]);
 
     expect(result.code).toBe(2);
@@ -4263,15 +4521,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
 
   return { code, stdout, stderr };
@@ -4280,7 +4538,7 @@ async function run(argv: string[]): Promise<RunResult> {
 async function runWithDeps(
   argv: string[],
   env: NodeJS.ProcessEnv,
-  deps: Parameters<typeof runCli>[2]
+  deps: Parameters<typeof runCli>[2],
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -4292,17 +4550,17 @@ async function runWithDeps(
         write(chunk: string) {
           stdout += chunk;
           return true;
-        }
+        },
       },
       stderr: {
         write(chunk: string) {
           stderr += chunk;
           return true;
-        }
+        },
       },
-      env
+      env,
     },
-    deps
+    deps,
   );
 
   return { code, stdout, stderr };

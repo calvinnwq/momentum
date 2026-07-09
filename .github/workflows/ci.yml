@@ -24,7 +24,7 @@ jobs:
       - name: Use Node.js 24
         uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -36,6 +36,23 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+          fi
+
+          if [ -n "$base_sha" ] && ! printf '%s' "$base_sha" | grep -Eq '^0+$'; then
+            MOMENTUM_FORMAT_BASE="$base_sha" pnpm format:check
+          else
+            pnpm format:check
+          fi
 
       - name: Build
         run: pnpm build

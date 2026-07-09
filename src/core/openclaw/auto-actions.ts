@@ -5,25 +5,25 @@ import type {
   OpenClawSupervisorAutoActionResult,
   OpenClawSupervisorEventType,
   OpenClawSupervisorState,
-  OpenClawSupervisorTick
+  OpenClawSupervisorTick,
 } from "./supervisor.js";
 import { buildOpenClawDeliveryIntent } from "./delivery-intent.js";
 import type {
   WorkflowActionAuthorityClass,
   WorkflowActionAuthorityPolicy,
-  WorkflowActionRiskLevel
+  WorkflowActionRiskLevel,
 } from "../workflow/monitor/action-authority.js";
 
 const SUPPORTED_AUTO_ACTIONS = new Set([
   "watch_recheck",
   "monitor_recheck",
   "stale_lease_auto_release",
-  "release_monitor"
+  "release_monitor",
 ]);
 
 const CONFIG_DISABLED_PASSTHROUGH_ACTIONS = new Set([
   "watch_recheck",
-  "monitor_recheck"
+  "monitor_recheck",
 ]);
 
 const REPEAT_LIMITED_ACTIONS = new Set(["release_monitor"]);
@@ -43,17 +43,17 @@ export type ExecuteOpenClawSupervisorAutoActionResult = {
 };
 
 export function openClawSupervisorAutoActionsEnabled(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
 ): boolean {
   const value = env["MOMENTUM_OPENCLAW_AUTO_ACTIONS"];
   if (value === undefined) return true;
   return !["0", "false", "off", "no", "disabled"].includes(
-    value.trim().toLowerCase()
+    value.trim().toLowerCase(),
   );
 }
 
 export function executeOpenClawSupervisorAutoAction(
-  input: ExecuteOpenClawSupervisorAutoActionInput
+  input: ExecuteOpenClawSupervisorAutoActionInput,
 ): ExecuteOpenClawSupervisorAutoActionResult {
   const policy = input.tick.recommendedActionPolicy;
   if (policy.authority !== "auto_allowed") {
@@ -71,12 +71,12 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "skipped",
       error: "Unsupported auto-allowed supervisor action.",
-      escalation: "human_required"
+      escalation: "human_required",
     });
     const persisted = appendRequiredAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
@@ -94,17 +94,20 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "skipped",
       error: "Supervisor auto-actions are disabled by configuration.",
-      escalation: "human_required"
+      escalation: "human_required",
     });
     const persisted = appendRequiredAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
-  if (actionType === "release_monitor" && input.tick.cleanupAction !== "remove_monitor") {
+  if (
+    actionType === "release_monitor" &&
+    input.tick.cleanupAction !== "remove_monitor"
+  ) {
     const finalTick = failClosedAutoActionTick(input);
     const autoAction = buildAutoActionRecord({
       actionType,
@@ -114,12 +117,12 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "skipped",
       error: "Release monitor policy did not match a removable monitor.",
-      escalation: "human_required"
+      escalation: "human_required",
     });
     const persisted = appendRequiredAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
@@ -128,7 +131,7 @@ export function executeOpenClawSupervisorAutoAction(
   try {
     priorAuditRecords = loadOpenClawSupervisorAutoActionAudit(
       input.dataDir,
-      input.tick.runId
+      input.tick.runId,
     );
   } catch {
     const finalTick = failClosedAutoActionTick(input);
@@ -140,12 +143,12 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "skipped",
       error: "Auto-action audit evidence is unreadable.",
-      escalation: "human_required"
+      escalation: "human_required",
     });
     const persisted = appendRequiredAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
@@ -153,7 +156,7 @@ export function executeOpenClawSupervisorAutoAction(
   const repeatLimitHit = repeatLimitExceeded(
     priorAuditRecords,
     actionType,
-    input.tick.nextState.lastDigest
+    input.tick.nextState.lastDigest,
   );
 
   if (repeatLimitHit && input.priorState?.disabled === true) {
@@ -161,9 +164,9 @@ export function executeOpenClawSupervisorAutoAction(
       tick: {
         ...input.tick,
         nextState: input.priorState,
-        stateChanged: false
+        stateChanged: false,
       },
-      autoAction: null
+      autoAction: null,
     };
   }
 
@@ -177,12 +180,12 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "skipped",
       error: "Auto-action repeat limit exceeded.",
-      escalation: "human_required"
+      escalation: "human_required",
     });
     const persisted = appendRequiredAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
@@ -195,14 +198,14 @@ export function executeOpenClawSupervisorAutoAction(
     now: input.now,
     result: "success",
     error: null,
-    escalation: null
+    escalation: null,
   });
 
   try {
     appendOpenClawSupervisorAutoActionAudit(
       input.dataDir,
       input.tick.runId,
-      autoAction
+      autoAction,
     );
   } catch (error) {
     const finalTick = failClosedAutoActionAuditFailureTick(input);
@@ -214,17 +217,17 @@ export function executeOpenClawSupervisorAutoAction(
       now: input.now,
       result: "failed",
       error: error instanceof Error ? error.message : String(error),
-      escalation: "human_required"
+      escalation: "human_required",
     });
     return {
       tick: withAutoAction(finalTick, failed),
-      autoAction: failed
+      autoAction: failed,
     };
   }
 
   const tick = {
     ...input.tick,
-    autoAction
+    autoAction,
   };
   return { tick, autoAction };
 }
@@ -233,18 +236,18 @@ export function recordOpenClawSupervisorAutoActionStatePersistence(
   dataDir: string,
   runId: string,
   record: OpenClawSupervisorAutoActionResult,
-  statePersistence: "saved" | "failed"
+  statePersistence: "saved" | "failed",
 ): OpenClawSupervisorAutoActionResult | null {
   if (record.result !== "success") return null;
   return appendRequiredAutoActionAudit(dataDir, runId, {
     ...record,
-    statePersistence
+    statePersistence,
   });
 }
 
 export function withOpenClawSupervisorAutoActionResult(
   tick: OpenClawSupervisorTick,
-  autoAction: OpenClawSupervisorAutoActionResult
+  autoAction: OpenClawSupervisorAutoActionResult,
 ): OpenClawSupervisorTick {
   if (autoAction.escalation !== "human_required") {
     return withAutoAction(tick, autoAction);
@@ -258,18 +261,20 @@ export function withOpenClawSupervisorAutoActionResult(
     ...baseTick,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
-    recommendedActionPolicy: autoActionEscalationPolicy(tick)
+    recommendedActionPolicy: autoActionEscalationPolicy(tick),
   });
-  const finalAutoAction =
-    statesEqualForAutoAction(autoAction.afterState, escalationTick.nextState)
-      ? autoAction
-      : { ...autoAction, afterState: escalationTick.nextState };
+  const finalAutoAction = statesEqualForAutoAction(
+    autoAction.afterState,
+    escalationTick.nextState,
+  )
+    ? autoAction
+    : { ...autoAction, afterState: escalationTick.nextState };
   return withAutoAction(escalationTick, finalAutoAction);
 }
 
 export function loadOpenClawSupervisorAutoActionAudit(
   dataDir: string,
-  runId: string
+  runId: string,
 ): OpenClawSupervisorAutoActionResult[] {
   const auditPath = openClawSupervisorAutoActionAuditPath(dataDir, runId);
   if (!fs.existsSync(auditPath)) return [];
@@ -280,7 +285,9 @@ export function loadOpenClawSupervisorAutoActionAudit(
     .map((line) => {
       const record = JSON.parse(line) as unknown;
       if (!isOpenClawSupervisorAutoActionAuditRecord(record, runId)) {
-        throw new Error("Invalid OpenClaw supervisor auto-action audit record.");
+        throw new Error(
+          "Invalid OpenClaw supervisor auto-action audit record.",
+        );
       }
       return record;
     });
@@ -288,34 +295,32 @@ export function loadOpenClawSupervisorAutoActionAudit(
 
 function isOpenClawSupervisorAutoActionAuditRecord(
   value: unknown,
-  runId: string
+  runId: string,
 ): value is OpenClawSupervisorAutoActionResult {
   if (!isObject(value)) return false;
-  if (
-    !(
-      typeof value.actionType === "string" &&
-      typeof value.policyAction === "string" &&
-      typeof value.reason === "string" &&
-      isStringOrNull(value.beforeDigest) &&
-      isStringOrNull(value.afterDigest) &&
-      isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
-      isOpenClawSupervisorState(value.afterState, runId) &&
-      typeof value.timestamp === "number" &&
-      isAutoActionResult(value.result) &&
-      isAutoActionStatePersistence(value.statePersistence) &&
-      isStringOrNull(value.error) &&
-      isAutoActionEscalation(value.escalation)
-    )
-  ) {
+  if (!(
+    typeof value.actionType === "string" &&
+    typeof value.policyAction === "string" &&
+    typeof value.reason === "string" &&
+    isStringOrNull(value.beforeDigest) &&
+    isStringOrNull(value.afterDigest) &&
+    isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
+    isOpenClawSupervisorState(value.afterState, runId) &&
+    typeof value.timestamp === "number" &&
+    isAutoActionResult(value.result) &&
+    isAutoActionStatePersistence(value.statePersistence) &&
+    isStringOrNull(value.error) &&
+    isAutoActionEscalation(value.escalation)
+  )) {
     return false;
   }
   return autoActionRecordDigestsMatchStates(
-    value as OpenClawSupervisorAutoActionResult
+    value as OpenClawSupervisorAutoActionResult,
   );
 }
 
 function autoActionRecordDigestsMatchStates(
-  value: OpenClawSupervisorAutoActionResult
+  value: OpenClawSupervisorAutoActionResult,
 ): boolean {
   return (
     value.beforeDigest === (value.beforeState?.lastDigest ?? null) &&
@@ -325,14 +330,14 @@ function autoActionRecordDigestsMatchStates(
 
 function isOpenClawSupervisorStateOrNull(
   value: unknown,
-  runId: string
+  runId: string,
 ): value is OpenClawSupervisorState | null {
   return value === null || isOpenClawSupervisorState(value, runId);
 }
 
 function isOpenClawSupervisorState(
   value: unknown,
-  runId: string
+  runId: string,
 ): value is OpenClawSupervisorState {
   if (!isObject(value)) return false;
   return (
@@ -349,13 +354,13 @@ function isOpenClawSupervisorState(
 }
 
 function isAutoActionResult(
-  value: unknown
+  value: unknown,
 ): value is OpenClawSupervisorAutoActionResult["result"] {
   return value === "success" || value === "skipped" || value === "failed";
 }
 
 function isAutoActionStatePersistence(
-  value: unknown
+  value: unknown,
 ): value is OpenClawSupervisorAutoActionResult["statePersistence"] {
   return (
     value === "pending" ||
@@ -366,7 +371,7 @@ function isAutoActionStatePersistence(
 }
 
 function isAutoActionEscalation(
-  value: unknown
+  value: unknown,
 ): value is OpenClawSupervisorAutoActionResult["escalation"] {
   return value === "human_required" || value === null;
 }
@@ -382,31 +387,19 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function appendOpenClawSupervisorAutoActionAudit(
   dataDir: string,
   runId: string,
-  record: OpenClawSupervisorAutoActionResult
+  record: OpenClawSupervisorAutoActionResult,
 ): void {
   const auditPath = openClawSupervisorAutoActionAuditPath(dataDir, runId);
   fs.mkdirSync(path.dirname(auditPath), { recursive: true });
   fs.appendFileSync(auditPath, `${JSON.stringify(record)}\n`, {
-    mode: 0o600
+    mode: 0o600,
   });
-}
-
-function appendAutoActionAuditBestEffort(
-  dataDir: string,
-  runId: string,
-  record: OpenClawSupervisorAutoActionResult
-): void {
-  try {
-    appendOpenClawSupervisorAutoActionAudit(dataDir, runId, record);
-  } catch {
-    // The caller is already escalating; never let evidence-write failure hide it.
-  }
 }
 
 function appendRequiredAutoActionAudit(
   dataDir: string,
   runId: string,
-  record: OpenClawSupervisorAutoActionResult
+  record: OpenClawSupervisorAutoActionResult,
 ): OpenClawSupervisorAutoActionResult {
   try {
     appendOpenClawSupervisorAutoActionAudit(dataDir, runId, record);
@@ -417,7 +410,7 @@ function appendRequiredAutoActionAudit(
       result: "failed",
       statePersistence: null,
       error: error instanceof Error ? error.message : String(error),
-      escalation: "human_required"
+      escalation: "human_required",
     };
   }
 }
@@ -425,29 +418,29 @@ function appendRequiredAutoActionAudit(
 function withRequiredAutoActionAuditResult(
   input: ExecuteOpenClawSupervisorAutoActionInput,
   tick: OpenClawSupervisorTick,
-  record: OpenClawSupervisorAutoActionResult
+  record: OpenClawSupervisorAutoActionResult,
 ): ExecuteOpenClawSupervisorAutoActionResult {
   if (record.result !== "failed") {
     return {
       tick: withAutoAction(tick, record),
-      autoAction: record
+      autoAction: record,
     };
   }
   const auditFailureTick = failClosedAutoActionAuditFailureTick(input);
   const auditFailureRecord = {
     ...record,
-    afterState: auditFailureTick.nextState
+    afterState: auditFailureTick.nextState,
   };
   return {
     tick: withAutoAction(auditFailureTick, auditFailureRecord),
-    autoAction: auditFailureRecord
+    autoAction: auditFailureRecord,
   };
 }
 
 function repeatLimitExceeded(
   records: OpenClawSupervisorAutoActionResult[],
   actionType: string,
-  digest: string | null
+  digest: string | null,
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
   const attemptStatuses = new Map<string, { saved: number; failed: number }>();
@@ -468,18 +461,20 @@ function repeatLimitExceeded(
   }
   const successfulStateSaves = [...attemptStatuses.values()].reduce(
     (count, status) => count + Math.max(0, status.saved - status.failed),
-    0
+    0,
   );
   return successfulStateSaves >= AUTO_ACTION_REPEAT_LIMIT;
 }
 
-function autoActionAttemptKey(record: OpenClawSupervisorAutoActionResult): string {
+function autoActionAttemptKey(
+  record: OpenClawSupervisorAutoActionResult,
+): string {
   return JSON.stringify({
     timestamp: record.timestamp,
     beforeDigest: record.beforeDigest,
     afterDigest: record.afterDigest,
     beforeUpdatedAt: record.beforeState?.updatedAt ?? null,
-    afterUpdatedAt: record.afterState.updatedAt
+    afterUpdatedAt: record.afterState.updatedAt,
   });
 }
 
@@ -505,14 +500,16 @@ function buildAutoActionRecord(input: {
     result: input.result,
     statePersistence: input.result === "success" ? "pending" : null,
     error: input.error,
-    escalation: input.escalation
+    escalation: input.escalation,
   };
 }
 
-function suppressAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTick {
+function suppressAutoAction(
+  tick: OpenClawSupervisorTick,
+): OpenClawSupervisorTick {
   const nextState = {
     ...tick.nextState,
-    disabled: false
+    disabled: false,
   };
   const suppressed = {
     ...tick,
@@ -522,45 +519,45 @@ function suppressAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
     nextState,
     stateChanged:
       tick.stateChanged || !statesEqualForAutoAction(tick.nextState, nextState),
-    deliveryIntent: null
+    deliveryIntent: null,
   };
   return {
     ...suppressed,
-    deliveryIntent: buildOpenClawDeliveryIntent(suppressed)
+    deliveryIntent: buildOpenClawDeliveryIntent(suppressed),
   };
 }
 
 function stampAutoActionEscalationHumanUpdate(
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
 ): OpenClawSupervisorTick {
   const nextState = {
     ...tick.nextState,
-    lastHumanUpdateAt: tick.nextState.updatedAt
+    lastHumanUpdateAt: tick.nextState.updatedAt,
   };
   return {
     ...tick,
     nextState,
     stateChanged:
-      tick.stateChanged || !statesEqualForAutoAction(tick.nextState, nextState)
+      tick.stateChanged || !statesEqualForAutoAction(tick.nextState, nextState),
   };
 }
 
 function withAutoAction(
   tick: OpenClawSupervisorTick,
-  autoAction: OpenClawSupervisorAutoActionResult
+  autoAction: OpenClawSupervisorAutoActionResult,
 ): OpenClawSupervisorTick {
   const tickWithAutoAction = {
     ...tick,
-    autoAction
+    autoAction,
   };
   return {
     ...tickWithAutoAction,
-    deliveryIntent: buildOpenClawDeliveryIntent(tickWithAutoAction)
+    deliveryIntent: buildOpenClawDeliveryIntent(tickWithAutoAction),
   };
 }
 
 function failClosedAutoActionTick(
-  input: ExecuteOpenClawSupervisorAutoActionInput
+  input: ExecuteOpenClawSupervisorAutoActionInput,
 ): OpenClawSupervisorTick {
   return input.priorState?.disabled === true
     ? escalateDisabledAutoAction(input.tick)
@@ -568,42 +565,44 @@ function failClosedAutoActionTick(
 }
 
 function failClosedAutoActionAuditFailureTick(
-  input: ExecuteOpenClawSupervisorAutoActionInput
+  input: ExecuteOpenClawSupervisorAutoActionInput,
 ): OpenClawSupervisorTick {
   return escalateAutoAction(input.tick);
 }
 
-function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTick {
+function escalateAutoAction(
+  tick: OpenClawSupervisorTick,
+): OpenClawSupervisorTick {
   const suppressed = suppressAutoAction(tick);
   const escalated = stampAutoActionEscalationHumanUpdate({
     ...suppressed,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
-    recommendedActionPolicy: autoActionEscalationPolicy(tick)
+    recommendedActionPolicy: autoActionEscalationPolicy(tick),
   });
   return {
     ...escalated,
-    deliveryIntent: buildOpenClawDeliveryIntent(escalated)
+    deliveryIntent: buildOpenClawDeliveryIntent(escalated),
   };
 }
 
 function escalateDisabledAutoAction(
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
 ): OpenClawSupervisorTick {
   const escalated = stampAutoActionEscalationHumanUpdate({
     ...tick,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
-    recommendedActionPolicy: autoActionEscalationPolicy(tick)
+    recommendedActionPolicy: autoActionEscalationPolicy(tick),
   });
   return {
     ...escalated,
-    deliveryIntent: buildOpenClawDeliveryIntent(escalated)
+    deliveryIntent: buildOpenClawDeliveryIntent(escalated),
   };
 }
 
 function autoActionEscalationPolicy(
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
 ): WorkflowActionAuthorityPolicy {
   return {
     ...tick.recommendedActionPolicy,
@@ -611,16 +610,17 @@ function autoActionEscalationPolicy(
     risk: "high" as WorkflowActionRiskLevel,
     evidenceRequired: [
       ...tick.recommendedActionPolicy.evidenceRequired,
-      "supported supervisor auto-action"
+      "supported supervisor auto-action",
     ],
-    rollback: "Keep the supervisor monitor registered until a human reviews the action.",
+    rollback:
+      "Keep the supervisor monitor registered until a human reviews the action.",
     rationale:
-      "Supervisor auto-actions fail closed when local policy support is missing or ambiguous."
+      "Supervisor auto-actions fail closed when local policy support is missing or ambiguous.",
   };
 }
 
 function autoActionEscalationEventType(
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
 ): OpenClawSupervisorEventType {
   if (tick.eventType !== null) return tick.eventType;
   if (
@@ -653,18 +653,18 @@ function autoActionEscalationEventType(
 
 function statesEqualForAutoAction(
   left: OpenClawSupervisorState,
-  right: OpenClawSupervisorState
+  right: OpenClawSupervisorState,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function openClawSupervisorAutoActionAuditPath(
   dataDir: string,
-  runId: string
+  runId: string,
 ): string {
   return path.join(
     dataDir,
     "openclaw-supervisor",
-    `${encodeURIComponent(runId)}.auto-actions.jsonl`
+    `${encodeURIComponent(runId)}.auto-actions.jsonl`,
   );
 }
