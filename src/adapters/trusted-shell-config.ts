@@ -1,14 +1,13 @@
 import path from "node:path";
 
 /**
- * Trusted-shell runner configuration.
+ * Trusted-shell runner-profile configuration.
  *
- * Momentum core owns Goal/Iteration/Job state, the git transaction,
- * verification, and the artifact layout. The trusted-shell runner profile
- * adds an *explicitly trusted* executable-plus-argv runner: it runs with
- * exactly the privileges of the user who invoked Momentum. There is no
- * sandbox and no privilege drop — the operator is responsible for what the
- * configured executable can do.
+ * The retired goal-first lane used the `trusted-shell` runner profile as an
+ * explicitly trusted executable-plus-argv runner. It ran with exactly the
+ * privileges of the user who invoked Momentum. There was no sandbox and no
+ * privilege drop, so archived profile data should still be treated as
+ * operator-trusted configuration.
  *
  * This module parses and validates the `trusted_shell` block from goal
  * frontmatter into a typed `TrustedShellConfig`. It does not execute

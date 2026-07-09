@@ -1,20 +1,18 @@
 /**
  * Runner profile model and resolver.
  *
- * Momentum core owns Goal/Iteration/Job state, the git transaction,
- * verification, and the artifact layout. A runner profile identifies how
- * the iteration prompt is executed and surfaces a safe summary for
- * operators. Executing profiles route through RunnerAdapter;
- * `trusted-shell` is an executing profile backed by an
- * operator-trusted executable plus argv, with no implicit shell. The
- * `acp` (ACP/acpx-style) runner profile is a thin smoke harness
- * around the existing adapter boundary with explicit runtime detection,
- * an optional auth/availability probe, and a distinct `runtime_unavailable`
- * error code so missing prerequisites are not conflated with command
- * failures or verification failures. The `momentum_policy`
- * resolver source sits between goal frontmatter and the built-in
- * default so a repo's `MOMENTUM.md` can set the default runner profile
- * without overriding goal-level or CLI-level choices.
+ * Momentum keeps runner profiles as compatibility metadata for stored
+ * goal-first data, recovery artifacts, and doctor diagnostics. A profile
+ * identifies how the retired lane executed an iteration prompt and surfaces a
+ * safe summary for operators. `trusted-shell` meant an operator-trusted
+ * executable plus argv, with no implicit shell. The `acp` (ACP/acpx-style)
+ * profile meant an external-agent smoke harness with explicit runtime
+ * detection, an optional auth/availability probe, and a distinct
+ * `runtime_unavailable` error code so missing prerequisites were not conflated
+ * with command failures or verification failures. The `momentum_policy`
+ * resolver source remains between goal frontmatter and the built-in default so
+ * a repo's `MOMENTUM.md` can still explain archived default runner-profile
+ * decisions without overriding goal-level or CLI-level choices.
  */
 
 export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell", "acp"] as const;

@@ -1,15 +1,13 @@
 /**
- * Read-only loader for `workflow run logs` (read-back goal-first read-back parity).
+ * Read-only loader for `workflow run logs`.
  *
- * The workflow-first equivalent of goal-first `logs <goal-id>`: it surfaces a
- * run's durable logs/evidence for operator inspection without any mutation. It
- * composes {@link loadWorkflowRunDetail} (run / steps / approvals / leases /
- * monitor / evidence / gates) with the per-round executor evidence that the
- * run-detail loader deliberately omits — agent/model identity, log paths,
- * summaries, key changes, changed files, verification status, commit SHA, and
- * recovery codes, plus child artifacts / checkpoints / findings / decisions —
- * so an operator migrating off goal `logs` keeps the same "what ran and what it
- * produced" read-back.
+ * This surfaces a run's durable logs/evidence for operator inspection without
+ * any mutation. It composes {@link loadWorkflowRunDetail} (run / steps /
+ * approvals / leases / monitor / evidence / gates) with the per-round executor
+ * evidence that the run-detail loader deliberately omits: agent/model identity,
+ * log paths, summaries, key changes, changed files, verification status, commit
+ * SHA, and recovery codes, plus child artifacts / checkpoints / findings /
+ * decisions.
  *
  * No SQLite mutation, no file reads, no external writes.
  */

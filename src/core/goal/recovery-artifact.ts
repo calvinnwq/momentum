@@ -105,9 +105,9 @@ export type RecoveryArtifactPathBundle = {
 
 /**
  * Self-contained input for rendering / writing a `recovery.md`. Designed to be
- * built by callers that already have the goal/job context (worker, daemon,
- * stale-recovery skip path) without needing to re-query the database from this
- * module — keeping the artifact generator pure makes it cheap to test and to
+ * built by callers that already have the goal/job context (daemon recovery and
+ * stale-recovery skip paths) without needing to re-query the database from this
+ * module. Keeping the artifact generator pure makes it cheap to test and to
  * reuse from CLI subcommands that may not have a live db handle.
  */
 export type RecoveryArtifactInput = {

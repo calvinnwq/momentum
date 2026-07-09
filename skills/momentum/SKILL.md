@@ -28,7 +28,7 @@ outlives process state.
 3. Treat JSON envelopes, durable events, evidence, and artifact pointers as
    authoritative. Do not scrape terminal prose or process scrollback.
 4. Mutate only through explicit public commands: start, approve, decide,
-   clear-recovery, update-step, worker, daemon, or intent apply.
+   clear-recovery, update-step, daemon, or intent apply.
 5. For side-effecting steps, verify the step's preflight / apply / reconcile
    evidence before reporting success.
 6. Report the next operator action as the CLI envelope states it; do not invent

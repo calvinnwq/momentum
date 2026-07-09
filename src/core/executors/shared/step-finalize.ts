@@ -376,10 +376,10 @@ type ReadNormalizedResultFile =
  * into ingesting an oversized or non-regular artifact.
  *
  * The `live step ...` wording in these `result_missing` / `result_invalid`
- * errors is the preserved durable contract — it surfaces in `goal-status`
- * output, `recovery.md` artifacts, and is pinned by the finalize tests, so it
- * is intentionally kept verbatim across the relocation, not updated to
- * match the neutral symbol names.
+ * errors is the preserved durable contract. It surfaces in workflow status /
+ * logs output, `recovery.md` artifacts, and is pinned by the finalize tests, so
+ * it is intentionally kept verbatim across the relocation, not updated to match
+ * the neutral symbol names.
  */
 function readNormalizedResultFile(
   resultFilePath: string

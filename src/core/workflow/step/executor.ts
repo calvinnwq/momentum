@@ -10,11 +10,12 @@
  * mutate the durable substrate, do not perform external apply, and do not
  * decide approval boundary advancement.
  *
- * The boundary mirrors the runner-adapter `RunnerAdapter` style: a small registry keyed by
- * step kind, a single dispatch entrypoint that validates input and traps
- * thrown executors, and stable error codes that callers can map to the workflow-run
- * state machine without leaking GNHF / postflight / no-mistakes /
- * merge-cleanup implementation details into Momentum core.
+ * The boundary keeps the compact registry style used by earlier execution
+ * seams: a small registry keyed by step kind, a single dispatch entrypoint that
+ * validates input and traps thrown executors, and stable error codes that
+ * callers can map to the workflow-run state machine without leaking GNHF /
+ * postflight / no-mistakes / merge-cleanup implementation details into Momentum
+ * core.
  *
  * This workflow-run module owns the dispatch boundary (input validation, executor
  * resolution, thrown-executor trapping, stable error codes). Runtime
