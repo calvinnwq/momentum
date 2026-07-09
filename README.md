@@ -28,7 +28,9 @@ node dist/index.js doctor
 The public agent-operated skill ships in `skills/momentum/`. Install that
 folder with any skill installer that accepts a repository path, or place it in
 your agent's skills root. The skill resolves the CLI via `MOMENTUM_CLI`,
-`momentum` on `PATH`, or a built Momentum checkout.
+`momentum` on `PATH`, or a built Momentum checkout. See
+[`docs/agent-skill.md`](docs/agent-skill.md) for the resolver and operating
+contract.
 
 ## Quick Start
 
