@@ -12,9 +12,9 @@ import path from "node:path";
  *
  * This module parses and validates the `trusted_shell` block from goal
  * frontmatter into a typed `TrustedShellConfig`. It does not execute
- * anything; execution is owned by `src/adapters/trusted-shell-runner.ts` and is
- * dispatched through the `RunnerAdapter` boundary defined in
- * `src/adapters/runner-adapter.ts`.
+ * anything; the retired goal-iteration mechanism owned execution, and this
+ * parser is retained so recovery artifacts keep rendering stored runner
+ * profiles faithfully.
  */
 
 export type TrustedShellCwd = "repo" | "iteration";

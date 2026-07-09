@@ -12,9 +12,8 @@ output.
 
 | Concern | Modules |
 | --- | --- |
-| Goal init / state | `init.ts`, `reducer.ts` |
+| Goal row read-back | `init.ts` |
 | Recovery compatibility | `recovery.ts`, `recovery-artifact.ts` |
-| Iteration helpers | `iteration-job.ts`, `iteration-prompt.ts` |
 | Goal spec parsing / types | `spec.ts`, `types.ts` |
 
 Goal specification parsing (`spec.ts`) and its exported `GoalSpec*` shapes

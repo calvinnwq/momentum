@@ -1015,8 +1015,8 @@ function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
 
 /**
  * Default `dispatch` lease TTL the scheduler lane stamps on a claimed step.
- * Mirrors `DEFAULT_DAEMON_WORKER_LEASE_MS` from `daemon-loop` so the workflow
- * lane and the goal-iteration lane age leases on the same cadence.
+ * Mirrors `DEFAULT_DAEMON_WORKER_LEASE_MS` from `daemon-loop` so daemon and
+ * workflow leases age on the same cadence.
  */
 export const DEFAULT_WORKFLOW_DISPATCH_LEASE_MS = 30_000;
 
@@ -1390,10 +1390,9 @@ function dispatchClaim(
 /**
  * Run one workflow scheduler-lane tick: recover stale leases, scan for the next
  * runnable step, atomically claim it, and hand it to the executor-dispatch seam.
- * This is the workflow-first analogue of `runWorkerOnce` (the goal-iteration
- * drain) and is what the daemon loop will call each cycle alongside — never
- * instead of — goal iteration draining. Goal-iteration tables are untouched here:
- * workflow scheduling is a separate lane over separate tables.
+ * The daemon loop calls this each cycle; it is the daemon's only work lane now
+ * that the goal-iteration drain is retired. Goal tables are untouched here:
+ * workflow scheduling runs over its own tables.
  *
  * Ordering matters and is deliberate:
  *

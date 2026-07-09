@@ -2,8 +2,8 @@
 
 Executor runtime domain. This folder owns the runtime execution *mechanisms*:
 the executor-loop reducer/persistence and the goal-loop, single-shot, live-step,
-and no-mistakes executor families plus their runner-profile, foreground
-iteration, and runner-smoke support. It holds business/runtime behavior only —
+and no-mistakes executor families plus their runner-profile and runner-smoke
+support. It holds business/runtime behavior only —
 reducers, state machines, persistence policies, and execution decisions. It does
 not parse CLI arguments or format output.
 
@@ -23,7 +23,6 @@ were left in place; importers still reference the concrete modules below.
 | Shared step finalization | `shared/step-finalize.ts` (neutral verify -> commit / reset seam) |
 | No-mistakes mechanism | `no-mistakes/mechanism.ts` |
 | Runner support | `runner/profile.ts` |
-| Foreground iteration | `goal-iteration/foreground.ts` |
 | Runner smoke | `smoke/linear-read.ts`, `smoke/workflow-harness.ts` |
 | Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts` |
 
@@ -66,11 +65,9 @@ ARCH-04 is a mechanical move with no adapter rewrite:
 
 - `src/adapters/no-mistakes-executor.ts` and `no-mistakes-orchestrator.ts` import
   `loop/reducer` / `loop/persist`.
-- `src/adapters/runner-adapter.ts` imports `runner/profile`.
 - `src/adapters/real-workflow-probe.ts` imports `smoke/workflow-harness`.
-- `src/adapters/acp-runner.ts`, `trusted-shell-runner.ts`, and
-  `live-step-wrapper.ts` import the `parseRunnerResult` parser from
-  `runner/result`; the `RunnerResult` shapes they also consume are type-only
+- `src/adapters/live-step-wrapper.ts` imports the `parseRunnerResult` parser
+  from `runner/result`; the `RunnerResult` shapes it also consumes are type-only
   imports from `runner/types.ts`. This runtime edge moved from the former root
   `src/runner-result.ts`.
 

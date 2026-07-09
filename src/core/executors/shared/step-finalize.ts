@@ -4,10 +4,10 @@
  * This is the workflow/runtime-owned seam that takes the *output* of a finished
  * workflow-step implementation (its normalized runner-result `success` flag and
  * `commit` intent) and runs Momentum's existing verify -> commit / reset
- * transaction around it, preserving the same safety posture the foreground
- * iteration path already enforces. It owns no durable state: it is a pure
- * transaction over git + verification, mirroring how `iteration-finalize.ts` stays
- * a pure transaction the foreground caller composes.
+ * transaction around it, preserving the safety posture the retired foreground
+ * iteration path enforced. It owns no durable state: it is a pure transaction
+ * over git + verification, composed on `iteration-finalize.ts`, which stays a
+ * pure transaction its caller composes.
  *
  * It began as the live-step lane's
  * `live-step/finalize.ts`, then was extracted here so the

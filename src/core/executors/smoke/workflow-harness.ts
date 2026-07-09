@@ -277,10 +277,9 @@ export type ProbeSpawnResult = {
 
 /**
  * Reduce a finished probe `spawnSync` into the `WorkflowHarnessRawOutcome` the
- * taxonomy classifier consumes. Pure: inspects only the supplied result. The
- * timeout detection mirrors the repo's canonical probe handling in
- * `src/adapters/acp-runner.ts` — a `spawnSync` timeout surfaces as an `ETIMEDOUT` error
- * (alongside a `SIGTERM` kill) rather than a plain non-zero exit.
+ * taxonomy classifier consumes. Pure: inspects only the supplied result. A
+ * `spawnSync` timeout surfaces as an `ETIMEDOUT` error (alongside a `SIGTERM`
+ * kill) rather than a plain non-zero exit.
  */
 export function classifyProbeSpawnResult(
   result: ProbeSpawnResult,

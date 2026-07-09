@@ -82,11 +82,10 @@ const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
   "MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable";
 
 /**
- * Workflow-context env vars injected into every live step process. Unlike the
- * runner adapters (which carry goal-iteration context), live wrappers carry the
- * workflow run / step identity plus optional per-step agent/model/effort
- * selections. Present values are injected by Momentum and are not subject to the
- * `env_allow` allowlist.
+ * Workflow-context env vars injected into every live step process. Live
+ * wrappers carry the workflow run / step identity plus optional per-step
+ * agent/model/effort selections. Present values are injected by Momentum and
+ * are not subject to the `env_allow` allowlist.
  */
 export const LIVE_STEP_WRAPPER_ENV_VARS = {
   RUN_ID: "MOMENTUM_RUN_ID",
