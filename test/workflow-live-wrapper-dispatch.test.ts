@@ -569,12 +569,19 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
   it("parks the run for manual recovery on runtime_unavailable instead of a fake success", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const exec: DispatchedStepExecutorContext = {
+      ...EXEC_CONTEXT,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log")
+    };
     // The real registry with NO profile resolves every kind to the honest
     // unconfigured adapter that refuses with runtime_unavailable.
     const registry = buildRealWorkflowStepExecutorRegistry();
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec }) }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -597,6 +604,10 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
       gateType: "manual_recovery_required",
       stepRunId: "preflight"
     });
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("runtime_unavailable");
+    expect(recoveryMd).toContain(`executor-log: ${exec.executorLogPath}`);
+    expect(recoveryMd).toContain(`result-file: ${exec.resultJsonPath}`);
   });
 });
 

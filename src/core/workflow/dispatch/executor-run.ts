@@ -325,12 +325,14 @@ export function executeAndReconcileDispatchedWorkflowStep(
       detail: reconciled.detail
     };
   }
-  if (finalized.recovery !== undefined) {
+  const recovery =
+    finalized.recovery ?? classifyProcessLevelRecovery(finalized.result);
+  if (recovery !== null) {
     tryWriteFinalizeRecoveryArtifact({
       runId,
       stepId,
       exec,
-      recovery: finalized.recovery,
+      recovery,
       now
     });
   }
@@ -674,6 +676,77 @@ function classifyFinalizeRecovery(
       evidencePointers: [{ label: "result-file", ref: resultFilePath }],
       nextAction: { code: nextCode, detail, stepId: null }
     };
+  }
+}
+
+function classifyProcessLevelRecovery(
+  result: WorkflowStepExecutorDispatchResult
+): LiveFinalizeRecovery | null {
+  if (result.ok) return null;
+  const code = readLiveRecoveryCode(result);
+  if (!isLiveRunRecoveryCode(code)) return null;
+  return {
+    code,
+    reason: result.error,
+    evidencePointers: processLevelEvidencePointers(result),
+    nextAction: {
+      code: `investigate_${code}`,
+      detail: processLevelRecoveryDetail(code),
+      stepId: null
+    }
+  };
+}
+
+function readLiveRecoveryCode(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: false }>
+): string {
+  const precise = (result as { liveRecoveryCode?: unknown }).liveRecoveryCode;
+  return typeof precise === "string" && precise.length > 0
+    ? precise
+    : result.code;
+}
+
+function isLiveRunRecoveryCode(
+  code: string
+): code is WorkflowLiveRunRecoveryCode {
+  return LIVE_RUN_RECOVERY_CODE_SET.has(code);
+}
+
+function processLevelEvidencePointers(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: false }>
+): WorkflowRecoveryEvidencePointer[] {
+  const pointers: WorkflowRecoveryEvidencePointer[] = [];
+  if (result.executorLogPath !== undefined && result.executorLogPath.length > 0) {
+    pointers.push({ label: "executor-log", ref: result.executorLogPath });
+  }
+  if (result.resultJsonPath !== undefined && result.resultJsonPath.length > 0) {
+    pointers.push({ label: "result-file", ref: result.resultJsonPath });
+  }
+  return pointers;
+}
+
+function processLevelRecoveryDetail(code: WorkflowLiveRunRecoveryCode): string {
+  switch (code) {
+    case "runtime_unavailable":
+      return "The live wrapper runtime was unavailable before a trusted terminal result could be produced. Inspect the executor log and runtime configuration before retrying.";
+    case "auth_unavailable":
+      return "The live wrapper could not authenticate before a trusted terminal result could be produced. Inspect the executor log and credentials before retrying.";
+    case "command_failed":
+      return "The live wrapper command failed before a trusted terminal result could be produced. Inspect the executor log and worktree before retrying.";
+    case "command_timed_out":
+      return "The live wrapper command timed out before a trusted terminal result could be produced. Confirm the process is no longer running, then inspect the executor log and worktree.";
+    case "output_overflow":
+      return "The live wrapper exceeded the output cap before a trusted terminal result could be produced. Inspect the executor log and worktree before retrying.";
+    case "executor_threw":
+      return "The workflow-step executor threw before a trusted terminal result could be produced. Inspect the executor error and run directory before retrying.";
+    case "result_missing":
+      return "The live wrapper exited without writing a trusted result document. Inspect the executor log and result path before retrying.";
+    case "result_invalid":
+      return "The live wrapper wrote a malformed result document. Inspect the executor log and result file before retrying.";
+    case "manual_recovery_required":
+      return "The live wrapper requested manual recovery before a trusted terminal result could be produced. Inspect the executor log and run directory before clearing recovery.";
+    default:
+      return "The live wrapper failed before a trusted terminal result could be produced. Inspect the run directory and worktree before clearing recovery.";
   }
 }
 
