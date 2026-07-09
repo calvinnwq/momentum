@@ -367,6 +367,13 @@ function finalizeSuccessfulExecutorResult(
   recovery?: LiveFinalizeRecovery;
 } {
   if (!result.ok || exec.repoSafety === undefined) return { result };
+  if (result.result.state === "skipped") {
+    // Skip is a pre-dispatch planning decision, never a dispatched-step
+    // terminal: terminalization parks this result as
+    // `unexpected_skipped_terminal`, so finalization must not verify, commit,
+    // or reset over it first.
+    return { result };
+  }
   const ownership = exec.repoSafety.beforeGitMutation?.();
   const finalize: FinalizeWorkflowStepFromResultFileResult = ownership?.ok === false
     ? { outcome: "repo_lock_lost", error: ownership.error }

@@ -109,6 +109,15 @@ export type LiveWrapperWorkflowDispatchDeps = {
   registry: WorkflowStepExecutorRegistry;
   /** Derives the executor context for a claimed dispatched step. */
   deriveExec: DeriveDispatchedStepExecutorContext;
+  /**
+   * Wall-clock source for the lease-freshness check made before each git
+   * mutation. The wrapper may run long after the tick's `context.now` was
+   * captured, so the check must not reuse that stale timestamp: a lease that
+   * expired mid-wrapper has to fail `expires_at >= heartbeat_at` and refuse
+   * the mutation instead of being retroactively extended. Defaults to
+   * `Date.now`; tests inject their fake tick clock.
+   */
+  nowMs?: () => number;
 };
 
 /**
@@ -166,7 +175,12 @@ export function createLiveWrapperWorkflowDispatch(
           stepId: claim.stepId,
           registry: deps.registry,
           exec: withAttemptScopedEvidencePaths(
-            withDispatchLeaseOwnership(resolved.exec, claim, context),
+            withDispatchLeaseOwnership(
+              resolved.exec,
+              claim,
+              context,
+              deps.nowMs ?? Date.now
+            ),
             attempt
           ),
           now: context.now
@@ -192,7 +206,8 @@ export function createLiveWrapperWorkflowDispatch(
 function withDispatchLeaseOwnership(
   exec: DispatchedStepExecutorContext,
   claim: ClaimedWorkflowStep,
-  context: WorkflowStepDispatchContext
+  context: WorkflowStepDispatchContext,
+  nowMs: () => number
 ): DispatchedStepExecutorContext {
   if (exec.repoSafety === undefined) return exec;
   const leaseDurationMs = Math.max(
@@ -212,13 +227,19 @@ function withDispatchLeaseOwnership(
       beforeGitMutation: () => {
         const existingCheck = existing?.();
         if (existingCheck?.ok === false) return existingCheck;
+        // Heartbeat from the current clock, not the tick's `context.now`: the
+        // wrapper ran between the two, and a lease that expired in that window
+        // must fail the `expires_at >= heartbeat_at` guard here rather than be
+        // extended after the fact while another daemon's stale-lease recovery
+        // may already own the run.
+        const mutationNow = nowMs();
         const heartbeat = heartbeatWorkflowLease(context.db, {
           runId: claim.lease.runId,
           leaseKind: claim.lease.leaseKind,
           holder: claim.lease.holder,
           acquiredAt: claim.lease.acquiredAt,
-          heartbeatAt: context.now,
-          expiresAt: context.now + extensionMs
+          heartbeatAt: mutationNow,
+          expiresAt: mutationNow + extensionMs
         });
         if (heartbeat.ok) return { ok: true };
         return {

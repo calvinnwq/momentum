@@ -389,7 +389,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -426,7 +426,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -464,7 +464,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     dispatch(claim, tickContext(db));
@@ -509,7 +509,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     dispatch(claim, tickContext(db));
@@ -523,6 +523,115 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
     expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+  });
+
+  it("refuses git mutation when the dispatch lease expired while the wrapper ran", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    // The wrapper "ran" past the claim's 30s lease: the wall clock at mutation
+    // time is a minute after the claim. The stale tick timestamp
+    // (`context.now = TICK_AT`) would still satisfy `expires_at >=
+    // heartbeat_at` and retroactively extend the expired lease; the fresh
+    // clock must refuse instead.
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => NOW + 60_000
+      }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(stepState(db, "preflight")).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "repo_lock_lost"
+    );
+    // Neither a commit nor a destructive reset happened after expiry.
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+  });
+
+  it("never verifies or mutates git for an unexpected skipped executor terminal", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return {
+        ok: true,
+        result: {
+          state: "skipped",
+          summary: "wrapper reported an unexpected skip",
+          checkpoints: [],
+          artifacts: [],
+          resultDigest: null,
+          errorCode: null,
+          errorMessage: null,
+          retryHint: null,
+          recoveryHint: null
+        },
+        executorLogPath: input.executorLogPath,
+        resultJsonPath: input.resultJsonPath
+      };
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    // Terminalization parks the unexpected skip for manual recovery, and
+    // finalization never verified, committed, or reset over it.
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "unexpected_skipped_terminal"
+    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(runDir, "verification.log"))).toBe(false);
   });
 
   it("preserves precise finalization recovery context and writes recovery.md", () => {
@@ -549,7 +658,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     dispatch(claim, tickContext(db));
@@ -581,7 +690,7 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
     const registry = buildRealWorkflowStepExecutorRegistry();
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     const result = dispatch(claim, tickContext(db));

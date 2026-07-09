@@ -178,7 +178,8 @@ function resolveDaemonDispatchedRepoSafety(
   | { ok: false; reason: string } {
   const head = readGitHead(repoPath);
   if (!head.ok) return { ok: false, reason: head.reason };
-  const verification = loadWorkflowRunVerificationConfig(db, runId);
+  const verification = loadWorkflowRunVerificationConfig(db, runId, repoPath);
+  if (!verification.ok) return { ok: false, reason: verification.reason };
   return {
     ok: true,
     repoSafety: {
@@ -205,10 +206,28 @@ function readGitHead(
   }
 }
 
-function loadWorkflowRunVerificationConfig(
+export const DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC = 900;
+
+/**
+ * Resolve the effective verification config for a dispatched run's git
+ * finalization, per the repo policy precedence (goal frontmatter >
+ * `MOMENTUM.md` > built-in default). Native workflow runs carry no `goal_id`,
+ * so without the `MOMENTUM.md` fallback they would finalize wrapper edits with
+ * zero verification commands and commit on a vacuously "skipped" verification.
+ *
+ * Fail-closed cases return `{ ok: false }` so the daemon parks the step for
+ * manual recovery instead of committing unverified work: the run row vanished,
+ * the goal's stored verification column is malformed, or a present
+ * `MOMENTUM.md` cannot be trusted (mirroring how `workflow run start` refuses
+ * a present-but-malformed policy rather than silently ignoring it).
+ */
+export function loadWorkflowRunVerificationConfig(
   db: MomentumDb,
-  runId: string
-): { commands: string[]; timeoutSec: number } {
+  runId: string,
+  repoPath: string
+):
+  | { ok: true; commands: string[]; timeoutSec: number }
+  | { ok: false; reason: string } {
   const row = db
     .prepare(
       `SELECT goals.verification AS verification,
@@ -220,28 +239,71 @@ function loadWorkflowRunVerificationConfig(
     .get(runId) as
     | { verification: string | null; verificationTimeoutSec: number | null }
     | undefined;
-  if (row === undefined) return { commands: [], timeoutSec: 900 };
+  if (row === undefined) {
+    return {
+      ok: false,
+      reason: `verification_config_unavailable: workflow run ${runId} not found`
+    };
+  }
+
+  const goalCommands = parseVerificationCommands(row.verification);
+  if (!goalCommands.ok) {
+    return {
+      ok: false,
+      reason: `verification_config_invalid: goal verification for run ${runId} is not a JSON string array`
+    };
+  }
+  const goalTimeoutSec =
+    row.verificationTimeoutSec !== null &&
+    Number.isInteger(row.verificationTimeoutSec) &&
+    row.verificationTimeoutSec > 0
+      ? row.verificationTimeoutSec
+      : undefined;
+  if (goalCommands.commands !== undefined) {
+    return {
+      ok: true,
+      commands: goalCommands.commands,
+      timeoutSec: goalTimeoutSec ?? DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
+    };
+  }
+
+  const policy = loadMomentumPolicy(repoPath);
+  if (!policy.ok) {
+    return {
+      ok: false,
+      reason: `verification_policy_invalid: (${policy.code}) ${policy.error}`
+    };
+  }
+  const config = policy.present ? policy.policy.config : undefined;
   return {
-    commands: parseVerificationCommands(row.verification),
+    ok: true,
+    commands:
+      config?.verification !== undefined ? [...config.verification] : [],
     timeoutSec:
-      Number.isInteger(row.verificationTimeoutSec) &&
-      row.verificationTimeoutSec !== null &&
-      row.verificationTimeoutSec > 0
-        ? row.verificationTimeoutSec
-        : 900
+      goalTimeoutSec ??
+      config?.verificationTimeoutSec ??
+      DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
   };
 }
 
-function parseVerificationCommands(raw: string | null): string[] {
-  if (raw === null) return [];
+function parseVerificationCommands(
+  raw: string | null
+):
+  | { ok: true; commands: string[] | undefined }
+  | { ok: false } {
+  // A null column means "no goal-backed verification configured" (no goal, or
+  // a goal without commands) and defers to the MOMENTUM.md fallback; a
+  // present-but-malformed column is untrusted state and fails closed instead
+  // of silently skipping verification.
+  if (raw === null) return { ok: true, commands: undefined };
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
-      return parsed as string[];
+      return { ok: true, commands: parsed as string[] };
     }
   } catch {
   }
-  return [];
+  return { ok: false };
 }
 
 function withExternalApplyDispatch(

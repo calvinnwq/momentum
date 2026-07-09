@@ -14,6 +14,7 @@ import {
   loadDispatchedStepRunProvenance,
   resolveDispatchedStepExecutorContext
 } from "../src/core/workflow/live-wrapper/daemon-exec-context.js";
+import { loadWorkflowRunVerificationConfig } from "../src/core/daemon/workflow-dispatch.js";
 
 /**
  * NGX-492 (RC-5b) — the daemon-lane exec-context deriver. The live-wrapper
@@ -211,6 +212,119 @@ describe("loadDispatchedStepRunProvenance", () => {
       expect(resolution.exec.runDir).toBe(
         path.join(REPO, ".agent-workflows", RUN_ID)
       );
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("loadWorkflowRunVerificationConfig", () => {
+  function makeRepoDir(policy?: string): string {
+    const repoDir = makeTempDir("momentum-execctx-repo-");
+    if (policy !== undefined) {
+      fs.writeFileSync(path.join(repoDir, "MOMENTUM.md"), policy, "utf-8");
+    }
+    return repoDir;
+  }
+
+  function attachGoal(
+    db: MomentumDb,
+    verification: string,
+    timeoutSec: number
+  ): void {
+    db.prepare(
+      `INSERT INTO goals (id, title, branch, verification, verification_timeout_sec, artifact_dir, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("goal-1", "Goal", "main", verification, timeoutSec, "/tmp/goal-art", NOW, NOW);
+    db.prepare("UPDATE workflow_runs SET goal_id = ? WHERE id = ?").run(
+      "goal-1",
+      RUN_ID
+    );
+  }
+
+  it("falls back to the repo MOMENTUM.md verification for a native run with no goal", () => {
+    const db = openSeededNativeRun();
+    const repoDir = makeRepoDir(
+      "---\nverification:\n  - pnpm test\n  - pnpm typecheck\nverification_timeout_sec: 120\n---\n"
+    );
+    try {
+      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, repoDir);
+      expect(config).toEqual({
+        ok: true,
+        commands: ["pnpm test", "pnpm typecheck"],
+        timeoutSec: 120
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves to no commands only when neither a goal nor MOMENTUM.md configures verification", () => {
+    const db = openSeededNativeRun();
+    const repoDir = makeRepoDir();
+    try {
+      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, repoDir);
+      expect(config).toEqual({ ok: true, commands: [], timeoutSec: 900 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed on a present-but-malformed MOMENTUM.md instead of skipping verification", () => {
+    const db = openSeededNativeRun();
+    const repoDir = makeRepoDir("---\nrunner: 42\n---\n");
+    try {
+      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, repoDir);
+      expect(config.ok).toBe(false);
+      if (config.ok) return;
+      expect(config.reason).toContain("verification_policy_invalid");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prefers goal-backed verification over the repo policy", () => {
+    const db = openSeededNativeRun();
+    const repoDir = makeRepoDir(
+      "---\nverification:\n  - pnpm policy-test\nverification_timeout_sec: 120\n---\n"
+    );
+    try {
+      attachGoal(db, JSON.stringify(["pnpm goal-test"]), 300);
+      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, repoDir);
+      expect(config).toEqual({
+        ok: true,
+        commands: ["pnpm goal-test"],
+        timeoutSec: 300
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed when the run row is missing", () => {
+    const db = openSeededNativeRun();
+    try {
+      const config = loadWorkflowRunVerificationConfig(
+        db,
+        "run-missing",
+        makeRepoDir()
+      );
+      expect(config.ok).toBe(false);
+      if (config.ok) return;
+      expect(config.reason).toContain("verification_config_unavailable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed on a malformed goal verification column", () => {
+    const db = openSeededNativeRun();
+    try {
+      attachGoal(db, "{not json", 300);
+      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, makeRepoDir());
+      expect(config.ok).toBe(false);
+      if (config.ok) return;
+      expect(config.reason).toContain("verification_config_invalid");
     } finally {
       db.close();
     }
