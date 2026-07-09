@@ -4,11 +4,11 @@
  * workflow-run added the `workflow_leases` table (PK `(run_id, lease_kind)`) and the pure
  * `classifyWorkflowLease` / `deriveWorkflowRunState` reducers, but no `src`
  * function acquired, heartbeated, or released a row — tests seeded leases with
- * raw SQL and the executor bridge (`live-step/executor.ts`) deferred this to
- * "caller-side" work. The live-execution contract requires each live step to
+ * raw SQL and early live-wrapper bridge work deferred this to "caller-side"
+ * work. The live-execution contract requires each live step to
  * "acquire a workflow lease before spawning the process", "heartbeat while the
  * process is active", and "persist terminal state before releasing the lease",
- * so the live-step orchestrator needs first-class lease primitives.
+ * so workflow dispatch needs first-class lease primitives.
  *
  * These mirror the repo-lock primitives (`acquireRepoLock` /
  * `updateRepoLockHeartbeat` / `releaseRepoLock`) and return the reducer's

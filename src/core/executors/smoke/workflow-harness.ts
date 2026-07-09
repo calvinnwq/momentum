@@ -17,8 +17,8 @@
  *
  * Live execution itself (spawning the engine, lease/heartbeat persistence,
  * result capture, the verification/commit transaction) stays owned by the
- * coding-workflow-pipeline skill and the live step wrapper / orchestrator
- * layers; this module is the gate, not the runner.
+ * coding-workflow-pipeline skill and the live-wrapper dispatch / executor-run
+ * lanes; this module is the gate, not the runner.
  *
  * Safety posture (mirrors the read smoke, per
  * SPEC.md):

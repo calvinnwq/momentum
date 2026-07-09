@@ -51,7 +51,7 @@ Other domains reach workflow behavior through these modules:
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
   `dispatch/reconcile-execute` own the pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
-- **Executor / live-step / daemon runtime**: `run/reducer` (shared run-state
+- **Executor / live-wrapper / daemon runtime**: `run/reducer` (shared run-state
   reduction), `run/runtime-state` (cached run-state / monitor refresh after a
   caller-owned mutation), `step/executor` (registry/dispatch boundary),
   `step/executor-real-adapters` (production registry builder backed by

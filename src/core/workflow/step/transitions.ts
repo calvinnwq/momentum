@@ -28,9 +28,10 @@
  * `deriveWorkflowRunState` directly. Mirrors the `leases.ts` primitives
  * in shape and race-guard discipline.
  *
- * The live-step orchestrator wires these together with the lease primitives and
- * the live executor (acquire lease -> start -> execute -> finish -> release).
- * These primitives stay the durable step-state building block it composes; the
+ * The workflow dispatch and reconciliation lanes wire these together with the
+ * lease primitives and executor evidence (acquire lease -> start -> execute ->
+ * terminalize evidence -> reconcile -> release).
+ * These primitives stay the durable step-state building block they compose; the
  * caller remains responsible for run-state re-derivation and run-level recovery
  * reconciliation.
  */

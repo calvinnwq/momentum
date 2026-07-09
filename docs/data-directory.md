@@ -50,7 +50,8 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `goals` — durable goal rows from the retired goal-first lane, including `state`, `reducer_decision`, `needs_manual_recovery`, and `linked_source_item_id`; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
 - `jobs` — stored `goal_iteration` job rows from the retired goal-first lane; nothing claims them anymore, but daemon startup recovery and `daemon status` still read and reconcile stale rows.
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
-- `repo_locks` — per-repo exclusion lease held across an iteration; released on commit / reset / `recovery clear`.
+- `repo_locks` — per-repo exclusion lease held across a goal iteration or a live-wrapper workflow dispatch that may mutate git; workflow dispatch locks are released only after a proven-clean commit / reset / reconciliation outcome, while stored goal-iteration manual-recovery locks are also released by `recovery clear`.
+  Workflow dispatch locks reuse the legacy identity columns (`goal_id` = run id, `job_id` = dispatch invocation id, `iteration` = attempt) so the active-per-repo-root index remains the exclusion primitive.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
 - `source_items` — durable rows for external tracker items (linked or unlinked) seen by source adapters.
 - `source_snapshots` — point-in-time JSON snapshots captured during reconciliation.
@@ -106,6 +107,13 @@ Files at `<data-dir>/goals/<goal-id>/`, written by the retired goal-first lane a
 - `handoff.md` — populated by the retired lane's handoff surface; starts as an empty placeholder.
 - `handoff.json` — populated by the retired lane's handoff surface (schema v1); starts as `{}`.
 - `recovery.md` — written lazily when a goal transitions to `needs_manual_recovery`; daemon startup recovery still writes it for stored goals it must park. Intentionally left on disk after `recovery clear` as durable evidence.
+
+## Repo-local workflow artifact files
+
+Native workflow runs that execute through a configured live-wrapper profile use `<repo>/.agent-workflows/<run-id>/` as the run directory.
+Imported workflow runs use the directory derived from their source artifact path.
+The live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
+When that run directory resolves inside the repository, daemon and watch dispatch require it to be ignored by git before the wrapper starts; otherwise the step is parked for manual recovery with `invalid_input` instead of risking evidence files being swept into a Momentum commit.
 
 ## OpenClaw supervisor state files
 

@@ -139,10 +139,11 @@ The daemon-dispatchable `external-apply` path uses the same surface when issue s
 The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
 The configured live-wrapper dispatch lane uses the same surface when the wrapper is
 unconfigured for the claimed step kind, the step's repo/run directory cannot be
-derived, the run directory cannot be created, the repo base HEAD cannot be read,
-a live wrapper returns a process-level failure such as `runtime_unavailable`, or
-post-wrapper finalization cannot safely parse the result, verify, commit, reset,
-or retain dispatch-lease ownership.
+derived, the run directory cannot be created, a repo-local run directory is not
+ignored by git, another live-wrapper dispatch owns the repo lock, the repo base
+HEAD cannot be read, a live wrapper returns a process-level failure such as
+`runtime_unavailable`, or post-wrapper finalization cannot safely parse the
+result, verify, commit, reset, or retain dispatch-lease ownership.
 That includes `merge-cleanup` auth, target, PR readback, head mismatch, or
 unsafe-state preflight refusal before the wrapper command is spawned, and live
 finalization codes such as `result_missing`, `result_invalid`,
