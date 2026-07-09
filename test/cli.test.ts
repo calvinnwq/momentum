@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { DOCTOR_MILESTONE, VERSION, runCli } from "../src/cli.js";
+import { DOCTOR_SCOPE, VERSION, runCli } from "../src/cli.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
@@ -154,7 +154,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain(`scope: ${DOCTOR_MILESTONE}`);
+    expect(result.stdout).toContain(`scope: ${DOCTOR_SCOPE}`);
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stdout).toContain(
       "evidence: total=0 goal_linked=0 source_item_linked=0"
@@ -173,7 +173,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: DOCTOR_MILESTONE
+      milestone: DOCTOR_SCOPE
     });
     expect(payload["daemon"]).toEqual({
       ok: true,

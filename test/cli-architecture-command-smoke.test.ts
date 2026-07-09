@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DOCTOR_MILESTONE, runCli } from "../src/cli.js";
+import { DOCTOR_SCOPE, runCli } from "../src/cli.js";
 
 type CliResult = {
   code: number;
@@ -162,7 +162,7 @@ describe("M11 closeout command-family smoke matrix", () => {
         match: {
           ok: true,
           command: "doctor",
-          milestone: DOCTOR_MILESTONE
+          milestone: DOCTOR_SCOPE
         }
       }
     ];

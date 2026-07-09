@@ -103,8 +103,10 @@ import { type LinearIssueRefreshClient } from "./adapters/linear-issue-refresh.j
 import type { OpenClawWatchOnce } from "./adapters/openclaw-watch-runner.js";
 
 export const VERSION = "0.0.0";
-export const DOCTOR_MILESTONE =
-  "Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete";
+// Rendered as doctor's JSON `milestone` field and text `scope:` line; the JSON
+// key name stays fixed because doctor is a wire-stable surface.
+export const DOCTOR_SCOPE =
+  "CLI architecture: parser dispatch, command families, renderers, adapters";
 
 export type LinearReconciliationClientFactoryInput = {
   apiKey: string | null;
@@ -549,7 +551,7 @@ async function daemonStart(
         : {}),
       pollIntervalMs:
         parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
-      // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
+      // Production workflow-first dispatch: bounded loops
       // drive the workflow scheduler lane alongside goal-iteration draining.
       // Register-only `daemon start` returns above and never reaches here, so it
       // stays inert. The lane is harmlessly idle when no workflow run has a
@@ -761,7 +763,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: DOCTOR_MILESTONE,
+    milestone: DOCTOR_SCOPE,
     daemon: daemonPayload,
     runners: {
       supported: [...BUILTIN_RUNNER_KINDS],
