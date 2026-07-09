@@ -47,6 +47,18 @@
  *     execution already ran the bounded session, so a re-entered tick NEVER
  *     re-runs the executor (no second process, no duplicate evidence). It only
  *     re-drives the idempotent reconciliation to converge the finalization.
+ *
+ * Known window (recorded limitation, not a guarantee): re-entry idempotency
+ * begins only once the dispatch invocation is TERMINAL. A process death after
+ * the wrapper exits — including after finalization committed — but before
+ * `terminalizeDispatchedExecutorInvocation` records terminal evidence leaves a
+ * non-terminal invocation over a `running` step, so the next tick runs the
+ * wrapper again under the same attempt (a second bounded process whose
+ * evidence paths overwrite the first). Git safety holds because the daemon
+ * lane re-derives the base HEAD per tick, but the bounded work itself is
+ * duplicated. Closing the window needs durable round progression persisted
+ * around the wrapper run (the executor-SDK dispatch driver owns that); it is
+ * deliberately not patched ad hoc here.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";

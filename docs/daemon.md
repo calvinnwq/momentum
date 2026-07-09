@@ -123,6 +123,12 @@ as the step base, parses the normalized runner result, runs the configured
 verification commands, commits verified changes, resets failed or unverifiable
 changes when safe, and records `verification.log` as round evidence before the
 dispatch scaffold is terminalized.
+The verification commands and timeout resolve per the repo policy precedence:
+the linked goal's stored verification when the run carries a legacy goal, then
+the repo's `MOMENTUM.md` `verification` frontmatter, then no commands, in which
+case `verification.log` records that verification was skipped; a missing run
+row, malformed stored goal verification, or present-but-malformed `MOMENTUM.md`
+parks the step for manual recovery instead of committing unverified work.
 If the base HEAD cannot be read, the result file is missing or invalid, HEAD
 moves unexpectedly, the dispatch lease is lost before git mutation, or git
 cannot safely commit or reset, the run is parked for manual recovery with the
