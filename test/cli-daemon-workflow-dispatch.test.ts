@@ -1518,7 +1518,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain(
-        "manual_recovery_required"
+        "runtime_unavailable"
       );
 
       const invocation = db
@@ -1593,7 +1593,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain(
-        "manual_recovery_required"
+        "runtime_unavailable"
       );
 
       const round = db

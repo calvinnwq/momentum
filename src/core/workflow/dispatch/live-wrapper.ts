@@ -64,6 +64,7 @@ import {
   deriveDispatchInvocationId
 } from "./execute.js";
 import { loadExecutorInvocation } from "../../executors/loop/persist.js";
+import { heartbeatWorkflowLease } from "../leases.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
@@ -164,7 +165,10 @@ export function createLiveWrapperWorkflowDispatch(
           runId: claim.runId,
           stepId: claim.stepId,
           registry: deps.registry,
-          exec: withAttemptScopedEvidencePaths(resolved.exec, attempt),
+          exec: withAttemptScopedEvidencePaths(
+            withDispatchLeaseOwnership(resolved.exec, claim, context),
+            attempt
+          ),
           now: context.now
         });
       } else {
@@ -182,6 +186,47 @@ export function createLiveWrapperWorkflowDispatch(
       }
     }
     return result;
+  };
+}
+
+function withDispatchLeaseOwnership(
+  exec: DispatchedStepExecutorContext,
+  claim: ClaimedWorkflowStep,
+  context: WorkflowStepDispatchContext
+): DispatchedStepExecutorContext {
+  if (exec.repoSafety === undefined) return exec;
+  const leaseDurationMs = Math.max(
+    1,
+    claim.lease.expiresAt - claim.lease.acquiredAt
+  );
+  const verificationWindowMs =
+    Math.max(1, exec.repoSafety.verificationCommands.length) *
+    exec.repoSafety.verificationTimeoutSec *
+    1000;
+  const extensionMs = leaseDurationMs + verificationWindowMs;
+  const existing = exec.repoSafety.beforeGitMutation;
+  return {
+    ...exec,
+    repoSafety: {
+      ...exec.repoSafety,
+      beforeGitMutation: () => {
+        const existingCheck = existing?.();
+        if (existingCheck?.ok === false) return existingCheck;
+        const heartbeat = heartbeatWorkflowLease(context.db, {
+          runId: claim.lease.runId,
+          leaseKind: claim.lease.leaseKind,
+          holder: claim.lease.holder,
+          acquiredAt: claim.lease.acquiredAt,
+          heartbeatAt: context.now,
+          expiresAt: context.now + extensionMs
+        });
+        if (heartbeat.ok) return { ok: true };
+        return {
+          ok: false,
+          error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`
+        };
+      }
+    }
   };
 }
 

@@ -59,6 +59,14 @@ import {
   finalizeWorkflowStepFromResultFile,
   type FinalizeWorkflowStepFromResultFileResult
 } from "../../executors/shared/step-finalize.js";
+import {
+  WORKFLOW_LIVE_RUN_RECOVERY_CODES,
+  writeWorkflowRecoveryArtifactInRunDir,
+  type WorkflowLiveRunRecoveryCode,
+  type WorkflowRecoveryArtifactInput,
+  type WorkflowRecoveryEvidencePointer,
+  type WorkflowRecoveryNextAction
+} from "../recovery/artifact.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
   terminalizeDispatchedExecutorInvocation,
@@ -103,6 +111,7 @@ export type DispatchedStepRepoSafetyContext = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
 type DispatchedStepExecutorSelection = {
@@ -290,7 +299,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
     registry
   );
 
-  const terminalResult = finalizeSuccessfulExecutorResult(executorResult, exec);
+  const finalized = finalizeSuccessfulExecutorResult(executorResult, exec);
 
   // Record the result as terminal evidence, then let the reconciliation seam finalize the step from
   // it. terminalize and reconcile are each idempotent and own their own
@@ -299,7 +308,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
     db,
     runId,
     stepId,
-    result: terminalResult,
+    result: finalized.result,
     now
   });
   const reconciled = tryReconcileDispatchedWorkflowStep({
@@ -315,6 +324,15 @@ export function executeAndReconcileDispatchedWorkflowStep(
       terminalize,
       detail: reconciled.detail
     };
+  }
+  if (finalized.recovery !== undefined) {
+    tryWriteFinalizeRecoveryArtifact({
+      runId,
+      stepId,
+      exec,
+      recovery: finalized.recovery,
+      now
+    });
   }
 
   return {
@@ -342,17 +360,30 @@ function readDispatchedStepExecutorSelection(
 function finalizeSuccessfulExecutorResult(
   result: WorkflowStepExecutorDispatchResult,
   exec: DispatchedStepExecutorContext
-): WorkflowStepExecutorDispatchResult {
-  if (!result.ok || exec.repoSafety === undefined) return result;
-  const finalize = finalizeWorkflowStepFromResultFile({
+): {
+  result: WorkflowStepExecutorDispatchResult;
+  recovery?: LiveFinalizeRecovery;
+} {
+  if (!result.ok || exec.repoSafety === undefined) return { result };
+  const ownership = exec.repoSafety.beforeGitMutation?.();
+  const finalize: FinalizeWorkflowStepFromResultFileResult = ownership?.ok === false
+    ? { outcome: "repo_lock_lost", error: ownership.error }
+    : finalizeWorkflowStepFromResultFile({
     repoPath: exec.repoPath,
     baseHead: exec.repoSafety.baseHead,
     resultFilePath: result.resultJsonPath,
     verificationCommands: exec.repoSafety.verificationCommands,
     verificationTimeoutSec: exec.repoSafety.verificationTimeoutSec,
-    verificationLogPath: exec.repoSafety.verificationLogPath
+    verificationLogPath: exec.repoSafety.verificationLogPath,
+    ...(exec.repoSafety.beforeGitMutation !== undefined
+      ? { beforeGitMutation: exec.repoSafety.beforeGitMutation }
+      : {})
   });
-  return executorResultFromFinalize(result, finalize, exec.repoSafety);
+  const recovery = classifyFinalizeRecovery(finalize);
+  return {
+    result: executorResultFromFinalize(result, finalize, exec.repoSafety),
+    ...(recovery !== null ? { recovery } : {})
+  };
 }
 
 function executorResultFromFinalize(
@@ -378,14 +409,36 @@ function executorResultFromFinalize(
         finalize.verification.error,
         repoSafety.verificationLogPath
       );
+    case "commit_failed":
+      if (
+        finalize.commit.code === "nothing_to_commit" ||
+        (finalize.reset !== undefined && finalize.reset.ok)
+      ) {
+        return withFinalizedFailure(
+          result,
+          "command_failed",
+          finalize.commit.error,
+          repoSafety.verificationLogPath
+        );
+      }
+      if (finalize.reset !== undefined && !finalize.reset.ok) {
+        return finalizedManualRecoveryResult(
+          result,
+          "reset_failed",
+          finalize.reset.error
+        );
+      }
+      return finalizedManualRecoveryResult(
+        result,
+        "commit_failed",
+        finalize.commit.error
+      );
     default:
-      return {
-        ok: false,
-        code: finalizeExecutorErrorCode(finalize),
-        error: describeFinalizeFailure(finalize),
-        executorLogPath: result.executorLogPath,
-        resultJsonPath: result.resultJsonPath
-      };
+      return finalizedManualRecoveryResult(
+        result,
+        finalizeExecutorErrorCode(finalize),
+        describeFinalizeFailure(finalize)
+      );
   }
 }
 
@@ -431,15 +484,47 @@ function withFinalizedFailure(
 
 function finalizeExecutorErrorCode(
   finalize: FinalizeWorkflowStepFromResultFileResult
-): Extract<WorkflowStepExecutorDispatchResult, { ok: false }>["code"] {
+): string {
   switch (finalize.outcome) {
     case "result_missing":
       return "result_missing";
     case "result_invalid":
       return "result_invalid";
+    case "manual_recovery_required":
+      return finalize.recoveryCode;
+    case "reset_failed":
+      return "reset_failed";
+    case "commit_failed":
+      if (finalize.reset !== undefined && !finalize.reset.ok) return "reset_failed";
+      if (finalize.commit.code === "nothing_to_commit") return "nothing_to_commit";
+      return "commit_failed";
+    case "git_failed":
+      return "git_failed";
+    case "repo_lock_lost":
+      return "repo_lock_lost";
     default:
-      return "manual_recovery_required";
+      return "invalid_input";
   }
+}
+
+function finalizedManualRecoveryResult(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: true }>,
+  recoveryCode: string,
+  error: string
+): WorkflowStepExecutorDispatchResult {
+  const failure = {
+    ok: false as const,
+    code: (
+      recoveryCode === "result_missing" || recoveryCode === "result_invalid"
+        ? recoveryCode
+        : "manual_recovery_required"
+    ) as Extract<WorkflowStepExecutorDispatchResult, { ok: false }>["code"],
+    error,
+    executorLogPath: result.executorLogPath,
+    resultJsonPath: result.resultJsonPath,
+    liveRecoveryCode: recoveryCode
+  };
+  return failure;
 }
 
 function describeFinalizeFailure(
@@ -464,6 +549,161 @@ function describeFinalizeFailure(
       return finalize.error;
     case "committed":
       return "workflow step committed";
+  }
+}
+
+type LiveFinalizeRecovery = {
+  code: WorkflowLiveRunRecoveryCode;
+  reason: string;
+  evidencePointers: readonly WorkflowRecoveryEvidencePointer[];
+  nextAction: WorkflowRecoveryNextAction;
+};
+
+const LIVE_RUN_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_LIVE_RUN_RECOVERY_CODES
+);
+
+function classifyFinalizeRecovery(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): LiveFinalizeRecovery | null {
+  switch (finalize.outcome) {
+    case "manual_recovery_required":
+      return {
+        code: finalize.recoveryCode,
+        reason: finalize.reason,
+        evidencePointers: [
+          { label: "expected-head", ref: finalize.expectedHead },
+          { label: "current-head", ref: finalize.currentHead }
+        ],
+        nextAction: {
+          code: "investigate_head_mismatch",
+          detail:
+            "HEAD moved off the recorded base during the live step. Momentum refused a destructive reset; inspect the unexpected commit and decide manually whether to keep, amend, or roll it back before clearing recovery.",
+          stepId: null
+        }
+      };
+    case "result_missing":
+      return resultFileRecovery(
+        "result_missing",
+        finalize.error,
+        finalize.resultFilePath,
+        "investigate_result_missing",
+        "The live step's normalized result document was not written, so its true outcome is unknown. Momentum did not commit or reset; inspect the executor log before retrying or canceling."
+      );
+    case "result_invalid":
+      return resultFileRecovery(
+        "result_invalid",
+        finalize.error,
+        finalize.resultFilePath,
+        "investigate_result_invalid",
+        "The live step's result document is malformed and cannot be trusted. Momentum did not commit or reset; inspect the executor log before retrying or canceling."
+      );
+    case "reset_failed":
+      return simpleFinalizeRecovery(
+        "reset_failed",
+        finalize.reset.error,
+        "investigate_reset_failed",
+        "The live step finalization could not restore the recorded base. Inspect and clean up the worktree manually before clearing recovery."
+      );
+    case "repo_lock_lost":
+      return simpleFinalizeRecovery(
+        "repo_lock_lost",
+        finalize.error,
+        "investigate_repo_lock_lost",
+        "Momentum lost the active repo lock during live step finalization. Confirm repository ownership and worktree state before clearing recovery."
+      );
+    case "git_failed":
+      return simpleFinalizeRecovery(
+        "git_failed",
+        finalize.error,
+        "investigate_git_failed",
+        "The live step finalization could not inspect or mutate git reliably. Inspect the repository and worktree manually before clearing recovery."
+      );
+    case "invalid_input":
+      return simpleFinalizeRecovery(
+        "invalid_input",
+        finalize.error,
+        "investigate_invalid_input",
+        "The live step finalization refused to commit or reset because its inputs were invalid. Inspect the run directory and worktree manually before clearing recovery."
+      );
+    case "commit_failed":
+      if (finalize.reset !== undefined) {
+        if (finalize.reset.ok) return null;
+        return simpleFinalizeRecovery(
+          "reset_failed",
+          finalize.reset.error,
+          "investigate_reset_failed",
+          "The live step finalization could not clean up after a commit failure. Inspect and clean up the worktree manually before clearing recovery."
+        );
+      }
+      if (finalize.commit.code === "nothing_to_commit") return null;
+      return simpleFinalizeRecovery(
+        "commit_failed",
+        finalize.commit.error,
+        "investigate_commit_failed",
+        "The live step finalization could not create the accepted Momentum commit and did not prove cleanup. Inspect the worktree manually before clearing recovery."
+      );
+    default:
+      return null;
+  }
+
+  function simpleFinalizeRecovery(
+    code: WorkflowLiveRunRecoveryCode,
+    reason: string,
+    nextCode: string,
+    detail: string
+  ): LiveFinalizeRecovery {
+    return {
+      code,
+      reason,
+      evidencePointers: [],
+      nextAction: { code: nextCode, detail, stepId: null }
+    };
+  }
+
+  function resultFileRecovery(
+    code: WorkflowLiveRunRecoveryCode,
+    reason: string,
+    resultFilePath: string,
+    nextCode: string,
+    detail: string
+  ): LiveFinalizeRecovery {
+    return {
+      code,
+      reason,
+      evidencePointers: [{ label: "result-file", ref: resultFilePath }],
+      nextAction: { code: nextCode, detail, stepId: null }
+    };
+  }
+}
+
+function tryWriteFinalizeRecoveryArtifact(input: {
+  runId: string;
+  stepId: string;
+  exec: DispatchedStepExecutorContext;
+  recovery: LiveFinalizeRecovery;
+  now: number;
+}): void {
+  if (!LIVE_RUN_RECOVERY_CODE_SET.has(input.recovery.code)) return;
+  const artifactInput: WorkflowRecoveryArtifactInput = {
+    runId: input.runId,
+    stepId: input.stepId,
+    classification: input.recovery.code,
+    reason: input.recovery.reason,
+    recommendedNextAction: {
+      ...input.recovery.nextAction,
+      stepId: input.stepId
+    },
+    evidencePointers: input.recovery.evidencePointers,
+    repoPath: input.exec.repoPath,
+    classifiedAt: input.now
+  };
+  try {
+    writeWorkflowRecoveryArtifactInRunDir({
+      runDir: input.exec.runDir,
+      input: artifactInput
+    });
+  } catch {
   }
 }
 
