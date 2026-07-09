@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 
 import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/adapters/fake-runner.js";
-import { DOCTOR_MILESTONE } from "../src/cli.js";
+import { DOCTOR_SCOPE } from "../src/cli.js";
 
 import {
   SMOKE_GOAL_SPEC,
@@ -134,7 +134,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       const result = runCliBinary(["doctor", "--json"]);
       expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
       const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-      expect(payload["milestone"]).toBe(DOCTOR_MILESTONE);
+      expect(payload["milestone"]).toBe(DOCTOR_SCOPE);
     },
     60_000
   );

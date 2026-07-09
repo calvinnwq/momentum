@@ -1,8 +1,8 @@
 /**
- * Two-phase external apply orchestrator (NGX-298 / M6-04 + NGX-300 / M6-05).
+ * Two-phase external apply orchestrator.
  *
- * Glues the NGX-296 adapter, NGX-297 Linear write client, NGX-299 audit
- * ledger, and NGX-300 post-apply reconcile into a single CLI-callable entry point. The orchestrator is pure: it
+ * Glues the external-update adapter, Linear write client, audit
+ * ledger, and post-apply reconcile into a single CLI-callable entry point. The orchestrator is pure: it
  * accepts dependencies for the adapter registry, policy loader, Linear client
  * factory, and clock so tests can drive every branch without touching the
  * network. The CLI wires this into `intent apply --external-apply` separately.
@@ -698,7 +698,7 @@ export async function executeExternalApply(
   }
 
   // Intent transitions to applied with the operator reason that drove the
-  // write. This is intentionally separate from the M5 manual mark-applied
+  // write. This is intentionally separate from the manual mark-applied
   // path so the audit ledger is the durable record of the external write.
   const decisionReason = `external_apply: ${input.operatorReason}`;
   const markApplied = markAppliedFn(input.db, {

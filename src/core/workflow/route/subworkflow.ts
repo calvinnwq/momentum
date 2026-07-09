@@ -1,6 +1,6 @@
 /**
  * Route-encoded child config + durable recursion lineage for production
- * `subworkflow` steps (RC-4b, NGX-498).
+ * `subworkflow` steps.
  *
  * Iteration 1 (`route/subworkflow-child-config.ts`) landed the two pure deciders —
  * {@link validateSubworkflowChildConfig} and {@link planSubworkflowChildLaunch} —
@@ -8,7 +8,7 @@
  *
  *   1. *Where* a production `subworkflow` step's child config is sourced from. A
  *      {@link StepDefinition} carries only an executor *family*, never per-step
- *      config (rich per-step config is NGX-404, explicitly out of this ticket's
+ *      config (rich per-step config is deliberately out of this module's
  *      scope), so the only in-scope home without a schema change is the run's
  *      existing free-form `route` JSON.
  *   2. *How* the parent run's recursion lineage is encoded durably. There is no

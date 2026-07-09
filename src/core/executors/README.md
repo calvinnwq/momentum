@@ -16,10 +16,10 @@ were left in place; importers still reference the concrete modules below.
 
 | Concern | Modules |
 | --- | --- |
-| Executor loop (M10) | `loop/reducer.ts`, `loop/persist.ts` |
+| Executor loop | `loop/reducer.ts`, `loop/persist.ts` |
 | Goal-loop executor | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
 | Single-shot executor | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
-| Live-step executor (M9) | `live-step/executor.ts`, `live-step/advance.ts`, `live-step/orchestrator.ts`, `live-step/run-recovery.ts`, `live-step/finalize.ts` |
+| Live-step executor | `live-step/executor.ts`, `live-step/advance.ts`, `live-step/orchestrator.ts`, `live-step/run-recovery.ts`, `live-step/finalize.ts` |
 | Shared step finalization | `shared/step-finalize.ts` (neutral verify -> commit / reset seam) |
 | No-mistakes mechanism | `no-mistakes/mechanism.ts` |
 | Runner support | `runner/profile.ts` |
@@ -36,21 +36,21 @@ After finalization, its authoritative evidence is the `executor_invocations` / `
 The concrete goal-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
 Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not become workflow executor families or make `.gnhf/runs` authoritative state.
 
-### Shared step finalization (M9 / M10 separation)
+### Shared step finalization
 
 The verify -> commit / reset finalization transaction lives in the neutrally-named
 `shared/step-finalize.ts` seam (`finalizeWorkflowStep` /
-`finalizeWorkflowStepFromResultFile`). It is consumed by both the M9 live-step
-path (`live-step/advance` / `live-step/run-recovery`) and the M10 executor-loop
+`finalizeWorkflowStepFromResultFile`). It is consumed by both the live-step
+path (`live-step/advance` / `live-step/run-recovery`) and the executor-loop
 families (goal-loop and single-shot). The goal-loop family imports the neutral
-seam directly (NGX-494, RC-1b); the M9 live wrappers and the single-shot family
+seam directly; the live wrappers and the single-shot family
 reach it through `live-step/finalize.ts`, a back-compat alias that re-exports the
 seam under the original `*LiveWorkflowStep*` names.
 
-The M9 direct-finalize path and the M10 executor-loop path intentionally stay
-separate composition lanes: the M9 path is **not** collapsed into the M10
-executor-loop path. Any unification is reconciliation work owned by a later slice
-(now landed as RC-2 / NGX-480: `dispatch/reconcile.ts` /
+The direct-finalize path and the executor-loop path intentionally stay
+separate composition lanes: the live-step path is **not** collapsed into the
+executor-loop path. Any unification is reconciliation work owned by the
+dispatch reconciliation seam (`dispatch/reconcile.ts` /
 `dispatch/reconcile-execute.ts`), not by this mechanical regrouping.
 
 ## Ownership boundary with adapters
@@ -72,7 +72,7 @@ ARCH-04 is a mechanical move with no adapter rewrite:
   `live-step-wrapper.ts` import the `parseRunnerResult` parser from
   `runner/result`; the `RunnerResult` shapes they also consume are type-only
   imports from `runner/types.ts`. This runtime edge moved from the former root
-  `src/runner-result.ts` under ARCH-06 / NGX-450.
+  `src/runner-result.ts`.
 
 These edges predate ARCH-04 (and, for the runner-result parser, ARCH-06).
 Tightening them (so adapters depend on core types only) is deferred; it would
@@ -93,11 +93,11 @@ to make.
   `RunnerResult{Error,Success,Parse}` envelopes), with their parser
   (`parseRunnerResult` / `normalizeRunnerResult` / `normalizeCommitIntent`) in
   `src/core/executors/runner/result.ts`. Both were drained from the former root
-  `src/runner-result.ts` under the type-placement slice (ARCH-06 / NGX-450).
+  `src/runner-result.ts` under the type-placement slice.
   `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
   no behavior, so it is colocated with the type it defines.
 - No executor barrel/seam consolidation and no finalizer/reconciliation redesign.
   ARCH-08 only added the workflow-owned `run/runtime-state.ts` refresh seam after
-  caller-owned durable mutations; the cross-path finalization owner has since landed
-  as RC-2 (NGX-480: `dispatch/reconcile.ts` /
-  `dispatch/reconcile-execute.ts`). Importers keep direct typed module paths.
+  caller-owned durable mutations; the cross-path finalization owner is now
+  `dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`. Importers keep
+  direct typed module paths.

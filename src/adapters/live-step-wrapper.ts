@@ -1,9 +1,9 @@
 /**
- * Live workflow-step execution wrapper introduced by NGX-333 (M9-02).
+ * Live workflow-step execution wrapper.
  *
- * Milestone 9 lets Momentum invoke live workflow steps that wrap the existing
- * OpenClaw engines. NGX-332 (M9-01) added the typed live-wrapper config plus a
- * `WorkflowStepKind`-keyed registry (`live-wrapper-registry.ts`). This module
+ * Momentum invokes live workflow steps that wrap the existing
+ * OpenClaw engines. The typed live-wrapper config plus a
+ * `WorkflowStepKind`-keyed registry live in `live-wrapper-registry.ts`. This module
  * adds the next layer: actually running a resolved live wrapper as an explicit
  * local child process and normalizing its outcome.
  *
@@ -16,7 +16,7 @@
  *     (`runtime_unavailable`), so a missing runtime never runs the step;
  *   - runs the optional pre-flight `probe`, mapping a missing/timed-out probe
  *     to `runtime_unavailable` and a non-zero probe exit to `auth_unavailable`
- *     (the M9 refinement over the M4 acp runner, which lacked an auth code);
+ *     (the live-wrapper refinement over the acp runner, which lacked an auth code);
  *   - spawns the configured `command` + explicit argv with no shell
  *     interpolation, a filtered env allowlist, and the chosen cwd;
  *   - captures stdout/stderr into a bounded artifact log, mapping an output
@@ -27,7 +27,7 @@
  *     missing file to `result_missing` and an unreadable/invalid document to
  *     `result_invalid`.
  *
- * The execution model is synchronous (`spawnSync`), mirroring the M4
+ * The execution model is synchronous (`spawnSync`), mirroring the
  * `trusted-shell` / `acp` runners and the synchronous `WorkflowStepExecutor`
  * boundary. Real-time heartbeating is therefore a caller-side concern.
  *
@@ -55,7 +55,7 @@ import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
 
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the
- * process-execution subset of the M9 run-level recovery taxonomy in
+ * process-execution subset of the run-level recovery taxonomy in
  * SPEC.md. Caller layers add durable
  * run-level classifications for lease, dispatch, verification, git, reset,
  * repo-lock, commit, invalid-input, executor-throw, and manual-recovery
@@ -74,7 +74,7 @@ export const LIVE_STEP_WRAPPER_RECOVERY_CODES = [
 export type LiveStepWrapperRecoveryCode =
   (typeof LIVE_STEP_WRAPPER_RECOVERY_CODES)[number];
 
-/** Default per-stream output ceiling, matching the M4 runners (256 MiB). */
+/** Default per-stream output ceiling, matching the runner ceiling (256 MiB). */
 export const LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES = 256 * 1024 * 1024;
 
 export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
@@ -83,7 +83,7 @@ const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
 
 /**
  * Workflow-context env vars injected into every live step process. Unlike the
- * M4 runners (which carry goal-iteration context), live wrappers carry the
+ * runner adapters (which carry goal-iteration context), live wrappers carry the
  * workflow run / step identity plus optional per-step agent/model/effort
  * selections. Present values are injected by Momentum and are not subject to the
  * `env_allow` allowlist.

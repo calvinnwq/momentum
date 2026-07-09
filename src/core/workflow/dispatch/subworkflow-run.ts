@@ -1,16 +1,16 @@
 /**
  * Async dispatched-step run path for the `subworkflow` executor family
- * (RC-4, NGX-497).
+ *.
  *
  * This is the daemon-dispatchable *producer* that makes `subworkflow` runnable by
  * the workflow lane. It is the async sibling of
  * `dispatch/external-apply-run.ts`'s
  * {@link executeAndReconcileDispatchedExternalApplyStep}: same "observe the work
- * -> terminalize the evidence -> let RC-2 finalize" shape and the same
+ * -> terminalize the evidence -> let the reconciliation seam finalize" shape and the same
  * single-finalization-owner / idempotent-re-entry discipline, but the work it
- * observes is a *child workflow run* rather than an M6 external write.
+ * observes is a *child workflow run* rather than an external-apply external write.
  *
- * The parent/child ownership boundary is the heart of RC-4: the parent step owns
+ * The parent/child ownership boundary is the heart of the subworkflow seam: the parent step owns
  * dispatch evidence; the child workflow run owns its own steps, gates, recovery,
  * and terminal state. This producer never reaches into the child's runtime — it
  * starts or attaches to the child run through the injected
@@ -26,31 +26,31 @@
  *     unfinished child;
  *   - a clean child terminal (`succeeded` / `failed`) *mirrors* the child's
  *     classification onto the dispatch scaffold as terminal executor evidence the
- *     RC-2 seam finalizes the parent step from (a child failure is a legitimate
+ *     the reconciliation seam finalizes the parent step from (a child failure is a legitimate
  *     mirrored terminal, NOT a process-level executor failure);
  *   - an ambiguous `canceled` / stuck `blocked` / unexpected child state *fails
- *     closed* to a `manual_recovery_required` terminal RC-2 parks for operator
+ *     closed* to a `manual_recovery_required` terminal the reconciliation seam parks for operator
  *     inspection rather than fabricating a clean parent terminal.
  *
- * Boundary discipline (so RC-2 stays the single finalization owner and a child run
+ * Boundary discipline (so the reconciliation seam stays the single finalization owner and a child run
  * is never duplicated):
  *
  *   - It acts only when a `<run>::<step>::dispatch` invocation exists. A step
- *     finalized by an M9 live wrapper (or never dispatched through the M10 lane)
+ *     finalized by a live wrapper (or never dispatched through the executor-loop lane)
  *     writes no such invocation, so this seam refuses it (`notDispatched`) and
  *     never starts a child run.
  *   - It never calls `finishWorkflowStep`, never writes `executor_invocations` /
  *     `executor_rounds` directly (the terminalize seam owns the scaffold rows),
- *     and never releases the dispatch lease (the RC-2 seam does, on terminal).
+ *     and never releases the dispatch lease (the reconciliation seam does, on terminal).
  *   - Idempotent on re-entry: once the dispatch invocation is terminal, a prior
  *     execution already mirrored the child terminal and recorded its evidence, so
  *     a re-entered tick NEVER re-starts the child run (no duplicate child run, no
- *     second terminalization). It only re-drives the idempotent RC-2
+ *     second terminalization). It only re-drives the idempotent the reconciliation seam
  *     reconciliation to converge the finalization. While the child is still in
  *     flight the invocation stays `running`, so the runner is consulted again on
  *     the next tick — the start-or-attach idempotency that keeps each re-check
  *     attached to the *same* child run lives in the injected runner, exactly as
- *     the M6 write path's idempotency lives in `executeExternalApply`.
+ *     the external-apply write path's idempotency lives in `executeExternalApply`.
  */
 
 import fs from "node:fs";
@@ -131,11 +131,11 @@ export type ExecuteAndReconcileDispatchedSubworkflowStepInput = {
 
 /**
  * Observe a dispatched `subworkflow` step's child run and finalize the parent step
- * through RC-2 when (and only when) the child reaches a terminal classification.
+ * through the reconciliation seam when (and only when) the child reaches a terminal classification.
  * The async analogue of {@link executeAndReconcileDispatchedExternalApplyStep}:
  * "observe the child -> map it -> terminalize the mirrored evidence -> reconcile",
  * with a defer branch for a child still in flight; see the module doc for the
- * boundary discipline (single finalization owner, M9-lane refusal, idempotent
+ * boundary discipline (single finalization owner, live-wrapper-lane refusal, idempotent
  * re-entry that never re-starts the child run, no premature parent finalize).
  */
 export async function executeAndReconcileDispatchedSubworkflowStep(
@@ -145,7 +145,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   const invocationId = deriveDispatchInvocationId(runId, stepId);
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation === undefined) {
-    // No phase-1 dispatch invocation: an M9 direct-finalize / never-dispatched
+    // No phase-1 dispatch invocation: a live-wrapper direct-finalize / never-dispatched
     // step. The seam owns only dispatched scaffolds, so it refuses and never
     // starts a child run — the structural guard against a double finalize.
     return {
@@ -163,7 +163,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   if (isTerminalExecutorInvocationState(invocation.state)) {
     // Idempotent re-entry: a prior execution already mirrored the child terminal
     // and recorded its evidence. NEVER re-start the child run (no duplicate child
-    // run / duplicate evidence); just re-drive the idempotent RC-2 reconciliation
+    // run / duplicate evidence); just re-drive the idempotent reconciliation
     // so a crashed prior finalize still converges the step / lease / run-state.
     const reconciled = tryReconcileDispatchedWorkflowStep({
       db,
@@ -241,7 +241,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     };
   }
 
-  // Mirror: record the child terminal as terminal evidence, then let RC-2 finalize
+  // Mirror: record the child terminal as terminal evidence, then let the reconciliation seam finalize
   // the parent step from it. terminalize and reconcile are each idempotent and own
   // their own transactions.
   const terminalize = terminalizeDispatchedExecutorInvocation({
@@ -275,7 +275,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
 }
 
 /**
- * Drive the idempotent RC-2 reconciliation, trapping a thrown reconcile so a
+ * Drive the idempotent reconciliation, trapping a thrown reconcile so a
  * recorded-but-unreconciled terminal can be retried on a later tick without losing
  * the durable evidence or releasing the held lease. Mirrors the same helper the
  * external-apply / synchronous run paths use.

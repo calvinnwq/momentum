@@ -1,6 +1,5 @@
 /**
- * Workflow gate decision domain for the workflow-first runtime (M10-08,
- * NGX-352).
+ * Workflow gate decision domain for the workflow-first runtime.
  *
  * This module owns the *pure* half of workflow gates and operator decisions: the
  * durable gate-type and target-scope vocabularies plus the delegated-policy /
@@ -90,7 +89,7 @@ export type GateDecisionMode = (typeof GATE_DECISION_MODES)[number];
 /**
  * The decision-relevant projection of a durable gate. The brain reads only these
  * fields; the full persisted gate record (ids, timestamps, evidence links) is
- * owned by the M10-08 persistence slice.
+ * owned by the executor-loop persistence slice.
  */
 export type GateDecisionInput = {
   /** Whether the gate is already settled (double-resolve / idempotency guard). */

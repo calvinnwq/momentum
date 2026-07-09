@@ -269,7 +269,7 @@ function buildUpdateIntentsFilter(options: CountUpdateIntentsOptions): {
 }
 
 /**
- * Mark a pending intent as applied with a required operator reason. M5 does
+ * Mark a pending intent as applied with a required operator reason. source-adapter does
  * not perform the external write — this records the operator's manual or
  * out-of-band action. Refuses to transition from a terminal status so prior
  * decisions are not silently overwritten.

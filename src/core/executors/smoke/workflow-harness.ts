@@ -1,6 +1,6 @@
 /**
  * Opt-in real coding-workflow harness smoke — planning and outcome
- * classification (NGX-372 / Adapter Test Coverage milestone).
+ * classification.
  *
  * `src/core/executors/smoke/linear-read.ts` owns the opt-in real Linear *read* smoke. This sibling
  * module owns the CI-safe decision logic for the opt-in real *coding-workflow

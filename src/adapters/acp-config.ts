@@ -1,7 +1,7 @@
 import path from "node:path";
 
 /**
- * ACP runner configuration introduced by NGX-283 (M4-04).
+ * ACP runner configuration.
  *
  * The `acp` runner profile is a smoke harness around the existing
  * `RunnerAdapter` boundary for ACP/acpx-style external agent runtimes.

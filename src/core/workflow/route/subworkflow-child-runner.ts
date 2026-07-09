@@ -1,12 +1,12 @@
 /**
  * Production start-or-attach child-run runner builder for the `subworkflow`
- * executor family (RC-4b, NGX-498).
+ * executor family.
  *
- * The RC-4 producer (`dispatch/subworkflow-run.ts`) drives a dispatched
+ * The the subworkflow seam producer (`dispatch/subworkflow-run.ts`) drives a dispatched
  * `subworkflow` step through an injected {@link DispatchedSubworkflowChildRunner}
  * — the parent step never reaches into the child's runtime; it starts or attaches
  * to the child run through the existing workflow-owned seams and observes that
- * child run's state. RC-4's integration proof built such a runner, but only as a
+ * child run's state. the subworkflow seam's integration proof built such a runner, but only as a
  * *test-only* helper that hardcoded `CODING_WORKFLOW_DEFINITION` as the child
  * recipe (`workflow-dispatch-subworkflow-child-run.test.ts`).
  *
@@ -17,8 +17,8 @@
  * closed when it does not resolve. This module owns exactly that — the keystone IO
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
  * and nothing else: it does not itself touch
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
- * (NGX-498) flipped `subworkflow` into that allowlist and wired the production
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; the production lane
+ * flipped `subworkflow` into that allowlist and wired the production
  * lane that injects this runner once the configured lane was proven.
  *
  * Discipline (the same pure-decision / injected-IO split
@@ -41,7 +41,7 @@
  *     observation the producer's mirror mapping consumes.
  *   - It never reaches into the child run's steps / gates / terminal state: the
  *     child run is a first-class `workflow_runs` row that owns its own lifecycle,
- *     exactly as the RC-4 parent/child ownership boundary requires. A genuinely
+ *     exactly as subworkflow parent/child ownership boundary requires. A genuinely
  *     unexpected failure (the child row vanishing after a successful start/attach,
  *     or an invalid run-start the parent facts should have precluded) rejects so a
  *     re-entered tick retries the still-non-terminal scaffold, and the entry-point

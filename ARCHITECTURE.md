@@ -10,7 +10,7 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration.
 The runtime centers on local SQLite state, per-run artifacts, explicit operator
 commands, and stable JSON / text envelopes.
 
-The executable entrypoint is intentionally thin. M11 leaves `src/cli.ts` as the
+The executable entrypoint is intentionally thin. The architecture contract keeps `src/cli.ts` as the
 stable parser and compatibility surface while command-family orchestration lives
 behind explicit `src/commands/` modules:
 
@@ -39,7 +39,7 @@ adapter, and no-mistakes executor / orchestrator wrappers.
 
 Use these docs for detailed behavior:
 
-- [README.md](README.md) and [docs/index.md](docs/index.md): public command
+- [README.md](README.md) and [docs/index.html](docs/index.html): public command
   usage and operator documentation.
 - [SPEC.md](SPEC.md): compact current runtime, workflow, external-apply,
   source-adapter, coding-workflow ownership, runtime-consolidation, and
@@ -55,9 +55,9 @@ not recreate `internal/`.
 There are no standing exceptions for repo-local `internal/` docs.
 Any future exception must be explicit, reviewed, and protected by the docs-boundary tests instead of introduced as an ad hoc file.
 
-## M11 Final Shape
+## Final Shape
 
-M11 changed structure, not semantics. The final shape is:
+The CLI architecture refactor changed structure, not semantics. The final shape is:
 
 ```text
 src/index.ts              process entrypoint only
@@ -70,7 +70,7 @@ src/shared/               cross-cutting helpers with no narrower domain owner
 src/core/<domain>/        workflow, executors, openclaw, goal, source, intent, daemon, repo, evidence
 ```
 
-The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
+The target source taxonomy is `src/commands/`, `src/renderers/`,
 `src/adapters/`, `src/config/`, `src/shared/`, and `src/core/<domain>/`.
 ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
 placeholder-free pending homes, and import guards; ARCH-03 populated
@@ -99,7 +99,7 @@ paths and existing policy gates.
 
 ## Command Module Contract
 
-Each command-family module introduced during M11 owns one coherent command
+Each command-family module owns one coherent command
 family, for example `workflow`, read-only status, goal, source, evidence,
 intent, or project. Daemon, recovery, worker, and doctor remain deliberate
 `src/cli.ts` compatibility surfaces, with their output contracts delegated to
@@ -120,9 +120,9 @@ A command module must not:
 - Reach into another command family's private parser or renderer.
 - Bypass existing policy, approval, recovery, or external-write gates.
 
-## M11 Import Boundaries
+## Import Boundaries
 
-After M11:
+The enforced import boundaries are:
 
 - `src/index.ts` only performs process bootstrap and loads `runCli` from
   `src/cli.ts`; bootstrap-only warning shims must run before `src/cli.ts`
@@ -172,13 +172,6 @@ domain behavior in `src/core/<domain>/`.
 Transitional exceptions require an explicit owner, exit condition, and guard
 test. Prefer moving the type or helper into an existing domain over creating a
 new shared bucket.
-
-## M11 Closeout
-
-The M11 migration shipped in deliberate, behavior-preserving slices: `NGX-411`,
-`NGX-412`, `NGX-413`, `NGX-414`, `NGX-415`, `NGX-416`, `NGX-417`, `NGX-418`, and
-`NGX-419`, which closes out M11 with final regression coverage, doctor marker
-advancement, and docs cleanup.
 
 ## Stability Rules
 

@@ -1,18 +1,18 @@
 /**
- * Runner profile model and resolver introduced by NGX-280 (M4-01).
+ * Runner profile model and resolver.
  *
  * Momentum core owns Goal/Iteration/Job state, the git transaction,
  * verification, and the artifact layout. A runner profile identifies how
  * the iteration prompt is executed and surfaces a safe summary for
- * operators. NGX-281 routes executing profiles through RunnerAdapter;
- * NGX-282 promotes `trusted-shell` to an executing profile backed by an
- * operator-trusted executable plus argv, with no implicit shell. NGX-283
- * adds an `acp` (ACP/acpx-style) runner profile: a thin smoke harness
+ * operators. Executing profiles route through RunnerAdapter;
+ * `trusted-shell` is an executing profile backed by an
+ * operator-trusted executable plus argv, with no implicit shell. The
+ * `acp` (ACP/acpx-style) runner profile is a thin smoke harness
  * around the existing adapter boundary with explicit runtime detection,
  * an optional auth/availability probe, and a distinct `runtime_unavailable`
  * error code so missing prerequisites are not conflated with command
- * failures or verification failures. NGX-284 adds the `momentum_policy`
- * resolver source, sitting between goal frontmatter and the built-in
+ * failures or verification failures. The `momentum_policy`
+ * resolver source sits between goal frontmatter and the built-in
  * default so a repo's `MOMENTUM.md` can set the default runner profile
  * without overriding goal-level or CLI-level choices.
  */

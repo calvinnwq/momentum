@@ -1,5 +1,5 @@
 /**
- * no-mistakes executor mirror — decision brain and identity (M10-07, NGX-351).
+ * no-mistakes executor mirror — decision brain and identity.
  *
  * The executor-loop contract (SPEC.md) pins the
  * `no-mistakes` family as a *mirror*, not a runner: it "mirrors no-mistakes

@@ -19,7 +19,9 @@ momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
 Reports CLI version, Node.js version, platform, the current scope label,
-and a compact daemon-readiness block. `--data-dir <path>` selects a
+and a compact daemon-readiness block.
+The JSON envelope keeps the historical top-level `milestone` key name for compatibility, but its value is the same current scope label printed as `scope:` in text output.
+`--data-dir <path>` selects a
 non-default Momentum home (otherwise `MOMENTUM_HOME` env / `~/.momentum`
 fallback). `--repo <path>` opts the run into loading the repo's
 `MOMENTUM.md` policy file for inspection; without `--repo`, the `policy`

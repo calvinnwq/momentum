@@ -1,6 +1,5 @@
 /**
- * Opt-in real coding-workflow harness *probe* execution layer (NGX-372 /
- * Adapter Test Coverage milestone).
+ * Opt-in real coding-workflow harness *probe* execution layer.
  *
  * `src/core/executors/smoke/workflow-harness.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
  * and the pure spawn-result mapping (`classifyProbeSpawnResult`) plus taxonomy

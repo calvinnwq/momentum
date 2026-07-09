@@ -1,14 +1,14 @@
 /**
- * Run-level composition for a single live workflow step (NGX-334, M9-03).
+ * Run-level composition for a single live workflow step.
  *
- * The M9-03 slice ships three primitives that are deliberately separate so each
+ * The live-step lane uses three primitives that are deliberately separate so each
  * stays a focused, independently testable unit:
  *
  *   - {@link runLiveWorkflowStep} (`live-step/orchestrator.ts`) drives the
  *     durable lease + step-state lifecycle around an executor. It is
  *     git-agnostic: it never touches the worktree.
  *   - {@link finalizeLiveWorkflowStepFromResultFile} (`live-step/finalize.ts`) is
- *     the M9 alias for the shared `shared/step-finalize.ts` pure git + verification
+ *     the live-step alias for the shared `shared/step-finalize.ts` pure git + verification
  *     transaction over the step's normalized result document. It owns no durable
  *     state.
  *   - `live-step/run-recovery.ts` durably enters manual recovery (the
@@ -16,8 +16,8 @@
  *     transaction or process-level dispatch surfaces a live recovery condition.
  *
  * This module is the seam that wires those three into the single managed-step
- * "advance" the M9 contract's "Git And Verification Transaction" section
- * describes, holding the caller's repo lock across the verification transaction:
+ * advance contract, holding the caller's repo lock across the verification
+ * transaction:
  *
  *   runLiveWorkflowStep             (lease + approved->running lifecycle)
  *   -> dispatch recovery             (for process-level executor failures)
@@ -28,7 +28,7 @@
  * into a terminal state from a *normalized* dispatch result —
  * `dispatch.ok === true`, either deferred while still leased or already durably
  * persisted. That gate is the boundary between the two recovery
- * worlds M9 keeps distinct:
+ * worlds live execution keeps distinct:
  *
  *   - A normalized dispatch (`ok: true`) means the runner produced a trustworthy
  *     result document: `success: true` commits the verified diff, `success:
@@ -112,7 +112,7 @@ export type AdvanceLiveWorkflowStepInput = {
   holder: string;
   /** Absolute ms timestamp at which the managed-step lease expires. */
   leaseExpiresAt: number;
-  /** The executor to run (an M9 live wrapper, or a fake in tests). */
+  /** The executor to run (a live wrapper, or a fake in tests). */
   executor: WorkflowStepExecutor;
   /** The executor input forwarded to the orchestrator after identity validation. */
   executorInput: WorkflowStepExecutorInput;

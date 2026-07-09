@@ -1,6 +1,5 @@
 /**
- * Workflow definition primitives for the workflow-first runtime (M10-01,
- * NGX-345).
+ * Workflow definition primitives for the workflow-first runtime.
  *
  * This module owns the *pure* `WorkflowDefinition` / `StepDefinition` shape,
  * a deterministic validator, and the built-in coding workflow definition. It
@@ -18,11 +17,11 @@
  *
  *   - `StepDefinition.executor` names an executor *family* only. The rich
  *     per-step executor configuration (agent / model / effort / policy) is the
- *     `ExecutorDefinition` record owned by M10-03 (NGX-347); naming the family
+ *     `ExecutorDefinition` record owned by the executor-loop spine; naming the family
  *     keeps a step "configured" without pulling that schema forward.
- *   - `StepDefinition.kind` reuses the canonical M7 `WorkflowStepKind`
+ *   - `StepDefinition.kind` reuses the canonical workflow-run `WorkflowStepKind`
  *     vocabulary so the built-in coding workflow stays wire-compatible with the
- *     existing `workflow_steps.kind` column and M7/M8 operator controls.
+ *     existing `workflow_steps.kind` column and workflow-run/operator-recovery operator controls.
  *     Broadening the kind vocabulary for genuinely arbitrary steps is a
  *     deliberate future concern, not part of this slice.
  *   - The built-in coding workflow definition is shipped as data/config, not a
@@ -298,7 +297,7 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
 
 /**
  * The canonical OpenClaw coding workflow expressed as a built-in
- * {@link WorkflowDefinition}. Steps mirror the M7 `WorkflowStepKind` order;
+ * {@link WorkflowDefinition}. Steps mirror the workflow-run `WorkflowStepKind` order;
  * executor families follow the `step -> executor` mapping in
  * SPEC.md, choosing one option where the
  * contract offers a pair:
@@ -308,10 +307,10 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *   - postflight     -> one-shot      (a single bounded review pass)
  *   - no-mistakes    -> no-mistakes   (specialist review-gate mirror)
  *   - merge-cleanup  -> script        (deterministic local cleanup; remote git
- *                                       stays out of M10 scope)
+ *                                       stays out of executor-loop scope)
  *   - linear-refresh -> external-apply (operator-mediated external write;
  *                                       daemon-dispatchable through the
- *                                       M6 safety-gated adapter)
+ *                                       external-apply safety-gated adapter)
  *
  * These families can evolve through explicit workflow-runtime design, but
  * compatibility runners such as GNHF must report through the native `goal-loop`

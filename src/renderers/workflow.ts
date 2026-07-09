@@ -189,7 +189,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     typeof preview.route["profile"] === "string"
       ? preview.route["profile"]
       : "(none)";
-  // The per-step route.steps selections (NGX-510) are surfaced alongside the
+  // The per-step route.steps selections are surfaced alongside the
   // run-level profile so an operator reading the default (non-JSON) preview can
   // audit which per-step harness/model/effort selections are default and which were
   // changed before approving. The lines are computed by the command from the same
@@ -831,7 +831,7 @@ export function emitWorkflowRunMonitorFailure(
 }
 
 /**
- * Frozen supervisor-envelope enums for `workflow run watch` (NGX-549 / SUP-02).
+ * Frozen supervisor-envelope enums for `workflow run watch`.
  *
  * `disposition`, `phase`, `cleanup`, and `nextAction.code` reuse the monitor
  * vocabularies (`WORKFLOW_MONITOR_*`). The watch-only renderer enums below are
@@ -955,7 +955,7 @@ export function emitWorkflowRunWatchFailure(
 }
 
 /**
- * Write one SUP-05 (NGX-552) watch-stream record as a single newline-delimited
+ * Write one watch-stream record as a single newline-delimited
  * JSON line to stdout. The stream driver calls this once per record so the JSONL
  * wire shape stays owned by the renderer layer and the command module never
  * touches the raw writer. Each record serializes to exactly one line - the driver

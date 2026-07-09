@@ -217,7 +217,7 @@ export type GoalStatusDaemonSummary = {
 };
 
 /**
- * Goal-scoped view of NGX-276 stale-lease recovery. Surfaces (a) the count and
+ * Goal-scoped view of stale-lease recovery. Surfaces (a) the count and
  * latest timestamp of `repo_lock.recovered` / `job.recovered` events recorded
  * for this goal so prior auto-recovery actions are visible to operators, and
  * (b) the current count of repo locks / claimed or running goal_iteration jobs
@@ -250,7 +250,7 @@ export type GoalStatusEvidenceSummary = GoalEvidenceSummary;
 
 /**
  * Per-goal pending external update intent summary surfaced through `status`
- * and `handoff` (NGX-293 / M5-06). Mirrors the rollup pending-intent shape
+ * and `handoff`. Mirrors the rollup pending-intent shape
  * but is scoped to the goal under inspection and uses the same default stale
  * TTL (30 days) so operators see the same `stale` semantics on both surfaces
  * without having to re-derive ageMs.

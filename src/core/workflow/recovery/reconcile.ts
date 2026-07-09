@@ -1,10 +1,10 @@
 /**
  * Auto-set wiring for the run-scoped manual-recovery flag + artifact
- * (NGX-327, M8-04).
+ *.
  *
  * The symmetric sibling of {@link ../run/recovery.ts}'s
  * `clearWorkflowRunManualRecoveryGuarded`: where the guarded clear re-derives
- * the M7 monitor state and *clears* the durable `needs_manual_recovery` flag
+ * the workflow-run monitor state and *clears* the durable `needs_manual_recovery` flag
  * only when no blocking condition remains, this reconcile re-derives the same
  * monitor state and *sets* the durable flag (and renders the per-run
  * `recovery.md` artifact) when `deriveWorkflowMonitorState` classifies a
@@ -20,7 +20,7 @@
  *
  * - Reconcile only ever *sets*. It never clears, even when the substrate no
  *   longer shows a blocking condition — clearing stays explicit and operator-
- *   driven per the NGX-327 safety contract ("Do not auto-clear recovery from
+ *   driven per the recovery safety contract ("Do not auto-clear recovery from
  *   elapsed time alone"). An already-flagged run with a now-resolved substrate
  *   is reported `no_recovery_required` with the durable flag left untouched.
  * - The advisory-only `monitor_drift_stale` code never triggers a set: it is a
@@ -114,7 +114,7 @@ export type ReconcileWorkflowRunManualRecoveryResult =
     };
 
 /**
- * Re-derive the M7 monitor state for a run and, when it classifies a blocking
+ * Re-derive the workflow-run monitor state for a run and, when it classifies a blocking
  * recovery code, set the durable `needs_manual_recovery` flag (reason sourced
  * from the monitor recovery message) and render the run-scoped `recovery.md`.
  * Returns `no_recovery_required` when no blocking condition is present —
@@ -236,7 +236,7 @@ export function reconcileWorkflowRunManualRecovery(
  * Map the run's best-effort evidence links into bounded artifact pointers. Only
  * source, type, and an artifact-path / record-id reference flow through — never
  * raw summaries, transcripts, or secrets — keeping the rendered artifact within
- * the NGX-327 no-secrets contract.
+ * the recovery no-secrets contract.
  */
 function evidencePointersFromDetail(
   detail: WorkflowRunDetail

@@ -1,5 +1,5 @@
 /**
- * Single-shot executor adapter — decision brain and identity (M10-06, NGX-350).
+ * Single-shot executor adapter — decision brain and identity.
  *
  * The executor-loop contract (SPEC.md) pins two
  * single-invocation executor families that this module serves together:
@@ -52,7 +52,7 @@
  *     non-absolute artifact / script paths.
  *
  * The recovery taxonomy reuses the existing vocabulary rather than inventing a
- * parallel one: the execution-time codes are exactly the M9
+ * parallel one: the execution-time codes are exactly the live-wrapper
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}, and the unsafe-finalize codes are the
  * same strings `goal-loop/executor.ts` preserves for an unsafe finalize outcome,
  * plus `invalid_input` for rejected mechanism configuration or launch
@@ -106,7 +106,7 @@ export function isSingleShotExecutorFamily(
 /**
  * Recovery codes that mark a `blocked` outcome: a durable non-terminal blockage
  * resolvable by changing the environment, credentials, or external state. These
- * are the M9 live-wrapper runtime/credential codes — the runtime is not the
+ * are the live-wrapper runtime/credential codes — the runtime is not the
  * step's fault, so the step blocks rather than fails.
  */
 export const SINGLE_SHOT_BLOCKED_RECOVERY_CODES = [
@@ -116,7 +116,7 @@ export const SINGLE_SHOT_BLOCKED_RECOVERY_CODES = [
 
 /**
  * Recovery codes that mark a `failed` outcome: a genuine execution failure of
- * the bounded unit itself. These are the M9 live-wrapper execution codes minus
+ * the bounded unit itself. These are the live-wrapper execution codes minus
  * the runtime/credential codes above.
  */
 export const SINGLE_SHOT_FAILED_RECOVERY_CODES = [
@@ -147,7 +147,7 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
 /**
  * The full single-shot recovery taxonomy: every code a single invocation can
  * record, partitioned by classification bucket. The execution-time codes
- * (`blocked` + `failed` buckets) are exactly the M9
+ * (`blocked` + `failed` buckets) are exactly the live-wrapper
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}; the manual-recovery codes are the
  * unsafe-finalize vocabulary shared with the goal-loop adapter, plus
  * `invalid_input` for rejected single-shot mechanism configuration and launch
@@ -171,7 +171,7 @@ const MANUAL_RECOVERY_SET: ReadonlySet<string> = new Set(
   SINGLE_SHOT_MANUAL_RECOVERY_CODES
 );
 
-// The execution-time codes must stay a subset of the M9 live-wrapper taxonomy so
+// The execution-time codes must stay a subset of the live-wrapper taxonomy so
 // a wrapper failure always has a single-shot classification. This is a
 // compile-time assertion: every live-wrapper code is a single-shot code. The
 // tuple wrapping keeps the `extends` check non-distributive, so a *single*
@@ -689,7 +689,7 @@ export type PlanSingleShotRoundArtifactsInput = {
 
 /**
  * Project a finished single-shot round's evidence into the durable
- * {@link ExecutorArtifactRecord} rows the M10-03 persistence layer
+ * {@link ExecutorArtifactRecord} rows the executor-loop persistence layer
  * (`insertExecutorArtifact`) writes — the contract "Required Artifacts" / ticket
  * "artifacts" + "bounded logs" half of the round's per-round evidence. `logs` rows
  * are derived from the round-start record's frozen `logPaths` (the orchestrator owns
@@ -803,7 +803,7 @@ export type PlanSingleShotRoundCheckpointsInput = {
 
 /**
  * Project a finished single-shot round's major executor stages into the durable
- * {@link ExecutorCheckpointRecord} stream the M10-03 persistence layer
+ * {@link ExecutorCheckpointRecord} stream the executor-loop persistence layer
  * (`insertExecutorCheckpoint`) writes — the contract "Round Lifecycle" step 7
  * "Capture ... checkpoints ..." for the single-shot families. These are the coarse
  * stages Momentum itself drives around the bounded mechanism, so they are derived

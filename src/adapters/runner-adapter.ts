@@ -1,5 +1,5 @@
 /**
- * Runner adapter boundary introduced by NGX-281 (M4-02).
+ * Runner adapter boundary.
  *
  * `RunnerAdapter` is the single dispatch seam shared by foreground and queued
  * execution. Momentum core continues to own Goal/Iteration/Job state, the

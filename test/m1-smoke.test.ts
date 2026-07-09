@@ -183,6 +183,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--data-dir <path>] [--json]",
         "momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--implementation-engine <engine>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]",
         "momentum workflow run preview-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--implementation-engine <engine>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]",
+        "momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]",
         "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent get <intent-id> [--data-dir <path>] [--json]",
         "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",

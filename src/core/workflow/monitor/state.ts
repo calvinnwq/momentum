@@ -1,10 +1,10 @@
 /**
- * Pure workflow monitor / recovery reducer introduced by NGX-316 (M7-04).
+ * Pure workflow monitor / recovery reducer.
  *
  * Derives a normalized monitor / recovery view from the durable substrate
  * (steps, leases, advisory monitor snapshot, last checkpoint) without touching
  * SQLite, the file system, or executors. The reducer encodes the contract
- * invariant pinned in SPEC.md and the M7 milestone
+ * invariant pinned in SPEC.md and the workflow-run milestone
  * doc: **terminal ledger / imported evidence beats stale monitor snapshots**,
  * and a workflow may not be reported as active without a live lease or
  * checkpoint.
@@ -33,7 +33,7 @@
  * drift is present — the drift is captured in `monitorDrift` instead.
  *
  * Recovery generation (rendering the per-run `recovery.md` artifact) lives in a
- * follow-up M7 slice. This module owns the classification only.
+ * follow-up workflow-run slice. This module owns the classification only.
  */
 
 import {
@@ -575,7 +575,7 @@ function leaseKindForStep(
   _step: { kind: WorkflowStepKind } | WorkflowStepRecord
 ): WorkflowLeaseKind {
   // Every coding-workflow step dispatches through the managed-step lease in
-  // the M7 contract; monitor / dispatch leases live around the step boundary,
+  // the workflow-run contract; monitor / dispatch leases live around the step boundary,
   // not on the step itself.
   return "managed-step";
 }

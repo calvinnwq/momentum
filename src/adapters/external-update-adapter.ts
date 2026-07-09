@@ -1,8 +1,8 @@
 /**
- * External update adapter boundary introduced by NGX-296 (M6-01).
+ * External update adapter boundary.
  *
  * This module defines the write-side adapter boundary that the policy-gated
- * external apply path in M6 layers on top of the M5 read adapter. It is
+ * external apply path layers on top of the read adapter. It is
  * intentionally narrow:
  *
  *  - Defines the durable input shape an external apply needs (a pending
@@ -15,9 +15,9 @@
  *    in later slices can key off Linear-side artifacts alone.
  *
  * This boundary deliberately exposes only `preview`; no code path here can
- * perform an external mutation. The NGX-297 Linear write client consumes this
- * preview separately, audit/claim surfaces land in NGX-299 before CLI execution
- * in NGX-298, and reconciliation result codes are owned by NGX-300 and
+ * perform an external mutation. The Linear write client consumes this
+ * preview separately, audit/claim surfaces sit in front of CLI execution,
+ * and reconciliation result codes are owned by post-apply reconcile and
  * intentionally absent from this taxonomy.
  */
 
@@ -168,7 +168,7 @@ export function getExternalUpdateAdapter(
 /**
  * Resolve the adapter that would handle the given intent, or undefined if the
  * intent's adapter kind is not registered or the intent type is not supported
- * by that adapter. The first eligible adapter wins; in M6 the only registered
+ * by that adapter. The first eligible adapter wins; the only registered
  * external update adapter is Linear with `source_satisfied` and `status_update`
  * support.
  */

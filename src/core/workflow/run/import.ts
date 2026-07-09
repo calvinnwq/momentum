@@ -1,16 +1,16 @@
 /**
- * WorkflowRun import normalizer for NGX-314 (M7-02 import current
- * agent-workflow plans).
+ * WorkflowRun import normalizer for current
+ * agent-workflow plans.
  *
  * Reads a `.agent-workflows/<run-id>/` directory and normalizes the durable
  * artifacts (`plan.json`, `ledger.jsonl`, `approval-*.json`, advisory
- * `monitor.json`) into the M7 `WorkflowRun` / `workflow_steps` /
+ * `monitor.json`) into the workflow-run `WorkflowRun` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` shape pinned by
  * SPEC.md.
  *
  * This module is pure: it does not touch SQLite, does not mutate the source
  * directory, and does not call external services. Persistence and the CLI
- * surface that consumes this normalizer live in follow-up M7 slices.
+ * surface that consumes this normalizer live in follow-up workflow-run slices.
  *
  * Stable contracts this slice locks in:
  *   - `monitor.json` is treated strictly as advisory: terminal ledger /

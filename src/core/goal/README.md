@@ -25,6 +25,6 @@ the folder now carries the domain (`goal-init.ts` → `init.ts`, `goal-logs.ts` 
 
 Goal specification parsing (`spec.ts`) and its exported `GoalSpec*` shapes
 (`types.ts`) moved here from the former flat `src/goal-spec.ts` root module under
-ARCH-06 / NGX-450 type placement, dropping the redundant `goal-` prefix. The
+the type-placement slice, dropping the redundant `goal-` prefix. The
 parser keeps its private YAML helpers and types local and imports the public
 shapes from `./types.js`.

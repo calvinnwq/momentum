@@ -43,8 +43,8 @@ repo architecture contract and import boundaries. [`SPEC.md`](SPEC.md) is the
 current runtime/spec anchor. [`VISION.md`](VISION.md) is the source of truth for
 Momentum's product and engineering opinions.
 
-## Current milestone
-Milestone 11 (CLI Architecture Refactor) is the most recently closed structure milestone. Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/worker/doctor compatibility home; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`. Public command semantics remain frozen while import-boundary guardrails preserve that final shape. The `doctor --json` marker reports `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. Long-form milestone history lives in Obsidian `/Workspaces/Momentum`.
+## Architecture status
+The CLI architecture contract is stable. Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/worker/doctor compatibility home; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`. Public command semantics remain frozen while import-boundary guardrails preserve that shape. The `doctor --json` marker reports `CLI architecture: parser dispatch, command families, renderers, adapters`. Long-form milestone history lives in Obsidian `/Workspaces/Momentum`.
 
 Workflow-first runtime, executor-loop, coding-workflow ownership,
 external-apply, source-adapter, runtime-consolidation, and adapter-test

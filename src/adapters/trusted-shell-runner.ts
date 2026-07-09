@@ -1,5 +1,5 @@
 /**
- * Trusted-shell runner introduced by NGX-282 (M4-03).
+ * Trusted-shell runner.
  *
  * Runs the configured `trusted_shell.command` (with `args`) as an explicitly
  * trusted child process: there is no sandbox, no privilege drop, and the

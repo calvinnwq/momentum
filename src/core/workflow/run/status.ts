@@ -1,6 +1,6 @@
 /**
  * Read-only loaders for `workflow status`, `workflow handoff`, and
- * `workflow run monitor` (NGX-317 / NGX-328).
+ * `workflow run monitor`.
  *
  * Reads durable substrate rows from `workflow_runs` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` and composes them with the pure
@@ -11,9 +11,9 @@
  * consume.
  *
  * No SQLite mutation, no external writes. Evidence linkage prefers the durable
- * typed `evidence_records.run_id` / `step_id` columns (NGX-329); legacy rows
+ * typed `evidence_records.run_id` / `step_id` columns; legacy rows
  * with null linkage still fall back to best-effort artifact-path matching
- * against `evidence_records.artifact_path` so pre-NGX-329 evidence keeps
+ * against `evidence_records.artifact_path` so evidence recorded before typed linkage keeps
  * surfacing.
  */
 import type { MomentumDb } from "../../../adapters/db.js";
@@ -168,7 +168,7 @@ export type WorkflowRunDetail = {
   monitor: WorkflowMonitorState;
   evidence: WorkflowEvidenceLink[];
   /**
-   * Durable workflow / step / executor gates for this run (M10-08, NGX-352),
+   * Durable workflow / step / executor gates for this run,
    * oldest first, open and resolved alike. Surfacing them here makes the run's
    * approval-required / operator-decision / manual-recovery pauses explicit and
    * inspectable in `workflow status`, `workflow handoff`, and every other
@@ -363,7 +363,7 @@ function listEvidenceLinksForRun(
   db: MomentumDb,
   run: WorkflowRunRow
 ): WorkflowEvidenceLink[] {
-  // Prefer the durable typed run_id linkage (NGX-329). Legacy rows ingested
+  // Prefer the durable typed run_id linkage. Legacy rows ingested
   // before the parser populated run_id keep their null linkage, so fall back
   // to best-effort artifact-path matching under the run dir for those rows
   // only when sourceArtifactPath is known.

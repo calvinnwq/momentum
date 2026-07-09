@@ -122,7 +122,7 @@ describe("workflow command family extraction", () => {
       result.stderr
         .trimEnd()
         .endsWith(
-          "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration."
+          "Default goal start enqueues a goal_iteration job for a worker; pass --foreground to run the iteration in the current process."
         )
     ).toBe(true);
   });

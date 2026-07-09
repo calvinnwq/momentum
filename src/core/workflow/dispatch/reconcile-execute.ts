@@ -1,10 +1,10 @@
 /**
- * Side-effecting twin of the RC-2 workflow-step reconciliation decider (NGX-480).
+ * Side-effecting twin of the pure workflow-step reconciliation decider.
  *
  * `dispatch/reconcile.ts` owns the *pure* half — the deterministic decision that
  * maps a dispatched step's terminal executor-invocation state to a finalization
  * outcome. This module owns the durable half: the single production seam the
- * runtime-consolidation plan names RC-2. It is to `dispatch/reconcile.ts` exactly
+ * runtime-consolidation plan names the reconciliation seam. It is to `dispatch/reconcile.ts` exactly
  * what `dispatch/execute.ts` is to `dispatch.ts`.
  *
  * The seam reads the deterministic `<run>::<step>::dispatch` invocation the
@@ -26,14 +26,14 @@
  *   - **not_terminal**: the bounded executor session is still in progress; the
  *     seam defers (no writes, the dispatch lease stays held).
  *
- * Two structural guarantees from the runtime-consolidation plan ("The M9 / M10
+ * Two structural guarantees from the runtime-consolidation plan ("The live-wrapper / executor-loop
  * step-finalization boundary"):
  *
  *   1. **Single owner, keyed on the dispatch id.** The seam acts only when a
- *      `<run>::<step>::dispatch` invocation exists. A step finalized by an M9 live
+ *      `<run>::<step>::dispatch` invocation exists. A step finalized by an live
  *      wrapper writes no executor invocation, so the seam refuses it
- *      (`not_dispatched`) and writes nothing — there is no path where both M9
- *      direct-finalize and M10 reconciliation finalize the same step.
+ *      (`not_dispatched`) and writes nothing — there is no path where both live-wrapper
+ *      direct-finalize and executor-loop reconciliation finalize the same step.
  *   2. **Idempotent on re-entry.** A second reconciliation of the same terminal
  *      evidence recognises the already-terminal step and makes no second
  *      finalization: the immutable terminal record (state / `finished_at` /
@@ -73,7 +73,7 @@ import {
  * returns without explaining what it did to a dispatched step.
  */
 export const WORKFLOW_RECONCILE_RESULT_STATUS = {
-  /** No `<run>::<step>::dispatch` invocation: not this seam's step (M9 lane). */
+  /** No `<run>::<step>::dispatch` invocation: not this seam's step (live-wrapper lane). */
   notDispatched: "reconcile_not_dispatched",
   /** The bounded executor session is still in progress; left running. */
   deferred: "reconcile_deferred",
@@ -107,7 +107,7 @@ export type ReconcileDispatchedWorkflowStepInput = {
 /**
  * `result_digest` prefix stamped on a step this seam finalizes, so durable state
  * carries an unmistakable marker that the production reconciliation seam — not an
- * operator, not the dogfood stand-in, not an M9 live wrapper — closed the step
+ * operator, not the dogfood stand-in, not a live wrapper — closed the step
  * from terminal executor evidence.
  */
 export const RECONCILE_RESULT_DIGEST_PREFIX = "rc2-reconcile";
@@ -121,7 +121,7 @@ const RECONCILE_RECOVERY_RECOMMENDED_ACTION = "clear_recovery";
 
 /**
  * Reconcile a dispatched workflow step from its terminal executor evidence. The
- * single production owner of the M10 dispatch lane's step finalization; see the
+ * single production owner of the executor-loop dispatch lane's step finalization; see the
  * module doc for the per-action effects, lease lifecycle, and the two structural
  * guarantees (single-owner, idempotent).
  */
@@ -133,7 +133,7 @@ export function reconcileDispatchedWorkflowStep(
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation === undefined) {
     // No phase-1 dispatch invocation: this step was never dispatched through the
-    // M10 lane (an M9 live-wrapper / imported step, which writes no executor
+    // executor-loop lane (a live-wrapper / imported step, which writes no executor
     // rows). The seam owns only dispatched steps, so it refuses and writes
     // nothing — the structural guard against a double finalize.
     return {

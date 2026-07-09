@@ -240,7 +240,7 @@ export type RecoverStaleClaimedGoalIterationJobsResult = {
  *
  * Safety guards (any failing → skipped, never re-pended):
  *   - `state = 'running'` → repo writes may have happened; route to manual
- *     recovery via `job_running`. M3-05 keeps dirty/unknown states out of the
+ *     recovery via `job_running`. The recovery path keeps dirty/unknown states out of the
  *     auto-recovery path.
  *   - An active daemon record has `active_job_id = job.id` → live owner;
  *     skipped with `daemon_active` (terminal-state daemons do NOT block).

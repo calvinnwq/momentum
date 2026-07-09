@@ -1,18 +1,18 @@
 /**
- * Dispatched executor-evidence terminalization seam (RC-5b, NGX-492).
+ * Dispatched executor-evidence terminalization seam.
  *
  * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the
  * `<run>::<step>::dispatch` executor invocation (`running`) and its first round
  * (`pending`) with every evidence field empty, and holds the dispatch lease. The
- * RC-2 reconciliation seam (`dispatch/reconcile-execute.ts`) then finalizes the
+ * reconciliation seam (`dispatch/reconcile-execute.ts`) then finalizes the
  * workflow step from that invocation's *terminal* executor state. Nothing in
  * production bridged the two: no code drove the scaffold's invocation/round from
  * `running`/`pending` to a terminal state from a real executor result, so the
- * RC-2 seam always deferred (the invocation stayed `running`).
+ * the reconciliation seam always deferred (the invocation stayed `running`).
  *
  * This module owns that bridge — the "produce real terminal executor evidence"
- * half RC-2 named as its remaining prerequisite. Given a finished
+ * half the reconciliation seam named as its remaining prerequisite. Given a finished
  * {@link WorkflowStepExecutorDispatchResult} from running the dispatched step's
  * live-wrapper executor, it:
  *
@@ -24,19 +24,19 @@
  *
  * It deliberately never calls `finishWorkflowStep` or releases the dispatch
  * lease: per `executor-loop.md` ("Core Boundary: the daemon, not the executor,
- * decides step progress") and the runtime-consolidation plan's M9/M10 boundary,
- * the executor adapter owns per-round evidence only, and the RC-2 reconciliation
+ * decides step progress") and the runtime-consolidation plan's live-wrapper/executor-loop boundary,
+ * the executor adapter owns per-round evidence only, and the reconciliation
  * seam stays the *single* owner of the workflow-step finalization. This module
- * produces the evidence; RC-2 consumes it. There is no second finalization owner.
+ * produces the evidence; the reconciliation seam consumes it. There is no second finalization owner.
  *
  * Mapping discipline (so an unconfigured wrapper / adapter fails honestly,
  * never as a fake success):
  *
  *   - A clean executor terminal (`succeeded` / `failed`) records a matching clean
- *     terminal invocation the RC-2 decider maps to a clean workflow-step terminal.
+ *     terminal invocation the reconciliation seam decider maps to a clean workflow-step terminal.
  *   - A process-level executor failure (`ok: false` — e.g. the honest
  *     `runtime_unavailable` an unconfigured live wrapper returns, a timeout, a
- *     missing result document) records `manual_recovery_required`, so RC-2 parks
+ *     missing result document) records `manual_recovery_required`, so the reconciliation seam parks
  *     the run for operator recovery rather than fabricating a clean terminal.
  *   - An unexpected `skipped` executor terminal (skipping is a pre-dispatch
  *     planning decision, never a dispatched-step outcome) also routes to manual
@@ -67,10 +67,10 @@ import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
  * implies for a dispatched step's scaffold invocation / round.
  *
  *   - `clean_terminal`: the bounded session reached a clean `succeeded` / `failed`
- *     terminal the RC-2 decider maps to a clean workflow-step terminal.
+ *     terminal the reconciliation seam decider maps to a clean workflow-step terminal.
  *   - `manual_recovery`: the session could not produce a clean terminal (a
  *     process-level failure, or an unexpected `skipped`), so the evidence is
- *     recorded `manual_recovery_required` and RC-2 parks the run for recovery.
+ *     recorded `manual_recovery_required` and the reconciliation seam parks the run for recovery.
  */
 export type DispatchedExecutorTerminalizationPlan =
   | {
@@ -172,13 +172,13 @@ export type TerminalizeDispatchedExecutorResult = {
 /**
  * Record the dispatched step's executor result as terminal evidence on the
  * `<run>::<step>::dispatch` scaffold — the invocation and its first round — so the
- * RC-2 reconciliation seam can finalize the workflow step from it. Writes the
+ * reconciliation seam can finalize the workflow step from it. Writes the
  * invocation/round transitions in one `BEGIN IMMEDIATE` transaction so a mid-write
  * failure can never leave a terminal invocation over a non-terminal round (or the
  * reverse). Idempotent: once the invocation is terminal, a re-entry preserves the
  * immutable evidence and writes nothing.
  *
- * Never finalizes the workflow step or touches the dispatch lease: the RC-2 seam
+ * Never finalizes the workflow step or touches the dispatch lease: the reconciliation seam
  * remains the single owner of step finalization (`executor-loop.md` Core Boundary).
  */
 export function terminalizeDispatchedExecutorInvocation(
@@ -189,7 +189,7 @@ export function terminalizeDispatchedExecutorInvocation(
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation === undefined) {
     // No phase-1 dispatch invocation: this step was never dispatched through the
-    // M10 lane. The seam owns only dispatched scaffolds, so it writes nothing.
+    // executor-loop lane. The seam owns only dispatched scaffolds, so it writes nothing.
     return {
       status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
       detail: invocationId

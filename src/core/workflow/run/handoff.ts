@@ -1,6 +1,6 @@
 /**
  * Machine-readable next-action envelope for OpenClaw coding-workflow runs
- * (NGX-317, M7-05).
+ *.
  *
  * Composes {@link loadWorkflowRunDetail} with the monitor reducer to produce a
  * stable, read-only envelope OpenClaw tooling can consume to decide the next

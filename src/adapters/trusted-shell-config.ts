@@ -1,7 +1,7 @@
 import path from "node:path";
 
 /**
- * Trusted-shell runner configuration introduced by NGX-282 (M4-03).
+ * Trusted-shell runner configuration.
  *
  * Momentum core owns Goal/Iteration/Job state, the git transaction,
  * verification, and the artifact layout. The trusted-shell runner profile

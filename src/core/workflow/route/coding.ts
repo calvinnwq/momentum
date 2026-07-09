@@ -1,9 +1,8 @@
 /**
- * Native coding route/config selection for the Momentum-native coding workflow
- * (NGX-510 / NGX-568).
+ * Native coding route/config selection for the Momentum-native coding workflow.
  *
- * NGX-508 (`workflow run start-coding`) and NGX-509 (`workflow run
- * preview-coding`) gave operators an explicit native door and a read-only frozen
+ * `workflow run start-coding` and `workflow run
+ * preview-coding` gave operators an explicit native door and a read-only frozen
  * plan, but the planned implementation route and harness/model/effort selections
  * were not yet explicit: the run-level `route.profile` was the only operator
  * route input, and nothing per-step. CWFP already lets an operator inspect and

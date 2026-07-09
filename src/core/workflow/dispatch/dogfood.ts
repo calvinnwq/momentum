@@ -1,5 +1,5 @@
 /**
- * Dogfood terminalize-and-continue dispatch wrapper (M10-09b, NGX-391).
+ * Dogfood terminalize-and-continue dispatch wrapper.
  *
  * The production workflow-lane dispatcher (`dispatch/execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
@@ -7,7 +7,7 @@
  * and *holds* the dispatch lease while an executor lane drives the round to terminal
  * out of band. Before the daemon-default live-wrapper lane landed, nothing
  * terminalized the step inside a single managed loop, so the scheduler could only
- * dispatch the *first* runnable step per process — the NGX-390 proof needed three
+ * dispatch the *first* runnable step per process — the dogfood proof needed three
  * separate `daemon start` invocations plus a manual `update-step` to advance past
  * preflight.
  *
@@ -36,7 +36,7 @@
  * echoed back untouched. Terminalizing a parked run to `succeeded` would mask a
  * manual-recovery condition, the one unsafe move this gate exists to prevent.
  *
- * RC-2 status (NGX-480): the production owner of post-scaffold `workflow_steps`
+ * Reconciliation status: the production owner of post-scaffold `workflow_steps`
  * finalization is now `reconcileDispatchedWorkflowStep`
  * (`dispatch/reconcile-execute.ts`), built on the pure decider
  * `planWorkflowStepReconciliation` (`dispatch/reconcile.ts`); it finalizes a
@@ -47,8 +47,8 @@
  * production terminal path. It is retained — not deleted — because it remains the
  * cheap opt-in way to exercise single-process multi-dispatch without a configured
  * daemon live-wrapper profile, spawning an agent, running verification, or
- * writing anything external. RC-5's fake demotion has landed — production
- * dispatch no longer resolves to shipped fake successes by default — and RC-5b
+ * writing anything external. the real-adapter seam's fake demotion has landed — production
+ * dispatch no longer resolves to shipped fake successes by default, and the dispatched-step producer
  * has wired configured daemon profiles to real terminal executor evidence, while
  * unconfigured adapters still refuse honestly with `runtime_unavailable`.
  */
@@ -151,7 +151,7 @@ export function resolveDaemonWorkflowDispatch(
 /**
  * Wrap a base {@link WorkflowStepDispatch} (the production
  * `executeWorkflowStepDispatch`) so a successfully-dispatched step is immediately,
- * safely terminalized — the terminalize-and-continue fixture the NGX-391 dogfood
+ * safely terminalized — the terminalize-and-continue fixture the dogfood harness
  * drives through a single daemon loop. The base dispatch's result status is
  * returned unchanged; the terminalization is a durable side effect layered after
  * it, gated on {@link shouldTerminalizeAfterDispatch}.

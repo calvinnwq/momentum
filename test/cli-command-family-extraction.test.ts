@@ -81,7 +81,7 @@ describe("goal/source/evidence/project/intent command family extraction", () => 
 
   it("renders the shared Momentum help block for text-mode usage errors", async () => {
     const footer =
-      "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration.";
+      "Default goal start enqueues a goal_iteration job for a worker; pass --foreground to run the iteration in the current process.";
     const cases: Array<{ args: string[]; message: string }> = [
       {
         args: ["source"],

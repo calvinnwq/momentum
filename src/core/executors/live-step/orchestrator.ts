@@ -1,13 +1,13 @@
 /**
- * Live workflow-step orchestrator introduced by NGX-333 (M9-02).
+ * Live workflow-step orchestrator.
  *
- * Iterations 1-4 of M9-02 added the caller-side building blocks: the live
- * execution core (`live-step-wrapper.ts`), the M7 executor bridge
+ * The caller-side building blocks are the live execution core
+ * (`live-step-wrapper.ts`), the executor bridge
  * (`live-step/executor.ts`), the durable `workflow_leases` lifecycle primitives
  * (`src/core/workflow/leases.ts`), and the durable `workflow_steps` transition primitives
  * (`src/core/workflow/step/transitions.ts`). This module is the seam that composes them
- * into the single managed-step lifecycle the M9 live-execution contract's "Step
- * Execution" section requires, around any `WorkflowStepExecutor` (the M9 live
+ * into the single managed-step lifecycle the live-execution contract requires,
+ * around any `WorkflowStepExecutor` (the live
  * wrapper in production, a deterministic fake in tests):
  *
  *   acquire the managed-step lease  (before any durable step mutation)
@@ -37,7 +37,7 @@
  * deferral via `deferredTerminalState` / `deferredLease`, and run-scoped
  * recovery reconciliation through the live finalize or dispatch recovery seams
  * that write `recovery.md` plus the `needs_manual_recovery` flag. This mirrors
- * how the M7 substrate keeps executors free of durable mutation: the executor
+ * how the workflow substrate keeps executors free of durable mutation: the executor
  * performs the work; the orchestrator owns the durable lease + step lifecycle
  * around it and surfaces terminal / live recovery metadata for its caller.
  *
@@ -105,7 +105,7 @@ export type RunLiveWorkflowStepInput = {
   holder: string;
   /** Absolute ms timestamp at which the managed-step lease expires. */
   leaseExpiresAt: number;
-  /** The executor to run (an M9 live wrapper, or a fake in tests). */
+  /** The executor to run (a live wrapper, or a fake in tests). */
   executor: WorkflowStepExecutor;
   /** The executor input forwarded to `executor.execute` after identity validation. */
   executorInput: WorkflowStepExecutorInput;

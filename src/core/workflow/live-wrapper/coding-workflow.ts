@@ -1,9 +1,9 @@
 /**
- * Opt-in NGX-499 coding-workflow live-wrapper command seam.
+ * Opt-in coding-workflow live-wrapper command seam.
  *
  * The daemon live-wrapper profile owns process supervision, iteration-directory
  * result placement, and dispatch reconciliation. This module is the command the
- * checked-in NGX-499 profile runs: it reads
+ * checked-in dogfood profile runs: it reads
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
  * executes the configured child command, and writes a normalized `RunnerResult`

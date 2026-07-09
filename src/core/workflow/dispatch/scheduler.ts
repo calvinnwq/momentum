@@ -1,6 +1,5 @@
 /**
- * Daemon workflow scheduler lane: durable runnable-work selection (M10-04,
- * NGX-348).
+ * Daemon workflow scheduler lane: durable runnable-work selection.
  *
  * The workflow-first runtime daemon contract opens with:
  *
@@ -42,7 +41,7 @@
  * worker is mid-dispatch (busy); a stale non-monitor lease must be recovered
  * before re-acquisition can succeed. The chosen step is the lowest-order
  * `approved` step whose predecessors are all `succeeded` or `skipped`, mirroring
- * the single-active-step model the M7 reducer and M9 lease primitives enforce.
+ * the single-active-step model the workflow-run reducer and live-wrapper lease primitives enforce.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
@@ -87,7 +86,7 @@ const RUN_TERMINAL_STATE_SET: ReadonlySet<string> = new Set(
 
 /**
  * Lease kinds that block step dispatch while outstanding. `monitor` leases are
- * intentionally excluded: the M7 contract lets a monitor lease coexist with a
+ * intentionally excluded: the workflow-run contract lets a monitor lease coexist with a
  * managed step, so a live monitor never withholds work.
  */
 const NON_MONITOR_LEASE_KINDS: ReadonlySet<WorkflowLeaseKind> = new Set([
@@ -392,7 +391,7 @@ export type RecoverStaleWorkflowLeasesInput = {
 /**
  * Recover the stale leases surfaced by {@link selectRunnableWorkflowWork} so the
  * daemon workflow scheduler lane does not strand a run behind a dead worker's
- * lease. Mirrors the M3 `recoverStale*` family in `stale-recovery.ts`:
+ * lease. Mirrors the stale-recovery `recoverStale*` family in `stale-recovery.ts`:
  *
  *   - `stale-auto-release` → release the lease so the run is schedulable again
  *     on the next scan (the row is released in place, never deleted).

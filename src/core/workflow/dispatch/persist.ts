@@ -1,6 +1,6 @@
 /**
  * Durable resolution twin of the production workflow-lane dispatch brain
- * (M10-09a, NGX-367).
+ *.
  *
  * `dispatch.ts` owns the *pure* dispatch decision: given a claimed
  * step's already-resolved executor family (a {@link WorkflowStepDispatchResolution}),
@@ -95,7 +95,7 @@ export function resolveClaimedWorkflowStepFamily(
   const definitionKey = run.workflow_definition_key;
   const definitionVersion = run.workflow_definition_version;
   // Either half of the link missing means the run cannot be resolved to a
-  // definition (e.g. an M7-imported run), so its step has no executor family.
+  // definition (e.g. an workflow-run-imported run), so its step has no executor family.
   if (
     definitionKey === null ||
     definitionKey === "" ||

@@ -1,18 +1,17 @@
 /**
  * Run-level durable recovery for live finalization and dispatch failures
- * (NGX-334, M9-03).
+ *.
  *
  * The shared `shared/step-finalize.ts` transaction, re-exported through
- * `live-step/finalize.ts` for this M9 lane, returns a rich in-memory outcome
+ * `live-step/finalize.ts` for this lane, returns a rich in-memory outcome
  * over git + verification but owns no durable state. Process-level
  * dispatch failures also return recovery evidence before any git transaction
  * runs: a precise wrapper `liveRecoveryCode` when the executor provides one,
  * otherwise the dispatch `code` itself may still be a live run-level
- * classification. This module is the run-level seam the M9 contract's
- * "Recovery" section requires — it takes either a
+ * classification. This module is the run-level recovery seam: it takes either a
  * {@link FinalizeLiveWorkflowStepFromResultFileResult} or dispatch failure
  * metadata and, when the outcome is one of the live run-level recovery
- * conditions M9-03 introduces, durably **enters manual recovery**: it sets the
+ * live recovery conditions, durably **enters manual recovery**: it sets the
  * run-scoped `needs_manual_recovery` flag first, then attempts the per-run
  * `recovery.md` artifact as best-effort operator guidance. This is the durable
  * counterpart to the finalize module's promise that a moved HEAD or an
@@ -51,7 +50,7 @@
  * written *first*: it is the authority that blocks unsafe progression, so it
  * must land even if the best-effort `recovery.md` write later fails
  * (`artifact_write_failed`). This module never clears recovery — clearing stays
- * explicit and operator-driven through the M8 guarded clear.
+ * explicit and operator-driven through guarded clear.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";

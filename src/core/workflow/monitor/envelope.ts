@@ -1,10 +1,10 @@
 /**
- * Read-only machine envelope for `workflow run monitor` (NGX-328, M8-05).
+ * Read-only machine envelope for `workflow run monitor`.
  *
  * The OpenClaw `coding-workflow-pipeline` skill's `monitor_runner.py` consumes
  * one stable JSON shape per monitor tick instead of parsing prose or scraping
  * `.agent-workflows/<runId>/` artifacts. This module composes the durable
- * substrate detail loader ({@link loadWorkflowRunDetail}) with the pure M7
+ * substrate detail loader ({@link loadWorkflowRunDetail}) with the pure workflow-run
  * monitor reducer ({@link deriveWorkflowMonitorState}) and a small
  * reportability classifier so the runner can decide whether to **report**,
  * **wait**, or ask an operator to **recover** from a single envelope. The same
@@ -15,11 +15,11 @@
  * `monitor.json` prose. It never mutates run / step / approval / lease state,
  * never schedules cron, never delivers to Discord, and never spawns a managed
  * child. Monitor recovery / next-action taxonomies are reused verbatim from the
- * M7 reducer; the `recovery` field stays monitor-derived. The durable
- * `needsManualRecovery` flag may also be set by M9 live dispatch / finalization
+ * workflow-run reducer; the `recovery` field stays monitor-derived. The durable
+ * `needsManualRecovery` flag may also be set by live dispatch / finalization
  * recovery, which can independently drive `disposition: "recover"` while
  * `recovery` remains null and the stored reason / `recovery.md` carries the
- * non-monitor classification. The M10 scheduler lane also sets the flag for
+ * non-monitor classification. The executor-loop scheduler lane also sets the flag for
  * stale workflow-lease recovery, but stale `manual-recovery-required` leases
  * remain outstanding and can still be re-derived here as
  * `manual_recovery_lease`.
@@ -117,7 +117,7 @@ export type WorkflowMonitorEnvelope = {
   recovery: WorkflowMonitorRecovery | null;
   evidence: readonly WorkflowEvidenceLink[];
   /**
-   * Durable workflow / step / executor gates for the run (M10-08, NGX-352),
+   * Durable workflow / step / executor gates for the run,
    * oldest first, open and resolved alike. Surfacing them in the monitor
    * envelope makes the run's approval-required / operator-decision pauses
    * explicit and inspectable to the monitor runner alongside the derived
@@ -128,7 +128,7 @@ export type WorkflowMonitorEnvelope = {
   /**
    * The digest of the last *emitted* native progress tick for this run, read
    * verbatim from the durable `monitor_last_emitted_digest` advisory column
-   * (NGX-511). It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
+   *. It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
    * reducer compares against: an equal digest means the operator-facing state
    * has not changed since the last surfaced tick. `null` means no tick has been
    * emitted yet (a first observation always emits).

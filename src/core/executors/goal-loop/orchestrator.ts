@@ -1,17 +1,17 @@
 /**
- * Goal-loop executor adapter — single-round driver (M10-05, NGX-349).
+ * Goal-loop executor adapter — single-round driver.
  *
  * `goal-loop/executor.ts` owns the *pure* projections for one bounded round: the
  * round-start record ({@link planGoalLoopRoundStart}), the daemon classification
  * + two-phase persistence patches ({@link planGoalLoopRoundPersistence}), and the
  * deterministic agent/model selection. This module is the stateful seam that
- * composes those projections with the *real* M10-03 executor-loop persistence
+ * composes those projections with the real executor-loop persistence
  * layer and round transition graph around the bounded mechanism, exactly the way
  * `live-step/orchestrator.ts` composes the pure `shared/step-finalize.ts`
  * transaction:
  *
  *   insert the round-start row  (running, agent/model/input frozen in)
- *   -> run the bounded mechanism (the M9 goal iteration; injected here)
+ *   -> run the bounded mechanism (the goal iteration; injected here)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
  *   -> capture the normalized result  (running -> capturing_result)
  *   -> persist the terminal decision  (-> succeeded / failed / manual recovery)
@@ -34,7 +34,7 @@
  * returns the same mechanism result shape this driver persists.
  *
  * The bounded mechanism is injected as a {@link GoalLoopRoundRunner} so the real
- * M9 goal iteration, a no-op, or a deterministic fake can all drive a round
+ * goal iteration, a no-op, or a deterministic fake can all drive a round
  * through the identical durable lifecycle. The mechanism is *total*: it encodes
  * every failure as a {@link FinalizeWorkflowStepFromResultFileResult} outcome
  * (and a `null` result for a missing/invalid result document) rather than
@@ -342,7 +342,7 @@ export type RunGoalLoopInvocationResult = {
  * failure. With a bounded `maxRounds` in the resolved selection,
  * {@link decideGoalLoopRound} guarantees that happens once the budget is reached;
  * an unbounded (`null`) `maxRounds` relies on the injected mechanism eventually
- * recommending completion or routing to recovery, exactly as the real M9 goal
+ * recommending completion or routing to recovery, exactly as the real goal
  * iteration does.
  *
  * @throws {ExecutorInvocationConflictError} if the invocation id already exists.
@@ -437,7 +437,7 @@ export type RunGoalLoopStepInput = {
   attempt: number;
   /** The deterministic selection (from `resolveGoalLoopRoundSelection`) frozen into each round. */
   selection: GoalLoopRoundSelection;
-  /** The bounded mechanism each round runs (the real M9 goal iteration plugs in here). */
+  /** The bounded mechanism each round runs (the real goal iteration plugs in here). */
   runRound: GoalLoopRoundRunner;
   /**
    * Resolves the per-round input digest / artifact root / log paths the daemon

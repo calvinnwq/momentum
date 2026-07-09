@@ -1,5 +1,5 @@
 /**
- * Workflow artifact parser for NGX-291 (M5-04 workflow evidence ingestion).
+ * Workflow artifact parser for workflow evidence ingestion.
  *
  * Reads `.agent-workflows/<run-id>/` artifacts (plan.json, ledger.jsonl,
  * approval-*.json) and normalizes them into `EvidenceRecordIngestInput`

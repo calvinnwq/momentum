@@ -382,7 +382,7 @@ export type ListStaleClaimedGoalIterationJobsInput = {
  * Return `goal_iteration` jobs in `claimed` or `running` state whose
  * `lease_expires_at` is older than `now` (minus an optional `graceMs`
  * tolerance for clock skew). The lease is the worker's contract; once it
- * lapses, the claim is a candidate for stale-lease recovery. M3-05 keeps
+ * lapses, the claim is a candidate for stale-lease recovery. The recovery path keeps
  * detection read-only here so higher-level orchestrator slices can decide
  * whether a stale claim is safe to requeue (e.g. repo is clean, no other
  * worker is heartbeating, metadata invariants hold).

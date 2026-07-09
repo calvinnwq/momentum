@@ -1,11 +1,11 @@
 /**
- * Pure state model for OpenClaw coding workflow runs (M7 contract).
+ * Pure state model for OpenClaw coding workflow runs (workflow-run contract).
  *
  * This module owns only the canonical vocabulary and the transition reducer
  * for `WorkflowRun` / `workflow_steps` records described in
  * SPEC.md. It does not touch SQLite, the file
  * system, or any executor. Schema migrations, ingest paths, and CLI envelopes
- * are layered on top of these primitives in follow-up M7 slices.
+ * are layered on top of these primitives in follow-up workflow-run slices.
  */
 
 export const WORKFLOW_STEP_KINDS = [
@@ -22,7 +22,7 @@ export type WorkflowStepKind = (typeof WORKFLOW_STEP_KINDS)[number];
  * Tail steps whose child command performs irreversible external side effects -
  * a pushed branch, a merged pull request, or a tracker write - as it runs. When
  * one of these fails, the merge / push / write may already have landed before
- * the failure (the NGX-512 native dogfood case: the PR merged, then a later
+ * the failure (a native dogfood case: the PR merged, then a later
  * command exited non-zero). That makes a naive re-run dangerous: it could
  * double-merge or re-write. Recovery surfaces (the live-wrapper guidance and the
  * monitor reducer) consult this set so a failed tail step steers operators to
@@ -342,7 +342,7 @@ export function transitionWorkflowRun(
  * treated as `pending`.
  *
  * When `leaseContext` is supplied the result is additionally constrained by
- * `workflow_leases` per the M7 contract:
+ * `workflow_leases` per the workflow-run contract:
  *   - Any outstanding `stale-manual-recovery-required` lease forces `blocked`,
  *     except when the step-derived state is already terminal-non-success
  *     (`failed` / `canceled`); a terminal-non-success run is not "rescued"
@@ -461,7 +461,7 @@ function deriveStepOnlyRunState(
 /**
  * Classify the freshness of a `workflow_leases` row without touching the file
  * system, cron platform, or `monitor.json`. A lease is the durable bookkeeping
- * the M7 contract uses to detect a missing / stuck monitor or managed-step
+ * the workflow-run contract uses to detect a missing / stuck monitor or managed-step
  * dispatcher independent of the cron tick that maintains it.
  *
  * Precedence:
@@ -476,7 +476,7 @@ function deriveStepOnlyRunState(
  *      operator clears it).
  *
  * `heartbeatAt` is informational only: the contract treats `expiresAt` as the
- * sole owner-of-record for freshness, mirroring M3 `repo_locks` stale-lease
+ * sole owner-of-record for freshness, mirroring stale-recovery `repo_locks` stale-lease
  * semantics (`listStaleRepoLocks` uses `lease_expires_at < cutoff`). A holder
  * extends the lease by writing both `heartbeatAt` and `expiresAt`; a stalled
  * heartbeat that failed to advance `expiresAt` is correctly classified stale.

@@ -1,5 +1,5 @@
 /**
- * Persistence layer for workflow gates and operator decisions (M10-08, NGX-352).
+ * Persistence layer for workflow gates and operator decisions.
  *
  * Takes the pure gate-decision domain owned by `gate/gate.ts` — the
  * gate-type / target-scope vocabularies and the {@link evaluateGateDecision}

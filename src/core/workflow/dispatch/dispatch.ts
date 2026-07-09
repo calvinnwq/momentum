@@ -1,6 +1,6 @@
 /**
  * Production workflow-lane dispatch decision domain for the workflow-first
- * runtime (M10-09a, NGX-367).
+ * runtime.
  *
  * This module owns the *pure* half of the production workflow-lane dispatcher:
  * the phase-1 executor-family allowlist and the deterministic decision
@@ -21,9 +21,9 @@
  * planning contracts externalized to Obsidian:
  *
  *   - The phase-1 dispatchable set is exactly the executor families that have a
- *     landed production adapter in the base allowlist (`goal-loop` M10-05,
- *     `one-shot` / `script` M10-06, `no-mistakes` M10-07, `external-apply` RC-3,
- *     and `subworkflow` RC-4b/NGX-498 once its configured production lane was
+ *     landed production adapter in the base allowlist (`goal-loop` executor-loop,
+ *     `one-shot` / `script` executor-loop, `no-mistakes` executor-loop, `external-apply` the external-apply seam,
+ *     and `subworkflow` once its configured production lane was
  *     proven). A family with no landed adapter still fails closed rather than
  *     silently no-op or strand a lease.
  *   - Every non-dispatch outcome routes to the contract's
@@ -51,7 +51,7 @@ import type { WorkflowGateType } from "../gate/gate.js";
 /**
  * Executor families the production workflow lane can genuinely dispatch through
  * the base PHASE1 allowlist. Anything outside this set fails closed (see the
- * module doc). RC-4b (NGX-498) flipped `subworkflow` into the allowlist once its
+ * module doc). `subworkflow` flipped into the allowlist once its
  * configured production lane — child-definition config, route-sourced bounded
  * recursion safety, key-resolved start-or-attach child runner, and the daemon
  * context deriver — was proven; the `unsupported_executor_family` fail-closed
@@ -91,7 +91,7 @@ export function isPhase1DispatchableExecutorFamily(
  *     dispatch.
  *   - `definition_unlinked`: the run carries no
  *     `(workflow_definition_key, workflow_definition_version)` link, so its steps
- *     cannot be resolved to an executor family (e.g. an M7-imported run).
+ *     cannot be resolved to an executor family (e.g. an workflow-run-imported run).
  *   - `step_definition_not_found`: no `step_definitions` row matches the claimed
  *     step's `(definitionKey, definitionVersion, stepId)` identity.
  *   - `unknown_executor_family`: the step definition's `executor` column is not a

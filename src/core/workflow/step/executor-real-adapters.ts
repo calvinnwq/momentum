@@ -1,16 +1,16 @@
 /**
- * Real `WorkflowStepExecutor` production adapter registry (RC-5, NGX-485).
+ * Real `WorkflowStepExecutor` production adapter registry.
  *
- * The M7 executor boundary (`step/executor.ts`) shipped a fake `ADAPTERS` map:
+ * The workflow-run executor boundary (`step/executor.ts`) shipped a fake `ADAPTERS` map:
  * `getWorkflowStepExecutor` / `dispatchWorkflowStepExecutor` resolved to a
  * deterministic fake for every `WorkflowStepExecutorKind`. The runtime
  * consolidation plan (`SPEC.md`, Path 6)
  * classifies that fake map as *deprecate-later*: useful substrate coverage, but
- * not production executor support. RC-5 lands the real per-kind adapters so the
+ * not production executor support. the real-adapter seam lands the real per-kind adapters so the
  * fakes can move behind a test-only seam.
  *
  * This module owns the real production registry builder. It reuses the existing
- * M9 live-wrapper boundary (`createLiveWorkflowStepExecutorsFromProfile`) for the
+ * live-wrapper boundary (`createLiveWorkflowStepExecutorsFromProfile`) for the
  * canonical step kinds rather than inventing a second command runner: a kind that
  * a live-wrapper profile configures resolves to a real live executor that spawns
  * the configured local command, captures its result file, and maps the outcome
@@ -42,7 +42,7 @@ import {
 } from "./executor.js";
 
 /**
- * Re-exported from the base executor module (RC-5 moved the honest "no live
+ * Re-exported from the base executor module (the real-adapter seam moved the honest "no live
  * wrapper configured" adapter to `step/executor.ts` so it can also back the
  * production default registry). Kept exported here for callers that resolve it
  * alongside {@link buildRealWorkflowStepExecutorRegistry}.

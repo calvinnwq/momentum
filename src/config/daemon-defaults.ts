@@ -9,7 +9,7 @@
 
 /**
  * Default cutoff between "active" and "stale" for daemon heartbeat surfaces.
- * M3 surfaces stale records without guessing recovery, so this only controls
+ * Daemon recovery surfaces stale records without guessing recovery, so this only controls
  * what the read-only inspector flags; it does not transition state.
  */
 export const DEFAULT_DAEMON_STALE_AFTER_MS = 90_000;

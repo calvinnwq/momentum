@@ -1,6 +1,5 @@
 /**
- * Pure state model for the executor loop nested below a `StepRun` (M10-03,
- * NGX-347).
+ * Pure state model for the executor loop nested below a `StepRun`.
  *
  * This module owns only the canonical vocabulary, the transition reducers, and
  * the record *shapes* for the `ExecutorDefinition` / `ExecutorInvocation` /
@@ -8,7 +7,7 @@
  * follows the same discipline as `src/core/workflow/run/reducer.ts` and
  * `src/core/workflow/definition/definition.ts`: no SQLite, no file system, no executor invocation.
  * Durable `executor_*` tables and the persistence twin layer on top of these
- * primitives, exactly as M7 layered `src/core/workflow/run/import-persist.ts` on top of
+ * primitives, exactly as workflow persistence layered `src/core/workflow/run/import-persist.ts` on top of
  * `src/core/workflow/run/reducer.ts`.
  *
  * The contract pins this nesting so bounded autonomy never flattens into
@@ -39,7 +38,7 @@
  *   - An invocation must `preparing` before it can `running` (resolve agent /
  *     model / leases first), mirroring the step reducer's
  *     pending -> approved -> running ordering.
- *   - `executorFamily` reuses the M10-01 {@link WorkflowExecutorFamily}
+ *   - `executorFamily` reuses the {@link WorkflowExecutorFamily}
  *     vocabulary so executor-loop records stay wire-compatible with
  *     `StepDefinition.executor`.
  */

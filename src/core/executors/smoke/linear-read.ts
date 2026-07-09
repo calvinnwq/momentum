@@ -1,6 +1,6 @@
 /**
  * Opt-in real adapter smoke harness — planning and outcome classification
- * (NGX-372 / Adapter Test Coverage milestone).
+ *.
  *
  * This module owns the CI-safe decision logic for the *first* adapter test
  * layer allowed to touch a real external system: a read-only Linear source

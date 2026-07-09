@@ -1,5 +1,5 @@
 /**
- * no-mistakes executor mirror — polling orchestrator (M10-07, NGX-351).
+ * no-mistakes executor mirror — polling orchestrator.
  *
  * `no-mistakes-executor.ts` owns the *pure* half of the mirror: the
  * {@link NoMistakesExternalState} snapshot shape, the daemon classification
@@ -8,7 +8,7 @@
  * durable invocation / round-start / finding / decision projections.
  * `no-mistakes/mechanism.ts` owns the IO seam that turns the untrusted external
  * state store into a typed snapshot ({@link NoMistakesExternalStateRead}). This
- * module is the stateful seam that composes both with the *real* M10-03
+ * module is the stateful seam that composes both with the real
  * executor-loop persistence layer and round transition graph, exactly the way
  * `single-shot/orchestrator.ts` and `goal-loop/orchestrator.ts` compose their pure
  * projections around a bounded mechanism — but the mirror's "bounded mechanism" is

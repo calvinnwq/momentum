@@ -1,6 +1,5 @@
 /**
- * Side-effecting twin of the production workflow-lane dispatcher (M10-09a,
- * NGX-367).
+ * Side-effecting twin of the production workflow-lane dispatcher.
  *
  * `dispatch.ts` owns the *pure* dispatch decision and
  * `dispatch/persist.ts` owns the *read-only* resolution that produces
@@ -39,14 +38,14 @@
  * gate without its recovery flag; on any throw the transaction rolls back and the
  * error propagates to the lane, which then releases the just-acquired lease.
  *
- * Phase-1 boundary (validated by the NGX-353 closeout dogfood and clarified by
- * the NGX-434 runtime consolidation plan): this path stops at the *start
+ * Phase-1 boundary (validated by the closeout dogfood and clarified by
+ * the runtime consolidation plan): this path stops at the *start
  * scaffold*. It does not run the bounded executor mechanism, drive the round
  * `pending -> running -> terminal`, run verification / commit finalization, or
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
- * `executor_invocations` / `executor_rounds` evidence only; the RC-2
- * reconciliation seam (`dispatch/reconcile-execute.ts`, NGX-480) is now the
+ * `executor_invocations` / `executor_rounds` evidence only; the reconciliation seam
+ * reconciliation seam (`dispatch/reconcile-execute.ts`) is now the
  * single owner that converts terminal executor evidence into the workflow step's
  * terminal transition. The phase-1 invocation /
  * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
@@ -530,7 +529,7 @@ function parseRouteJson(
  * unmistakably the phase-1 dispatcher's row, not a landed adapter's reattachable
  * id (see the module doc's phase-1 boundary note).
  *
- * Exported as the single source of truth for this id: the RC-2 reconciliation
+ * Exported as the single source of truth for this id: the reconciliation
  * seam (`dispatch/reconcile-execute.ts`) recomputes the same id to find the
  * dispatched step's terminal executor evidence, so the two halves can never drift
  * apart on the namespacing convention.

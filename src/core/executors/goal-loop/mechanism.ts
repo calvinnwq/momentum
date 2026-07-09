@@ -1,5 +1,5 @@
 /**
- * Goal-loop executor adapter — round mechanism bridge (M10-05, NGX-349).
+ * Goal-loop executor adapter — round mechanism bridge.
  *
  * `goal-loop/orchestrator.ts` drives one bounded round through its durable
  * lifecycle around an *injected* {@link GoalLoopRoundRunner} mechanism; every

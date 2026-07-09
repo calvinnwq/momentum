@@ -1,5 +1,5 @@
 /**
- * Linear source reconciliation orchestrator (NGX-289 / M5-02 second slice).
+ * Linear source reconciliation orchestrator.
  *
  * This module composes:
  *   - the read-only Linear `SourceAdapter` (normalization boundary), and

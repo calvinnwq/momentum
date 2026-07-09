@@ -5,7 +5,7 @@ import type {
 } from "../run/events.js";
 
 /**
- * SUP-05 (NGX-552) JSONL watch-stream record kinds.
+ * JSONL watch-stream record kinds.
  *
  * `event` records carry one durable semantic event; `heartbeat` records are
  * synthetic liveness ticks emitted when a poll observed no new events.
@@ -176,7 +176,7 @@ export type WorkflowWatchStreamSleep = (ms: number) => Promise<void>;
 export type WorkflowWatchStreamExitReason = "terminal" | "max_ticks" | "aborted";
 
 export type RunWorkflowWatchStreamInput = {
-  /** Durable event poll keyed by the caller's resume cursor (SUP-04). */
+  /** Durable event poll keyed by the caller's resume cursor (event-cursor). */
   poll: WorkflowWatchStreamPoll;
   /** Sink for each newline-delimited record, called as it is produced. */
   write: WorkflowWatchStreamWrite;

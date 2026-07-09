@@ -1,5 +1,5 @@
 /**
- * ACP runner introduced by NGX-283 (M4-04).
+ * ACP runner.
  *
  * Spawns the configured ACP/acpx-style runtime as an external child process
  * via the shared `RunnerAdapter` boundary. Adds two pre-flight detections

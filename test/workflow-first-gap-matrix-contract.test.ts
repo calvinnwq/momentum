@@ -41,10 +41,4 @@ describe("workflow-first gap matrix anchor", () => {
       "subworkflow",
     ]);
   });
-
-  it("keeps M10 issue provenance in the compact milestone anchor", () => {
-    for (const id of ["NGX-344", "NGX-345", "NGX-346", "NGX-347", "NGX-348", "NGX-349", "NGX-350", "NGX-351", "NGX-352", "NGX-367", "NGX-353"]) {
-      expect(spec, `SPEC.md should preserve ${id}`).toContain(id);
-    }
-  });
 });

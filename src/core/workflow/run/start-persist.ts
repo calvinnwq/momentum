@@ -1,5 +1,5 @@
 /**
- * Persistence layer for the workflow-first run start surface (M10-02, NGX-346).
+ * Persistence layer for the workflow-first run start surface.
  *
  * Takes the pure {@link WorkflowRunStartInput} owned by `run/start.ts`,
  * materializes it through {@link materializeWorkflowRunStart}, and writes the
