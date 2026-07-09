@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import type { MomentumDb } from "../../adapters/db.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
@@ -56,6 +57,7 @@ import type {
   AsyncWorkflowStepDispatch,
   WorkflowStepDispatch
 } from "../workflow/dispatch/scheduler.js";
+import type { DispatchedStepRepoSafetyContext } from "../workflow/dispatch/executor-run.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
   apiKey: string | null;
@@ -139,10 +141,18 @@ export function resolveDaemonWorkflowStepDispatch(
                   reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
                 };
               }
+              const repoSafety = resolveDaemonDispatchedRepoSafety(
+                context.db,
+                claim.runId,
+                resolved.exec.repoPath,
+                resolved.exec.runDir
+              );
+              if (!repoSafety.ok) return repoSafety;
               return {
                 ok: true,
                 exec: {
                   ...resolved.exec,
+                  repoSafety: repoSafety.repoSafety,
                   env
                 }
               };
@@ -156,6 +166,82 @@ export function resolveDaemonWorkflowStepDispatch(
     ),
     leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
   };
+}
+
+function resolveDaemonDispatchedRepoSafety(
+  db: MomentumDb,
+  runId: string,
+  repoPath: string,
+  runDir: string
+):
+  | { ok: true; repoSafety: DispatchedStepRepoSafetyContext }
+  | { ok: false; reason: string } {
+  const head = readGitHead(repoPath);
+  if (!head.ok) return { ok: false, reason: head.reason };
+  const verification = loadWorkflowRunVerificationConfig(db, runId);
+  return {
+    ok: true,
+    repoSafety: {
+      baseHead: head.head,
+      verificationCommands: verification.commands,
+      verificationTimeoutSec: verification.timeoutSec,
+      verificationLogPath: path.join(runDir, "verification.log")
+    }
+  };
+}
+
+function readGitHead(
+  repoPath: string
+): { ok: true; head: string } | { ok: false; reason: string } {
+  try {
+    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).trim();
+    return { ok: true, head };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `base_head_unavailable: ${detail}` };
+  }
+}
+
+function loadWorkflowRunVerificationConfig(
+  db: MomentumDb,
+  runId: string
+): { commands: string[]; timeoutSec: number } {
+  const row = db
+    .prepare(
+      `SELECT goals.verification AS verification,
+              goals.verification_timeout_sec AS verificationTimeoutSec
+         FROM workflow_runs
+         LEFT JOIN goals ON goals.id = workflow_runs.goal_id
+        WHERE workflow_runs.id = ?`
+    )
+    .get(runId) as
+    | { verification: string | null; verificationTimeoutSec: number | null }
+    | undefined;
+  if (row === undefined) return { commands: [], timeoutSec: 900 };
+  return {
+    commands: parseVerificationCommands(row.verification),
+    timeoutSec:
+      Number.isInteger(row.verificationTimeoutSec) &&
+      row.verificationTimeoutSec !== null &&
+      row.verificationTimeoutSec > 0
+        ? row.verificationTimeoutSec
+        : 900
+  };
+}
+
+function parseVerificationCommands(raw: string | null): string[] {
+  if (raw === null) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+      return parsed as string[];
+    }
+  } catch {
+  }
+  return [];
 }
 
 function withExternalApplyDispatch(

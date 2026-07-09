@@ -55,6 +55,10 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation
 } from "../../executors/loop/persist.js";
+import {
+  finalizeWorkflowStepFromResultFile,
+  type FinalizeWorkflowStepFromResultFileResult
+} from "../../executors/shared/step-finalize.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
   terminalizeDispatchedExecutorInvocation,
@@ -85,12 +89,20 @@ export type DispatchedStepExecutorContext = {
   runDir: string;
   resultJsonPath: string;
   executorLogPath: string;
+  repoSafety?: DispatchedStepRepoSafetyContext;
   /** Bounded-session attempt; defaults to 1 when omitted. */
   attempt?: number;
   promptPath?: string;
   ledgerPath?: string;
   env?: NodeJS.ProcessEnv;
   config?: Record<string, unknown>;
+};
+
+export type DispatchedStepRepoSafetyContext = {
+  baseHead: string;
+  verificationCommands: string[];
+  verificationTimeoutSec: number;
+  verificationLogPath: string;
 };
 
 type DispatchedStepExecutorSelection = {
@@ -278,6 +290,8 @@ export function executeAndReconcileDispatchedWorkflowStep(
     registry
   );
 
+  const terminalResult = finalizeSuccessfulExecutorResult(executorResult, exec);
+
   // Record the result as terminal evidence, then let the reconciliation seam finalize the step from
   // it. terminalize and reconcile are each idempotent and own their own
   // transactions.
@@ -285,7 +299,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
     db,
     runId,
     stepId,
-    result: executorResult,
+    result: terminalResult,
     now
   });
   const reconciled = tryReconcileDispatchedWorkflowStep({
@@ -323,6 +337,134 @@ function readDispatchedStepExecutorSelection(
     model: latest.model,
     effort: latest.effort
   };
+}
+
+function finalizeSuccessfulExecutorResult(
+  result: WorkflowStepExecutorDispatchResult,
+  exec: DispatchedStepExecutorContext
+): WorkflowStepExecutorDispatchResult {
+  if (!result.ok || exec.repoSafety === undefined) return result;
+  const finalize = finalizeWorkflowStepFromResultFile({
+    repoPath: exec.repoPath,
+    baseHead: exec.repoSafety.baseHead,
+    resultFilePath: result.resultJsonPath,
+    verificationCommands: exec.repoSafety.verificationCommands,
+    verificationTimeoutSec: exec.repoSafety.verificationTimeoutSec,
+    verificationLogPath: exec.repoSafety.verificationLogPath
+  });
+  return executorResultFromFinalize(result, finalize, exec.repoSafety);
+}
+
+function executorResultFromFinalize(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: true }>,
+  finalize: FinalizeWorkflowStepFromResultFileResult,
+  repoSafety: DispatchedStepRepoSafetyContext
+): WorkflowStepExecutorDispatchResult {
+  switch (finalize.outcome) {
+    case "committed":
+      return withFinalizationArtifact(result, repoSafety.verificationLogPath);
+    case "reset_step_failure":
+      return withFinalizedFailure(
+        result,
+        result.result.errorCode ?? "command_failed",
+        result.result.errorMessage ??
+          "workflow step reported failure and its worktree changes were reset",
+        repoSafety.verificationLogPath
+      );
+    case "reset_verification_failure":
+      return withFinalizedFailure(
+        result,
+        "command_failed",
+        finalize.verification.error,
+        repoSafety.verificationLogPath
+      );
+    default:
+      return {
+        ok: false,
+        code: finalizeExecutorErrorCode(finalize),
+        error: describeFinalizeFailure(finalize),
+        executorLogPath: result.executorLogPath,
+        resultJsonPath: result.resultJsonPath
+      };
+  }
+}
+
+function withFinalizationArtifact(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: true }>,
+  verificationLogPath: string
+): WorkflowStepExecutorDispatchResult {
+  return {
+    ...result,
+    result: {
+      ...result.result,
+      artifacts: [
+        ...result.result.artifacts,
+        { kind: "verification-log", path: verificationLogPath }
+      ]
+    }
+  };
+}
+
+function withFinalizedFailure(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: true }>,
+  errorCode: NonNullable<
+    Extract<WorkflowStepExecutorDispatchResult, { ok: true }>["result"]["errorCode"]
+  >,
+  errorMessage: string,
+  verificationLogPath: string
+): WorkflowStepExecutorDispatchResult {
+  return {
+    ...result,
+    result: {
+      ...result.result,
+      state: "failed",
+      artifacts: [
+        ...result.result.artifacts,
+        { kind: "verification-log", path: verificationLogPath }
+      ],
+      errorCode,
+      errorMessage,
+      recoveryHint: null
+    }
+  };
+}
+
+function finalizeExecutorErrorCode(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): Extract<WorkflowStepExecutorDispatchResult, { ok: false }>["code"] {
+  switch (finalize.outcome) {
+    case "result_missing":
+      return "result_missing";
+    case "result_invalid":
+      return "result_invalid";
+    default:
+      return "manual_recovery_required";
+  }
+}
+
+function describeFinalizeFailure(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string {
+  switch (finalize.outcome) {
+    case "reset_step_failure":
+      return "workflow step reported failure and its worktree changes were reset";
+    case "reset_verification_failure":
+      return finalize.verification.error;
+    case "manual_recovery_required":
+      return finalize.reason;
+    case "reset_failed":
+      return finalize.reset.error;
+    case "commit_failed":
+      return finalize.commit.error;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return finalize.error;
+    case "committed":
+      return "workflow step committed";
+  }
 }
 
 export type RecordDispatchedStepManualRecoveryInput = {

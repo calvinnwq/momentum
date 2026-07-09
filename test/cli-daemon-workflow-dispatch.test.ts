@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,23 @@ function makeTempDir(prefix = "momentum-cli-daemon-wf-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(repoPath: string, args: string[]): string {
+  return execFileSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function initRepo(repoPath: string): void {
+  runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repoPath, ["config", "user.email", "test@example.com"]);
+  runGit(repoPath, ["config", "user.name", "Test User"]);
+  runGit(repoPath, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
+  runGit(repoPath, ["add", "README.md"]);
+  runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
 }
 
 async function run(
@@ -107,7 +125,8 @@ async function startApprovedCodingRun(
 
 function writeSucceedingPreflightProfile(dir: string, timeoutSec = 5): string {
   const profilePath = path.join(dir, "live-wrapper-profile.json");
-  const script = `cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+  const script = `printf 'preflight from daemon\\n' > "$MOMENTUM_REPO_PATH/daemon-preflight.txt"
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
 {"success":true,"summary":"daemon live wrapper preflight succeeded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper preflight","body":"","breaking":false}}
 JSON`;
   fs.writeFileSync(
@@ -133,6 +152,7 @@ JSON`;
 function writeEnvForwardingPreflightProfile(dir: string): string {
   const profilePath = path.join(dir, "live-wrapper-env-profile.json");
   const script = `test "$MOMENTUM_TEST_TOKEN" = "from-cli-io" || exit 7
+printf 'env from daemon\\n' > "$MOMENTUM_REPO_PATH/daemon-env.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
 {"success":true,"summary":"daemon live wrapper env forwarded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper env","body":"","breaking":false}}
 JSON`;
@@ -193,6 +213,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
   it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
+    initRepo(repoDir);
     const profileDir = makeTempDir();
     const profilePath = writeSucceedingPreflightProfile(profileDir);
     const runId = "ngx492-live-wrapper-profile";
@@ -1358,6 +1379,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
   it("sizes the dispatch lease for the configured live-wrapper timeout", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
+    initRepo(repoDir);
     const profileDir = makeTempDir();
     const profilePath = writeSucceedingPreflightProfile(profileDir, 120);
     const runId = "ngx492-live-wrapper-lease-duration";
@@ -1400,6 +1422,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
   it("forwards the injected CLI env to daemon live-wrapper commands", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
+    initRepo(repoDir);
     const profileDir = makeTempDir();
     const profilePath = writeEnvForwardingPreflightProfile(profileDir);
     const runId = "ngx492-live-wrapper-env";

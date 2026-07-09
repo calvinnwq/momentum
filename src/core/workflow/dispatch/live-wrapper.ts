@@ -56,7 +56,8 @@ import path from "node:path";
 import {
   executeAndReconcileDispatchedWorkflowStep,
   recordUnresolvedDispatchedStepContext,
-  type DispatchedStepExecutorContext
+  type DispatchedStepExecutorContext,
+  type DispatchedStepRepoSafetyContext
 } from "./executor-run.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
@@ -197,6 +198,22 @@ function withAttemptScopedEvidencePaths(
     attempt,
     runDir,
     resultJsonPath: path.join(runDir, path.basename(exec.resultJsonPath)),
-    executorLogPath: path.join(runDir, path.basename(exec.executorLogPath))
+    executorLogPath: path.join(runDir, path.basename(exec.executorLogPath)),
+    ...(exec.repoSafety !== undefined
+      ? { repoSafety: withAttemptScopedRepoSafety(exec.repoSafety, runDir) }
+      : {})
+  };
+}
+
+function withAttemptScopedRepoSafety(
+  repoSafety: DispatchedStepRepoSafetyContext,
+  runDir: string
+): DispatchedStepRepoSafetyContext {
+  return {
+    ...repoSafety,
+    verificationLogPath: path.join(
+      runDir,
+      path.basename(repoSafety.verificationLogPath)
+    )
   };
 }

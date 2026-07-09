@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -83,6 +84,25 @@ function makeTempDir(prefix = "momentum-livewrap-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(repoPath: string, args: string[]): string {
+  return execFileSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function initRepo(): { repoPath: string; baseHead: string } {
+  const repoPath = makeTempDir("momentum-livewrap-repo-");
+  runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repoPath, ["config", "user.email", "test@example.com"]);
+  runGit(repoPath, ["config", "user.name", "Test User"]);
+  runGit(repoPath, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
+  runGit(repoPath, ["add", "README.md"]);
+  runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
+  return { repoPath, baseHead: runGit(repoPath, ["rev-parse", "HEAD"]) };
 }
 
 /** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
@@ -344,16 +364,25 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
   it("passes the derived exec context into a real configured live-wrapper command end to end", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
-    const repoPath = makeTempDir("momentum-livewrap-repo-");
+    const { repoPath, baseHead } = initRepo();
     const runDir = makeTempDir("momentum-livewrap-run-");
     const registry = buildRealWorkflowStepExecutorRegistry({
-      profile: profileWith("preflight", ["-c", WRITE_VALID_RESULT])
+      profile: profileWith("preflight", [
+        "-c",
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
+      ])
     });
     const exec: DispatchedStepExecutorContext = {
       repoPath,
       runDir,
       resultJsonPath: path.join(runDir, "result.json"),
-      executorLogPath: path.join(runDir, "executor.log")
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
@@ -364,6 +393,48 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     expect(stepState(db, "preflight")).toBe("succeeded");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).not.toBe(baseHead);
+    expect(runGit(repoPath, ["rev-parse", "HEAD^"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(runDir, "verification.log"))).toBe(true);
+  });
+
+  it("runs verification and resets live-wrapper edits before reconciliation on verification failure", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const registry = buildRealWorkflowStepExecutorRegistry({
+      profile: profileWith("preflight", [
+        "-c",
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
+      ])
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["false"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }) }
+    );
+
+    const result = dispatch(claim, tickContext(db));
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(stepState(db, "preflight")).toBe("failed");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(false);
+    expect(fs.readFileSync(path.join(runDir, "verification.log"), "utf-8")).toContain(
+      "exit_code: 1"
+    );
   });
 });
 
