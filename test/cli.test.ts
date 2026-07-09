@@ -2062,6 +2062,68 @@ describe("momentum CLI scaffold", () => {
     }
   });
 
+  it("managed daemon start recovers a stale workflow-dispatch active run before registering", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const { openDb } = await import("../src/adapters/db.js");
+    const { getDaemonRun, setDaemonRunActiveJob, startDaemonRun } =
+      await import("../src/core/daemon/runs.js");
+    let staleRunId: string;
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 100, 100)"
+      ).run();
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+         VALUES ('run-1', 'implementation', 'implementation', 'running', 0, 1, 100, 100)`
+      ).run();
+      ({ runId: staleRunId } = startDaemonRun(db, {
+        pid: 5151,
+        host: "stale-workflow-dispatch",
+        now: 100
+      }));
+      setDaemonRunActiveJob(db, {
+        runId: staleRunId,
+        jobId: "workflow:run-1:implementation",
+        lockId: null,
+        now: 100
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      state: "stopped"
+    });
+    expect(payload["runId"]).not.toBe(staleRunId);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const staleRun = getDaemonRun(verifyDb, staleRunId);
+      expect(staleRun).not.toBeNull();
+      expect(staleRun?.state).toBe("error");
+      expect(staleRun?.active_job_id).toBeNull();
+      expect(staleRun?.recovery_status).toBe(
+        "auto_recovered_stale_workflow_dispatch"
+      );
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("daemon start refuses to run the loop while another daemon is active", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const { openDb } = await import("../src/adapters/db.js");
