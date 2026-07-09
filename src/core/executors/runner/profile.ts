@@ -79,7 +79,7 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+          "Built-in compatibility fake runner profile retained for stored goal-first data and diagnostics; the retired lane wrote a fixture file and reported a normalized result.",
         executes: true
       };
     case "trusted-shell":
@@ -87,7 +87,7 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
+          "Operator-trusted executable-plus-argv compatibility profile retained for stored goal-first data and diagnostics; the retired lane ran the configured command with no implicit shell, no sandbox, and no privilege drop.",
         executes: true
       };
     case "acp":
@@ -95,7 +95,7 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "ACP/acpx-style smoke runner; spawns the configured external agent runtime via the RunnerAdapter boundary. Detects missing runtime/auth as `runtime_unavailable` without corrupting Goal state, distinct from command_failed and verification failures.",
+          "ACP/acpx-style compatibility profile retained for stored goal-first data and diagnostics; the retired lane spawned the configured external agent runtime and reported missing runtime/auth as `runtime_unavailable` without corrupting Goal state.",
         executes: true
       };
   }
