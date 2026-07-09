@@ -396,12 +396,13 @@ failed.
 
 The managed loop observes graceful and immediate stop requests between
 cycles. Graceful stop exits as `stopped`; stop-now exits as `canceled`
-and records `cancelOutcome` (`idle` if no job ran in that loop session,
-`active_job_completed` if an in-flight iteration completed before cancellation
-was observed). The command does not signal, kill, or otherwise terminate any
-running runner, worker, or external process; process signaling, forced
-termination, and mid-job cancellation are intentionally out of scope — stop
-semantics are observation-only.
+and records `cancelOutcome: "idle"`. The retired goal-iteration drain was the
+only lane that could report an active job completing before cancellation was
+observed; with that lane removed, immediate stop is always an idle cancellation.
+The command does not signal, kill, or otherwise terminate any running workflow
+step or external process; process signaling, forced termination, and mid-step
+cancellation are intentionally out of scope — stop semantics are
+observation-only.
 
 JSON envelope shape:
 
