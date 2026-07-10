@@ -33,16 +33,20 @@ ticks.
 |---|---|---|---|
 | Repo lock (`repo_locks`) | `state = 'active'` AND `lease_expires_at < now - staleLeaseGraceMs` | Released when the owning job is terminal (`succeeded` / `failed`); emits `repo_lock.recovered` and stamps `recovery_status = 'auto_released_job_terminal'`. | `job_pending` / `job_claimed` / `job_running` / `job_missing`. |
 | Claimed/running `goal_iteration` job (`jobs`) | `state IN ('claimed', 'running')` AND `lease_expires_at < now - staleLeaseGraceMs` | Safe stale `claimed` jobs are re-pended without losing `attempt_count` or idempotency key; emits `job.recovered` with `recovery_status = 'auto_repended_stale_claim'`. `running` jobs are skipped. | `job_running` (in-flight repo writes), `daemon_active` (live owner), `lock_active` (held lock), `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` (repo-state safety refusal), `job_state_changed` (concurrent update race). |
-| Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`. | `self` (caller's own run), `active_job_present` (delegates to job-side recovery), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
+| Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`; finalized with `recovery_status = 'auto_recovered_stale_workflow_dispatch'` when the only owner pointer is a synthetic workflow-dispatch `active_job_id`, the matching workflow step is unambiguous, no active lock is present, and no fresh unreleased dispatch lease still proves live ownership. | `self` (caller's own run), `active_job_present` (generic active job, active lock paired with a workflow-dispatch job, or a fresh workflow dispatch lease still proves live ownership), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
 | Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. A stale dispatch lease with terminal executor evidence is reconciled first so the owning step finalizes from that evidence before release. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. A stale dispatch lease over a still-`running` step with no terminal dispatch evidence is parked for run-scoped manual recovery and then released so future work is not suppressed. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
 
-The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
-its first cycle. Those three startup primitives are independently idempotent,
-share one observed `now`, and emit structured recovery events (where the events
-schema's non-empty `goal_id` constraint allows). Workflow lease recovery is a
+The managed `daemon start` path may run a startup-recovery pass before a new
+daemon row is registered when the existing active row is already stale, then the
+managed loop runs its one-shot `runStartupRecovery` pass before its first cycle.
+Those startup primitives are independently idempotent, share one observed `now`
+per pass, and emit structured recovery events (where the events schema's
+non-empty `goal_id` constraint allows). Workflow lease recovery is a
 per-scheduler-tick lane over `workflow_leases`, also idempotent, and is surfaced
 through workflow run state and scheduler-lane telemetry rather than the startup
-recovery block. The CLI surfaces startup recovery at:
+recovery block. A pre-loop daemon-row recovery is merged into the same
+`loop.startupRecovery` summary so the JSON envelope shape stays stable. The CLI
+surfaces startup recovery at:
 
 - `daemon start --max-loop-iterations N` JSON response — `loop.startupRecovery`
   with `observedAt`, `graceMs`, recovered counts, and skipped arrays for repo

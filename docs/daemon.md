@@ -28,8 +28,10 @@ existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`,
 default while an active job is recorded) so operators can decide whether to
 wait or recover the prior record. In managed-loop mode, a stale existing active
 run is first passed through the startup-recovery primitives; if it is an idle
-stale daemon row that can be auto-finalized safely, the new start proceeds and
-the managed loop still reports its own pre-loop `loop.startupRecovery` summary.
+stale daemon row or a stale row whose only owner pointer is a
+workflow-dispatch marker with no fresh dispatch lease, the new start proceeds
+and the managed loop still reports its own pre-loop `loop.startupRecovery`
+summary.
 After a terminal record (`stopped` / `canceled` / `error`), a fresh start is
 allowed.
 

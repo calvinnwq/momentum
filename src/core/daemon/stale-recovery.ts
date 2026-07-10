@@ -362,9 +362,9 @@ export function recoverStaleClaimedGoalIterationJobs(
 }
 
 /**
- * `recovery_status` stamped on daemon_runs when this slice auto-finalizes an
- * idle stale daemon record. Re-exported from daemon-runs.ts so callers that
- * already import from stale-recovery have a single recognized status taxonomy.
+ * Legacy idle-daemon `recovery_status` re-exported from daemon-runs.ts for
+ * callers that already import from stale-recovery. Workflow-dispatch daemon
+ * recovery uses `DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS`.
  */
 export const DAEMON_RUN_AUTO_RECOVERED_STATUS =
   DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
