@@ -198,11 +198,9 @@ gate state and current run status or outcome evidence showing cancellation
 before reliable completion.
 These are not trusted as verification failures because the external no-mistakes
 runner did not produce reliable pass/fail evidence.
-When the no-mistakes mirror sees the same running external-state digest for four
-minutes, it parks the mirror round for manual recovery instead of treating
-repeated polls as fresh progress.
-Clear recovery only after the external no-mistakes run produces fresh progress
-or terminal evidence.
+When the no-mistakes mirror sees the same running semantic progress digest for four minutes, it parks the mirror round for manual recovery instead of treating repeated polls as fresh progress.
+The raw external-state digest still updates in `inputDigest`; the stall decision uses `resultDigest`.
+Clear recovery only after the external no-mistakes run produces fresh progress or terminal evidence.
 When no-mistakes instead reports `checks-passed`, or is still monitoring while current pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence instead of entering this recovery lane, unless current output also shows a blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state.
 If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves success, operators may reconcile the failed `no-mistakes` step with either legacy `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
 The structured record uses `schemaVersion: 1` and must carry the current workflow run id, issue scope, branch name and head SHA, pull request identity and check state when present, no-mistakes run id and successful outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.

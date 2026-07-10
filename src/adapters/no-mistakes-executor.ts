@@ -696,9 +696,10 @@ export type NoMistakesRoundPersistencePlan = {
  * orchestrator's read-failure path (over a {@link decideNoMistakesUnreadable}
  * decision) build the patch through this, so a readable and an unreadable poll
  * patch the round identically modulo the decision they carry. The orchestrator
- * additionally threads the read's content digest onto `inputDigest` so the durable
- * round fingerprints the exact external evidence it mirrored this poll. Pure: no
- * SQLite, no file system.
+ * additionally threads the read's content digest onto `inputDigest` and the
+ * orchestrator's semantic progress digest onto `resultDigest` so the durable
+ * round fingerprints both the exact external evidence and the heartbeat / stall
+ * signal it mirrored this poll. Pure: no SQLite, no file system.
  */
 export function noMistakesRoundUpdate(
   decision: NoMistakesMirrorDecision

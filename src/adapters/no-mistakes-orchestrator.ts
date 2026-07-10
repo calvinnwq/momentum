@@ -30,7 +30,7 @@
  *
  *   - `continue` is a legal same-state `mirroring_external_state` poll that
  *     keeps the round live for the next tick (no `finished_at`). When the same
- *     external-state digest repeats, the prior heartbeat is preserved so the
+ *     semantic progress digest repeats, the prior heartbeat is preserved so the
  *     mirror can detect a stalled external run instead of treating every poll as
  *     fresh progress.
  *   - a gate moves it to a durable, non-terminal `waiting_operator` Momentum never
@@ -38,9 +38,10 @@
  *   - a settle moves it straight to its terminal (`succeeded` directly from the
  *     mirror phase — no intervening capture, unlike the result-bearing families —
  *     or `failed` / `blocked` / `manual_recovery_required`).
- *   - a running snapshot with an unchanged digest for the stall window settles to
- *     `manual_recovery_required` so an operator can inspect no-mistakes rather
- *     than letting Momentum wait forever on stale mirror evidence.
+ *   - a running snapshot with unchanged semantic progress for the stall window
+ *     settles to `manual_recovery_required` so an operator can inspect
+ *     no-mistakes rather than letting Momentum wait forever on stale mirror
+ *     evidence.
  *
  * {@link runNoMistakesMirrorStep} is the entrypoint a daemon / scheduler calls with
  * a `StepRun` identity to *start* a mirror: it materializes the durable invocation
@@ -58,6 +59,8 @@
  * a broken external store pauses the workflow for an operator rather than crashing
  * the daemon poll or being trusted.
  */
+
+import crypto from "node:crypto";
 
 import type { MomentumDb } from "./db.js";
 import {
@@ -153,6 +156,26 @@ export type NoMistakesExpectedExternalIdentity = NoMistakesExternalIdentity;
 
 const EXTERNAL_STATE_MIRRORED_STAGE = "external_state_mirrored";
 const EXPECTED_EXTERNAL_IDENTITY_STAGE = "expected_external_identity";
+
+function noMistakesProgressDigest(state: NoMistakesExternalState): string {
+  return `sha256:${crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        externalRunId: state.externalRunId,
+        branch: state.branch,
+        headSha: state.headSha,
+        activeStep: state.activeStep,
+        stepStatus: state.stepStatus,
+        findings: state.findings,
+        selectedFindingIds: state.selectedFindingIds,
+        decisions: state.decisions,
+        prUrl: state.prUrl,
+        ciState: state.ciState
+      })
+    )
+    .digest("hex")}`;
+}
 
 function externalIdentity(
   state: NoMistakesExternalState
@@ -476,14 +499,23 @@ function noMistakesPollRoundUpdate(
     ? polledAt
     : null;
   const baseUpdate = noMistakesRoundUpdate(decision);
+  const progressDigest = stateRead.ok
+    ? noMistakesProgressDigest(stateRead.value)
+    : null;
   const heartbeatAt =
     stateRead.ok &&
     decision.classification === "continue" &&
-    current.inputDigest === stateRead.digest
+    current.resultDigest === progressDigest
       ? (current.heartbeatAt ?? current.startedAt ?? polledAt)
       : polledAt;
   return stateRead.ok
-    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt, finishedAt }
+    ? {
+        ...baseUpdate,
+        inputDigest: stateRead.digest,
+        resultDigest: progressDigest,
+        heartbeatAt,
+        finishedAt
+      }
     : { ...baseUpdate, heartbeatAt, finishedAt };
 }
 
@@ -627,7 +659,7 @@ function reconcileNoMistakesStalledDecision(
   if (!stateRead.ok || decision.classification !== "continue") {
     return decision;
   }
-  if (current.inputDigest !== stateRead.digest) {
+  if (current.resultDigest !== noMistakesProgressDigest(stateRead.value)) {
     return decision;
   }
   const lastHeartbeatAt = current.heartbeatAt ?? current.startedAt ?? polledAt;
@@ -677,10 +709,12 @@ export type RunNoMistakesMirrorRoundResult = {
  * routes through {@link decideNoMistakesUnreadable} to the same
  * `manual_recovery_required` settle as a semantically broken snapshot, never
  * crashing the poll. A successful read additionally re-fingerprints the round's
- * `inputDigest` with the exact external bytes it mirrored this poll, so the durable
- * round reflects the evidence behind its current state (contract "Heartbeat And
- * Reattach"). Findings / decisions are projected only from a readable snapshot — a
- * reader failure invents none and preserves any already mirrored.
+ * `inputDigest` with the exact external bytes it mirrored this poll and
+ * `resultDigest` with the semantic progress fingerprint used for heartbeat / stall
+ * decisions, so the durable round reflects both the raw evidence and the progress
+ * signal behind its current state (contract "Heartbeat And Reattach"). Findings /
+ * decisions are projected only from a readable snapshot — a reader failure invents
+ * none and preserves any already mirrored.
  *
  * @throws {ExecutorRoundNotFoundError} if no round has `roundId` — the mirror round
  * must already exist (born at {@link runNoMistakesMirrorStep}); a poll reconciles a
