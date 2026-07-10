@@ -57,28 +57,26 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   insertExecutorInvocation,
   insertExecutorRound,
-  loadExecutorInvocation
+  loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord,
-  WorkflowExecutorFamily
+  WorkflowExecutorFamily,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
+  GNHF_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   isCodingImplementationEngine,
   readCodingStepRouteOverrides,
   resolveCodingStepExecutorSelection,
   type CodingImplementationEngine,
-  type CodingStepExecutorSelection
+  type CodingStepExecutorSelection,
 } from "../route/coding.js";
-import {
-  insertWorkflowGate,
-  loadWorkflowGate
-} from "../gate/persist.js";
+import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 import { releaseWorkflowLease } from "../leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
@@ -89,12 +87,12 @@ import { reopenRetryableDispatchInvocationForAttempt } from "./retry.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import {
   startWorkflowStep,
-  type WorkflowStepTransitionOutcome
+  type WorkflowStepTransitionOutcome,
 } from "../step/transitions.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatchContext,
-  WorkflowStepDispatchResult
+  WorkflowStepDispatchResult,
 } from "./scheduler.js";
 
 /**
@@ -109,11 +107,14 @@ export const WORKFLOW_DISPATCH_RESULT_STATUS = {
   /** An unsupported / unresolvable step was parked, or an orphaned lease released. */
   failClosed: "manual_recovery_gated",
   /** The step left `approved` between claim and dispatch; nothing was written. */
-  stepNotStartable: "step_not_startable"
+  stepNotStartable: "step_not_startable",
 } as const;
 
 /** The operator actions a phase-1 fail-closed manual-recovery gate offers. */
-const FAIL_CLOSED_GATE_ACTIONS: readonly string[] = ["clear_recovery", "abort_run"];
+const FAIL_CLOSED_GATE_ACTIONS: readonly string[] = [
+  "clear_recovery",
+  "abort_run",
+];
 const FAIL_CLOSED_RECOMMENDED_ACTION = "clear_recovery";
 
 /**
@@ -128,12 +129,12 @@ const FAIL_CLOSED_RECOMMENDED_ACTION = "clear_recovery";
  */
 export function executeWorkflowStepDispatch(
   claim: ClaimedWorkflowStep,
-  context: WorkflowStepDispatchContext
+  context: WorkflowStepDispatchContext,
 ): WorkflowStepDispatchResult {
   const { db, now } = context;
   const plan = resolveWorkflowStepDispatchPlan(db, {
     runId: claim.runId,
-    stepId: claim.stepId
+    stepId: claim.stepId,
   });
 
   if (plan.action === "fail_closed") {
@@ -141,17 +142,17 @@ export function executeWorkflowStepDispatch(
       code: plan.code,
       gateType: plan.gateType,
       reason: plan.reason,
-      now
+      now,
     });
   }
 
-  const selection = resolveDispatchRoundSelection(db, claim);
+  const selection = resolveWorkflowStepDispatchRouteSelection(db, claim);
   if (!selection.ok) {
     return failClosedDispatch(db, claim, {
       code: "route_config_invalid",
       gateType: "manual_recovery_required",
       reason: selection.reason,
-      now
+      now,
     });
   }
 
@@ -160,7 +161,7 @@ export function executeWorkflowStepDispatch(
     claim,
     plan.executorFamily,
     now,
-    selection.selection
+    selection.selection,
   );
 }
 
@@ -174,7 +175,7 @@ function dispatchExecutorScaffold(
   claim: ClaimedWorkflowStep,
   family: WorkflowExecutorFamily,
   now: number,
-  selection: CodingStepExecutorSelection
+  selection: CodingStepExecutorSelection,
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
@@ -182,12 +183,12 @@ function dispatchExecutorScaffold(
     if (reopened.reopened) {
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-        detail: `${family} ${reopened.invocationId} attempt ${reopened.attempt}`
+        detail: `${family} ${reopened.invocationId} attempt ${reopened.attempt}`,
       };
     }
     return {
       status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
-      detail: invocationId
+      detail: invocationId,
     };
   }
 
@@ -196,7 +197,7 @@ function dispatchExecutorScaffold(
     const started = startWorkflowStep(db, {
       runId: claim.runId,
       stepId: claim.stepId,
-      now
+      now,
     });
     if (!started.ok) {
       db.exec("ROLLBACK");
@@ -206,19 +207,19 @@ function dispatchExecutorScaffold(
       releaseDispatchLease(db, claim, now);
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
-        detail: describeStartFailure(started)
+        detail: describeStartFailure(started),
       };
     }
 
     insertExecutorInvocation(
       db,
       buildInvocationScaffold(claim, family, invocationId, now),
-      { now }
+      { now },
     );
     insertExecutorRound(
       db,
       buildRoundScaffold(claim, family, invocationId, now, selection),
-      { now }
+      { now },
     );
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
@@ -229,7 +230,7 @@ function dispatchExecutorScaffold(
 
   return {
     status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-    detail: `${family} ${invocationId}`
+    detail: `${family} ${invocationId}`,
   };
 }
 
@@ -237,14 +238,14 @@ function dispatchRetryScaffold(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
   now: number,
-  selection: CodingStepExecutorSelection
+  selection: CodingStepExecutorSelection,
 ): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
   db.exec("BEGIN IMMEDIATE");
   try {
     const started = startWorkflowStep(db, {
       runId: claim.runId,
       stepId: claim.stepId,
-      now
+      now,
     });
     if (!started.ok) {
       db.exec("ROLLBACK");
@@ -255,7 +256,7 @@ function dispatchRetryScaffold(
       stepId: claim.stepId,
       now,
       stepState: "running",
-      selection
+      selection,
     });
     if (!reopened.reopened) {
       db.exec("ROLLBACK");
@@ -285,7 +286,7 @@ function failClosedDispatch(
     gateType: WorkflowGateType;
     reason: string;
     now: number;
-  }
+  },
 ): WorkflowStepDispatchResult {
   const { code, gateType, reason, now } = outcome;
   db.exec("BEGIN IMMEDIATE");
@@ -293,7 +294,7 @@ function failClosedDispatch(
     const marked = markWorkflowRunNeedsManualRecovery(db, {
       runId: claim.runId,
       reason,
-      now
+      now,
     });
     // A gate has a NOT NULL FK to workflow_runs; only open one when the run still
     // exists. A vanished run (run_not_found) cannot carry a gate, but the lease
@@ -312,9 +313,9 @@ function failClosedDispatch(
             reason,
             evidence: code,
             allowedActions: FAIL_CLOSED_GATE_ACTIONS,
-            recommendedAction: FAIL_CLOSED_RECOMMENDED_ACTION
+            recommendedAction: FAIL_CLOSED_RECOMMENDED_ACTION,
           },
-          { now }
+          { now },
         );
       }
     }
@@ -327,7 +328,7 @@ function failClosedDispatch(
 
   return {
     status: WORKFLOW_DISPATCH_RESULT_STATUS.failClosed,
-    detail: `${code}: ${reason}`
+    detail: `${code}: ${reason}`,
   };
 }
 
@@ -335,7 +336,7 @@ function buildInvocationScaffold(
   claim: ClaimedWorkflowStep,
   family: WorkflowExecutorFamily,
   invocationId: string,
-  now: number
+  now: number,
 ): ExecutorInvocationRecord {
   return {
     invocationId,
@@ -347,7 +348,7 @@ function buildInvocationScaffold(
     attempt: 1,
     startedAt: now,
     heartbeatAt: now,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
@@ -356,7 +357,7 @@ function buildRoundScaffold(
   family: WorkflowExecutorFamily,
   invocationId: string,
   _now: number,
-  selection: CodingStepExecutorSelection
+  selection: CodingStepExecutorSelection,
 ): ExecutorRoundRecord {
   return {
     roundId: deriveDispatchRoundId(invocationId),
@@ -390,11 +391,11 @@ function buildRoundScaffold(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
-type DispatchRouteSelectionResolution =
+export type WorkflowStepDispatchRouteSelectionResolution =
   | { ok: true; selection: CodingStepExecutorSelection }
   | { ok: false; reason: string };
 
@@ -407,18 +408,18 @@ type DispatchRouteRow = {
 const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
   agentProvider: null,
   model: null,
-  effort: null
+  effort: null,
 };
 
-function resolveDispatchRoundSelection(
+export function resolveWorkflowStepDispatchRouteSelection(
   db: MomentumDb,
-  claim: ClaimedWorkflowStep
-): DispatchRouteSelectionResolution {
+  claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
+): WorkflowStepDispatchRouteSelectionResolution {
   const row = db
     .prepare(
       `SELECT source, workflow_definition_key, route_json
          FROM workflow_runs
-        WHERE id = ?`
+        WHERE id = ?`,
     )
     .get(claim.runId) as DispatchRouteRow | undefined;
   if (row === undefined) {
@@ -437,7 +438,7 @@ function resolveDispatchRoundSelection(
   }
   const implementationEngine = readCodingImplementationEngine(
     claim.runId,
-    route.route
+    route.route,
   );
   if (!implementationEngine.ok) {
     return { ok: false, reason: implementationEngine.reason };
@@ -448,7 +449,7 @@ function resolveDispatchRoundSelection(
   ) {
     return {
       ok: false,
-      reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`
+      reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
     };
   }
 
@@ -458,21 +459,21 @@ function resolveDispatchRoundSelection(
       ok: false,
       reason: `Native coding run ${claim.runId} route.steps is invalid (${overrides.refusal}${
         overrides.path === undefined ? "" : ` at ${overrides.path}`
-      }): ${overrides.reason}`
+      }): ${overrides.reason}`,
     };
   }
   return {
     ok: true,
     selection: resolveCodingStepExecutorSelection(
       overrides.overrides,
-      claim.stepId
-    )
+      claim.stepId,
+    ),
   };
 }
 
 function readCodingImplementationEngine(
   runId: string,
-  route: Record<string, unknown>
+  route: Record<string, unknown>,
 ):
   | { ok: true; engine: CodingImplementationEngine }
   | { ok: false; reason: string } {
@@ -483,14 +484,14 @@ function readCodingImplementationEngine(
   if (typeof value !== "string" || value.trim().length === 0) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route.implementationEngine is invalid; routing to manual recovery.`
+      reason: `Native coding run ${runId} route.implementationEngine is invalid; routing to manual recovery.`,
     };
   }
   const normalized = value.trim();
   if (!isCodingImplementationEngine(normalized)) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route.implementationEngine is unsupported (${normalized}); routing to manual recovery.`
+      reason: `Native coding run ${runId} route.implementationEngine is unsupported (${normalized}); routing to manual recovery.`,
     };
   }
   return { ok: true, engine: normalized };
@@ -498,8 +499,9 @@ function readCodingImplementationEngine(
 
 function parseRouteJson(
   runId: string,
-  routeJson: string | null
-): { ok: true; route: Record<string, unknown> } | { ok: false; reason: string } {
+  routeJson: string | null,
+):
+  { ok: true; route: Record<string, unknown> } | { ok: false; reason: string } {
   if (routeJson === null) return { ok: true, route: {} };
   let parsed: unknown;
   try {
@@ -507,17 +509,13 @@ function parseRouteJson(
   } catch {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route is corrupt; routing to manual recovery.`
+      reason: `Native coding run ${runId} route is corrupt; routing to manual recovery.`,
     };
   }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Array.isArray(parsed)
-  ) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {
       ok: false,
-      reason: `Native coding run ${runId} route is not an object; routing to manual recovery.`
+      reason: `Native coding run ${runId} route is not an object; routing to manual recovery.`,
     };
   }
   return { ok: true, route: parsed as Record<string, unknown> };
@@ -534,7 +532,10 @@ function parseRouteJson(
  * dispatched step's terminal executor evidence, so the two halves can never drift
  * apart on the namespacing convention.
  */
-export function deriveDispatchInvocationId(runId: string, stepId: string): string {
+export function deriveDispatchInvocationId(
+  runId: string,
+  stepId: string,
+): string {
   return `${runId}::${stepId}::dispatch`;
 }
 
@@ -546,7 +547,7 @@ function deriveDispatchRoundId(invocationId: string): string {
 function deriveDispatchGateId(
   runId: string,
   stepId: string,
-  code: WorkflowDispatchFailClosedCode
+  code: WorkflowDispatchFailClosedCode,
 ): string {
   return `${runId}::${stepId}::dispatch-fail::${code}`;
 }
@@ -554,31 +555,31 @@ function deriveDispatchGateId(
 function releaseDispatchLease(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
-  now: number
+  now: number,
 ): void {
   releaseWorkflowLease(db, {
     runId: claim.lease.runId,
     leaseKind: claim.lease.leaseKind,
     holder: claim.lease.holder,
     acquiredAt: claim.lease.acquiredAt,
-    now
+    now,
   });
 }
 
 function refreshWorkflowRunStateAfterDispatch(
   db: MomentumDb,
   runId: string,
-  now: number
+  now: number,
 ): void {
   refreshWorkflowRunRuntimeState(db, {
     runId,
     now,
-    startedAt: "coalesce-now"
+    startedAt: "coalesce-now",
   });
 }
 
 function describeStartFailure(
-  outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>
+  outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>,
 ): string {
   if (outcome.reason === "step_not_found") return "step_not_found";
   return `not_approved (was ${outcome.from})`;

@@ -38,13 +38,13 @@ function makeTempDir(prefix = "momentum-cli-daemon-wf-"): string {
 function runGit(repoPath: string, args: string[]): string {
   return execFileSync("git", ["-C", repoPath, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
 
 function initRepo(
   repoPath: string,
-  options: { ignoreAgentWorkflows?: boolean } = {}
+  options: { ignoreAgentWorkflows?: boolean } = {},
 ): void {
   runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
   runGit(repoPath, ["config", "user.email", "test@example.com"]);
@@ -55,7 +55,7 @@ function initRepo(
     fs.writeFileSync(
       path.join(repoPath, ".gitignore"),
       ".agent-workflows/\n",
-      "utf-8"
+      "utf-8",
     );
   }
   runGit(repoPath, ["add", "README.md"]);
@@ -68,7 +68,7 @@ function initRepo(
 async function run(
   argv: string[],
   env: Record<string, string | undefined> = {},
-  deps: Parameters<typeof runCli>[2] = {}
+  deps: Parameters<typeof runCli>[2] = {},
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -79,17 +79,17 @@ async function run(
         write(chunk: string) {
           stdout += chunk;
           return true;
-        }
+        },
       },
       stderr: {
         write(chunk: string) {
           stderr += chunk;
           return true;
-        }
+        },
       },
-      env
+      env,
     },
-    deps
+    deps,
   );
   return { code, stdout, stderr };
 }
@@ -103,7 +103,7 @@ async function run(
 async function startApprovedCodingRun(
   dataDir: string,
   repoDir: string,
-  runId: string
+  runId: string,
 ): Promise<void> {
   const startResult = await run([
     "workflow",
@@ -117,7 +117,7 @@ async function startApprovedCodingRun(
     "Dogfood NGX-367 production dispatch",
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(startResult.code).toBe(0);
 
@@ -132,7 +132,7 @@ async function startApprovedCodingRun(
     `approve plan ${runId} through-implementation`,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(approveResult.code).toBe(0);
 }
@@ -154,11 +154,11 @@ JSON`;
           cwd: "iteration",
           timeout_sec: timeoutSec,
           env_allow: [],
-          result_file: "result.json"
-        }
-      }
+          result_file: "result.json",
+        },
+      },
     }),
-    "utf8"
+    "utf8",
   );
   return profilePath;
 }
@@ -181,11 +181,11 @@ JSON`;
           cwd: "iteration",
           timeout_sec: 5,
           env_allow: ["MOMENTUM_TEST_TOKEN"],
-          result_file: "result.json"
-        }
-      }
+          result_file: "result.json",
+        },
+      },
     }),
-    "utf8"
+    "utf8",
   );
   return profilePath;
 }
@@ -204,21 +204,21 @@ function writeCodingWorkflowWrapperPreflightProfile(dir: string): string {
             "--import",
             path.join(
               process.cwd(),
-              "src/adapters/typescript-source-register.mjs"
+              "src/adapters/typescript-source-register.mjs",
             ),
             path.join(
               process.cwd(),
-              "src/adapters/coding-workflow-live-wrapper-cli.ts"
-            )
+              "src/adapters/coding-workflow-live-wrapper-cli.ts",
+            ),
           ],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH"],
-          result_file: "result.json"
-        }
-      }
+          result_file: "result.json",
+        },
+      },
     }),
-    "utf8"
+    "utf8",
   );
   return profilePath;
 }
@@ -243,9 +243,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -258,35 +258,33 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const step = db
         .prepare(
-          "SELECT state, result_digest FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          "SELECT state, result_digest FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; result_digest: string | null }
-        | undefined;
+        { state: string; result_digest: string | null } | undefined;
       expect(step).toMatchObject({ state: "succeeded" });
 
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       expect(invocation).toEqual({ state: "succeeded" });
 
       const round = db
         .prepare(
-          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; summary: string | null }
-        | undefined;
+        { state: string; summary: string | null } | undefined;
       expect(round).toEqual({
         state: "succeeded",
-        summary: "daemon live wrapper preflight succeeded"
+        summary: "daemon live wrapper preflight succeeded",
       });
 
       const openLeases = db
         .prepare(
-          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([]);
@@ -295,10 +293,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
 
     expect(
-      fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
+      fs.existsSync(
+        path.join(repoDir, ".agent-workflows", runId, "result.json"),
+      ),
     ).toBe(true);
     expect(runGit(repoDir, ["show", "--name-only", "--format=", "HEAD"])).toBe(
-      "daemon-preflight.txt"
+      "daemon-preflight.txt",
     );
   });
 
@@ -322,25 +322,30 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(runGit(repoDir, ["rev-parse", "HEAD"])).toBe(baseHead);
-    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(
+      false,
+    );
     expect(fs.existsSync(path.join(repoDir, ".agent-workflows"))).toBe(false);
 
     const db = openDb(dataDir);
     try {
       const runRow = db
         .prepare(
-          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
-        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | {
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain("invalid_input");
@@ -348,10 +353,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const round = db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; recovery_code: string | null; summary: string | null }
+        | {
+            state: string;
+            recovery_code: string | null;
+            summary: string | null;
+          }
         | undefined;
       expect(round?.state).toBe("manual_recovery_required");
       expect(round?.recovery_code).toBe("invalid_input");
@@ -382,7 +391,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         iteration: 1,
         jobId: "run-other::preflight::dispatch",
         leaseExpiresAt: 1_700_000_600_000,
-        now: 1_700_000_000_000
+        now: 1_700_000_000_000,
       });
       expect(locked.ok).toBe(true);
     } finally {
@@ -399,27 +408,32 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
-    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(
+      false,
+    );
 
     const verifyDb = openDb(dataDir);
     try {
       const runRow = verifyDb
         .prepare(
-          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
-        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | {
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain(
-        `repository ${repoDir} is locked by other-worker`
+        `repository ${repoDir} is locked by other-worker`,
       );
     } finally {
       verifyDb.close();
@@ -447,34 +461,43 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(runGit(repoDir, ["rev-parse", "HEAD"])).toBe(baseHead);
-    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(
+      false,
+    );
 
     const db = openDb(dataDir);
     try {
       const runRow = db
         .prepare(
-          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
-        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | {
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain("git_failed");
 
       const round = db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; recovery_code: string | null; summary: string | null }
+        | {
+            state: string;
+            recovery_code: string | null;
+            summary: string | null;
+          }
         | undefined;
       expect(round?.state).toBe("manual_recovery_required");
       expect(round?.recovery_code).toBe("git_failed");
@@ -485,7 +508,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     const recoveryMd = fs.readFileSync(
       path.join(repoDir, ".agent-workflows", runId, "recovery.md"),
-      "utf-8"
+      "utf-8",
     );
     expect(recoveryMd).toContain("git_failed");
     expect(recoveryMd).toContain("uncommitted changes");
@@ -497,7 +520,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf8"
+      "utf8",
     );
     const runId = "ngx496-linear-key-scope";
 
@@ -515,28 +538,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1001",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1001', 'linear', 'linear-issue-1001', 'NGX-1001',
                  'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -548,7 +571,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  '{"state":"Done","comment":"evidence says done"}',
                  'evidence says done',
                  'source_ngx1001', 'pending', 'idemp:intent_ngx1001', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -567,22 +590,22 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             issue: {
               id: "linear-issue-1001",
               key: "NGX-1001",
-              url: "https://linear.app/example/issue/NGX-1001"
+              url: "https://linear.app/example/issue/NGX-1001",
             },
             comment: {
               id: "comment-ngx1001",
-              url: "https://linear.app/example/comment/NGX-1001"
+              url: "https://linear.app/example/comment/NGX-1001",
             },
             status: {
               transitioned: true as const,
               previousStateId: "state-todo",
               previousStateName: "Todo",
               nextStateId: "state-done",
-              nextStateName: "Done"
+              nextStateName: "Done",
             },
-            idempotencyMarker: marker
+            idempotencyMarker: marker,
           };
-        }
+        },
       }),
       buildLinearIssueRefreshClient: () => ({
         async refresh() {
@@ -594,18 +617,18 @@ describe("daemon start production workflow lane (NGX-367)", () => {
               title: "Scoped issue",
               url: "https://linear.app/example/issue/NGX-1001",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "comment-ngx1001",
                 body: `Applied ${marker}`,
-                url: "https://linear.app/example/comment/NGX-1001"
-              }
-            ]
+                url: "https://linear.app/example/comment/NGX-1001",
+              },
+            ],
           };
-        }
-      })
+        },
+      }),
     };
 
     const result = await run(
@@ -618,10 +641,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -633,12 +656,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     const verifyDb = openDb(dataDir);
     try {
       const intent = verifyDb
-        .prepare("SELECT status FROM update_intents WHERE id = 'intent_ngx1001'")
+        .prepare(
+          "SELECT status FROM update_intents WHERE id = 'intent_ngx1001'",
+        )
         .get() as { status: string } | undefined;
       expect(intent).toEqual({ status: "applied" });
       const step = verifyDb
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'",
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
@@ -653,7 +678,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf8"
+      "utf8",
     );
     const runId = "ngx584-linear-refresh-seed";
 
@@ -671,21 +696,21 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1001",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
@@ -693,7 +718,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
          VALUES ('source_ngx1001_seeded', 'linear', 'linear-issue-1001',
                  'NGX-1001',
                  'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
     } finally {
       db.close();
@@ -712,7 +737,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
           marker = input.preview.idempotencyMarker;
           observedStateName =
             input.statusMutation?.kind === "by_name"
-              ? input.statusMutation.stateName ?? null
+              ? (input.statusMutation.stateName ?? null)
               : null;
           return {
             ok: true as const,
@@ -720,22 +745,22 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             issue: {
               id: "linear-issue-1001",
               key: "NGX-1001",
-              url: "https://linear.app/example/issue/NGX-1001"
+              url: "https://linear.app/example/issue/NGX-1001",
             },
             comment: {
               id: "comment-ngx1001-seeded",
-              url: "https://linear.app/example/comment/NGX-1001-seeded"
+              url: "https://linear.app/example/comment/NGX-1001-seeded",
             },
             status: {
               transitioned: true as const,
               previousStateId: "state-todo",
               previousStateName: "Todo",
               nextStateId: "state-done",
-              nextStateName: "Done"
+              nextStateName: "Done",
             },
-            idempotencyMarker: marker
+            idempotencyMarker: marker,
           };
-        }
+        },
       }),
       buildLinearIssueRefreshClient: () => ({
         async refresh() {
@@ -747,18 +772,18 @@ describe("daemon start production workflow lane (NGX-367)", () => {
               title: "Scoped issue",
               url: "https://linear.app/example/issue/NGX-1001",
               updatedAt: "2026-05-21T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "comment-ngx1001-seeded",
                 body: `Applied ${marker}`,
-                url: "https://linear.app/example/comment/NGX-1001-seeded"
-              }
-            ]
+                url: "https://linear.app/example/comment/NGX-1001-seeded",
+              },
+            ],
           };
-        }
-      })
+        },
+      }),
     };
 
     const result = await run(
@@ -771,10 +796,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -790,7 +815,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                   idempotency_key
              FROM update_intents
             WHERE source_item_id = 'source_ngx1001_seeded'
-            ORDER BY created_at ASC`
+            ORDER BY created_at ASC`,
         )
         .all() as Array<{
         intent_type: string;
@@ -804,12 +829,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         intent_type: "status_update",
         source_item_id: "source_ngx1001_seeded",
         status: "applied",
-        idempotency_key: "linear:linear-issue-1001:status_update:done"
+        idempotency_key: "linear:linear-issue-1001:status_update:done",
       });
       expect(JSON.parse(intents[0]!.payload_json)).toEqual({ state: "Done" });
       const step = verifyDb
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'",
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
@@ -824,7 +849,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf8"
+      "utf8",
     );
     const runId = "ngx559-linear-auth-preflight";
 
@@ -842,28 +867,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1001",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1001_missing_auth', 'linear', 'linear-issue-1001', 'NGX-1001',
                  'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -874,7 +899,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'source_satisfied', '{"kind":"comment"}', 'evidence says done',
                  'source_ngx1001_missing_auth', 'pending',
                  'idemp:intent_ngx1001_missing_auth', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -885,9 +910,11 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       buildLinearExternalUpdateClient: () => ({
         async apply() {
           applyCalls += 1;
-          throw new Error("must not call external apply without auth preflight");
-        }
-      })
+          throw new Error(
+            "must not call external apply without auth preflight",
+          );
+        },
+      }),
     };
 
     const result = await run(
@@ -900,10 +927,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       {},
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -918,7 +945,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(runRow?.needs_manual_recovery).toBe(1);
       const round = verifyDb
         .prepare(
-          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'",
         )
         .get(runId) as { state: string; summary: string | null } | undefined;
       expect(round?.state).toBe("manual_recovery_required");
@@ -947,28 +974,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1002",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1002_default_policy', 'linear', 'linear-issue-1002', 'NGX-1002',
                  'https://linear.app/example/issue/NGX-1002', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -979,7 +1006,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'source_satisfied', '{"kind":"comment"}', 'evidence says done',
                  'source_ngx1002_default_policy', 'pending',
                  'idemp:intent_ngx1002_default_policy', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -991,8 +1018,8 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         async apply() {
           applyCalls += 1;
           throw new Error("must not call external apply when policy denies");
-        }
-      })
+        },
+      }),
     };
 
     const result = await run(
@@ -1005,10 +1032,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       {},
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -1023,7 +1050,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(runRow?.needs_manual_recovery).toBe(1);
       const round = verifyDb
         .prepare(
-          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'",
         )
         .get(runId) as { state: string; summary: string | null } | undefined;
       expect(round?.state).toBe("manual_recovery_required");
@@ -1054,33 +1081,33 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1003",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: write_everything\n---\n",
-      "utf8"
+      "utf8",
     );
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1003_invalid_policy', 'linear', 'linear-issue-1003', 'NGX-1003',
                  'https://linear.app/example/issue/NGX-1003', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -1091,7 +1118,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'status_update', '{"state":"Done"}', 'evidence says done',
                  'source_ngx1003_invalid_policy', 'pending',
                  'idemp:intent_ngx1003_invalid_policy', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -1102,9 +1129,11 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       buildLinearExternalUpdateClient: () => ({
         async apply() {
           applyCalls += 1;
-          throw new Error("must not call external apply when policy is invalid");
-        }
-      })
+          throw new Error(
+            "must not call external apply when policy is invalid",
+          );
+        },
+      }),
     };
 
     const result = await run(
@@ -1117,10 +1146,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -1131,7 +1160,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const round = verifyDb
         .prepare(
-          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'",
         )
         .get(runId) as { state: string; summary: string | null } | undefined;
       expect(round?.state).toBe("manual_recovery_required");
@@ -1162,33 +1191,33 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-1004",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf8"
+      "utf8",
     );
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx1004_invalid_target_state', 'linear', 'linear-issue-1004', 'NGX-1004',
                  'https://linear.app/example/issue/NGX-1004', 'Scoped issue',
-                 'Todo', '{}', 1, NULL, 1, 1)`
+                 'Todo', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -1200,7 +1229,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'evidence says done',
                  'source_ngx1004_invalid_target_state', 'pending',
                  'idemp:intent_ngx1004_invalid_target_state', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -1211,9 +1240,11 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       buildLinearExternalUpdateClient: () => ({
         async apply() {
           applyCalls += 1;
-          throw new Error("must not call external apply for invalid target state");
-        }
-      })
+          throw new Error(
+            "must not call external apply for invalid target state",
+          );
+        },
+      }),
     };
 
     const result = await run(
@@ -1226,10 +1257,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -1240,7 +1271,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const round = verifyDb
         .prepare(
-          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'",
         )
         .get(runId) as { state: string; summary: string | null } | undefined;
       expect(round?.state).toBe("manual_recovery_required");
@@ -1248,7 +1279,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(round?.summary).toContain("resolve_intent_evidence");
       const intentRow = verifyDb
         .prepare(
-          "SELECT status FROM update_intents WHERE id = 'intent_ngx1004_invalid_target_state'"
+          "SELECT status FROM update_intents WHERE id = 'intent_ngx1004_invalid_target_state'",
         )
         .get() as { status: string } | undefined;
       expect(intentRow).toEqual({ status: "pending" });
@@ -1266,7 +1297,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     const marker = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId,
-      payload
+      payload,
     });
 
     const startResult = await run([
@@ -1283,33 +1314,33 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-565",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: write_everything\n---\n",
-      "utf8"
+      "utf8",
     );
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx565_applied_invalid_policy', 'linear', 'linear-issue-565', 'NGX-565',
                  'https://linear.app/example/issue/NGX-565', 'Scoped issue',
-                 'Done', '{}', 1, NULL, 1, 1)`
+                 'Done', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -1320,7 +1351,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'status_update', ?, 'workflow complete',
                  'source_ngx565_applied_invalid_policy', 'applied',
                  'idemp:intent_ngx565_applied_invalid_policy', 1, 2,
-                 2, NULL, NULL, NULL)`
+                 2, NULL, NULL, NULL)`,
       ).run(intentId, JSON.stringify(payload));
       db.prepare(
         `INSERT INTO intent_apply_audits
@@ -1347,8 +1378,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'comment-ngx565', 'https://linear.app/example/comment/NGX-565',
                  'transition-ngx565',
                  'success', NULL,
-                 1, 2)`
-      ).run(intentId, `daemon external-apply for workflow ${runId}/linear-refresh`, marker);
+                 1, 2)`,
+      ).run(
+        intentId,
+        `daemon external-apply for workflow ${runId}/linear-refresh`,
+        marker,
+      );
     } finally {
       db.close();
     }
@@ -1358,9 +1393,11 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       buildLinearExternalUpdateClient: () => ({
         async apply() {
           applyCalls += 1;
-          throw new Error("must not call external apply for already-applied evidence");
-        }
-      })
+          throw new Error(
+            "must not call external apply for already-applied evidence",
+          );
+        },
+      }),
     };
 
     const result = await run(
@@ -1373,10 +1410,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       {},
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -1387,15 +1424,15 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const step = verifyDb
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'",
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
       const resultJson = JSON.parse(
         fs.readFileSync(
           path.join(repoDir, ".agent-workflows", runId, "external-apply.json"),
-          "utf8"
-        )
+          "utf8",
+        ),
       ) as { resultCode?: string; external?: { alreadyApplied?: boolean } };
       expect(resultJson.resultCode).toBe("already_applied");
       expect(resultJson.external?.alreadyApplied).toBe(true);
@@ -1414,7 +1451,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nintent_apply_policy: external_apply_allowed\n---\n",
-      "utf8"
+      "utf8",
     );
     const runId = "ngx522-linear-status-update";
 
@@ -1432,28 +1469,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "NGX-522",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(startResult.code).toBe(0);
 
     const db = openDb(dataDir);
     try {
       db.prepare(
-        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
       ).run(runId);
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
       db.prepare(
         `INSERT INTO source_items
            (id, adapter_kind, external_id, external_key, url, title, status,
             metadata_json, last_observed_at, goal_id, created_at, updated_at)
          VALUES ('source_ngx522', 'linear', 'linear-issue-522', 'NGX-522',
                  'https://linear.app/example/issue/NGX-522', 'Status issue',
-                 'In Review', '{}', 1, NULL, 1, 1)`
+                 'In Review', '{}', 1, NULL, 1, 1)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -1464,7 +1501,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  'source_satisfied', '{"kind":"comment"}',
                  'source evidence exists',
                  'source_ngx522', 'pending', 'idemp:intent_aaa_ngx522_source_satisfied', 0, 0,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
       db.prepare(
         `INSERT INTO update_intents
@@ -1476,7 +1513,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
                  '{"state":"Done","comment":"Native workflow finished."}',
                  'close issue after native workflow',
                  'source_ngx522', 'pending', 'idemp:intent_ngx522', 1, 1,
-                 NULL, NULL, NULL, NULL)`
+                 NULL, NULL, NULL, NULL)`,
       ).run();
     } finally {
       db.close();
@@ -1495,7 +1532,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
           marker = input.preview.idempotencyMarker;
           statusMutation = input.statusMutation;
           expect(input.preview.commentBody).toContain(
-            "Native workflow finished."
+            "Native workflow finished.",
           );
           return {
             ok: true as const,
@@ -1503,22 +1540,22 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             issue: {
               id: "linear-issue-522",
               key: "NGX-522",
-              url: "https://linear.app/example/issue/NGX-522"
+              url: "https://linear.app/example/issue/NGX-522",
             },
             comment: {
               id: "comment-ngx522",
-              url: "https://linear.app/example/comment/NGX-522"
+              url: "https://linear.app/example/comment/NGX-522",
             },
             status: {
               transitioned: true as const,
               previousStateId: "state-review",
               previousStateName: "In Review",
               nextStateId: "state-done",
-              nextStateName: "Done"
+              nextStateName: "Done",
             },
-            idempotencyMarker: marker
+            idempotencyMarker: marker,
           };
-        }
+        },
       }),
       buildLinearIssueRefreshClient: () => ({
         async refresh() {
@@ -1530,18 +1567,18 @@ describe("daemon start production workflow lane (NGX-367)", () => {
               title: "Status issue",
               url: "https://linear.app/example/issue/NGX-522",
               updatedAt: "2026-06-24T00:00:00.000Z",
-              state: { id: "state-done", name: "Done" }
+              state: { id: "state-done", name: "Done" },
             },
             comments: [
               {
                 id: "comment-ngx522",
                 body: `Applied ${marker}`,
-                url: "https://linear.app/example/comment/NGX-522"
-              }
-            ]
+                url: "https://linear.app/example/comment/NGX-522",
+              },
+            ],
           };
-        }
-      })
+        },
+      }),
     };
 
     const result = await run(
@@ -1554,10 +1591,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       { LINEAR_API_KEY: "test-key" },
-      deps
+      deps,
     );
 
     expect(result.code).toBe(0);
@@ -1573,7 +1610,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(intent).toEqual({ status: "applied" });
       const step = verifyDb
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'",
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
@@ -1601,9 +1638,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -1611,14 +1648,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const lease = db
         .prepare(
-          "SELECT acquired_at, expires_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+          "SELECT acquired_at, expires_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
         )
-        .get(runId) as
-        | { acquired_at: number; expires_at: number }
-        | undefined;
+        .get(runId) as { acquired_at: number; expires_at: number } | undefined;
       expect(lease).not.toBeUndefined();
       expect(lease!.expires_at - lease!.acquired_at).toBeGreaterThanOrEqual(
-        120_000
+        120_000,
       );
     } finally {
       db.close();
@@ -1647,12 +1682,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
           "0",
           "--data-dir",
           dataDir,
-          "--json"
+          "--json",
         ],
         {
           [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
-          MOMENTUM_TEST_TOKEN: "from-cli-io"
-        }
+          MOMENTUM_TEST_TOKEN: "from-cli-io",
+        },
       );
 
       expect(result.code).toBe(0);
@@ -1661,13 +1696,13 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       try {
         const step = db
           .prepare(
-            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
           )
           .get(runId, "preflight") as { state: string } | undefined;
         expect(step).toEqual({ state: "succeeded" });
         const round = db
           .prepare(
-            "SELECT summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+            "SELECT summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
           )
           .get(runId, "preflight") as { summary: string | null } | undefined;
         expect(round?.summary).toBe("daemon live wrapper env forwarded");
@@ -1705,9 +1740,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -1720,29 +1755,34 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const runRow = db
         .prepare(
-          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
-        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | {
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
-      expect(runRow?.manual_recovery_reason).toContain(
-        "runtime_unavailable"
-      );
+      expect(runRow?.manual_recovery_reason).toContain("runtime_unavailable");
 
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       expect(invocation).toEqual({ state: "manual_recovery_required" });
 
       const round = db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; recovery_code: string | null; summary: string | null }
+        | {
+            state: string;
+            recovery_code: string | null;
+            summary: string | null;
+          }
         | undefined;
       expect(round?.state).toBe("manual_recovery_required");
       expect(round?.recovery_code).toBe("runtime_unavailable");
@@ -1750,7 +1790,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const openLeases = db
         .prepare(
-          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([]);
@@ -1778,9 +1818,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -1789,29 +1829,34 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const step = db
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       expect(step).toEqual({ state: "running" });
 
       const runRow = db
         .prepare(
-          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
-        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | {
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
         | undefined;
       expect(runRow?.needs_manual_recovery).toBe(1);
-      expect(runRow?.manual_recovery_reason).toContain(
-        "runtime_unavailable"
-      );
+      expect(runRow?.manual_recovery_reason).toContain("runtime_unavailable");
 
       const round = db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as
-        | { state: string; recovery_code: string | null; summary: string | null }
+        | {
+            state: string;
+            recovery_code: string | null;
+            summary: string | null;
+          }
         | undefined;
       expect(round?.state).toBe("manual_recovery_required");
       expect(round?.recovery_code).toBe("runtime_unavailable");
@@ -1836,7 +1881,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "0",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -1854,7 +1899,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const invocations = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?"
+          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
@@ -1862,12 +1907,16 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         state: string;
       }>;
       expect(invocations).toEqual([
-        { step_key: "preflight", executor_family: "one-shot", state: "running" }
+        {
+          step_key: "preflight",
+          executor_family: "one-shot",
+          state: "running",
+        },
       ]);
 
       const rounds = db
         .prepare(
-          "SELECT step_key, round_index, state FROM executor_rounds WHERE workflow_run_id = ?"
+          "SELECT step_key, round_index, state FROM executor_rounds WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
@@ -1875,7 +1924,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         state: string;
       }>;
       expect(rounds).toEqual([
-        { step_key: "preflight", round_index: 1, state: "pending" }
+        { step_key: "preflight", round_index: 1, state: "pending" },
       ]);
     } finally {
       db.close();
@@ -1889,7 +1938,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
     const statusPayload = JSON.parse(statusResult.stdout) as {
@@ -1905,7 +1954,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitorResult.code).toBe(0);
   });
@@ -1925,17 +1974,19 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "0",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(firstDispatch.code).toBe(0);
-    expect(JSON.parse(firstDispatch.stdout).loop.workflowStepsDispatched).toBe(1);
+    expect(JSON.parse(firstDispatch.stdout).loop.workflowStepsDispatched).toBe(
+      1,
+    );
 
     const db = openDb(dataDir);
     try {
       db.prepare(
         `UPDATE workflow_leases
             SET heartbeat_at = ?, expires_at = ?
-          WHERE run_id = ? AND lease_kind = ?`
+          WHERE run_id = ? AND lease_kind = ?`,
       ).run(1, 2, runId, "dispatch");
       terminalizeDispatchedExecutorInvocation({
         db,
@@ -1953,11 +2004,21 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             errorCode: null,
             errorMessage: null,
             retryHint: null,
-            recoveryHint: null
+            recoveryHint: null,
           },
-          executorLogPath: path.join(repoDir, ".agent-workflows", runId, "executor.log"),
-          resultJsonPath: path.join(repoDir, ".agent-workflows", runId, "result.json")
-        }
+          executorLogPath: path.join(
+            repoDir,
+            ".agent-workflows",
+            runId,
+            "executor.log",
+          ),
+          resultJsonPath: path.join(
+            repoDir,
+            ".agent-workflows",
+            runId,
+            "result.json",
+          ),
+        },
       });
     } finally {
       db.close();
@@ -1972,10 +2033,13 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "0",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(recoverLease.code).toBe(0);
-    const loop = JSON.parse(recoverLease.stdout).loop as Record<string, unknown>;
+    const loop = JSON.parse(recoverLease.stdout).loop as Record<
+      string,
+      unknown
+    >;
     expect(loop["exitReason"]).toBe("max_loop_iterations");
     expect(loop["iterations"]).toBe(1);
     expect(loop["workflowStepsDispatched"]).toBe(1);
@@ -1984,17 +2048,17 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const steps = finalDb
         .prepare(
-          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       expect(steps.slice(0, 2)).toEqual([
         { step_id: "preflight", state: "succeeded" },
-        { step_id: "implementation", state: "running" }
+        { step_id: "implementation", state: "running" },
       ]);
 
       const invocations = finalDb
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at"
+          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{
         step_key: string;
@@ -2002,8 +2066,16 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         state: string;
       }>;
       expect(invocations).toEqual([
-        { step_key: "preflight", executor_family: "one-shot", state: "succeeded" },
-        { step_key: "implementation", executor_family: "goal-loop", state: "running" }
+        {
+          step_key: "preflight",
+          executor_family: "one-shot",
+          state: "succeeded",
+        },
+        {
+          step_key: "implementation",
+          executor_family: "delegate-supervisor",
+          state: "running",
+        },
       ]);
     } finally {
       finalDb.close();
@@ -2031,9 +2103,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
-      { [DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR]: "1" }
+      { [DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR]: "1" },
     );
 
     expect(result.code).toBe(0);
@@ -2049,19 +2121,19 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const steps = db
         .prepare(
-          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       expect(steps.slice(0, 2)).toEqual([
         { step_id: "preflight", state: "succeeded" },
-        { step_id: "implementation", state: "succeeded" }
+        { step_id: "implementation", state: "succeeded" },
       ]);
 
       // The dispatch lease taken for each step was released on terminal — no
       // lease corruption strands the run.
       const openLeases = db
         .prepare(
-          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([]);
@@ -2089,7 +2161,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "0",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -2100,7 +2172,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const preflight = db
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       // The dispatched step stays `running` (held by its dispatch lease); nothing
@@ -2122,7 +2194,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "start",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -2137,7 +2209,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       const invocationCount = (
         db
           .prepare(
-            "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+            "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?",
           )
           .get(runId) as { count: number }
       ).count;
@@ -2145,7 +2217,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const preflight = db
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       // The approved step stays approved; nothing claimed or advanced it.

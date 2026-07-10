@@ -25,7 +25,12 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
   `goal-loop` remains an executor family.
 
 Executor families currently include `goal-loop`, `one-shot`, `script`,
-`no-mistakes`, `external-apply`, and `subworkflow`.
+`no-mistakes`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
+The legacy values remain readable for durable compatibility. The current
+`coding-workflow` definition classifies implementation and no-mistakes as
+`delegate-supervisor`, with `{ "tool": "gnhf" }` and
+`{ "tool": "no-mistakes" }` stored as portable step config; version 1 remains
+registered unchanged for runs that recorded it.
 
 The daemon owns scheduling, leases, recovery rechecks, gate enforcement, and
 bounded progress. Executors own bounded work and may recommend `continue`,
@@ -82,12 +87,12 @@ The loop must preserve no duplicate completed rounds and no duplicate commits by
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
 If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
 
-GNHF is source material, a compatibility reference, or an optional runner below `goal-loop`.
-GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may inform the native runner mechanism.
+GNHF is source material, a compatibility reference, or an optional runner below `goal-loop` for legacy definitions; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
+GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native goal-loop runner mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
 Momentum's durable source of truth is the workflow run, step, executor invocation, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
 `gnhf` must not become a first-class executor family merely to reuse behavior.
-A future GNHF-backed runner must report into native `goal-loop` invocation and round records instead of making `.gnhf/runs` authoritative.
+Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum invocation and round records instead of making `.gnhf/runs` authoritative.
 
 ## Workflow Safety
 
@@ -181,17 +186,17 @@ source so durable status/handoff/monitor/logs show it as Momentum-owned. It
 captures the run's isolation inputs in durable state: repo, objective, issue
 scope, approval boundary, skill revision, and the selected runtime/profile
 (`route.profile`) plus the selected implementation path
-(`route.implementationEngine`, defaulting to `native-goal-loop`); the daemon
+(`route.implementationEngine`, defaulting to the honest `gnhf` label); the daemon
 still resolves the executing live-wrapper profile from
 `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
-`workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
+`workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family, portable config, and on-start state) so an operator can inspect the proposed run before approval or execution.
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
-`--implementation-engine` accepts `native-goal-loop` or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
-The native dispatch lane executes only `native-goal-loop` today; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts rather than silently running the native goal-loop route.
+`--implementation-engine` accepts `gnhf`, the persisted compatibility label `native-goal-loop`, or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
+The native dispatch lane executes `gnhf` and legacy `native-goal-loop` through today's same kind-keyed live-wrapper path; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts rather than silently selecting another route.
 The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.

@@ -9,7 +9,7 @@ import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
   isBlockingWorkflowRecoveryCode,
-  markWorkflowRunNeedsManualRecovery
+  markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
 
 const tempRoots: string[] = [];
@@ -29,10 +29,14 @@ function makeTempDir(prefix = "momentum-workflow-run-recovery-"): string {
   return fs.realpathSync(dir);
 }
 
-function seedRun(db: MomentumDb, id: string, updatedAt = 1_730_000_000_000): void {
+function seedRun(
+  db: MomentumDb,
+  id: string,
+  updatedAt = 1_730_000_000_000,
+): void {
   db.prepare(
     `INSERT INTO workflow_runs (id, source, created_at, updated_at)
-     VALUES (?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?)`,
   ).run(id, "agent-workflow", updatedAt, updatedAt);
 }
 
@@ -44,13 +48,13 @@ function seedRunWithState(
     updatedAt?: number;
     finishedAt?: number | null;
     issueScope?: unknown;
-  } = {}
+  } = {},
 ): void {
   const updatedAt = options.updatedAt ?? 1_730_000_000_000;
   db.prepare(
     `INSERT INTO workflow_runs (
        id, source, state, issue_scope_json, finished_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     "momentum-native-coding",
@@ -58,7 +62,7 @@ function seedRunWithState(
     JSON.stringify(options.issueScope ?? {}),
     options.finishedAt ?? null,
     updatedAt,
-    updatedAt
+    updatedAt,
   );
 }
 
@@ -67,13 +71,18 @@ function seedStep(
   runId: string,
   stepId: string,
   state: string,
-  options: { kind?: string; order?: number; required?: number; at?: number } = {}
+  options: {
+    kind?: string;
+    order?: number;
+    required?: number;
+    at?: number;
+  } = {},
 ): void {
   const at = options.at ?? 1_730_000_000_000;
   db.prepare(
     `INSERT INTO workflow_steps (
        run_id, step_id, kind, state, step_order, required, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     stepId,
@@ -82,7 +91,7 @@ function seedStep(
     options.order ?? 0,
     options.required ?? 1,
     at,
-    at
+    at,
   );
 }
 
@@ -91,56 +100,58 @@ function seedNoMistakesCheckpoint(
   runId: string,
   stepId: string,
   options: {
+    executorFamily?: "no-mistakes" | "delegate-supervisor";
     noMistakesRunId?: string;
     branch?: string;
     headSha?: string;
     prUrl?: string | null;
     at?: number;
-  } = {}
+  } = {},
 ): void {
   const at = options.at ?? 1_730_000_000_000;
+  const executorFamily = options.executorFamily ?? "no-mistakes";
   const invocationId = `${runId}::${stepId}::dispatch`;
   const roundId = `${invocationId}::round-0`;
   db.prepare(
     `INSERT INTO executor_invocations (
        invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
        state, attempt, started_at, heartbeat_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     invocationId,
     runId,
     stepId,
     stepId,
-    "no-mistakes",
+    executorFamily,
     "running",
     1,
     at,
     at,
     at,
-    at
+    at,
   );
   db.prepare(
     `INSERT INTO executor_rounds (
        round_id, invocation_id, workflow_run_id, step_run_id, step_key,
        executor_family, attempt, round_index, state, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     roundId,
     invocationId,
     runId,
     stepId,
     stepId,
-    "no-mistakes",
+    executorFamily,
     1,
     0,
     "mirroring_external_state",
     at,
-    at
+    at,
   );
   db.prepare(
     `INSERT INTO executor_checkpoints (
        checkpoint_id, round_id, sequence, stage, detail, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     `${roundId}::checkpoint-0`,
     roundId,
@@ -157,9 +168,9 @@ function seedNoMistakesCheckpoint(
         options.prUrl === undefined
           ? "https://github.com/acme/momentum/pull/193"
           : options.prUrl,
-      ciState: "passed"
+      ciState: "passed",
     }),
-    at
+    at,
   );
 }
 
@@ -169,26 +180,26 @@ function seedNoMistakesExternalStateCheckpoint(
   stepId: string,
   sequence: number,
   detail: Record<string, unknown>,
-  at = 1_730_000_000_000
+  at = 1_730_000_000_000,
 ): void {
   const roundId = `${runId}::${stepId}::dispatch::round-0`;
   db.prepare(
     `INSERT INTO executor_checkpoints (
        checkpoint_id, round_id, sequence, stage, detail, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     `${roundId}::checkpoint-${sequence}`,
     roundId,
     sequence,
     "external_state_mirrored",
     JSON.stringify(detail),
-    at
+    at,
   );
 }
 
 function readRunRow(
   db: MomentumDb,
-  id: string
+  id: string,
 ): {
   needs_manual_recovery: number;
   manual_recovery_reason: string | null;
@@ -199,7 +210,7 @@ function readRunRow(
     .prepare(
       `SELECT needs_manual_recovery, manual_recovery_reason,
               manual_recovery_at, updated_at
-         FROM workflow_runs WHERE id = ?`
+         FROM workflow_runs WHERE id = ?`,
     )
     .get(id) as {
     needs_manual_recovery: number;
@@ -211,7 +222,7 @@ function readRunRow(
 
 function readRunRuntimeRow(
   db: MomentumDb,
-  id: string
+  id: string,
 ): { state: string; finished_at: number | null } {
   return db
     .prepare("SELECT state, finished_at FROM workflow_runs WHERE id = ?")
@@ -227,7 +238,7 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
       const out = markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "manual_recovery_lease",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
       expect(out).toEqual({ ok: true, previouslyMarked: false });
 
@@ -236,7 +247,7 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
         needs_manual_recovery: 1,
         manual_recovery_reason: "manual_recovery_lease",
         manual_recovery_at: 1_730_000_500_000,
-        updated_at: 1_730_000_500_000
+        updated_at: 1_730_000_500_000,
       });
     } finally {
       db.close();
@@ -251,12 +262,12 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "manual_recovery_lease",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
       const second = markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "ghost_active_no_lease",
-        now: 1_730_000_600_000
+        now: 1_730_000_600_000,
       });
       expect(second).toEqual({ ok: true, previouslyMarked: true });
 
@@ -275,7 +286,7 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
       const out = markWorkflowRunNeedsManualRecovery(db, {
         runId: "missing",
         reason: "manual_recovery_lease",
-        now: 1
+        now: 1,
       });
       expect(out).toEqual({ ok: false, reason: "run_not_found" });
     } finally {
@@ -290,8 +301,8 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
       expect(() =>
         markWorkflowRunNeedsManualRecovery(db, {
           runId: "",
-          reason: "manual_recovery_lease"
-        })
+          reason: "manual_recovery_lease",
+        }),
       ).toThrow(/runId is required/);
     } finally {
       db.close();
@@ -306,8 +317,8 @@ describe("markWorkflowRunNeedsManualRecovery", () => {
       expect(() =>
         markWorkflowRunNeedsManualRecovery(db, {
           runId: "run-1",
-          reason: ""
-        })
+          reason: "",
+        }),
       ).toThrow(/reason is required/);
     } finally {
       db.close();
@@ -324,12 +335,12 @@ describe("clearWorkflowRunManualRecovery", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "manual_recovery_lease",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
 
       const out = clearWorkflowRunManualRecovery(db, {
         runId: "run-1",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out).toEqual({ ok: true, wasMarked: true });
 
@@ -338,7 +349,7 @@ describe("clearWorkflowRunManualRecovery", () => {
         needs_manual_recovery: 0,
         manual_recovery_reason: null,
         manual_recovery_at: null,
-        updated_at: 1_730_000_900_000
+        updated_at: 1_730_000_900_000,
       });
     } finally {
       db.close();
@@ -352,7 +363,7 @@ describe("clearWorkflowRunManualRecovery", () => {
       seedRun(db, "run-1");
       const out = clearWorkflowRunManualRecovery(db, {
         runId: "run-1",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out).toEqual({ ok: true, wasMarked: false });
     } finally {
@@ -366,7 +377,7 @@ describe("clearWorkflowRunManualRecovery", () => {
     try {
       const out = clearWorkflowRunManualRecovery(db, {
         runId: "missing",
-        now: 1
+        now: 1,
       });
       expect(out).toEqual({ ok: false, reason: "run_not_found" });
     } finally {
@@ -384,14 +395,14 @@ describe("getWorkflowRunManualRecoveryState", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "failed_required_step",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
       const state = getWorkflowRunManualRecoveryState(db, "run-1");
       expect(state).toEqual({
         runId: "run-1",
         needsManualRecovery: true,
         reason: "failed_required_step",
-        markedAt: 1_730_000_500_000
+        markedAt: 1_730_000_500_000,
       });
     } finally {
       db.close();
@@ -408,7 +419,7 @@ describe("getWorkflowRunManualRecoveryState", () => {
         runId: "run-1",
         needsManualRecovery: false,
         reason: null,
-        markedAt: null
+        markedAt: null,
       });
     } finally {
       db.close();
@@ -439,7 +450,7 @@ describe("isBlockingWorkflowRecoveryCode", () => {
     // the run must stay blocked for operator reconciliation rather than being
     // cleared as if nothing landed.
     expect(
-      isBlockingWorkflowRecoveryCode("failed_external_side_effect_step")
+      isBlockingWorkflowRecoveryCode("failed_external_side_effect_step"),
     ).toBe(true);
   });
 
@@ -460,19 +471,19 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "failed_required_step",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out).toEqual({
         ok: true,
         runId: "run-1",
         previousReason: "failed_required_step",
         previousMarkedAt: 1_730_000_500_000,
-        clearedAt: 1_730_000_900_000
+        clearedAt: 1_730_000_900_000,
       });
 
       const row = readRunRow(db, "run-1");
@@ -480,7 +491,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         needs_manual_recovery: 0,
         manual_recovery_reason: null,
         manual_recovery_at: null,
-        updated_at: 1_730_000_900_000
+        updated_at: 1_730_000_900_000,
       });
     } finally {
       db.close();
@@ -498,12 +509,12 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-1",
         reason: "failed_required_step",
-        now: 1_730_000_500_000
+        now: 1_730_000_500_000,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
@@ -528,30 +539,30 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       seedRun(db, "run-1");
       seedStep(db, "run-1", "preflight", "succeeded", {
         kind: "preflight",
-        order: 0
+        order: 0,
       });
       seedStep(db, "run-1", "implementation", "succeeded", {
         kind: "implementation",
-        order: 1
+        order: 1,
       });
       seedStep(db, "run-1", "postflight", "succeeded", {
         kind: "postflight",
-        order: 2
+        order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "succeeded", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "failed", {
         kind: "merge-cleanup",
-        order: 4
+        order: 4,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
         externalSideEffectEvidencePointer: "github://pulls/123#merged",
-        externalSideEffectLedgerPointer: "ledger://merge-cleanup#42"
+        externalSideEffectLedgerPointer: "ledger://merge-cleanup#42",
       });
 
       expect(out).toEqual({
@@ -565,18 +576,18 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           recoveryCode: "failed_external_side_effect_step",
           state: "succeeded",
           evidencePointer: "github://pulls/123#merged",
-          ledgerPointer: "ledger://merge-cleanup#42"
-        }
+          ledgerPointer: "ledger://merge-cleanup#42",
+        },
       });
       expect(getWorkflowRunManualRecoveryState(db, "run-1")).toMatchObject({
         needsManualRecovery: false,
         reason: null,
-        markedAt: null
+        markedAt: null,
       });
       const step = db
         .prepare(
           `SELECT state, operator_reason, operator_evidence_pointer, operator_ledger_pointer
-             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
         )
         .get("run-1", "merge-cleanup") as {
         state: string;
@@ -588,7 +599,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         state: "succeeded",
         operator_reason: "failed_external_side_effect_step",
         operator_evidence_pointer: "github://pulls/123#merged",
-        operator_ledger_pointer: "ledger://merge-cleanup#42"
+        operator_ledger_pointer: "ledger://merge-cleanup#42",
       });
     } finally {
       db.close();
@@ -600,39 +611,39 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "preflight", "succeeded", {
         kind: "preflight",
-        order: 0
+        order: 0,
       });
       seedStep(db, "run-1", "implementation", "succeeded", {
         kind: "implementation",
-        order: 1
+        order: 1,
       });
       seedStep(db, "run-1", "postflight", "succeeded", {
         kind: "postflight",
-        order: 2
+        order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "succeeded", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "failed", {
         kind: "merge-cleanup",
-        order: 4
+        order: 4,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
-        externalSideEffectEvidencePointer: "github://pulls/123#merged"
+        externalSideEffectEvidencePointer: "github://pulls/123#merged",
       });
 
       expect(out.ok).toBe(true);
       expect(readRunRuntimeRow(db, "run-1")).toEqual({
         state: "succeeded",
-        finished_at: 1_730_000_900_000
+        finished_at: 1_730_000_900_000,
       });
     } finally {
       db.close();
@@ -644,31 +655,31 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "preflight", "succeeded", {
         kind: "preflight",
-        order: 0
+        order: 0,
       });
       seedStep(db, "run-1", "implementation", "succeeded", {
         kind: "implementation",
-        order: 1
+        order: 1,
       });
       seedStep(db, "run-1", "postflight", "succeeded", {
         kind: "postflight",
-        order: 2
+        order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "approved", {
         kind: "merge-cleanup",
-        order: 4
+        order: 4,
       });
       seedStep(db, "run-1", "linear-refresh", "approved", {
         kind: "linear-refresh",
-        order: 5
+        order: 5,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
@@ -677,7 +688,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         successfulNoMistakesEvidencePointer:
           "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
         successfulNoMistakesLedgerPointer:
-          ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper"
+          ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper",
       });
 
       expect(out).toEqual({
@@ -693,19 +704,19 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           evidencePointer:
             "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
           ledgerPointer:
-            ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper"
-        }
+            ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper",
+        },
       });
 
       expect(readRunRuntimeRow(db, "run-1")).toEqual({
         state: "approved",
-        finished_at: null
+        finished_at: null,
       });
       const step = db
         .prepare(
           `SELECT state, operator_reason, operator_evidence_pointer,
                   operator_ledger_pointer, finished_at
-             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
         )
         .get("run-1", "no-mistakes") as {
         state: string;
@@ -721,100 +732,105 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
         operator_ledger_pointer:
           ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper",
-        finished_at: 1_730_000_900_000
+        finished_at: 1_730_000_900_000,
       });
     } finally {
       db.close();
     }
   });
 
-  it("reconciles an interrupted no-mistakes failure from deterministic evidence without a new no-mistakes run", () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      seedRunWithState(db, "run-ngx-561", "failed", {
-        finishedAt: 1_730_000_800_000,
-        issueScope: { identifiers: ["NGX-561"] }
-      });
-      seedStep(db, "run-ngx-561", "preflight", "succeeded", {
-        kind: "preflight",
-        order: 0
-      });
-      seedStep(db, "run-ngx-561", "implementation", "succeeded", {
-        kind: "implementation",
-        order: 1
-      });
-      seedStep(db, "run-ngx-561", "postflight", "succeeded", {
-        kind: "postflight",
-        order: 2
-      });
-      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-        kind: "no-mistakes",
-        order: 3
-      });
-      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
+  it.each(["no-mistakes", "delegate-supervisor"] as const)(
+    "reconciles %s no-mistakes checkpoint evidence without a new no-mistakes run",
+    (executorFamily) => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedRunWithState(db, "run-ngx-561", "failed", {
+          finishedAt: 1_730_000_800_000,
+          issueScope: { identifiers: ["NGX-561"] },
+        });
+        seedStep(db, "run-ngx-561", "preflight", "succeeded", {
+          kind: "preflight",
+          order: 0,
+        });
+        seedStep(db, "run-ngx-561", "implementation", "succeeded", {
+          kind: "implementation",
+          order: 1,
+        });
+        seedStep(db, "run-ngx-561", "postflight", "succeeded", {
+          kind: "postflight",
+          order: 2,
+        });
+        seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+          kind: "no-mistakes",
+          order: 3,
+        });
+        seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
+          executorFamily,
+        });
 
-      const evidence = JSON.parse(
-        fs.readFileSync(
-          path.join(
-            process.cwd(),
-            "test/fixtures/no-mistakes-evidence-clean-success.json"
+        const evidence = JSON.parse(
+          fs.readFileSync(
+            path.join(
+              process.cwd(),
+              "test/fixtures/no-mistakes-evidence-clean-success.json",
+            ),
+            "utf8",
           ),
-          "utf8"
-        )
-      ) as unknown;
-      const out = clearWorkflowRunManualRecoveryGuarded(db, {
-        runId: "run-ngx-561",
-        now: 1_730_000_900_000,
-        successfulNoMistakesEvidencePointer:
-          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-        successfulNoMistakesEvidence: evidence,
-        successfulNoMistakesLedgerPointer:
-          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
-      });
-
-      expect(out).toEqual({
-        ok: true,
-        runId: "run-ngx-561",
-        previousReason: null,
-        previousMarkedAt: null,
-        clearedAt: 1_730_000_900_000,
-        reconciledStep: {
-          stepId: "no-mistakes",
-          recoveryCode: "interrupted_no_mistakes_checks_passed",
-          state: "succeeded",
-          evidencePointer:
+        ) as unknown;
+        const out = clearWorkflowRunManualRecoveryGuarded(db, {
+          runId: "run-ngx-561",
+          now: 1_730_000_900_000,
+          successfulNoMistakesEvidencePointer:
             ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-          ledgerPointer:
-            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
-        }
-      });
-      const step = db
-        .prepare(
-          `SELECT state, operator_reason, operator_actor, operator_evidence_pointer,
+          successfulNoMistakesEvidence: evidence,
+          successfulNoMistakesLedgerPointer:
+            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test",
+        });
+
+        expect(out).toEqual({
+          ok: true,
+          runId: "run-ngx-561",
+          previousReason: null,
+          previousMarkedAt: null,
+          clearedAt: 1_730_000_900_000,
+          reconciledStep: {
+            stepId: "no-mistakes",
+            recoveryCode: "interrupted_no_mistakes_checks_passed",
+            state: "succeeded",
+            evidencePointer:
+              ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+            ledgerPointer:
+              ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test",
+          },
+        });
+        const step = db
+          .prepare(
+            `SELECT state, operator_reason, operator_actor, operator_evidence_pointer,
                   operator_ledger_pointer
-             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
-        )
-        .get("run-ngx-561", "no-mistakes") as {
-        state: string;
-        operator_reason: string | null;
-        operator_actor: string | null;
-        operator_evidence_pointer: string | null;
-        operator_ledger_pointer: string | null;
-      };
-      expect(step).toEqual({
-        state: "succeeded",
-        operator_reason: "interrupted_no_mistakes_checks_passed",
-        operator_actor: "workflow run clear-recovery",
-        operator_evidence_pointer:
-          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-        operator_ledger_pointer:
-          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
-      });
-    } finally {
-      db.close();
-    }
-  });
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
+          )
+          .get("run-ngx-561", "no-mistakes") as {
+          state: string;
+          operator_reason: string | null;
+          operator_actor: string | null;
+          operator_evidence_pointer: string | null;
+          operator_ledger_pointer: string | null;
+        };
+        expect(step).toEqual({
+          state: "succeeded",
+          operator_reason: "interrupted_no_mistakes_checks_passed",
+          operator_actor: "workflow run clear-recovery",
+          operator_evidence_pointer:
+            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+          operator_ledger_pointer:
+            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test",
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("keeps no-mistakes blocked when deterministic evidence is stale", () => {
     const dataDir = makeTempDir();
@@ -822,11 +838,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       seedRunWithState(db, "run-ngx-561", "failed", {
         finishedAt: 1_730_000_800_000,
-        issueScope: { identifiers: ["NGX-561"] }
+        issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
 
@@ -834,24 +850,26 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         fs.readFileSync(
           path.join(
             process.cwd(),
-            "test/fixtures/no-mistakes-evidence-missing-test-phase.json"
+            "test/fixtures/no-mistakes-evidence-missing-test-phase.json",
           ),
-          "utf8"
-        )
+          "utf8",
+        ),
       ) as unknown;
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-ngx-561",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
           ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-        successfulNoMistakesEvidence: evidence
+        successfulNoMistakesEvidence: evidence,
       });
 
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
       expect(out.reason).toBe("recovery_clear_refused");
       const step = db
-        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
         .get("run-ngx-561", "no-mistakes") as { state: string };
       expect(step.state).toBe("failed");
     } finally {
@@ -865,11 +883,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       seedRunWithState(db, "run-ngx-561", "failed", {
         finishedAt: 1_730_000_800_000,
-        issueScope: { identifiers: ["NGX-561"] }
+        issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
 
@@ -877,24 +895,26 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         fs.readFileSync(
           path.join(
             process.cwd(),
-            "test/fixtures/no-mistakes-evidence-stale-head.json"
+            "test/fixtures/no-mistakes-evidence-stale-head.json",
           ),
-          "utf8"
-        )
+          "utf8",
+        ),
       ) as unknown;
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-ngx-561",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
           ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-        successfulNoMistakesEvidence: evidence
+        successfulNoMistakesEvidence: evidence,
       });
 
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
       expect(out.reason).toBe("recovery_clear_refused");
       const step = db
-        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
         .get("run-ngx-561", "no-mistakes") as { state: string };
       expect(step.state).toBe("failed");
     } finally {
@@ -908,14 +928,14 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       seedRunWithState(db, "run-ngx-561", "failed", {
         finishedAt: 1_730_000_800_000,
-        issueScope: { identifiers: ["NGX-561"] }
+        issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
-        prUrl: null
+        prUrl: null,
       });
       seedNoMistakesExternalStateCheckpoint(
         db,
@@ -929,32 +949,34 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           activeStep: null,
           stepStatus: "completed",
           prUrl: "https://github.com/acme/momentum/pull/193",
-          ciState: "passed"
-        }
+          ciState: "passed",
+        },
       );
 
       const evidence = JSON.parse(
         fs.readFileSync(
           path.join(
             process.cwd(),
-            "test/fixtures/no-mistakes-evidence-pr-mismatch.json"
+            "test/fixtures/no-mistakes-evidence-pr-mismatch.json",
           ),
-          "utf8"
-        )
+          "utf8",
+        ),
       ) as unknown;
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-ngx-561",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
           ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
-        successfulNoMistakesEvidence: evidence
+        successfulNoMistakesEvidence: evidence,
       });
 
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
       expect(out.reason).toBe("recovery_clear_refused");
       const step = db
-        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
         .get("run-ngx-561", "no-mistakes") as { state: string };
       expect(step.state).toBe("failed");
     } finally {
@@ -967,18 +989,18 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
-          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#failed"
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#failed",
       });
 
       expect(out.ok).toBe(false);
@@ -987,7 +1009,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       expect(out.recoveryCode).toBe("failed_required_step");
       expect(readRunRuntimeRow(db, "run-1")).toEqual({
         state: "failed",
-        finished_at: 1_730_000_800_000
+        finished_at: 1_730_000_800_000,
       });
     } finally {
       db.close();
@@ -999,17 +1021,17 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
-        successfulNoMistakesEvidencePointer: "no-mistakes:#checks-passed"
+        successfulNoMistakesEvidencePointer: "no-mistakes:#checks-passed",
       });
 
       expect(out.ok).toBe(false);
@@ -1026,36 +1048,36 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "preflight", "succeeded", {
         kind: "preflight",
-        order: 0
+        order: 0,
       });
       seedStep(db, "run-1", "implementation", "succeeded", {
         kind: "implementation",
-        order: 1
+        order: 1,
       });
       seedStep(db, "run-1", "postflight", "succeeded", {
         kind: "postflight",
-        order: 2
+        order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
         kind: "no-mistakes",
-        order: 3
+        order: 3,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
-          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed"
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
       });
 
       expect(out.ok).toBe(true);
       expect(readRunRuntimeRow(db, "run-1")).toEqual({
         state: "succeeded",
-        finished_at: 1_730_000_900_000
+        finished_at: 1_730_000_900_000,
       });
     } finally {
       db.close();
@@ -1067,18 +1089,18 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithState(db, "run-1", "failed", {
-        finishedAt: 1_730_000_800_000
+        finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "implementation", "failed", {
         kind: "implementation",
-        order: 1
+        order: 1,
       });
 
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
         now: 1_730_000_900_000,
         successfulNoMistakesEvidencePointer:
-          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed"
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
       });
 
       expect(out.ok).toBe(false);
@@ -1097,7 +1119,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       seedRun(db, "run-1");
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "run-1",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
@@ -1113,7 +1135,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       const out = clearWorkflowRunManualRecoveryGuarded(db, {
         runId: "missing",
-        now: 1_730_000_900_000
+        now: 1_730_000_900_000,
       });
       expect(out.ok).toBe(false);
       if (out.ok) throw new Error("expected refusal");
@@ -1128,7 +1150,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       expect(() =>
-        clearWorkflowRunManualRecoveryGuarded(db, { runId: "" })
+        clearWorkflowRunManualRecoveryGuarded(db, { runId: "" }),
       ).toThrow(/runId is required/);
     } finally {
       db.close();
@@ -1143,8 +1165,8 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       expect(() =>
         clearWorkflowRunManualRecoveryGuarded(db, {
           runId: "run-1",
-          now: Number.POSITIVE_INFINITY
-        })
+          now: Number.POSITIVE_INFINITY,
+        }),
       ).toThrow(/now must be finite/);
     } finally {
       db.close();

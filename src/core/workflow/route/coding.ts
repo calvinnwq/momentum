@@ -21,11 +21,10 @@
  * per-step agent/model/effort selection for execution or fails closed when the
  * namespace is corrupt.
  *
- * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} carries
- * only an executor *family*, never the selected implementation path or per-step config, so - exactly as
- * `route/subworkflow.ts` reasoned for child config - the only in-scope durable
- * home without a schema change is the run's free-form `route` JSON. The
- * implementation path lives under
+ * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
+ * portable recipe-level executor config, but the selected implementation path
+ * and operator harness/model/effort overrides are run-specific. Their durable
+ * home is therefore the run's free-form `route` JSON. The implementation path lives under
  * {@link CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY} (`route.implementationEngine`).
  * Per-step overrides live under the single {@link CODING_ROUTE_STEPS_KEY}
  * (`route.steps`) namespace, parallel to `route.subworkflow` and the run-level
@@ -53,26 +52,30 @@ import { resolveCommandModelAlias } from "../../model-aliases.js";
 /** The run-`route` field that records the selected coding implementation engine. */
 export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
 
-/** The explicit native goal-loop route selected by `workflow run start-coding`. */
+/** The honest GNHF implementation route selected by new coding starts. */
+export const GNHF_IMPLEMENTATION_ENGINE = "gnhf";
+
+/** Legacy label retained for persisted runs and explicit compatibility input. */
 export const NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE = "native-goal-loop";
 
 /** The explicit compatibility route that keeps the current GNHF/CWFP path selectable. */
 export const CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE = "current-gnhf-cwfp";
 
 export const CODING_IMPLEMENTATION_ENGINES = [
+  GNHF_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
-  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
 ] as const;
 
 export type CodingImplementationEngine =
   (typeof CODING_IMPLEMENTATION_ENGINES)[number];
 
 const CODING_IMPLEMENTATION_ENGINE_SET: ReadonlySet<string> = new Set(
-  CODING_IMPLEMENTATION_ENGINES
+  CODING_IMPLEMENTATION_ENGINES,
 );
 
 export function isCodingImplementationEngine(
-  value: string
+  value: string,
 ): value is CodingImplementationEngine {
   return CODING_IMPLEMENTATION_ENGINE_SET.has(value);
 }
@@ -92,7 +95,7 @@ export const CONFIGURABLE_CODING_STEP_KEYS = [
   "implementation",
   "postflight",
   "no-mistakes",
-  "merge-cleanup"
+  "merge-cleanup",
 ] as const;
 
 export type ConfigurableCodingStepKey =
@@ -154,7 +157,7 @@ export type CodingStepExecutorSelection = {
 export const DEFAULT_CODING_STEP_ROUTE_SELECTION: CodingStepRouteSelection = {
   harness: null,
   model: null,
-  effort: null
+  effort: null,
 };
 
 /**
@@ -173,7 +176,7 @@ export const CODING_ROUTE_CONFIG_REFUSALS = [
   "step_unsupported",
   "step_config_invalid",
   "field_unsupported",
-  "value_invalid"
+  "value_invalid",
 ] as const;
 
 export type CodingRouteConfigRefusal =
@@ -181,10 +184,15 @@ export type CodingRouteConfigRefusal =
 
 export type CodingStepRouteOverridesResult =
   | { ok: true; overrides: CodingStepRouteOverrides }
-  | { ok: false; refusal: CodingRouteConfigRefusal; reason: string; path?: string };
+  | {
+      ok: false;
+      refusal: CodingRouteConfigRefusal;
+      reason: string;
+      path?: string;
+    };
 
 const CONFIGURABLE_STEP_KEY_SET: ReadonlySet<string> = new Set(
-  CONFIGURABLE_CODING_STEP_KEYS
+  CONFIGURABLE_CODING_STEP_KEYS,
 );
 
 const ROUTE_FIELD_SET: ReadonlySet<string> = new Set(CODING_STEP_ROUTE_FIELDS);
@@ -194,7 +202,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isConfigurableCodingStepKey(
-  value: string
+  value: string,
 ): value is ConfigurableCodingStepKey {
   return CONFIGURABLE_STEP_KEY_SET.has(value);
 }
@@ -206,7 +214,7 @@ function isCodingStepRouteField(value: string): value is CodingStepRouteField {
 function refuse(
   refusal: CodingRouteConfigRefusal,
   reason: string,
-  path?: string
+  path?: string,
 ): CodingStepRouteOverridesResult {
   return path === undefined
     ? { ok: false, refusal, reason }
@@ -222,7 +230,7 @@ function refuse(
  */
 export function resolveCodingRouteModelAlias(
   harness: string | undefined,
-  model: string
+  model: string,
 ): string {
   return resolveCommandModelAlias(harness, model);
 }
@@ -243,7 +251,7 @@ export function resolveCodingRouteModelAlias(
  * whose override object resolves to no recognized fields is dropped entirely.
  */
 export function validateCodingStepRouteOverrides(
-  value: unknown
+  value: unknown,
 ): CodingStepRouteOverridesResult {
   if (value === undefined || value === null) {
     return { ok: true, overrides: {} };
@@ -252,7 +260,7 @@ export function validateCodingStepRouteOverrides(
     return refuse(
       "overrides_invalid",
       "Coding route step overrides must be a plain object keyed by step.",
-      CODING_ROUTE_STEPS_KEY
+      CODING_ROUTE_STEPS_KEY,
     );
   }
 
@@ -267,14 +275,14 @@ export function validateCodingStepRouteOverrides(
       return refuse(
         "step_unsupported",
         `Coding route step "${stepKey}" is not configurable; supported steps: ${CONFIGURABLE_CODING_STEP_KEYS.join(", ")}.`,
-        `${CODING_ROUTE_STEPS_KEY}.${stepKey}`
+        `${CODING_ROUTE_STEPS_KEY}.${stepKey}`,
       );
     }
     if (!isPlainObject(rawStepConfig)) {
       return refuse(
         "step_config_invalid",
         `Coding route config for step "${stepKey}" must be a plain object of harness/model/effort fields.`,
-        `${CODING_ROUTE_STEPS_KEY}.${stepKey}`
+        `${CODING_ROUTE_STEPS_KEY}.${stepKey}`,
       );
     }
 
@@ -284,14 +292,17 @@ export function validateCodingStepRouteOverrides(
         return refuse(
           "field_unsupported",
           `Coding route config for step "${stepKey}" has unknown field "${fieldKey}"; supported fields: ${CODING_STEP_ROUTE_FIELDS.join(", ")}.`,
-          `${CODING_ROUTE_STEPS_KEY}.${stepKey}.${fieldKey}`
+          `${CODING_ROUTE_STEPS_KEY}.${stepKey}.${fieldKey}`,
         );
       }
-      if (typeof rawFieldValue !== "string" || rawFieldValue.trim().length === 0) {
+      if (
+        typeof rawFieldValue !== "string" ||
+        rawFieldValue.trim().length === 0
+      ) {
         return refuse(
           "value_invalid",
           `Coding route config ${stepKey}.${fieldKey} must be a non-empty string.`,
-          `${CODING_ROUTE_STEPS_KEY}.${stepKey}.${fieldKey}`
+          `${CODING_ROUTE_STEPS_KEY}.${stepKey}.${fieldKey}`,
         );
       }
       normalizedFields[fieldKey] = rawFieldValue.trim();
@@ -300,7 +311,7 @@ export function validateCodingStepRouteOverrides(
     if (normalizedFields.model !== undefined) {
       normalizedFields.model = resolveCodingRouteModelAlias(
         normalizedFields.harness,
-        normalizedFields.model
+        normalizedFields.model,
       );
     }
 
@@ -337,7 +348,7 @@ export function validateCodingStepRouteOverrides(
  * stale-shape route can never silently drop or misread an operator's selection.
  */
 export function readCodingStepRouteOverrides(
-  route: Record<string, unknown>
+  route: Record<string, unknown>,
 ): CodingStepRouteOverridesResult {
   const raw = route[CODING_ROUTE_STEPS_KEY];
   if (raw === undefined) {
@@ -355,7 +366,7 @@ export function readCodingStepRouteOverrides(
  */
 export function writeCodingStepRouteOverrides(
   route: Record<string, unknown>,
-  overrides: CodingStepRouteOverrides
+  overrides: CodingStepRouteOverrides,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...route };
   if (Object.keys(overrides).length === 0) {
@@ -374,7 +385,7 @@ export function writeCodingStepRouteOverrides(
  * override reads as all-default, an overridden field reads as the operator's choice.
  */
 export function resolveCodingRouteStepSelections(
-  overrides: CodingStepRouteOverrides
+  overrides: CodingStepRouteOverrides,
 ): CodingRouteStepSelections {
   const selections = {} as CodingRouteStepSelections;
   for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
@@ -382,7 +393,7 @@ export function resolveCodingRouteStepSelections(
     selections[stepKey] = {
       harness: override?.harness ?? null,
       model: override?.model ?? null,
-      effort: override?.effort ?? null
+      effort: override?.effort ?? null,
     };
   }
   return selections;
@@ -390,7 +401,7 @@ export function resolveCodingRouteStepSelections(
 
 export function resolveCodingStepExecutorSelection(
   overrides: CodingStepRouteOverrides,
-  stepKey: string
+  stepKey: string,
 ): CodingStepExecutorSelection {
   if (!isConfigurableCodingStepKey(stepKey)) {
     return { agentProvider: null, model: null, effort: null };
@@ -399,7 +410,7 @@ export function resolveCodingStepExecutorSelection(
   return {
     agentProvider: override?.harness ?? null,
     model: override?.model ?? null,
-    effort: override?.effort ?? null
+    effort: override?.effort ?? null,
   };
 }
 
@@ -420,14 +431,14 @@ export const CODING_STEP_ROUTE_DEFAULT_LABEL = "(default)";
  * results rather than importing this projection).
  */
 export function formatCodingRouteStepSelectionLines(
-  selections: CodingRouteStepSelections
+  selections: CodingRouteStepSelections,
 ): string[] {
   const lines = ["Per-step route:"];
   for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
     const selection = selections[stepKey];
     const fields = CODING_STEP_ROUTE_FIELDS.map(
       (field) =>
-        `${field}=${selection[field] ?? CODING_STEP_ROUTE_DEFAULT_LABEL}`
+        `${field}=${selection[field] ?? CODING_STEP_ROUTE_DEFAULT_LABEL}`,
     ).join(", ");
     lines.push(`  ${stepKey}: ${fields}`);
   }

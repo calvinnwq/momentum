@@ -11,16 +11,16 @@ const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
   { name: "lease_expires_at", type: "INTEGER" },
   { name: "heartbeat_at", type: "INTEGER" },
   { name: "result_path", type: "TEXT" },
-  { name: "error_path", type: "TEXT" }
+  { name: "error_path", type: "TEXT" },
 ];
 
 const UPDATE_INTENT_M6_COLUMNS: ColumnSpec[] = [
-  { name: "apply_state", type: "TEXT NOT NULL DEFAULT 'idle'" }
+  { name: "apply_state", type: "TEXT NOT NULL DEFAULT 'idle'" },
 ];
 
 const EVIDENCE_RECORD_LINKAGE_COLUMNS: ColumnSpec[] = [
   { name: "run_id", type: "TEXT" },
-  { name: "step_id", type: "TEXT" }
+  { name: "step_id", type: "TEXT" },
 ];
 
 const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
@@ -28,13 +28,13 @@ const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
   { name: "completion_reason", type: "TEXT" },
   { name: "needs_manual_recovery", type: "INTEGER NOT NULL DEFAULT 0" },
   { name: "manual_recovery_reason", type: "TEXT" },
-  { name: "manual_recovery_at", type: "INTEGER" }
+  { name: "manual_recovery_at", type: "INTEGER" },
 ];
 
 const DAEMON_RUN_COLUMNS: ColumnSpec[] = [
   { name: "stop_now_requested_at", type: "INTEGER" },
   { name: "cancel_outcome", type: "TEXT" },
-  { name: "recovery_status", type: "TEXT" }
+  { name: "recovery_status", type: "TEXT" },
 ];
 
 const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
@@ -43,7 +43,7 @@ const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
   { name: "issue_scope_json", type: "TEXT NOT NULL DEFAULT '{}'" },
   { name: "route_json", type: "TEXT NOT NULL DEFAULT '{}'" },
   { name: "approval_boundary", type: "TEXT" },
-  { name: "skill_revision", type: "TEXT" }
+  { name: "skill_revision", type: "TEXT" },
 ];
 
 const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
@@ -53,7 +53,7 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
   { name: "monitor_last_seen_digest", type: "TEXT" },
   { name: "monitor_last_emitted_digest", type: "TEXT" },
   { name: "monitor_last_seen_at", type: "INTEGER" },
-  { name: "monitor_last_emitted_at", type: "INTEGER" }
+  { name: "monitor_last_emitted_at", type: "INTEGER" },
 ];
 
 // Link a workflow run back to the WorkflowDefinition recipe it
@@ -62,7 +62,11 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
 // artifacts) have no persisted definition link.
 const WORKFLOW_RUN_DEFINITION_COLUMNS: ColumnSpec[] = [
   { name: "workflow_definition_key", type: "TEXT" },
-  { name: "workflow_definition_version", type: "INTEGER" }
+  { name: "workflow_definition_version", type: "INTEGER" },
+];
+
+const STEP_DEFINITION_CONFIG_COLUMNS: ColumnSpec[] = [
+  { name: "config_json", type: "TEXT" },
 ];
 
 const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
@@ -70,17 +74,17 @@ const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
   { name: "operator_actor", type: "TEXT" },
   { name: "operator_evidence_pointer", type: "TEXT" },
   { name: "operator_ledger_pointer", type: "TEXT" },
-  { name: "operator_transition_at", type: "INTEGER" }
+  { name: "operator_transition_at", type: "INTEGER" },
 ];
 
 const EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS: ColumnSpec[] = [
-  { name: "external_ref", type: "TEXT" }
+  { name: "external_ref", type: "TEXT" },
 ];
 
 const EXECUTOR_ROUND_LEARNING_COLUMNS: ColumnSpec[] = [
   { name: "key_learnings", type: "TEXT NOT NULL DEFAULT '[]'" },
   { name: "verification_results", type: "TEXT NOT NULL DEFAULT '[]'" },
-  { name: "executor_recommendation", type: "TEXT" }
+  { name: "executor_recommendation", type: "TEXT" },
 ];
 
 const REPO_LOCKS_DDL = `
@@ -144,7 +148,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_daemon_runs_one_active
   ON daemon_runs((state IN ('starting', 'running', 'stop_requested')))
   WHERE state IN ('starting', 'running', 'stop_requested');
 `;
-
 
 const EVIDENCE_RECORDS_DDL = `
 CREATE TABLE IF NOT EXISTS evidence_records (
@@ -462,8 +465,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
 // A definition is identified by (key, version) so recipes can evolve without
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
-// src/core/workflow/definition/definition.ts (no rich ExecutorDefinition config beyond the
-// executor-family field, no run state; those arrive with executor-loop tables).
+// src/core/workflow/definition/definition.ts. Portable per-step executor intent
+// lives in config_json; machine-local resolution and run state stay elsewhere.
 const WORKFLOW_DEFINITIONS_DDL = `
 CREATE TABLE IF NOT EXISTS workflow_definitions (
   key TEXT NOT NULL,
@@ -480,6 +483,7 @@ CREATE TABLE IF NOT EXISTS step_definitions (
   step_key TEXT NOT NULL,
   kind TEXT NOT NULL,
   executor TEXT NOT NULL,
+  config_json TEXT,
   step_order INTEGER NOT NULL,
   required INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
@@ -787,6 +791,11 @@ export function applyQueueMigrations(db: MomentumDb): void {
     }
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec(WORKFLOW_DEFINITIONS_DDL);
+    if (tableExists(db, "step_definitions")) {
+      for (const column of STEP_DEFINITION_CONFIG_COLUMNS) {
+        ensureColumn(db, "step_definitions", column);
+      }
+    }
     db.exec(EXECUTOR_LOOP_DDL);
     if (tableExists(db, "executor_rounds")) {
       for (const column of EXECUTOR_ROUND_LEARNING_COLUMNS) {

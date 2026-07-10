@@ -7,10 +7,11 @@
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
- * is owned separately by `dispatch/scheduler.ts`; the landed goal-loop and
- * one-shot / script / no-mistakes mirror adapters attach through executor-loop
- * persistence rather than this start persistence layer. The retired goal-first
- * lane no longer starts work; durable Goal rows remain readable state.
+ * is owned separately by `dispatch/scheduler.ts`; the landed goal-loop,
+ * one-shot / script, legacy no-mistakes mirror, and delegate-supervisor
+ * live-wrapper paths attach through executor-loop persistence rather than this
+ * start persistence layer. The retired goal-first lane no longer starts work;
+ * durable Goal rows remain readable state.
  *
  * Stable contracts this slice locks in:
  *   - A run's durable identity is its `id` (= `runId`); a step's is
@@ -33,18 +34,13 @@
 import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
-import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY
-} from "../route/coding.js";
+import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
   materializeWorkflowRunStart,
   type WorkflowRunStartError,
-  type WorkflowRunStartInput
+  type WorkflowRunStartInput,
 } from "./start.js";
-import type {
-  WorkflowApprovalBoundary,
-  WorkflowRunState
-} from "./reducer.js";
+import type { WorkflowApprovalBoundary, WorkflowRunState } from "./reducer.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not
@@ -56,7 +52,7 @@ export class InvalidWorkflowRunStartError extends Error {
 
   constructor(errors: readonly WorkflowRunStartError[]) {
     super(
-      `Invalid workflow run start: ${errors.map((e) => e.code).join(", ")}`
+      `Invalid workflow run start: ${errors.map((e) => e.code).join(", ")}`,
     );
     this.name = "InvalidWorkflowRunStartError";
     this.errors = errors;
@@ -101,7 +97,7 @@ export type PersistWorkflowRunStartSummary = {
  */
 export function persistWorkflowRunStart(
   db: MomentumDb,
-  input: WorkflowRunStartInput
+  input: WorkflowRunStartInput,
 ): PersistWorkflowRunStartSummary {
   const result = materializeWorkflowRunStart(input);
   if (!result.ok) {
@@ -125,7 +121,7 @@ export function persistWorkflowRunStart(
          approval_boundary, skill_revision,
          workflow_definition_key, workflow_definition_version,
          started_at, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       run.runId,
       run.state,
@@ -141,14 +137,14 @@ export function persistWorkflowRunStart(
       run.definitionVersion,
       run.startedAt,
       run.createdAt,
-      run.updatedAt
+      run.updatedAt,
     );
 
     const stepStmt = db.prepare(
       `INSERT INTO workflow_steps (
          run_id, step_id, kind, state, step_order, required,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const step of steps) {
       stepStmt.run(
@@ -159,7 +155,7 @@ export function persistWorkflowRunStart(
         step.order,
         step.required ? 1 : 0,
         run.createdAt,
-        run.updatedAt
+        run.updatedAt,
       );
     }
 
@@ -175,7 +171,7 @@ export function persistWorkflowRunStart(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         run.runId,
         run.approvalBoundary,
@@ -186,7 +182,7 @@ export function persistWorkflowRunStart(
         run.createdAt,
         null,
         run.createdAt,
-        run.updatedAt
+        run.updatedAt,
       );
     }
 
@@ -209,11 +205,13 @@ export function persistWorkflowRunStart(
     route: run.route,
     implementationEngine: readImplementationEngine(run.route),
     stepCount: steps.length,
-    inserted: true
+    inserted: true,
   };
 }
 
-function readImplementationEngine(route: Record<string, unknown>): string | null {
+function readImplementationEngine(
+  route: Record<string, unknown>,
+): string | null {
   const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
   if (typeof value === "string" && value.trim().length > 0) {
     return value;

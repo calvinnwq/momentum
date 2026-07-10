@@ -1,6 +1,6 @@
 # core/executors
 
-Executor runtime domain. This folder owns the runtime execution *mechanisms*:
+Executor runtime domain. This folder owns the runtime execution _mechanisms_:
 the executor-loop reducer/persistence, the goal-loop and single-shot executor
 families, the production live-step wrapper executor, and the no-mistakes
 mechanism, plus their runner-profile, foreground iteration, and runner-smoke
@@ -15,17 +15,17 @@ were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern | Modules |
-| --- | --- |
-| Executor loop | `loop/reducer.ts`, `loop/persist.ts` |
-| Goal-loop executor | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
-| Single-shot executor | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
-| Live-step executor | `live-step/executor.ts` (production live-wrapper lane) |
-| Shared step finalization | `shared/step-finalize.ts` (neutral verify -> commit / reset seam) |
-| No-mistakes mechanism | `no-mistakes/mechanism.ts` |
-| Runner support | `runner/profile.ts` |
-| Runner smoke | `smoke/linear-read.ts`, `smoke/workflow-harness.ts` |
-| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts` |
+| Concern                        | Modules                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                  |
+| Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
+| Single-shot executor           | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                  |
+| Live-step executor             | `live-step/executor.ts` (production live-wrapper lane)                                                |
+| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                     |
+| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                            |
+| Runner support                 | `runner/profile.ts`                                                                                   |
+| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                   |
+| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                 |
 
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
@@ -34,7 +34,8 @@ The native `goal-loop` family renders deterministic per-round prompts through `g
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete goal-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
-Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not become workflow executor families or make `.gnhf/runs` authoritative state.
+The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while legacy definitions may still run it beneath `goal-loop`.
+In both cases it must report through Momentum invocation and round evidence rather than become an executor family or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization
 
@@ -59,7 +60,7 @@ executor consumed by the real-adapter registry.
 ## Ownership boundary with adapters
 
 `no-mistakes/mechanism.ts` is the runtime decision logic and lives here in core.
-The no-mistakes *external integration* — `src/adapters/no-mistakes-executor.ts`
+The no-mistakes _external integration_ — `src/adapters/no-mistakes-executor.ts`
 and `src/adapters/no-mistakes-orchestrator.ts` — stays under `src/adapters/`
 because it drives the external no-mistakes tool. The
 `test/cli-import-boundaries.test.ts` adapter-ownership list pins that split.

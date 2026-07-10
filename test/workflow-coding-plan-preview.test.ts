@@ -2,16 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   materializeWorkflowCodingPlanPreview,
-  type WorkflowRunStartInput
+  type WorkflowRunStartInput,
 } from "../src/core/workflow/run/start.js";
 
 function baseInput(
-  overrides: Partial<WorkflowRunStartInput> = {}
+  overrides: Partial<WorkflowRunStartInput> = {},
 ): WorkflowRunStartInput {
   return {
     definition: CODING_WORKFLOW_DEFINITION,
@@ -20,7 +20,7 @@ function baseInput(
     objective: "Inspect the plan",
     now: 1_730_000_000_000,
     source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -36,15 +36,16 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         executor: "one-shot",
         order: 0,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "delegate-supervisor",
+        config: { tool: "gnhf" },
         order: 1,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "postflight",
@@ -52,15 +53,16 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         executor: "one-shot",
         order: 2,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "no-mistakes",
         kind: "no-mistakes",
-        executor: "no-mistakes",
+        executor: "delegate-supervisor",
+        config: { tool: "no-mistakes" },
         order: 3,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "merge-cleanup",
@@ -68,7 +70,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         executor: "script",
         order: 4,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "linear-refresh",
@@ -76,8 +78,8 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         executor: "external-apply",
         order: 5,
         required: true,
-        state: "pending"
-      }
+        state: "pending",
+      },
     ]);
   });
 
@@ -86,10 +88,10 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       baseInput({
         issueScope: { identifier: "NGX-509" },
         route: {
-        profile: "live-wrapper",
-        implementationEngine: "native-goal-loop"
-      }
-      })
+          profile: "live-wrapper",
+          implementationEngine: "native-goal-loop",
+        },
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -101,44 +103,44 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       objective: "Inspect the plan",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 1,
+      definitionVersion: 2,
       issueScope: { identifier: "NGX-509" },
       route: {
         profile: "live-wrapper",
-        implementationEngine: "native-goal-loop"
+        implementationEngine: "native-goal-loop",
       },
       implementationEngine: "native-goal-loop",
-      skillRevision: null
+      skillRevision: null,
     });
   });
 
   it("promotes approval-covered steps and opens approved with a boundary", () => {
     const result = materializeWorkflowCodingPlanPreview(
-      baseInput({ approvalBoundary: "through-implementation" })
+      baseInput({ approvalBoundary: "through-implementation" }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.preview.state).toBe("approved");
     expect(result.preview.approvalBoundary).toBe("through-implementation");
     const stateByStep = Object.fromEntries(
-      result.preview.steps.map((step) => [step.stepId, step.state])
+      result.preview.steps.map((step) => [step.stepId, step.state]),
     );
     expect(stateByStep).toMatchObject({
       preflight: "approved",
       implementation: "approved",
       postflight: "pending",
-      "no-mistakes": "pending"
+      "no-mistakes": "pending",
     });
   });
 
   it("collects materialization errors for invalid input", () => {
     const result = materializeWorkflowCodingPlanPreview(
-      baseInput({ objective: "   " })
+      baseInput({ objective: "   " }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.map((error) => error.code)).toContain(
-      "objective_invalid"
+      "objective_invalid",
     );
   });
 
@@ -153,28 +155,28 @@ describe("materializeWorkflowCodingPlanPreview", () => {
           kind: "implementation",
           executor: "goal-loop",
           order: 1,
-          required: false
+          required: false,
         },
         {
           key: "preflight",
           kind: "preflight",
           executor: "one-shot",
           order: 0,
-          required: true
-        }
-      ]
+          required: true,
+        },
+      ],
     };
     const result = materializeWorkflowCodingPlanPreview(
-      baseInput({ definition })
+      baseInput({ definition }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // Steps are ordered by `order`, and each carries the definition executor.
     expect(
-      result.preview.steps.map((step) => [step.stepId, step.executor])
+      result.preview.steps.map((step) => [step.stepId, step.executor]),
     ).toEqual([
       ["preflight", "one-shot"],
-      ["implementation", "goal-loop"]
+      ["implementation", "goal-loop"],
     ]);
   });
 });

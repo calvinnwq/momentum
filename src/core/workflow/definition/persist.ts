@@ -18,6 +18,8 @@
  *     bad definition can never leave partial state behind.
  *   - `created_at` is preserved across re-persists; `updated_at` is bumped on
  *     every upsert so callers can detect re-ingest.
+ *   - Optional portable step config round-trips through nullable `config_json`;
+ *     an omitted config remains absent when loaded.
  *   - The persisted step set exactly mirrors the definition: re-persisting a
  *     `(key, version)` with a step removed deletes the orphaned step row, so a
  *     loaded definition always round-trips to what was last persisted.
@@ -30,7 +32,7 @@ import {
   type StepDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionValidationError,
-  type WorkflowExecutorFamily
+  type WorkflowExecutorFamily,
 } from "./definition.js";
 import type { WorkflowStepKind } from "../run/reducer.js";
 
@@ -44,7 +46,7 @@ export class InvalidWorkflowDefinitionError extends Error {
 
   constructor(errors: readonly WorkflowDefinitionValidationError[]) {
     super(
-      `Invalid workflow definition: ${errors.map((e) => e.code).join(", ")}`
+      `Invalid workflow definition: ${errors.map((e) => e.code).join(", ")}`,
     );
     this.name = "InvalidWorkflowDefinitionError";
     this.errors = errors;
@@ -72,7 +74,7 @@ export type PersistWorkflowDefinitionSummary = {
 export function persistWorkflowDefinition(
   db: MomentumDb,
   definition: unknown,
-  options: PersistWorkflowDefinitionOptions = {}
+  options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary {
   const validation = validateWorkflowDefinition(definition);
   if (!validation.ok) {
@@ -85,7 +87,7 @@ export function persistWorkflowDefinition(
   try {
     const existing = db
       .prepare(
-        "SELECT key FROM workflow_definitions WHERE key = ? AND version = ?"
+        "SELECT key FROM workflow_definitions WHERE key = ? AND version = ?",
       )
       .get(def.key, def.version) as { key: string } | undefined;
     const inserted = existing === undefined;
@@ -96,20 +98,21 @@ export function persistWorkflowDefinition(
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(key, version) DO UPDATE SET
          title = excluded.title,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at`,
     ).run(def.key, def.version, def.title, now, now);
 
     const stepStmt = db.prepare(
       `INSERT INTO step_definitions
-         (definition_key, definition_version, step_key, kind, executor,
+         (definition_key, definition_version, step_key, kind, executor, config_json,
           step_order, required, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(definition_key, definition_version, step_key) DO UPDATE SET
          kind = excluded.kind,
          executor = excluded.executor,
+         config_json = excluded.config_json,
          step_order = excluded.step_order,
          required = excluded.required,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at`,
     );
     for (const step of def.steps) {
       stepStmt.run(
@@ -118,10 +121,11 @@ export function persistWorkflowDefinition(
         step.key,
         step.kind,
         step.executor,
+        step.config === undefined ? null : JSON.stringify(step.config),
         step.order,
         step.required ? 1 : 0,
         now,
-        now
+        now,
       );
     }
 
@@ -133,7 +137,7 @@ export function persistWorkflowDefinition(
     db.prepare(
       `DELETE FROM step_definitions
          WHERE definition_key = ? AND definition_version = ?
-           AND step_key NOT IN (${placeholders})`
+           AND step_key NOT IN (${placeholders})`,
     ).run(def.key, def.version, ...keepKeys);
 
     db.exec("COMMIT");
@@ -142,7 +146,7 @@ export function persistWorkflowDefinition(
       version: def.version,
       title: def.title,
       inserted,
-      stepCount: def.steps.length
+      stepCount: def.steps.length,
     };
   } catch (error) {
     safeRollback(db);
@@ -158,13 +162,13 @@ export function persistWorkflowDefinition(
 export function loadWorkflowDefinition(
   db: MomentumDb,
   key: string,
-  version?: number
+  version?: number,
 ): WorkflowDefinition | undefined {
   let resolvedVersion = version;
   if (resolvedVersion === undefined) {
     const row = db
       .prepare(
-        "SELECT MAX(version) AS version FROM workflow_definitions WHERE key = ?"
+        "SELECT MAX(version) AS version FROM workflow_definitions WHERE key = ?",
       )
       .get(key) as { version: number | null } | undefined;
     if (row?.version == null) return undefined;
@@ -173,42 +177,74 @@ export function loadWorkflowDefinition(
 
   const defRow = db
     .prepare(
-      "SELECT key, version, title FROM workflow_definitions WHERE key = ? AND version = ?"
+      "SELECT key, version, title FROM workflow_definitions WHERE key = ? AND version = ?",
     )
     .get(key, resolvedVersion) as
-    | { key: string; version: number; title: string }
-    | undefined;
+    { key: string; version: number; title: string } | undefined;
   if (defRow === undefined) return undefined;
 
   const stepRows = db
     .prepare(
-      `SELECT step_key, kind, executor, step_order, required
+      `SELECT step_key, kind, executor, config_json, step_order, required
          FROM step_definitions
          WHERE definition_key = ? AND definition_version = ?
-         ORDER BY step_order, step_key`
+         ORDER BY step_order, step_key`,
     )
     .all(key, resolvedVersion) as Array<{
     step_key: string;
     kind: string;
     executor: string;
+    config_json: string | null;
     step_order: number;
     required: number;
   }>;
 
-  const steps: StepDefinition[] = stepRows.map((row) => ({
-    key: row.step_key,
-    kind: row.kind as WorkflowStepKind,
-    executor: row.executor as WorkflowExecutorFamily,
-    order: row.step_order,
-    required: row.required === 1
-  }));
+  const steps: StepDefinition[] = stepRows.map((row) => {
+    const config = parseStepConfig(
+      row.config_json,
+      key,
+      resolvedVersion,
+      row.step_key,
+    );
+    return {
+      key: row.step_key,
+      kind: row.kind as WorkflowStepKind,
+      executor: row.executor as WorkflowExecutorFamily,
+      ...(config === undefined ? {} : { config }),
+      order: row.step_order,
+      required: row.required === 1,
+    };
+  });
 
   return {
     key: defRow.key,
     title: defRow.title,
     version: defRow.version,
-    steps
+    steps,
   };
+}
+
+function parseStepConfig(
+  raw: string | null,
+  definitionKey: string,
+  definitionVersion: number,
+  stepKey: string,
+): Record<string, unknown> | undefined {
+  if (raw === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `Invalid step config JSON for ${definitionKey}@${definitionVersion}/${stepKey}.`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `Invalid step config object for ${definitionKey}@${definitionVersion}/${stepKey}.`,
+    );
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /**
@@ -227,10 +263,10 @@ export function listWorkflowDefinitionKeys(db: MomentumDb): string[] {
  */
 export function seedBuiltInWorkflowDefinitions(
   db: MomentumDb,
-  options: PersistWorkflowDefinitionOptions = {}
+  options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary[] {
   return BUILT_IN_WORKFLOW_DEFINITIONS.map((definition) =>
-    persistWorkflowDefinition(db, definition, options)
+    persistWorkflowDefinition(db, definition, options),
   );
 }
 

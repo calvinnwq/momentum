@@ -8,11 +8,14 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import {
   loadWorkflowDefinition,
-  persistWorkflowDefinition
+  persistWorkflowDefinition,
 } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function readDoc(relative: string): string {
   return fs.readFileSync(path.join(repoRoot, relative), "utf8");
@@ -49,15 +52,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -85,7 +88,12 @@ describe("momentum workflow run start (NGX-346)", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
-      startArgs({ dataDir, repoDir, runId: "run-1", objective: "Ship NGX-346" })
+      startArgs({
+        dataDir,
+        repoDir,
+        runId: "run-1",
+        objective: "Ship NGX-346",
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -97,9 +105,9 @@ describe("momentum workflow run start (NGX-346)", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 1,
+      definitionVersion: 2,
       repoPath: repoDir,
-      objective: "Ship NGX-346"
+      objective: "Ship NGX-346",
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(6);
     expect((payload["policy"] as { present: boolean }).present).toBe(false);
@@ -110,7 +118,7 @@ describe("momentum workflow run start (NGX-346)", () => {
         .prepare(
           `SELECT id, state, source, repo_path, objective,
                   workflow_definition_key, workflow_definition_version
-             FROM workflow_runs WHERE id = ?`
+             FROM workflow_runs WHERE id = ?`,
         )
         .get("run-1") as Record<string, unknown> | undefined;
       expect(runRow).toMatchObject({
@@ -120,12 +128,12 @@ describe("momentum workflow run start (NGX-346)", () => {
         repo_path: repoDir,
         objective: "Ship NGX-346",
         workflow_definition_key: "coding-workflow",
-        workflow_definition_version: 1
+        workflow_definition_version: 2,
       });
       const steps = db
         .prepare(
           `SELECT step_id, kind, state, step_order
-             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`
+             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
         )
         .all("run-1") as Array<{ step_id: string; state: string }>;
       expect(steps.map((s) => s.step_id)).toEqual([
@@ -134,10 +142,10 @@ describe("momentum workflow run start (NGX-346)", () => {
         "postflight",
         "no-mistakes",
         "merge-cleanup",
-        "linear-refresh"
+        "linear-refresh",
       ]);
       expect(steps.every((s) => s.state === "pending")).toBe(true);
-      expect(loadWorkflowDefinition(db, "coding-workflow", 1)).toBeDefined();
+      expect(loadWorkflowDefinition(db, "coding-workflow", 2)).toBeDefined();
     } finally {
       db.close();
     }
@@ -152,8 +160,8 @@ describe("momentum workflow run start (NGX-346)", () => {
         dataDir,
         repoDir: relativeRepo,
         runId: "run-relative-repo",
-        objective: "Resolve repo path"
-      })
+        objective: "Resolve repo path",
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -179,15 +187,15 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-approved",
         objective: "Ship NGX-346",
-        extra: ["--approval-boundary", "through-implementation"]
-      })
+        extra: ["--approval-boundary", "through-implementation"],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       state: "approved",
-      approvalBoundary: "through-implementation"
+      approvalBoundary: "through-implementation",
     });
 
     const db = openDb(dataDir);
@@ -195,12 +203,12 @@ describe("momentum workflow run start (NGX-346)", () => {
       const approved = db
         .prepare(
           `SELECT step_id FROM workflow_steps
-             WHERE run_id = ? AND state = 'approved' ORDER BY step_order`
+             WHERE run_id = ? AND state = 'approved' ORDER BY step_order`,
         )
         .all("run-approved") as Array<{ step_id: string }>;
       expect(approved.map((s) => s.step_id)).toEqual([
         "preflight",
-        "implementation"
+        "implementation",
       ]);
     } finally {
       db.close();
@@ -215,15 +223,21 @@ describe("momentum workflow run start (NGX-346)", () => {
       title: "Custom Flow",
       version: 2,
       steps: [
-        { key: "preflight", kind: "preflight", executor: "one-shot", order: 0, required: true },
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true,
+        },
         {
           key: "implementation",
           kind: "implementation",
           executor: "goal-loop",
           order: 1,
-          required: false
-        }
-      ]
+          required: false,
+        },
+      ],
     };
     const db = openDb(dataDir);
     try {
@@ -238,15 +252,15 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-custom",
         objective: "Run the custom flow",
-        extra: ["--definition", "custom-flow"]
-      })
+        extra: ["--definition", "custom-flow"],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       definitionKey: "custom-flow",
-      definitionVersion: 2
+      definitionVersion: 2,
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(2);
   });
@@ -255,14 +269,14 @@ describe("momentum workflow run start (NGX-346)", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
-      startArgs({ dataDir, repoDir, objective: "no run id" })
+      startArgs({ dataDir, repoDir, objective: "no run id" }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -278,14 +292,14 @@ describe("momentum workflow run start (NGX-346)", () => {
       "no repo",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "repo_required"
+      code: "repo_required",
     });
   });
 
@@ -298,7 +312,7 @@ describe("momentum workflow run start (NGX-346)", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "objective_required"
+      code: "objective_required",
     });
   });
 
@@ -311,15 +325,15 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-extra",
         objective: "bad args",
-        extra: ["--definiton", "custom-flow"]
-      })
+        extra: ["--definiton", "custom-flow"],
+      }),
     );
     expect(result.code).toBe(2);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "Unexpected argument for workflow run start: --definiton"
+      message: "Unexpected argument for workflow run start: --definiton",
     });
   });
 
@@ -332,16 +346,48 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-z",
         objective: "unknown definition",
-        extra: ["--definition", "does-not-exist"]
-      })
+        extra: ["--definition", "does-not-exist"],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "definition_not_found"
+      code: "definition_not_found",
     });
+  });
+
+  it("starts a fresh generic run from a pinned retained built-in version", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startArgs({
+        dataDir,
+        repoDir,
+        runId: "run-v1",
+        objective: "pin retained coding workflow v1",
+        extra: ["--definition-version", "1"],
+      }),
+    );
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      definitionKey: "coding-workflow",
+      definitionVersion: 1,
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const definition = loadWorkflowDefinition(db, "coding-workflow", 1);
+      expect(
+        definition?.steps.find((step) => step.key === "implementation"),
+      ).toMatchObject({
+        executor: "goal-loop",
+      });
+    } finally {
+      db.close();
+    }
   });
 
   it("refuses a --definition-version that matches no persisted or built-in version", async () => {
@@ -353,15 +399,15 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-ver",
         objective: "pin a missing version",
-        extra: ["--definition-version", "99"]
-      })
+        extra: ["--definition-version", "99"],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "definition_not_found"
+      code: "definition_not_found",
     });
   });
 
@@ -369,11 +415,11 @@ describe("momentum workflow run start (NGX-346)", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const first = await run(
-      startArgs({ dataDir, repoDir, runId: "dup", objective: "first" })
+      startArgs({ dataDir, repoDir, runId: "dup", objective: "first" }),
     );
     expect(first.code).toBe(0);
     const second = await run(
-      startArgs({ dataDir, repoDir, runId: "dup", objective: "second" })
+      startArgs({ dataDir, repoDir, runId: "dup", objective: "second" }),
     );
     expect(second.code).toBe(1);
     const payload = JSON.parse(second.stderr) as Record<string, unknown>;
@@ -381,7 +427,7 @@ describe("momentum workflow run start (NGX-346)", () => {
       ok: false,
       command: "workflow run start",
       code: "run_exists",
-      runId: "dup"
+      runId: "dup",
     });
 
     const db = openDb(dataDir);
@@ -406,8 +452,8 @@ describe("momentum workflow run start (NGX-346)", () => {
         repoDir,
         runId: "run-bad-boundary",
         objective: "bad boundary",
-        extra: ["--approval-boundary", "not-a-boundary"]
-      })
+        extra: ["--approval-boundary", "not-a-boundary"],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
@@ -420,7 +466,7 @@ describe("momentum workflow run start (NGX-346)", () => {
     expect(payload.command).toBe("workflow run start");
     expect(payload.code).toBe("invalid_run_start");
     expect(payload.errors?.map((e) => e.code)).toContain(
-      "approval_boundary_invalid"
+      "approval_boundary_invalid",
     );
   });
 
@@ -430,22 +476,22 @@ describe("momentum workflow run start (NGX-346)", () => {
     fs.writeFileSync(
       path.join(repoDir, "MOMENTUM.md"),
       "---\nrunner: 42\n---\n",
-      "utf-8"
+      "utf-8",
     );
     const result = await run(
       startArgs({
         dataDir,
         repoDir,
         runId: "run-bad-policy",
-        objective: "bad policy"
-      })
+        objective: "bad policy",
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "policy_invalid"
+      code: "policy_invalid",
     });
 
     const db = openDb(dataDir);
@@ -473,7 +519,7 @@ describe("momentum workflow run start (NGX-346)", () => {
       "--objective",
       "Plain text run",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("run-text");
@@ -501,11 +547,12 @@ describe("workflow run start public docs (NGX-346)", () => {
       "definition_not_found",
       "policy_invalid",
       "invalid_run_start",
-      "run_exists"
+      "run_exists",
     ]) {
-      expect(doc, `docs/workflow-commands.md is missing refusal code ${code}`).toContain(
-        code
-      );
+      expect(
+        doc,
+        `docs/workflow-commands.md is missing refusal code ${code}`,
+      ).toContain(code);
     }
   });
 
@@ -517,11 +564,12 @@ describe("workflow run start public docs (NGX-346)", () => {
       "objective_invalid",
       "approval_boundary_invalid",
       "issue_scope_invalid",
-      "route_invalid"
+      "route_invalid",
     ]) {
-      expect(doc, `docs/workflow-commands.md is missing taxonomy code ${code}`).toContain(
-        code
-      );
+      expect(
+        doc,
+        `docs/workflow-commands.md is missing taxonomy code ${code}`,
+      ).toContain(code);
     }
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODING_WORKFLOW_DEFINITION,
   WORKFLOW_EXECUTOR_FAMILIES,
-  listBuiltInWorkflowDefinitionKeys
+  listBuiltInWorkflowDefinitionKeys,
 } from "../src/core/workflow/definition/definition.js";
 import { readRepoFile, expectSpecSection } from "./helpers/repo-docs.js";
 
@@ -21,6 +21,7 @@ describe("workflow-first runtime contract", () => {
       "goal-loop",
       "one-shot",
       "no-mistakes",
+      "delegate-supervisor",
       "script",
       "external-apply",
       "subworkflow",
@@ -37,18 +38,24 @@ describe("workflow-first runtime contract", () => {
       "merge-cleanup",
       "linear-refresh",
     ]);
-    expect(CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor)).toEqual([
+    expect(
+      CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor),
+    ).toEqual([
       "one-shot",
-      "goal-loop",
+      "delegate-supervisor",
       "one-shot",
-      "no-mistakes",
+      "delegate-supervisor",
       "script",
       "external-apply",
     ]);
   });
 
   it("keeps public docs free of workflow-first planning vocabulary", () => {
-    expect(readRepoFile("README.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
-    expect(readRepoFile("docs/index.html")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
+    expect(readRepoFile("README.md")).not.toMatch(
+      /\bM10\b|Workflow-First Runtime/,
+    );
+    expect(readRepoFile("docs/index.html")).not.toMatch(
+      /\bM10\b|Workflow-First Runtime/,
+    );
   });
 });

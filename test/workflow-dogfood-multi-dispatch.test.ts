@@ -13,7 +13,7 @@ import { startDaemonRun } from "../src/core/daemon/runs.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 import { createTerminalizingWorkflowDispatch } from "../src/core/workflow/dispatch/dogfood.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
@@ -53,15 +53,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -75,7 +75,7 @@ async function run(argv: string[]): Promise<RunResult> {
 async function startApprovedCodingRun(
   dataDir: string,
   repoDir: string,
-  runId: string
+  runId: string,
 ): Promise<void> {
   const startResult = await run([
     "workflow",
@@ -89,7 +89,7 @@ async function startApprovedCodingRun(
     "Dogfood NGX-391 multi-dispatch terminalization proof",
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(startResult.code).toBe(0);
 
@@ -104,7 +104,7 @@ async function startApprovedCodingRun(
     `approve plan ${runId} through-implementation`,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(approveResult.code).toBe(0);
 }
@@ -121,7 +121,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     try {
       const { runId: daemonRunId } = startDaemonRun(db, {
         pid: process.pid,
-        host: os.hostname() || null
+        host: os.hostname() || null,
       });
       // A SINGLE managed daemon loop — exactly what `daemon start --max-loop-*`
       // runs — driving the terminalize-and-continue fixture over the production
@@ -134,8 +134,10 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
         maxLoopIterations: 5,
         pollIntervalMs: 0,
         workflowLane: {
-          dispatch: createTerminalizingWorkflowDispatch(executeWorkflowStepDispatch)
-        }
+          dispatch: createTerminalizingWorkflowDispatch(
+            executeWorkflowStepDispatch,
+          ),
+        },
       });
     } finally {
       db.close();
@@ -156,7 +158,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     try {
       const steps = verifyDb
         .prepare(
-          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       // Both approved local steps terminalized to `succeeded`; every step past
@@ -167,25 +169,28 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
         { step_id: "postflight", state: "pending" },
         { step_id: "no-mistakes", state: "pending" },
         { step_id: "merge-cleanup", state: "pending" },
-        { step_id: "linear-refresh", state: "pending" }
+        { step_id: "linear-refresh", state: "pending" },
       ]);
 
       // Exactly one executor invocation per dispatched step — no duplicate
       // dispatch — created through the production dispatch path.
       const invocations = verifyDb
         .prepare(
-          "SELECT step_key, executor_family FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at"
+          "SELECT step_key, executor_family FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{ step_key: string; executor_family: string }>;
       expect(invocations).toEqual([
         { step_key: "preflight", executor_family: "one-shot" },
-        { step_key: "implementation", executor_family: "goal-loop" }
+        {
+          step_key: "implementation",
+          executor_family: "delegate-supervisor",
+        },
       ]);
 
       // No dispatch lease left outstanding — no lease corruption.
       const openLeases = verifyDb
         .prepare(
-          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([]);
@@ -194,7 +199,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
       // result.
       const digests = verifyDb
         .prepare(
-          "SELECT result_digest FROM workflow_steps WHERE run_id = ? AND state = 'succeeded' ORDER BY step_order"
+          "SELECT result_digest FROM workflow_steps WHERE run_id = ? AND state = 'succeeded' ORDER BY step_order",
         )
         .all(runId) as Array<{ result_digest: string | null }>;
       for (const row of digests) {
@@ -211,7 +216,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as {
@@ -220,7 +225,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     };
     expect(statusPayload.run.needsManualRecovery).toBe(false);
     const statusStepStates = Object.fromEntries(
-      statusPayload.steps.map((s) => [s.stepId, s.state])
+      statusPayload.steps.map((s) => [s.stepId, s.state]),
     );
     expect(statusStepStates["preflight"]).toBe("succeeded");
     expect(statusStepStates["implementation"]).toBe("succeeded");
@@ -234,7 +239,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitor.code).toBe(0);
     const monitorPayload = JSON.parse(monitor.stdout) as {
@@ -258,7 +263,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(handoff.code).toBe(0);
     const handoffPayload = JSON.parse(handoff.stdout) as {
@@ -269,7 +274,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     expect(handoffPayload.ok).toBe(true);
     expect(handoffPayload.nextAction.code).toBe("await_approval");
     const handoffStepStates = Object.fromEntries(
-      handoffPayload.steps.map((s) => [s.stepId, s.state])
+      handoffPayload.steps.map((s) => [s.stepId, s.state]),
     );
     expect(handoffStepStates["preflight"]).toBe("succeeded");
     expect(handoffStepStates["implementation"]).toBe("succeeded");
@@ -287,9 +292,9 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         kind: "preflight",
         executor: "one-shot",
         order: 1,
-        required: true
-      }
-    ]
+        required: true,
+      },
+    ],
   };
   const parentDefinition: WorkflowDefinition = {
     key: "dogfood-subworkflow-parent",
@@ -301,9 +306,9 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         kind: "implementation",
         executor: "subworkflow",
         order: 1,
-        required: true
-      }
-    ]
+        required: true,
+      },
+    ],
   };
 
   it("does not prematurely succeed a dispatched subworkflow scaffold", () => {
@@ -324,46 +329,46 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
           subworkflow: {
             child: {
               childDefinitionKey: childDefinition.key,
-              childDefinitionVersion: childDefinition.version
-            }
-          }
+              childDefinitionVersion: childDefinition.version,
+            },
+          },
         },
-        now
+        now,
       });
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
       ).run(runId, "implementation");
-      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-        runId
-      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved' WHERE id = ?",
+      ).run(runId);
 
       const claim = claimRunnableWorkflowStep(db, {
         runId,
         stepId: "implementation",
         holder: "dogfood-subworkflow",
         leaseExpiresAt: now + 60_000,
-        now
+        now,
       });
       expect(claim.ok).toBe(true);
       if (!claim.ok) return;
 
       const wrapped = createTerminalizingWorkflowDispatch(
-        executeWorkflowStepDispatch
+        executeWorkflowStepDispatch,
       );
       const result = wrapped(claim.claim, {
         db,
         workerId: "dogfood-subworkflow",
-        now: now + 1
+        now: now + 1,
       });
 
       expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
       expect(getWorkflowStep(db, runId, "implementation")?.state).toBe(
-        "running"
+        "running",
       );
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
       const invocation = loadExecutorInvocation(
         db,
-        deriveDispatchInvocationId(runId, "implementation")
+        deriveDispatchInvocationId(runId, "implementation"),
       );
       expect(invocation?.executorFamily).toBe("subworkflow");
       expect(invocation?.state).toBe("running");
@@ -388,7 +393,7 @@ describe("dogfood terminalize fails closed when the step cannot be finished (NGX
         stepId: "preflight",
         holder: "dogfood-guard",
         leaseExpiresAt: now + 60_000,
-        now
+        now,
       });
       expect(claimResult.ok).toBe(true);
       if (!claimResult.ok) return;
@@ -398,14 +403,14 @@ describe("dogfood terminalize fails closed when the step cannot be finished (NGX
       // invalid transition — the off-nominal outcome the guard must fail closed
       // on instead of releasing the lease over a step it never terminalized.
       const baseDispatchThatNeverStarts: WorkflowStepDispatch = () => ({
-        status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
       });
       const wrapped = createTerminalizingWorkflowDispatch(
-        baseDispatchThatNeverStarts
+        baseDispatchThatNeverStarts,
       );
 
       expect(() =>
-        wrapped(claimResult.claim, { db, workerId: "dogfood-guard", now })
+        wrapped(claimResult.claim, { db, workerId: "dogfood-guard", now }),
       ).toThrow(/could not be finished succeeded/);
 
       // The dispatch lease the claim acquired is still held: the failed
@@ -413,7 +418,7 @@ describe("dogfood terminalize fails closed when the step cannot be finished (NGX
       // non-terminalized step.
       const openLeases = db
         .prepare(
-          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([{ lease_kind: "dispatch" }]);
@@ -421,7 +426,7 @@ describe("dogfood terminalize fails closed when the step cannot be finished (NGX
       // The step was never silently marked succeeded.
       const step = db
         .prepare(
-          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
         .get(runId, "preflight") as { state: string };
       expect(step.state).toBe("approved");

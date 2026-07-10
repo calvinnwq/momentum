@@ -6,14 +6,15 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  CODING_WORKFLOW_DEFINITION_V1,
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import {
   InvalidWorkflowDefinitionError,
   listWorkflowDefinitionKeys,
   loadWorkflowDefinition,
   persistWorkflowDefinition,
-  seedBuiltInWorkflowDefinitions
+  seedBuiltInWorkflowDefinitions,
 } from "../src/core/workflow/definition/persist.js";
 
 const tempRoots: string[] = [];
@@ -37,9 +38,7 @@ function openTempDb(): MomentumDb {
 
 function countDefinitionRows(db: MomentumDb, key: string): number {
   const row = db
-    .prepare(
-      "SELECT count(*) AS c FROM workflow_definitions WHERE key = ?"
-    )
+    .prepare("SELECT count(*) AS c FROM workflow_definitions WHERE key = ?")
     .get(key) as { c: number };
   return row.c;
 }
@@ -48,7 +47,7 @@ function countStepRows(db: MomentumDb, key: string, version: number): number {
   const row = db
     .prepare(
       `SELECT count(*) AS c FROM step_definitions
-         WHERE definition_key = ? AND definition_version = ?`
+         WHERE definition_key = ? AND definition_version = ?`,
     )
     .get(key, version) as { c: number };
   return row.c;
@@ -59,10 +58,7 @@ describe("persistWorkflowDefinition", () => {
     const db = openTempDb();
     try {
       persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: 1000 });
-      const loaded = loadWorkflowDefinition(
-        db,
-        CODING_WORKFLOW_DEFINITION.key
-      );
+      const loaded = loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key);
       expect(loaded).toEqual(CODING_WORKFLOW_DEFINITION);
     } finally {
       db.close();
@@ -73,7 +69,7 @@ describe("persistWorkflowDefinition", () => {
     const db = openTempDb();
     try {
       const first = persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, {
-        now: 1000
+        now: 1000,
       });
       expect(first.inserted).toBe(true);
       expect(first.key).toBe(CODING_WORKFLOW_DEFINITION.key);
@@ -81,7 +77,7 @@ describe("persistWorkflowDefinition", () => {
       expect(first.stepCount).toBe(CODING_WORKFLOW_DEFINITION.steps.length);
 
       const second = persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, {
-        now: 2000
+        now: 2000,
       });
       expect(second.inserted).toBe(false);
     } finally {
@@ -101,12 +97,12 @@ describe("persistWorkflowDefinition", () => {
         countStepRows(
           db,
           CODING_WORKFLOW_DEFINITION.key,
-          CODING_WORKFLOW_DEFINITION.version
-        )
+          CODING_WORKFLOW_DEFINITION.version,
+        ),
       ).toBe(CODING_WORKFLOW_DEFINITION.steps.length);
-      expect(loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key)).toEqual(
-        CODING_WORKFLOW_DEFINITION
-      );
+      expect(
+        loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key),
+      ).toEqual(CODING_WORKFLOW_DEFINITION);
     } finally {
       db.close();
     }
@@ -120,11 +116,11 @@ describe("persistWorkflowDefinition", () => {
 
       const def = db
         .prepare(
-          "SELECT created_at, updated_at FROM workflow_definitions WHERE key = ? AND version = ?"
+          "SELECT created_at, updated_at FROM workflow_definitions WHERE key = ? AND version = ?",
         )
         .get(
           CODING_WORKFLOW_DEFINITION.key,
-          CODING_WORKFLOW_DEFINITION.version
+          CODING_WORKFLOW_DEFINITION.version,
         ) as { created_at: number; updated_at: number };
       expect(def.created_at).toBe(1000);
       expect(def.updated_at).toBe(2000);
@@ -132,11 +128,11 @@ describe("persistWorkflowDefinition", () => {
       const step = db
         .prepare(
           `SELECT created_at, updated_at FROM step_definitions
-             WHERE definition_key = ? AND definition_version = ? AND step_key = 'preflight'`
+             WHERE definition_key = ? AND definition_version = ? AND step_key = 'preflight'`,
         )
         .get(
           CODING_WORKFLOW_DEFINITION.key,
-          CODING_WORKFLOW_DEFINITION.version
+          CODING_WORKFLOW_DEFINITION.version,
         ) as { created_at: number; updated_at: number };
       expect(step.created_at).toBe(1000);
       expect(step.updated_at).toBe(2000);
@@ -158,9 +154,9 @@ describe("persistWorkflowDefinition", () => {
             kind: "preflight",
             executor: "bogus-family",
             order: 0,
-            required: true
-          }
-        ]
+            required: true,
+          },
+        ],
       };
 
       let thrown: unknown;
@@ -171,7 +167,7 @@ describe("persistWorkflowDefinition", () => {
       }
       expect(thrown).toBeInstanceOf(InvalidWorkflowDefinitionError);
       expect(
-        (thrown as InvalidWorkflowDefinitionError).errors.map((e) => e.code)
+        (thrown as InvalidWorkflowDefinitionError).errors.map((e) => e.code),
       ).toContain("step_executor_invalid");
 
       expect(countDefinitionRows(db, "broken-workflow")).toBe(0);
@@ -194,14 +190,14 @@ describe("persistWorkflowDefinition", () => {
             kind: "preflight",
             executor: "one-shot",
             order: 0,
-            required: true
-          }
-        ]
+            required: true,
+          },
+        ],
       };
       const v2: WorkflowDefinition = {
         ...v1,
         title: "Demo v2",
-        version: 2
+        version: 2,
       };
       persistWorkflowDefinition(db, v1, { now: 1000 });
       persistWorkflowDefinition(db, v2, { now: 2000 });
@@ -226,20 +222,20 @@ describe("persistWorkflowDefinition", () => {
             kind: "preflight",
             executor: "one-shot",
             order: 0,
-            required: true
+            required: true,
           },
           {
             key: "implementation",
             kind: "implementation",
             executor: "goal-loop",
             order: 1,
-            required: true
-          }
-        ]
+            required: true,
+          },
+        ],
       };
       const oneStep: WorkflowDefinition = {
         ...twoStep,
-        steps: [twoStep.steps[0]!]
+        steps: [twoStep.steps[0]!],
       };
       persistWorkflowDefinition(db, twoStep, { now: 1000 });
       persistWorkflowDefinition(db, oneStep, { now: 2000 });
@@ -273,10 +269,13 @@ describe("seedBuiltInWorkflowDefinitions", () => {
       const second = seedBuiltInWorkflowDefinitions(db, { now: 2000 });
       expect(second.every((s) => s.inserted)).toBe(false);
 
-      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(1);
-      expect(loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key)).toEqual(
-        CODING_WORKFLOW_DEFINITION
-      );
+      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(2);
+      expect(
+        loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key),
+      ).toEqual(CODING_WORKFLOW_DEFINITION);
+      expect(
+        loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key, 1),
+      ).toEqual(CODING_WORKFLOW_DEFINITION_V1);
     } finally {
       db.close();
     }
@@ -302,11 +301,11 @@ describe("listWorkflowDefinitionKeys", () => {
               kind: "preflight",
               executor: "one-shot",
               order: 0,
-              required: true
-            }
-          ]
+              required: true,
+            },
+          ],
         },
-        { now: 1000 }
+        { now: 1000 },
       );
       persistWorkflowDefinition(
         db,
@@ -320,16 +319,16 @@ describe("listWorkflowDefinitionKeys", () => {
               kind: "preflight",
               executor: "one-shot",
               order: 0,
-              required: true
-            }
-          ]
+              required: true,
+            },
+          ],
         },
-        { now: 2000 }
+        { now: 2000 },
       );
 
       expect(listWorkflowDefinitionKeys(db)).toEqual([
         CODING_WORKFLOW_DEFINITION.key,
-        "demo"
+        "demo",
       ]);
     } finally {
       db.close();

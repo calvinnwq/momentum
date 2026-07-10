@@ -28,6 +28,7 @@ describe("workflow-first gap matrix anchor", () => {
       "goal-loop",
       "one-shot",
       "no-mistakes",
+      "delegate-supervisor",
       "script",
       "external-apply",
       "subworkflow",
@@ -37,6 +38,7 @@ describe("workflow-first gap matrix anchor", () => {
       "one-shot",
       "script",
       "no-mistakes",
+      "delegate-supervisor",
       "external-apply",
       "subworkflow",
     ]);

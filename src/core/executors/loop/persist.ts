@@ -7,9 +7,10 @@
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * scheduler lane is owned separately by `src/core/workflow/dispatch/scheduler.ts`; the
- * landed goal-loop, one-shot / script, and no-mistakes mirror adapters layer on
- * top of this persistence spine, exactly as `src/core/workflow/definition/persist.ts` is
- * the storage twin of `src/core/workflow/definition/definition.ts`.
+ * landed goal-loop, one-shot / script, legacy no-mistakes mirror, and
+ * delegate-supervisor live-wrapper paths layer on top of this persistence spine,
+ * exactly as `src/core/workflow/definition/persist.ts` is the storage twin of
+ * `src/core/workflow/definition/definition.ts`.
  *
  * Stable contracts this slice locks in:
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
@@ -70,20 +71,20 @@ import {
   type ExecutorRoundTransitionErrorCode,
   type ExecutorRoundVerificationResult,
   isTerminalExecutorRoundState,
-  type WorkflowExecutorFamily
+  type WorkflowExecutorFamily,
 } from "./reducer.js";
 import { isWorkflowExecutorFamily } from "../../workflow/definition/definition.js";
 
 const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
-  EXECUTOR_INVOCATION_STATES
+  EXECUTOR_INVOCATION_STATES,
 );
 const ROUND_STATE_SET: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
 const CLASSIFICATION_SET: ReadonlySet<string> = new Set(
-  EXECUTOR_COMPLETION_CLASSIFICATIONS
+  EXECUTOR_COMPLETION_CLASSIFICATIONS,
 );
 const GATE_TYPE_SET: ReadonlySet<string> = new Set(EXECUTOR_HUMAN_GATE_TYPES);
 const ARTIFACT_CLASS_SET: ReadonlySet<string> = new Set(
-  EXECUTOR_ARTIFACT_CLASSES
+  EXECUTOR_ARTIFACT_CLASSES,
 );
 
 /** One typed validation problem with an enum field of an executor record. */
@@ -141,7 +142,7 @@ export class ExecutorInvocationTransitionError extends Error {
     from: ExecutorInvocationState,
     to: ExecutorInvocationState,
     code: ExecutorInvocationTransitionErrorCode,
-    message: string
+    message: string,
   ) {
     super(message);
     this.name = "ExecutorInvocationTransitionError";
@@ -186,7 +187,7 @@ export class ExecutorRoundTransitionError extends Error {
     from: ExecutorRoundState,
     to: ExecutorRoundState,
     code: ExecutorRoundTransitionErrorCode,
-    message: string
+    message: string,
   ) {
     super(message);
     this.name = "ExecutorRoundTransitionError";
@@ -199,10 +200,7 @@ export class ExecutorRoundTransitionError extends Error {
 
 /** The four append-only evidence classes that hang below an executor round. */
 export type ExecutorEvidenceEntity =
-  | "artifact"
-  | "checkpoint"
-  | "finding"
-  | "decision";
+  "artifact" | "checkpoint" | "finding" | "decision";
 
 /**
  * Thrown when inserting a child evidence row whose id collides (or, for a
@@ -243,7 +241,7 @@ export type PersistExecutorDefinitionSummary = {
 export function persistExecutorDefinition(
   db: MomentumDb,
   record: ExecutorDefinitionRecord,
-  options: PersistExecutorDefinitionOptions = {}
+  options: PersistExecutorDefinitionOptions = {},
 ): PersistExecutorDefinitionSummary {
   const errors = validateDefinitionRecord(record);
   if (errors.length > 0) {
@@ -255,7 +253,7 @@ export function persistExecutorDefinition(
   try {
     const existing = db
       .prepare(
-        "SELECT executor_key FROM executor_definitions WHERE executor_key = ?"
+        "SELECT executor_key FROM executor_definitions WHERE executor_key = ?",
       )
       .get(record.executorKey) as { executor_key: string } | undefined;
     const inserted = existing === undefined;
@@ -273,7 +271,7 @@ export function persistExecutorDefinition(
          timeout_ms = excluded.timeout_ms,
          max_rounds = excluded.max_rounds,
          policy_envelope = excluded.policy_envelope,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at`,
     ).run(
       record.executorKey,
       record.family,
@@ -284,7 +282,7 @@ export function persistExecutorDefinition(
       record.maxRounds,
       record.policyEnvelope,
       now,
-      now
+      now,
     );
 
     db.exec("COMMIT");
@@ -298,13 +296,13 @@ export function persistExecutorDefinition(
 /** Load a persisted executor definition; `undefined` when none matches. */
 export function loadExecutorDefinition(
   db: MomentumDb,
-  executorKey: string
+  executorKey: string,
 ): ExecutorDefinitionRecord | undefined {
   const row = db
     .prepare(
       `SELECT executor_key, family, agent_provider, model, effort,
               timeout_ms, max_rounds, policy_envelope
-         FROM executor_definitions WHERE executor_key = ?`
+         FROM executor_definitions WHERE executor_key = ?`,
     )
     .get(executorKey) as ExecutorDefinitionRow | undefined;
   if (row === undefined) return undefined;
@@ -316,7 +314,7 @@ export function loadExecutorDefinition(
     effort: row.effort,
     timeoutMs: row.timeout_ms,
     maxRounds: row.max_rounds,
-    policyEnvelope: row.policy_envelope
+    policyEnvelope: row.policy_envelope,
   };
 }
 
@@ -334,7 +332,7 @@ export type InsertExecutorInvocationOptions = {
 export function insertExecutorInvocation(
   db: MomentumDb,
   record: ExecutorInvocationRecord,
-  options: InsertExecutorInvocationOptions = {}
+  options: InsertExecutorInvocationOptions = {},
 ): ExecutorInvocationRecord {
   const errors = validateInvocationRecord(record);
   if (errors.length > 0) {
@@ -347,7 +345,7 @@ export function insertExecutorInvocation(
          invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
          state, attempt, started_at, heartbeat_at, finished_at,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       record.invocationId,
       record.workflowRunId,
@@ -360,7 +358,7 @@ export function insertExecutorInvocation(
       record.heartbeatAt,
       record.finishedAt,
       now,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -374,7 +372,7 @@ export function insertExecutorInvocation(
 /** Load a persisted invocation; `undefined` when none matches. */
 export function loadExecutorInvocation(
   db: MomentumDb,
-  invocationId: string
+  invocationId: string,
 ): ExecutorInvocationRecord | undefined {
   return loadExecutorInvocationSnapshot(db, invocationId)?.record;
 }
@@ -387,12 +385,12 @@ export function loadExecutorInvocation(
  */
 export function listExecutorInvocationsForRun(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): ExecutorInvocationRecord[] {
   const rows = db
     .prepare(
       `${INVOCATION_SELECT} WHERE workflow_run_id = ?
-       ORDER BY step_key, attempt, invocation_id`
+       ORDER BY step_key, attempt, invocation_id`,
     )
     .all(runId) as ExecutorInvocationRow[];
   return rows.map(rowToInvocation);
@@ -418,7 +416,7 @@ export function updateExecutorInvocationState(
   db: MomentumDb,
   invocationId: string,
   toState: ExecutorInvocationState,
-  options: UpdateExecutorInvocationOptions = {}
+  options: UpdateExecutorInvocationOptions = {},
 ): ExecutorInvocationRecord {
   const currentSnapshot = loadExecutorInvocationSnapshot(db, invocationId);
   if (currentSnapshot === undefined) {
@@ -432,7 +430,7 @@ export function updateExecutorInvocationState(
       current.state,
       toState,
       result.errorCode,
-      result.errorMessage
+      result.errorMessage,
     );
   }
   const now = options.now ?? Date.now();
@@ -441,25 +439,32 @@ export function updateExecutorInvocationState(
     state: toState,
     startedAt: coalesce(options.startedAt, current.startedAt),
     heartbeatAt: coalesce(options.heartbeatAt, current.heartbeatAt),
-    finishedAt: coalesce(options.finishedAt, current.finishedAt)
+    finishedAt: coalesce(options.finishedAt, current.finishedAt),
   };
-  const updateResult = db.prepare(
-    `UPDATE executor_invocations
+  const updateResult = db
+    .prepare(
+      `UPDATE executor_invocations
        SET state = ?, started_at = ?, heartbeat_at = ?, finished_at = ?,
            updated_at = ?
-     WHERE invocation_id = ? AND state = ? AND updated_at = ?`
-  ).run(
-    next.state,
-    next.startedAt,
-    next.heartbeatAt,
-    next.finishedAt,
-    now,
-    invocationId,
-    current.state,
-    currentSnapshot.updatedAt
-  );
+     WHERE invocation_id = ? AND state = ? AND updated_at = ?`,
+    )
+    .run(
+      next.state,
+      next.startedAt,
+      next.heartbeatAt,
+      next.finishedAt,
+      now,
+      invocationId,
+      current.state,
+      currentSnapshot.updatedAt,
+    );
   if (Number(updateResult.changes) === 0) {
-    return handleInvocationPostWriteConflict(db, invocationId, toState, options);
+    return handleInvocationPostWriteConflict(
+      db,
+      invocationId,
+      toState,
+      options,
+    );
   }
   return next;
 }
@@ -481,7 +486,7 @@ export type InsertExecutorRoundOptions = {
 export function insertExecutorRound(
   db: MomentumDb,
   record: ExecutorRoundRecord,
-  options: InsertExecutorRoundOptions = {}
+  options: InsertExecutorRoundOptions = {},
 ): ExecutorRoundRecord {
   const errors = validateRoundRecord(record);
   if (errors.length > 0) {
@@ -502,7 +507,7 @@ export function insertExecutorRound(
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-       )`
+       )`,
     ).run(
       record.roundId,
       record.invocationId,
@@ -536,7 +541,7 @@ export function insertExecutorRound(
       record.recoveryCode,
       record.humanGate,
       now,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -550,7 +555,7 @@ export function insertExecutorRound(
 /** Load a persisted round; `undefined` when none matches. */
 export function loadExecutorRound(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorRoundRecord | undefined {
   return loadExecutorRoundSnapshot(db, roundId)?.record;
 }
@@ -558,7 +563,7 @@ export function loadExecutorRound(
 /** List an invocation's rounds, ordered by `round_index`. */
 export function listExecutorRoundsForInvocation(
   db: MomentumDb,
-  invocationId: string
+  invocationId: string,
 ): ExecutorRoundRecord[] {
   const rows = db
     .prepare(`${ROUND_SELECT} WHERE invocation_id = ? ORDER BY round_index`)
@@ -575,12 +580,12 @@ export function listExecutorRoundsForInvocation(
  */
 export function listExecutorRoundsForRun(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): ExecutorRoundRecord[] {
   const rows = db
     .prepare(
       `${ROUND_SELECT} WHERE workflow_run_id = ?
-       ORDER BY step_key, attempt, invocation_id, round_index, round_id`
+       ORDER BY step_key, attempt, invocation_id, round_index, round_id`,
     )
     .all(runId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
@@ -595,10 +600,10 @@ export function listExecutorRoundsForRun(
  */
 export function listIncompleteExecutorRoundsForRun(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): ExecutorRoundRecord[] {
   return listExecutorRoundsForRun(db, runId).filter(
-    (round) => !isTerminalExecutorRoundState(round.state)
+    (round) => !isTerminalExecutorRoundState(round.state),
   );
 }
 
@@ -652,7 +657,7 @@ export function updateExecutorRound(
   db: MomentumDb,
   roundId: string,
   update: ExecutorRoundUpdate,
-  options: UpdateExecutorRoundOptions = {}
+  options: UpdateExecutorRoundOptions = {},
 ): ExecutorRoundRecord {
   const currentSnapshot = loadExecutorRoundSnapshot(db, roundId);
   if (currentSnapshot === undefined) {
@@ -666,7 +671,7 @@ export function updateExecutorRound(
       current.state,
       update.toState,
       result.errorCode,
-      result.errorMessage
+      result.errorMessage,
     );
   }
   const next: ExecutorRoundRecord = {
@@ -675,7 +680,7 @@ export function updateExecutorRound(
     classification: coalesce(update.classification, current.classification),
     executorRecommendation: coalesce(
       update.executorRecommendation,
-      current.executorRecommendation ?? null
+      current.executorRecommendation ?? null,
     ),
     startedAt: coalesce(update.startedAt, current.startedAt),
     heartbeatAt: coalesce(update.heartbeatAt, current.heartbeatAt),
@@ -694,64 +699,66 @@ export function updateExecutorRound(
     changedFiles: coalesce(update.changedFiles, current.changedFiles),
     verificationStatus: coalesce(
       update.verificationStatus,
-      current.verificationStatus
+      current.verificationStatus,
     ),
     ...(coalesce(update.verificationResults, current.verificationResults) !==
     undefined
       ? {
           verificationResults: coalesce(
             update.verificationResults,
-            current.verificationResults
-          )
+            current.verificationResults,
+          ),
         }
       : {}),
     commitSha: coalesce(update.commitSha, current.commitSha),
     recoveryCode: coalesce(update.recoveryCode, current.recoveryCode),
-    humanGate: coalesce(update.humanGate, current.humanGate)
+    humanGate: coalesce(update.humanGate, current.humanGate),
   };
   const errors = validateRoundRecord(next);
   if (errors.length > 0) {
     throw new InvalidExecutorRecordError(errors);
   }
   const now = options.now ?? Date.now();
-  const updateResult = db.prepare(
-    `UPDATE executor_rounds SET
+  const updateResult = db
+    .prepare(
+      `UPDATE executor_rounds SET
        state = ?, classification = ?, executor_recommendation = ?, started_at = ?, heartbeat_at = ?,
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
        input_digest = ?, result_digest = ?, artifact_root = ?, log_paths = ?,
        summary = ?, key_changes = ?, key_learnings = ?, remaining_work = ?, changed_files = ?,
        verification_status = ?, verification_results = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
        updated_at = ?
-     WHERE round_id = ? AND state = ? AND updated_at = ?`
-  ).run(
-    next.state,
-    next.classification,
-    next.executorRecommendation ?? null,
-    next.startedAt,
-    next.heartbeatAt,
-    next.finishedAt,
-    next.agentProvider,
-    next.model,
-    next.effort,
-    next.inputDigest,
-    next.resultDigest,
-    next.artifactRoot,
-    JSON.stringify(next.logPaths),
-    next.summary,
-    JSON.stringify(next.keyChanges),
-    JSON.stringify(next.keyLearnings),
-    JSON.stringify(next.remainingWork),
-    JSON.stringify(next.changedFiles),
-    next.verificationStatus,
-    JSON.stringify(next.verificationResults ?? []),
-    next.commitSha,
-    next.recoveryCode,
-    next.humanGate,
-    now,
-    roundId,
-    current.state,
-    currentSnapshot.updatedAt
-  );
+     WHERE round_id = ? AND state = ? AND updated_at = ?`,
+    )
+    .run(
+      next.state,
+      next.classification,
+      next.executorRecommendation ?? null,
+      next.startedAt,
+      next.heartbeatAt,
+      next.finishedAt,
+      next.agentProvider,
+      next.model,
+      next.effort,
+      next.inputDigest,
+      next.resultDigest,
+      next.artifactRoot,
+      JSON.stringify(next.logPaths),
+      next.summary,
+      JSON.stringify(next.keyChanges),
+      JSON.stringify(next.keyLearnings),
+      JSON.stringify(next.remainingWork),
+      JSON.stringify(next.changedFiles),
+      next.verificationStatus,
+      JSON.stringify(next.verificationResults ?? []),
+      next.commitSha,
+      next.recoveryCode,
+      next.humanGate,
+      now,
+      roundId,
+      current.state,
+      currentSnapshot.updatedAt,
+    );
   if (Number(updateResult.changes) === 0) {
     return handleRoundPostWriteConflict(db, roundId, update);
   }
@@ -774,7 +781,7 @@ export type InsertExecutorEvidenceOptions = {
 export function insertExecutorArtifact(
   db: MomentumDb,
   record: ExecutorArtifactRecord,
-  options: InsertExecutorEvidenceOptions = {}
+  options: InsertExecutorEvidenceOptions = {},
 ): ExecutorArtifactRecord {
   const errors = validateArtifactRecord(record);
   if (errors.length > 0) {
@@ -786,7 +793,7 @@ export function insertExecutorArtifact(
       `INSERT INTO executor_artifacts (
          artifact_id, round_id, artifact_class, path, digest, description,
          created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       record.artifactId,
       record.roundId,
@@ -794,7 +801,7 @@ export function insertExecutorArtifact(
       record.path,
       record.digest,
       record.description,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -808,14 +815,14 @@ export function insertExecutorArtifact(
 /** List a round's artifacts, oldest first. */
 export function listExecutorArtifactsForRound(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorArtifactRecord[] {
   const rows = db
     .prepare(
       `SELECT artifact_id, round_id, artifact_class, path, digest, description
          FROM executor_artifacts
         WHERE round_id = ?
-        ORDER BY created_at, artifact_id`
+        ORDER BY created_at, artifact_id`,
     )
     .all(roundId) as ExecutorArtifactRow[];
   return rows.map(rowToArtifact);
@@ -830,27 +837,27 @@ export function listExecutorArtifactsForRound(
 export function insertExecutorCheckpoint(
   db: MomentumDb,
   record: ExecutorCheckpointRecord,
-  options: InsertExecutorEvidenceOptions = {}
+  options: InsertExecutorEvidenceOptions = {},
 ): ExecutorCheckpointRecord {
   const now = options.now ?? Date.now();
   try {
     db.prepare(
       `INSERT INTO executor_checkpoints (
          checkpoint_id, round_id, sequence, stage, detail, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(
       record.checkpointId,
       record.roundId,
       record.sequence,
       record.stage,
       record.detail,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new ExecutorEvidenceConflictError(
         "checkpoint",
-        record.checkpointId
+        record.checkpointId,
       );
     }
     throw error;
@@ -861,14 +868,14 @@ export function insertExecutorCheckpoint(
 /** List a round's checkpoints in stage-stream (`sequence`) order. */
 export function listExecutorCheckpointsForRound(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorCheckpointRecord[] {
   const rows = db
     .prepare(
       `SELECT checkpoint_id, round_id, sequence, stage, detail
          FROM executor_checkpoints
         WHERE round_id = ?
-        ORDER BY sequence`
+        ORDER BY sequence`,
     )
     .all(roundId) as ExecutorCheckpointRow[];
   return rows.map(rowToCheckpoint);
@@ -882,7 +889,7 @@ export function listExecutorCheckpointsForRound(
 export function insertExecutorFinding(
   db: MomentumDb,
   record: ExecutorFindingRecord,
-  options: InsertExecutorEvidenceOptions = {}
+  options: InsertExecutorEvidenceOptions = {},
 ): ExecutorFindingRecord {
   const now = options.now ?? Date.now();
   try {
@@ -890,7 +897,7 @@ export function insertExecutorFinding(
       `INSERT INTO executor_findings (
          finding_id, round_id, severity, title, detail, selected, external_ref,
          created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       record.findingId,
       record.roundId,
@@ -899,7 +906,7 @@ export function insertExecutorFinding(
       record.detail,
       record.selected ? 1 : 0,
       record.externalRef,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -913,7 +920,7 @@ export function insertExecutorFinding(
 /** List a round's findings, oldest first. */
 export function listExecutorFindingsForRound(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorFindingRecord[] {
   const rows = db
     .prepare(
@@ -921,7 +928,7 @@ export function listExecutorFindingsForRound(
               external_ref
          FROM executor_findings
         WHERE round_id = ?
-        ORDER BY created_at, finding_id`
+        ORDER BY created_at, finding_id`,
     )
     .all(roundId) as ExecutorFindingRow[];
   return rows.map(rowToFinding);
@@ -936,7 +943,7 @@ export function listExecutorFindingsForRound(
 export function insertExecutorDecision(
   db: MomentumDb,
   record: ExecutorDecisionRecord,
-  options: InsertExecutorEvidenceOptions = {}
+  options: InsertExecutorEvidenceOptions = {},
 ): ExecutorDecisionRecord {
   const now = options.now ?? Date.now();
   try {
@@ -944,7 +951,7 @@ export function insertExecutorDecision(
       `INSERT INTO executor_decisions (
          decision_id, round_id, summary, allowed_actions, recommended_action,
          chosen_action, resolution, external_ref, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       record.decisionId,
       record.roundId,
@@ -954,7 +961,7 @@ export function insertExecutorDecision(
       record.chosenAction,
       record.resolution,
       record.externalRef ?? null,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -968,7 +975,7 @@ export function insertExecutorDecision(
 /** List a round's decisions, oldest first. */
 export function listExecutorDecisionsForRound(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorDecisionRecord[] {
   const rows = db
     .prepare(
@@ -976,7 +983,7 @@ export function listExecutorDecisionsForRound(
               chosen_action, resolution, external_ref
          FROM executor_decisions
         WHERE round_id = ?
-        ORDER BY created_at, decision_id`
+        ORDER BY created_at, decision_id`,
     )
     .all(roundId) as ExecutorDecisionRow[];
   return rows.map(rowToDecision);
@@ -1112,7 +1119,7 @@ const ROUND_SELECT = `
 
 function loadExecutorInvocationSnapshot(
   db: MomentumDb,
-  invocationId: string
+  invocationId: string,
 ): ExecutorInvocationSnapshot | undefined {
   const row = db
     .prepare(`${INVOCATION_SELECT} WHERE invocation_id = ?`)
@@ -1123,11 +1130,10 @@ function loadExecutorInvocationSnapshot(
 
 function loadExecutorRoundSnapshot(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): ExecutorRoundSnapshot | undefined {
-  const row = db
-    .prepare(`${ROUND_SELECT} WHERE round_id = ?`)
-    .get(roundId) as ExecutorRoundRow | undefined;
+  const row = db.prepare(`${ROUND_SELECT} WHERE round_id = ?`).get(roundId) as
+    ExecutorRoundRow | undefined;
   if (row === undefined) return undefined;
   return { record: rowToRound(row), updatedAt: row.updated_at };
 }
@@ -1143,12 +1149,14 @@ function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
     attempt: row.attempt,
     startedAt: row.started_at,
     heartbeatAt: row.heartbeat_at,
-    finishedAt: row.finished_at
+    finishedAt: row.finished_at,
   };
 }
 
 function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
-  const verificationResults = parseVerificationResults(row.verification_results);
+  const verificationResults = parseVerificationResults(
+    row.verification_results,
+  );
   return {
     roundId: row.round_id,
     invocationId: row.invocation_id,
@@ -1182,7 +1190,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: row.commit_sha,
     recoveryCode: row.recovery_code,
-    humanGate: row.human_gate as ExecutorHumanGateType | null
+    humanGate: row.human_gate as ExecutorHumanGateType | null,
   };
 }
 
@@ -1193,19 +1201,17 @@ function rowToArtifact(row: ExecutorArtifactRow): ExecutorArtifactRecord {
     artifactClass: row.artifact_class as ExecutorArtifactClass,
     path: row.path,
     digest: row.digest,
-    description: row.description
+    description: row.description,
   };
 }
 
-function rowToCheckpoint(
-  row: ExecutorCheckpointRow
-): ExecutorCheckpointRecord {
+function rowToCheckpoint(row: ExecutorCheckpointRow): ExecutorCheckpointRecord {
   return {
     checkpointId: row.checkpoint_id,
     roundId: row.round_id,
     sequence: row.sequence,
     stage: row.stage,
-    detail: row.detail
+    detail: row.detail,
   };
 }
 
@@ -1217,7 +1223,7 @@ function rowToFinding(row: ExecutorFindingRow): ExecutorFindingRecord {
     title: row.title,
     detail: row.detail,
     selected: row.selected !== 0,
-    externalRef: row.external_ref
+    externalRef: row.external_ref,
   };
 }
 
@@ -1229,7 +1235,7 @@ function rowToDecision(row: ExecutorDecisionRow): ExecutorDecisionRecord {
     allowedActions: parseStringArray(row.allowed_actions),
     recommendedAction: row.recommended_action,
     chosenAction: row.chosen_action,
-    resolution: row.resolution
+    resolution: row.resolution,
   };
   if (row.external_ref !== null) {
     record.externalRef = row.external_ref;
@@ -1238,57 +1244,60 @@ function rowToDecision(row: ExecutorDecisionRow): ExecutorDecisionRecord {
 }
 
 function validateDefinitionRecord(
-  record: ExecutorDefinitionRecord
+  record: ExecutorDefinitionRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
   if (!isWorkflowExecutorFamily(record.family)) {
     errors.push({
       code: "executor_definition_unknown_family",
-      message: `unknown executor family: ${String(record.family)}`
+      message: `unknown executor family: ${String(record.family)}`,
     });
   }
   return errors;
 }
 
 function validateInvocationRecord(
-  record: ExecutorInvocationRecord
+  record: ExecutorInvocationRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
   if (!isWorkflowExecutorFamily(record.executorFamily)) {
     errors.push({
       code: "executor_invocation_unknown_family",
-      message: `unknown executor family: ${String(record.executorFamily)}`
+      message: `unknown executor family: ${String(record.executorFamily)}`,
     });
   }
   if (!INVOCATION_STATE_SET.has(record.state)) {
     errors.push({
       code: "executor_invocation_unknown_state",
-      message: `unknown executor invocation state: ${String(record.state)}`
+      message: `unknown executor invocation state: ${String(record.state)}`,
     });
   }
   return errors;
 }
 
 function validateRoundRecord(
-  record: ExecutorRoundRecord
+  record: ExecutorRoundRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
   if (!isWorkflowExecutorFamily(record.executorFamily)) {
     errors.push({
       code: "executor_round_unknown_family",
-      message: `unknown executor family: ${String(record.executorFamily)}`
+      message: `unknown executor family: ${String(record.executorFamily)}`,
     });
   }
   if (!ROUND_STATE_SET.has(record.state)) {
     errors.push({
       code: "executor_round_unknown_state",
-      message: `unknown executor round state: ${String(record.state)}`
+      message: `unknown executor round state: ${String(record.state)}`,
     });
   }
-  if (record.classification !== null && !CLASSIFICATION_SET.has(record.classification)) {
+  if (
+    record.classification !== null &&
+    !CLASSIFICATION_SET.has(record.classification)
+  ) {
     errors.push({
       code: "executor_round_unknown_classification",
-      message: `unknown completion classification: ${String(record.classification)}`
+      message: `unknown completion classification: ${String(record.classification)}`,
     });
   }
   if (
@@ -1297,26 +1306,26 @@ function validateRoundRecord(
   ) {
     errors.push({
       code: "executor_round_unknown_executor_recommendation",
-      message: `unknown executor recommendation: ${String(record.executorRecommendation)}`
+      message: `unknown executor recommendation: ${String(record.executorRecommendation)}`,
     });
   }
   if (record.humanGate !== null && !GATE_TYPE_SET.has(record.humanGate)) {
     errors.push({
       code: "executor_round_unknown_human_gate",
-      message: `unknown human gate type: ${String(record.humanGate)}`
+      message: `unknown human gate type: ${String(record.humanGate)}`,
     });
   }
   return errors;
 }
 
 function validateArtifactRecord(
-  record: ExecutorArtifactRecord
+  record: ExecutorArtifactRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
   if (!ARTIFACT_CLASS_SET.has(record.artifactClass)) {
     errors.push({
       code: "executor_artifact_unknown_class",
-      message: `unknown artifact class: ${String(record.artifactClass)}`
+      message: `unknown artifact class: ${String(record.artifactClass)}`,
     });
   }
   return errors;
@@ -1326,7 +1335,7 @@ function handleInvocationPostWriteConflict(
   db: MomentumDb,
   invocationId: string,
   toState: ExecutorInvocationState,
-  options: UpdateExecutorInvocationOptions
+  options: UpdateExecutorInvocationOptions,
 ): ExecutorInvocationRecord {
   const current = loadExecutorInvocation(db, invocationId);
   if (current === undefined) {
@@ -1340,14 +1349,14 @@ function handleInvocationPostWriteConflict(
     current.state,
     toState,
     "executor_invocation_invalid_transition",
-    `executor invocation ${invocationId} changed concurrently; refusing ambiguous ${toState} update`
+    `executor invocation ${invocationId} changed concurrently; refusing ambiguous ${toState} update`,
   );
 }
 
 function handleRoundPostWriteConflict(
   db: MomentumDb,
   roundId: string,
-  update: ExecutorRoundUpdate
+  update: ExecutorRoundUpdate,
 ): ExecutorRoundRecord {
   const current = loadExecutorRound(db, roundId);
   if (current === undefined) {
@@ -1361,13 +1370,13 @@ function handleRoundPostWriteConflict(
     current.state,
     update.toState,
     "executor_round_invalid_transition",
-    `executor round ${roundId} changed concurrently; refusing ambiguous ${update.toState} update`
+    `executor round ${roundId} changed concurrently; refusing ambiguous ${update.toState} update`,
   );
 }
 
 function invocationPatchMatches(
   current: ExecutorInvocationRecord,
-  options: UpdateExecutorInvocationOptions
+  options: UpdateExecutorInvocationOptions,
 ): boolean {
   return (
     fieldMatches(current.startedAt, options.startedAt) &&
@@ -1378,13 +1387,13 @@ function invocationPatchMatches(
 
 function roundPatchMatches(
   current: ExecutorRoundRecord,
-  update: ExecutorRoundUpdate
+  update: ExecutorRoundUpdate,
 ): boolean {
   return (
     fieldMatches(current.classification, update.classification) &&
     fieldMatches(
       current.executorRecommendation ?? null,
-      update.executorRecommendation
+      update.executorRecommendation,
     ) &&
     fieldMatches(current.startedAt, update.startedAt) &&
     fieldMatches(current.heartbeatAt, update.heartbeatAt) &&
@@ -1404,7 +1413,7 @@ function roundPatchMatches(
     fieldMatches(current.verificationStatus, update.verificationStatus) &&
     verificationResultsMatch(
       current.verificationResults,
-      update.verificationResults
+      update.verificationResults,
     ) &&
     fieldMatches(current.commitSha, update.commitSha) &&
     fieldMatches(current.recoveryCode, update.recoveryCode) &&
@@ -1418,7 +1427,7 @@ function fieldMatches<T>(current: T, update: T | undefined): boolean {
 
 function arrayFieldMatches(
   current: readonly string[],
-  update: readonly string[] | undefined
+  update: readonly string[] | undefined,
 ): boolean {
   return (
     update === undefined ||
@@ -1429,7 +1438,7 @@ function arrayFieldMatches(
 
 function verificationResultsMatch(
   current: readonly ExecutorRoundVerificationResult[] | undefined,
-  update: readonly ExecutorRoundVerificationResult[] | undefined
+  update: readonly ExecutorRoundVerificationResult[] | undefined,
 ): boolean {
   return (
     update === undefined ||
@@ -1442,7 +1451,9 @@ function parseStringArray(text: string): string[] {
   return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
 }
 
-function parseVerificationResults(text: string): ExecutorRoundVerificationResult[] {
+function parseVerificationResults(
+  text: string,
+): ExecutorRoundVerificationResult[] {
   const parsed = JSON.parse(text) as unknown;
   if (!Array.isArray(parsed)) return [];
   return parsed.flatMap((value) => {
@@ -1454,7 +1465,8 @@ function parseVerificationResults(text: string): ExecutorRoundVerificationResult
         ? record.exitCode
         : null;
     const durationMs =
-      typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+      typeof record.durationMs === "number" &&
+      Number.isFinite(record.durationMs)
         ? record.durationMs
         : 0;
     return [
@@ -1462,8 +1474,8 @@ function parseVerificationResults(text: string): ExecutorRoundVerificationResult
         command: record.command,
         exitCode,
         durationMs,
-        timedOut: record.timedOut === true
-      }
+        timedOut: record.timedOut === true,
+      },
     ];
   });
 }
