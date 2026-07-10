@@ -1,0 +1,7 @@
+node_modules/
+dist/
+docs/
+pnpm-lock.yaml
+.agent-runs/
+.agent-workflows/
+coverage/

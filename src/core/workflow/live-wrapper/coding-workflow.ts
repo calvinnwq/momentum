@@ -22,19 +22,23 @@ import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
-import type { CommitIntent, CommitType, RunnerResult } from "../../executors/runner/types.js";
+import type {
+  CommitIntent,
+  CommitType,
+  RunnerResult,
+} from "../../executors/runner/types.js";
 import {
   preflightGitHubMergeCleanup,
-  preflightGitHubMergeCleanupSetup
+  preflightGitHubMergeCleanupSetup,
 } from "./merge-cleanup-preflight.js";
 import type {
   MergeCleanupPullRequestState,
-  MergeCleanupTargetIdentity
+  MergeCleanupTargetIdentity,
 } from "./merge-cleanup-lifecycle.js";
 import {
   WORKFLOW_STEP_KINDS,
   isExternalSideEffectTailStepKind,
-  type WorkflowStepKind
+  type WorkflowStepKind,
 } from "../run/reducer.js";
 
 export const CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR =
@@ -53,7 +57,7 @@ export const CODING_WORKFLOW_WRAPPER_ENV_VARS = [
   "MOMENTUM_REPO_PATH",
   "MOMENTUM_ITERATION_DIR",
   "MOMENTUM_PROMPT_PATH",
-  "MOMENTUM_RESULT_PATH"
+  "MOMENTUM_RESULT_PATH",
 ] as const;
 
 export type CodingWorkflowWrapperCwd = "repo" | "iteration";
@@ -93,7 +97,7 @@ export type CodingWorkflowWrapperDeps = {
       timeout: number;
       encoding: BufferEncoding;
       maxBuffer: number;
-    }
+    },
   ) => SpawnSyncReturns<string>;
   stdout: (chunk: string) => void;
   stderr: (chunk: string) => void;
@@ -125,7 +129,9 @@ export type NoMistakesRunnerProfile = {
 
 type NoMistakesRunnerAgent = "claude" | "codex" | "opencode" | "rovodev";
 
-const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
+const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_STEP_KINDS,
+);
 const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
 const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
   "command",
@@ -141,13 +147,13 @@ const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
   "remaining_work",
   "commit",
   "runner_profile",
-  "merge_cleanup"
+  "merge_cleanup",
 ]);
 const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
   envAllow: "env_allow",
   timeoutSec: "timeout_sec",
   resultFile: "result_file",
-  runnerProfile: "runner_profile"
+  runnerProfile: "runner_profile",
 };
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
@@ -156,7 +162,7 @@ const NO_MISTAKES_RUNNER_AGENTS = [
   "claude",
   "codex",
   "opencode",
-  "rovodev"
+  "rovodev",
 ] as const satisfies readonly NoMistakesRunnerAgent[];
 const REQUIRED_NO_MISTAKES_BASE_ENV = ["HOME", "PATH"] as const;
 const REQUIRED_NO_MISTAKES_AGENT_ENV: Readonly<
@@ -165,21 +171,22 @@ const REQUIRED_NO_MISTAKES_AGENT_ENV: Readonly<
   claude: [],
   codex: ["CODEX_HOME"],
   opencode: [],
-  rovodev: []
+  rovodev: [],
 };
 
 export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
   return {
     env: process.env,
     readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
-    writeFile: (filePath, contents) => fs.writeFileSync(filePath, contents, "utf8"),
+    writeFile: (filePath, contents) =>
+      fs.writeFileSync(filePath, contents, "utf8"),
     mkdir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
     spawn: (command, args, options) =>
       runProcessGroupSync(command, [...args], {
         cwd: options.cwd,
         env: options.env,
         timeoutMs: options.timeout,
-        maxBuffer: options.maxBuffer
+        maxBuffer: options.maxBuffer,
       }),
     stdout: (chunk) => {
       fs.writeSync(1, chunk);
@@ -187,12 +194,12 @@ export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
     stderr: (chunk) => {
       fs.writeSync(2, chunk);
     },
-    readMergeCleanupPullRequest: readGitHubMergeCleanupPullRequest
+    readMergeCleanupPullRequest: readGitHubMergeCleanupPullRequest,
   };
 }
 
 export function runCodingWorkflowLiveWrapper(
-  deps: CodingWorkflowWrapperDeps = defaultCodingWorkflowWrapperDeps()
+  deps: CodingWorkflowWrapperDeps = defaultCodingWorkflowWrapperDeps(),
 ): CodingWorkflowWrapperOutcome {
   const resultPath = readRequiredEnv(deps.env, "MOMENTUM_RESULT_PATH");
   if (resultPath === undefined) {
@@ -200,20 +207,24 @@ export function runCodingWorkflowLiveWrapper(
     return {
       exitCode: 1,
       success: false,
-      summary: "MOMENTUM_RESULT_PATH is required."
+      summary: "MOMENTUM_RESULT_PATH is required.",
     };
   }
 
   const stepKind = readWorkflowStepKind(deps.env["MOMENTUM_STEP_KIND"]);
   if (stepKind === undefined) {
-    return writeFailureResult(deps, resultPath, "Unknown or missing MOMENTUM_STEP_KIND.");
+    return writeFailureResult(
+      deps,
+      resultPath,
+      "Unknown or missing MOMENTUM_STEP_KIND.",
+    );
   }
 
   const configPath = deps.env[CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]?.trim();
   if (configPath === undefined || configPath.length === 0) {
     return processSetupFailure(
       deps,
-      `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "${stepKind}".`
+      `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "${stepKind}".`,
     );
   }
 
@@ -226,14 +237,14 @@ export function runCodingWorkflowLiveWrapper(
   if (stepConfig?.command === undefined) {
     return processSetupFailure(
       deps,
-      `No command is configured for workflow step "${stepKind}" in ${CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR}.`
+      `No command is configured for workflow step "${stepKind}" in ${CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR}.`,
     );
   }
 
   const configuredResultPath = resolveConfiguredResultPath(
     stepConfig,
     deps.env,
-    resultPath
+    resultPath,
   );
   if (!configuredResultPath.ok) {
     return processSetupFailure(deps, configuredResultPath.error);
@@ -241,14 +252,20 @@ export function runCodingWorkflowLiveWrapper(
 
   const cwd = resolveStepCwd(stepConfig.cwd, deps.env);
   if (!cwd.ok) {
-    return writeFailureResult(deps, resultPath, cwd.error, stepKind, stepConfig);
+    return writeFailureResult(
+      deps,
+      resultPath,
+      cwd.error,
+      stepKind,
+      stepConfig,
+    );
   }
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
   if (stepKind === "no-mistakes") {
     const runnerProfilePreflight = preflightNoMistakesRunnerProfile(
       stepConfig,
-      childEnv
+      childEnv,
     );
     if (!runnerProfilePreflight.ok) {
       return processSetupFailure(deps, runnerProfilePreflight.error);
@@ -259,24 +276,26 @@ export function runCodingWorkflowLiveWrapper(
       env: childEnv,
       ...(stepConfig.mergeCleanup !== undefined
         ? { target: stepConfig.mergeCleanup }
-        : {})
+        : {}),
     });
     if (!setupPreflight.ok) {
       return processSetupFailure(
         deps,
-        `${setupPreflight.message} ${setupPreflight.action}`
+        `${setupPreflight.message} ${setupPreflight.action}`,
       );
     }
     const stateRead = deps.readMergeCleanupPullRequest({
       target: setupPreflight.target,
       cwd: cwd.path,
-      env: childEnv
+      env: childEnv,
     });
     const preflight = preflightGitHubMergeCleanup({
       env: childEnv,
       target: setupPreflight.target,
       ...(stateRead?.ok ? { pullRequest: stateRead.pullRequest } : {}),
-      ...(stateRead?.ok === false ? { pullRequestReadError: stateRead.error } : {})
+      ...(stateRead?.ok === false
+        ? { pullRequestReadError: stateRead.error }
+        : {}),
     });
     if (!preflight.ok) {
       const summary = `${preflight.message} ${preflight.action}`;
@@ -291,7 +310,7 @@ export function runCodingWorkflowLiveWrapper(
           key_learnings: stepConfig.keyLearnings,
           remaining_work: [preflight.action],
           goal_complete: false,
-          commit: stepConfig.commit
+          commit: stepConfig.commit,
         });
       }
       return processSetupFailure(deps, summary);
@@ -302,7 +321,7 @@ export function runCodingWorkflowLiveWrapper(
     env: childEnv,
     timeout: stepConfig.timeoutSec * 1000,
     encoding: "utf8",
-    maxBuffer: OUTPUT_MAX_BYTES
+    maxBuffer: OUTPUT_MAX_BYTES,
   });
 
   if (result.stdout.length > 0) deps.stdout(result.stdout);
@@ -310,16 +329,14 @@ export function runCodingWorkflowLiveWrapper(
 
   const success =
     result.error === undefined && result.signal === null && result.status === 0;
-  const recoverableNoMistakesFailure = classifyRecoverableNoMistakesRunnerFailure(
-    stepKind,
-    result
-  );
+  const recoverableNoMistakesFailure =
+    classifyRecoverableNoMistakesRunnerFailure(stepKind, result);
   if (!success && recoverableNoMistakesFailure !== null) {
     return processSetupFailure(deps, recoverableNoMistakesFailure);
   }
   const terminalNoMistakesSuccess = classifyTerminalNoMistakesWorkflowSuccess(
     stepKind,
-    result
+    result,
   );
   if (!success && terminalNoMistakesSuccess !== null) {
     return writeRunnerResult(deps, resultPath, {
@@ -329,7 +346,7 @@ export function runCodingWorkflowLiveWrapper(
       key_learnings: stepConfig.keyLearnings,
       remaining_work: stepConfig.remainingWork,
       goal_complete: false,
-      commit: stepConfig.commit
+      commit: stepConfig.commit,
     });
   }
   const summary = summarizeCommandResult(stepKind, stepConfig, result, success);
@@ -342,7 +359,7 @@ export function runCodingWorkflowLiveWrapper(
       ? stepConfig.remainingWork
       : commandFailureRemainingWork(stepKind),
     goal_complete: false,
-    commit: stepConfig.commit
+    commit: stepConfig.commit,
   });
 }
 
@@ -352,13 +369,16 @@ function commandFailureRemainingWork(kind: WorkflowStepKind): string[] {
   }
   return [
     `${kind} may have completed external side effects (such as a pushed branch, a merged pull request, or a tracker write) before failing; verify the remote, pull request, and tracker state before taking further action.`,
-    `Do not blindly re-run ${kind}: after confirming external success, use \`momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>\` to reconcile the run from external evidence.`
+    `Do not blindly re-run ${kind}: after confirming external success, use \`momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>\` to reconcile the run from external evidence.`,
   ];
 }
 
 export function classifyRecoverableNoMistakesRunnerFailure(
   kind: WorkflowStepKind,
-  result: Pick<SpawnSyncReturns<string>, "stdout" | "stderr" | "error" | "signal">
+  result: Pick<
+    SpawnSyncReturns<string>,
+    "stdout" | "stderr" | "error" | "signal"
+  >,
 ): string | null {
   if (kind !== "no-mistakes") return null;
   if (result.error !== undefined || result.signal !== null) return null;
@@ -367,13 +387,13 @@ export function classifyRecoverableNoMistakesRunnerFailure(
   if (output.includes("no previous run for branch")) {
     return [
       "no-mistakes could not start for this branch because its external gate state has no previous run.",
-      "Repair or re-seed the no-mistakes branch/gate state, then clear recovery to retry the no-mistakes step."
+      "Repair or re-seed the no-mistakes branch/gate state, then clear recovery to retry the no-mistakes step.",
     ].join(" ");
   }
   if (hasCancelledNoMistakesRunEvidence(output)) {
     return [
       "no-mistakes was cancelled before producing a reliable successful result.",
-      "Inspect the external no-mistakes run for review/fixer state, repair the blocker, then clear recovery to retry the no-mistakes step."
+      "Inspect the external no-mistakes run for review/fixer state, repair the blocker, then clear recovery to retry the no-mistakes step.",
     ].join(" ");
   }
   return null;
@@ -417,9 +437,14 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
       ) {
         yamlSections.length = 0;
       }
-      for (const { label, value } of parseNoMistakesStatusOrOutcomeLine(trimmed)) {
+      for (const { label, value } of parseNoMistakesStatusOrOutcomeLine(
+        trimmed,
+      )) {
         if (value !== "cancelled") continue;
-        if (label === "outcome" && isCurrentNoMistakesRunStatusContext(yamlSections)) {
+        if (
+          label === "outcome" &&
+          isCurrentNoMistakesRunStatusContext(yamlSections)
+        ) {
           return true;
         }
         if (
@@ -447,22 +472,24 @@ function hasCompactCancelledNoMistakesRunStatus(line: string): boolean {
   if (/\b(?:previous|historical|history)\b/.test(line)) return false;
   return (
     /^run\s+status\s*[:=]\s*cancelled\b/.test(line) ||
-    /^\{\s*["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(line)
+    /^\{\s*["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(
+      line,
+    )
   );
 }
 
 function isCurrentNoMistakesRunStatusContext(
-  yamlSections: ReadonlyArray<{ section: string }>
+  yamlSections: ReadonlyArray<{ section: string }>,
 ): boolean {
   if (yamlSections.length === 0) return true;
-  return yamlSections.every(({ section }) => isNoMistakesRunYamlSection(section));
+  return yamlSections.every(({ section }) =>
+    isNoMistakesRunYamlSection(section),
+  );
 }
 
 function isNoMistakesRunYamlSection(section: string): boolean {
   return (
-    section === "run" ||
-    section === "no-mistakes" ||
-    section === "no mistakes"
+    section === "run" || section === "no-mistakes" || section === "no mistakes"
   );
 }
 
@@ -478,7 +505,10 @@ function isNoMistakesRunYamlSection(section: string): boolean {
  */
 export function classifyTerminalNoMistakesWorkflowSuccess(
   kind: WorkflowStepKind,
-  result: Pick<SpawnSyncReturns<string>, "stdout" | "stderr" | "error" | "signal">
+  result: Pick<
+    SpawnSyncReturns<string>,
+    "stdout" | "stderr" | "error" | "signal"
+  >,
 ): string | null {
   if (kind !== "no-mistakes") return null;
   if (result.error !== undefined || result.signal !== null) return null;
@@ -491,30 +521,31 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
 
   if (outputLines.some((line) => isChecksPassedOutcomeLine(line))) {
     return [
-      "no-mistakes reached checks-passed; treating the PR as terminal success for this workflow while no-mistakes continues any upstream monitoring."
+      "no-mistakes reached checks-passed; treating the PR as terminal success for this workflow while no-mistakes continues any upstream monitoring.",
     ].join(" ");
   }
 
-  const stillMonitoring =
-    outputLines.some(
-      (line) =>
-        !isHistoricalNoMistakesEvidenceLine(line) &&
-        (isRunningNoMistakesStatusLine(line) ||
-          /\bci\/running\b/.test(line) ||
-          /\bstill (reports|shows).*running\b/.test(line))
-    );
+  const stillMonitoring = outputLines.some(
+    (line) =>
+      !isHistoricalNoMistakesEvidenceLine(line) &&
+      (isRunningNoMistakesStatusLine(line) ||
+        /\bci\/running\b/.test(line) ||
+        /\bstill (reports|shows).*running\b/.test(line)),
+  );
   if (!stillMonitoring) return null;
 
   const cleanPr = outputLines.some((line) =>
-    isCleanPullRequestEvidenceLine(line)
+    isCleanPullRequestEvidenceLine(line),
   );
   if (!cleanPr) return null;
 
-  const greenChecks = outputLines.some((line) => isGreenChecksEvidenceLine(line));
+  const greenChecks = outputLines.some((line) =>
+    isGreenChecksEvidenceLine(line),
+  );
   if (!greenChecks) return null;
 
   return [
-    "no-mistakes is still monitoring upstream, but the pull request is clean and checks are green; treating this as terminal success for this workflow."
+    "no-mistakes is still monitoring upstream, but the pull request is clean and checks are green; treating this as terminal success for this workflow.",
   ].join(" ");
 }
 
@@ -526,9 +557,8 @@ function toNoMistakesOutputLines(output: string): string[] {
     if (isStructuredNoMistakesOutputLine(trimmed)) {
       lines.push(trimmed);
       const labelValue = parseNoMistakesGateOrFindingLabelLine(trimmed);
-      pendingIndentedGateSection = isPendingNoMistakesIndentedGateSection(
-        labelValue
-      );
+      pendingIndentedGateSection =
+        isPendingNoMistakesIndentedGateSection(labelValue);
       continue;
     }
     for (const expanded of rawLine
@@ -556,7 +586,7 @@ function toNoMistakesOutputLines(output: string): string[] {
 }
 
 function isPendingNoMistakesIndentedGateSection(
-  labelValue: { label: string; value: string } | null
+  labelValue: { label: string; value: string } | null,
 ): boolean {
   return (
     labelValue !== null &&
@@ -568,16 +598,15 @@ function isPendingNoMistakesIndentedGateSection(
 function isStructuredNoMistakesOutputLine(line: string): boolean {
   if (parseNoMistakesJsonObjectLine(line) !== null) return true;
   return parseNoMistakesGateOrFindingLabelLines(line).some(
-    (labelValue) => parseNoMistakesJsonValue(labelValue.value).ok
+    (labelValue) => parseNoMistakesJsonValue(labelValue.value).ok,
   );
 }
 
 type NoMistakesJsonValueParseResult =
-  | { ok: true; value: unknown }
-  | { ok: false };
+  { ok: true; value: unknown } | { ok: false };
 
 function parseNoMistakesJsonValue(
-  value: string
+  value: string,
 ): NoMistakesJsonValueParseResult {
   try {
     return { ok: true, value: JSON.parse(value) as unknown };
@@ -587,7 +616,7 @@ function parseNoMistakesJsonValue(
 }
 
 function parseNoMistakesJsonObjectLine(
-  line: string
+  line: string,
 ): Record<string, unknown> | null {
   const trimmed = line.trim();
   const jsonText = extractNoMistakesJsonObjectText(trimmed);
@@ -628,31 +657,34 @@ function extractNoMistakesJsonObjectText(line: string): string | null {
 }
 
 function parseNoMistakesJsonObjectPrefixLabel(prefix: string): string | null {
-  const match = /^\s*["']?(?<label>[a-z0-9][a-z0-9 _-]*)["']?\s*(?::|=>|=)\s*$/.exec(
-    prefix
-  );
+  const match =
+    /^\s*["']?(?<label>[a-z0-9][a-z0-9 _-]*)["']?\s*(?::|=>|=)\s*$/.exec(
+      prefix,
+    );
   return match?.groups?.label ?? null;
 }
 
 function isChecksPassedOutcomeLine(line: string): boolean {
   if (isHistoricalNoMistakesEvidenceLine(line)) return false;
   return parseNoMistakesStatusOrOutcomeLine(line).some(
-    ({ label, value }) => label === "outcome" && value === "checks-passed"
+    ({ label, value }) => label === "outcome" && value === "checks-passed",
   );
 }
 
 function hasContradictoryNoMistakesSuccessEvidence(
-  lines: readonly string[]
+  lines: readonly string[],
 ): boolean {
   return lines.some(
     (line) =>
       !isHistoricalNoMistakesEvidenceOnlyLine(line) &&
       (isContradictoryPullRequestEvidenceLine(line) ||
-        isContradictoryChecksEvidenceLine(line))
+        isContradictoryChecksEvidenceLine(line)),
   );
 }
 
-function hasBlockingNoMistakesStatusOrOutcome(lines: readonly string[]): boolean {
+function hasBlockingNoMistakesStatusOrOutcome(
+  lines: readonly string[],
+): boolean {
   return lines.some((line) => {
     const parsed = parseNoMistakesStatusOrOutcomeLine(line);
     return parsed.some(({ label, value }) => {
@@ -660,7 +692,8 @@ function hasBlockingNoMistakesStatusOrOutcome(lines: readonly string[]): boolean
         return isBlockingNoMistakesRecoveryCode(value);
       }
       if (label === "outcome") return isBlockingNoMistakesOutcome(value);
-      if (label === "classification") return isBlockingNoMistakesClassification(value);
+      if (label === "classification")
+        return isBlockingNoMistakesClassification(value);
       return isBlockingNoMistakesStatus(value);
     });
   });
@@ -669,12 +702,12 @@ function hasBlockingNoMistakesStatusOrOutcome(lines: readonly string[]): boolean
 function isRunningNoMistakesStatusLine(line: string): boolean {
   const parsed = parseNoMistakesStatusOrOutcomeLine(line);
   return parsed.some(
-    ({ label, value }) => label !== "outcome" && value === "running"
+    ({ label, value }) => label !== "outcome" && value === "running",
   );
 }
 
 function parseNoMistakesStatusOrOutcomeLine(
-  line: string
+  line: string,
 ): Array<{ label: string; value: string }> {
   const jsonObject = parseNoMistakesJsonObjectLine(line);
   if (jsonObject !== null) {
@@ -686,7 +719,7 @@ function parseNoMistakesStatusOrOutcomeLine(
   if (hasDisallowedNoMistakesJsonObjectPrefix(line)) return [];
 
   const matches = line.matchAll(
-    /(?:^|[,{;]\s*)(?:(?<scope>[a-z0-9][a-z0-9 _-]*)\s+)?["']?(?<label>status|outcome|classification|step[_ -]?status|recovery[_ -]?code)["']?\s*(?::|=>|=)\s*["']?(?<value>[a-z0-9][a-z0-9 _-]*)["']?/g
+    /(?:^|[,{;]\s*)(?:(?<scope>[a-z0-9][a-z0-9 _-]*)\s+)?["']?(?<label>status|outcome|classification|step[_ -]?status|recovery[_ -]?code)["']?\s*(?::|=>|=)\s*["']?(?<value>[a-z0-9][a-z0-9 _-]*)["']?/g,
   );
   const out: Array<{ label: string; value: string }> = [];
   for (const match of matches) {
@@ -695,9 +728,9 @@ function parseNoMistakesStatusOrOutcomeLine(
     if (!isNoMistakesStatusScope(scope)) continue;
     out.push({
       label: normalizeNoMistakesStatusLabel(
-        scope === "step" && rawLabel === "status" ? "step-status" : rawLabel
+        scope === "step" && rawLabel === "status" ? "step-status" : rawLabel,
       ),
-      value: normalizeNoMistakesStatusValue(match.groups?.value ?? "")
+      value: normalizeNoMistakesStatusValue(match.groups?.value ?? ""),
     });
   }
   return out;
@@ -718,7 +751,7 @@ function hasDisallowedNoMistakesJsonObjectPrefix(line: string): boolean {
   const suffix = normalizedLine.slice(end + 1).trim();
   if (suffix.length > 0 && suffix !== ",") return false;
   const prefixLabel = parseNoMistakesJsonObjectPrefixLabel(
-    normalizedLine.slice(0, start)
+    normalizedLine.slice(0, start),
   );
   if (prefixLabel === null) return false;
   return !isNoMistakesJsonStatusTraversalContainerLabel(prefixLabel);
@@ -726,7 +759,7 @@ function hasDisallowedNoMistakesJsonObjectPrefix(line: string): boolean {
 
 function collectNoMistakesStatusOrOutcomeJsonValues(
   value: unknown,
-  out: Array<{ label: string; value: string }>
+  out: Array<{ label: string; value: string }>,
 ): void {
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -735,13 +768,15 @@ function collectNoMistakesStatusOrOutcomeJsonValues(
     return;
   }
   if (value === null || typeof value !== "object") return;
-  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, rawValue] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     const label = normalizeNoMistakesStatusLabel(key);
     if (isNoMistakesStatusOrOutcomeLabel(label)) {
       if (rawValue === null) {
         out.push({
           label,
-          value: label === "recovery-code" ? "null" : "__invalid__"
+          value: label === "recovery-code" ? "null" : "__invalid__",
         });
         continue;
       }
@@ -752,7 +787,7 @@ function collectNoMistakesStatusOrOutcomeJsonValues(
       ) {
         out.push({
           label,
-          value: normalizeNoMistakesStatusValue(String(rawValue))
+          value: normalizeNoMistakesStatusValue(String(rawValue)),
         });
       } else {
         out.push({ label, value: "__invalid__" });
@@ -778,7 +813,10 @@ function collectNoMistakesStatusOrOutcomeJsonValues(
 }
 
 function isNoMistakesJsonStatusTraversalContainerLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   return NO_MISTAKES_STATUS_TRAVERSAL_CONTAINER_LABELS.has(normalized);
 }
 
@@ -796,11 +834,14 @@ const NO_MISTAKES_STATUS_TRAVERSAL_CONTAINER_LABELS = new Set([
   "workflowrunstate",
   "nomistakes",
   "nomistakesstate",
-  "externalstate"
+  "externalstate",
 ]);
 
 function isNoMistakesStatusTraversalExcludedLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   return NO_MISTAKES_STATUS_TRAVERSAL_EXCLUDED_LABELS.has(normalized);
 }
 
@@ -811,11 +852,14 @@ const NO_MISTAKES_STATUS_TRAVERSAL_EXCLUDED_LABELS = new Set([
   "mergestate",
   "mergestatestatus",
   "mergeable",
-  "mergeablestate"
+  "mergeablestate",
 ]);
 
 function isHistoricalNoMistakesJsonContainerLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   return NO_MISTAKES_HISTORICAL_JSON_CONTAINER_LABELS.has(normalized);
 }
 
@@ -826,7 +870,7 @@ const NO_MISTAKES_HISTORICAL_JSON_CONTAINER_LABELS = new Set([
   "history",
   "stale",
   "prior",
-  "past"
+  "past",
 ]);
 
 function normalizeNoMistakesStatusLabel(value: string): string {
@@ -844,7 +888,7 @@ function isNoMistakesStatusScope(scope: string): boolean {
   if (scope.length === 0) return true;
   if (scope.endsWith("-step")) {
     return ACCEPTED_NO_MISTAKES_STATUS_SCOPES.has(
-      scope.slice(0, -"-step".length)
+      scope.slice(0, -"-step".length),
     );
   }
   return ACCEPTED_NO_MISTAKES_STATUS_SCOPES.has(scope);
@@ -857,7 +901,7 @@ const ACCEPTED_NO_MISTAKES_STATUS_SCOPES = new Set([
   "workflow",
   "workflow-run",
   "no-mistakes",
-  "nomistakes"
+  "nomistakes",
 ]);
 
 function isNoMistakesStatusOrOutcomeLabel(value: string): boolean {
@@ -897,7 +941,7 @@ const ACCEPTED_NO_MISTAKES_STATUS_VALUES = new Set([
   "passed",
   "complete",
   "completed",
-  "checks-passed"
+  "checks-passed",
 ]);
 
 const ACCEPTED_NO_MISTAKES_OUTCOME_VALUES = new Set([
@@ -906,7 +950,7 @@ const ACCEPTED_NO_MISTAKES_OUTCOME_VALUES = new Set([
   "succeeded",
   "passed",
   "complete",
-  "completed"
+  "completed",
 ]);
 
 const ACCEPTED_NO_MISTAKES_CLASSIFICATION_VALUES = new Set([
@@ -916,7 +960,7 @@ const ACCEPTED_NO_MISTAKES_CLASSIFICATION_VALUES = new Set([
   "passed",
   "complete",
   "completed",
-  "continue"
+  "continue",
 ]);
 
 const ACCEPTED_NO_MISTAKES_RECOVERY_CODES = new Set(["null", "none"]);
@@ -929,31 +973,27 @@ function isContradictoryPullRequestEvidenceLine(line: string): boolean {
     return true;
   }
   if (
-    lineHasCopularEvidenceValue(line, ["clean"], [
-      "false",
-      "no",
-      "0",
-      "unknown",
-      "pending"
-    ])
+    lineHasCopularEvidenceValue(
+      line,
+      ["clean"],
+      ["false", "no", "0", "unknown", "pending"],
+    )
   ) {
     return true;
   }
   if (lineHasExplicitNonPositiveEvidenceValue(line, ["clean"])) return true;
   if (
-    lineHasTrailingEvidenceValue(line, ["clean"], [
-      "false",
-      "no",
-      "0",
-      "unknown",
-      "pending"
-    ])
+    lineHasTrailingEvidenceValue(
+      line,
+      ["clean"],
+      ["false", "no", "0", "unknown", "pending"],
+    )
   ) {
     return true;
   }
   if (
     /\bmerge conflicts?\b(?!\s*(?::|=>|=)?\s*(?:free|resolved|none)\b)/.test(
-      line
+      line,
     ) &&
     !/\b(?:no|without|not|zero)\b[^\n]*\bmerge conflicts?\b/.test(line)
   ) {
@@ -961,37 +1001,37 @@ function isContradictoryPullRequestEvidenceLine(line: string): boolean {
   }
   const mentionsPullRequest =
     /\b(?:pr|pull request|mergestate(?:status)?|merge[_ -]?state(?:[_ -]?status)?|mergeable(?:[_ -]?state)?)\b/.test(
-      line
+      line,
     );
   if (!mentionsPullRequest) return false;
   if (lineHasExplicitNegativeEvidenceValue(line, ["mergeable"])) return true;
   if (lineHasNonMergeableEvidenceValue(line)) return true;
   if (
     /\bmergestate(status)?["'`: =-]*(behind|blocked|dirty|draft|has[_ -]hooks|unknown|unstable)\b/.test(
-      line
+      line,
     ) ||
     /\bmerge[_ -]?state(?:[_ -]?status)?["'`: =-]*(behind|blocked|dirty|draft|has[_ -]hooks|unknown|unstable)\b/.test(
-      line
+      line,
     ) ||
     /\bmergeable[_ -]?state["'`: =-]*(behind|blocked|dirty|draft|has[_ -]hooks|unknown|unstable)\b/.test(
-      line
+      line,
     )
   ) {
     return true;
   }
   if (
     /\b(?:not|isn't|isnt|wasn't|wasnt|can't|cant|cannot|never)\b[^\n]*\bclean\b/.test(
-      line
+      line,
     )
   ) {
     return true;
   }
   if (
     /\b(?:not|isn't|isnt|wasn't|wasnt|can't|cant|cannot|never|no)\b[^\n]*\bmergeable\b/.test(
-      line
+      line,
     ) ||
     /\b(?:not|isn't|isnt|wasn't|wasnt|can't|cant|cannot|never)\b[^\n]*\bmerged?\b/.test(
-      line
+      line,
     )
   ) {
     return true;
@@ -1018,7 +1058,7 @@ function isContradictoryChecksEvidenceLine(line: string): boolean {
       "passed",
       "successful",
       "succeeded",
-      "green"
+      "green",
     ])
   ) {
     return true;
@@ -1030,7 +1070,7 @@ function isContradictoryChecksEvidenceLine(line: string): boolean {
     lineHasTrailingEvidenceValue(
       line,
       ["passed", "successful", "succeeded", "green"],
-      ["false", "no", "0"]
+      ["false", "no", "0"],
     )
   ) {
     return true;
@@ -1048,8 +1088,8 @@ function isContradictoryChecksEvidenceLine(line: string): boolean {
         "skipped",
         "neutral",
         "action_required",
-        "action-required"
-      ]
+        "action-required",
+      ],
     )
   ) {
     return true;
@@ -1064,18 +1104,20 @@ function isContradictoryChecksEvidenceLine(line: string): boolean {
     return true;
   }
   if (
-    /\bchecks?\b[^\n]*\b(?:running|in[ -]?progress|queued|waiting|awaiting|skipped|neutral|unknown|action[_ -]?required)\b/.test(line) ||
+    /\bchecks?\b[^\n]*\b(?:running|in[ -]?progress|queued|waiting|awaiting|skipped|neutral|unknown|action[_ -]?required)\b/.test(
+      line,
+    ) ||
     /\bci\s+(?:is|checks?|status)\s*(?::|=>|=|\s+)\s*(?:running|in[ -]?progress|queued|waiting|awaiting|skipped|neutral|unknown|action[_ -]?required)\b/.test(
-      line
+      line,
     ) ||
     /\b(?:checks?|ci)\b[^\n]*\b(?:blocked|gated|skipped|neutral|unknown|action[_ -]?required)\b/.test(
-      line
+      line,
     )
   ) {
     return true;
   }
   return /\b(?:checks?|ci)\b[^\n]*\b(?:not|failed|failure|failing|red|unsuccessful|cancelled|canceled|timed out|timeout|pending|awaiting|skipped|neutral|unknown|action[_ -]?required)\b/.test(
-    line
+    line,
   );
 }
 
@@ -1119,7 +1161,9 @@ function hasActiveNoMistakesGateOrFinding(lines: readonly string[]): boolean {
         : trimmed;
     if (requiredFlag === "inactive") {
       if (lineWithoutInactiveRequiredFlags.length === 0) continue;
-      if (isInactiveNoMistakesStandaloneValue(lineWithoutInactiveRequiredFlags)) {
+      if (
+        isInactiveNoMistakesStandaloneValue(lineWithoutInactiveRequiredFlags)
+      ) {
         continue;
       }
     }
@@ -1130,7 +1174,7 @@ function hasActiveNoMistakesGateOrFinding(lines: readonly string[]): boolean {
       return true;
     }
     const indexedDecision = /^\bdecisions?\[\d+\]\s*(?::|=>|=)\s*(.*)$/.exec(
-      lineWithoutInactiveRequiredFlags
+      lineWithoutInactiveRequiredFlags,
     );
     if (indexedDecision !== null) {
       return isActiveNoMistakesValue(indexedDecision[1] ?? "");
@@ -1142,7 +1186,7 @@ function hasActiveNoMistakesGateOrFinding(lines: readonly string[]): boolean {
       return true;
     }
     const labelValues = parseNoMistakesGateOrFindingLabelLines(
-      lineWithoutInactiveRequiredFlags
+      lineWithoutInactiveRequiredFlags,
     );
     for (const labelValue of labelValues) {
       if (labelValue.value.length === 0) {
@@ -1178,7 +1222,7 @@ function hasActiveNoMistakesGateOrFinding(lines: readonly string[]): boolean {
 }
 
 function jsonObjectHasActiveNoMistakesGateOrFinding(
-  object: Record<string, unknown>
+  object: Record<string, unknown>,
 ): boolean {
   for (const [key, value] of Object.entries(object)) {
     if (isNoMistakesGateOrFindingLabel(key)) {
@@ -1199,16 +1243,18 @@ function jsonObjectHasActiveNoMistakesGateOrFinding(
 
 function jsonValueHasActiveNoMistakesGateOrFinding(value: unknown): boolean {
   if (Array.isArray(value)) {
-    return value.some((item) => jsonValueHasActiveNoMistakesGateOrFinding(item));
+    return value.some((item) =>
+      jsonValueHasActiveNoMistakesGateOrFinding(item),
+    );
   }
   if (value === null || typeof value !== "object") return false;
   return jsonObjectHasActiveNoMistakesGateOrFinding(
-    value as Record<string, unknown>
+    value as Record<string, unknown>,
   );
 }
 
 function jsonObjectHasActiveNoMistakesGateMarkerValue(
-  object: Record<string, unknown>
+  object: Record<string, unknown>,
 ): boolean {
   return Object.entries(object).some(([key, value]) => {
     if (isNoMistakesRequiredGateFlagLabel(key)) return false;
@@ -1226,7 +1272,10 @@ function jsonObjectHasActiveNoMistakesGateMarkerValue(
 }
 
 function isNoMistakesJsonGateMarkerTextLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   return NO_MISTAKES_JSON_GATE_MARKER_TEXT_LABELS.has(normalized);
 }
 
@@ -1241,7 +1290,7 @@ const NO_MISTAKES_JSON_GATE_MARKER_TEXT_LABELS = new Set([
   "gate",
   "gates",
   "humangate",
-  "recoverycode"
+  "recoverycode",
 ]);
 
 function isNoMistakesIdentityOnlyLabelLine(line: string): boolean {
@@ -1249,19 +1298,22 @@ function isNoMistakesIdentityOnlyLabelLine(line: string): boolean {
   return (
     fields.length > 0 &&
     fields.every((field) => {
-      const match = /^\s*["']?(?<label>[a-z0-9][a-z0-9 _-]*)["']?\s*(?::|=>|=)\s*/.exec(
-        field
-      );
+      const match =
+        /^\s*["']?(?<label>[a-z0-9][a-z0-9 _-]*)["']?\s*(?::|=>|=)\s*/.exec(
+          field,
+        );
       return (
-        match !== null &&
-        isNoMistakesIdentityLabel(match.groups?.label ?? "")
+        match !== null && isNoMistakesIdentityLabel(match.groups?.label ?? "")
       );
     })
   );
 }
 
 function isNoMistakesIdentityLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
   return NO_MISTAKES_IDENTITY_LABELS.has(normalized);
 }
 
@@ -1275,7 +1327,7 @@ const NO_MISTAKES_IDENTITY_LABELS = new Set([
   "prurl",
   "pullrequesturl",
   "url",
-  "htmlurl"
+  "htmlurl",
 ]);
 
 function hasActiveNoMistakesGateMarkerValue(value: unknown): boolean {
@@ -1284,7 +1336,7 @@ function hasActiveNoMistakesGateMarkerValue(value: unknown): boolean {
   }
   if (value !== null && typeof value === "object") {
     return jsonObjectHasActiveNoMistakesGateMarkerValue(
-      value as Record<string, unknown>
+      value as Record<string, unknown>,
     );
   }
   if (typeof value !== "string") return false;
@@ -1298,35 +1350,35 @@ function hasActiveNoMistakesGateMarkerText(value: string): boolean {
     .replace(/[:=]+/g, " ")
     .replace(
       /\b(?:no|without|not)\s+(?:operator\s+decision|decision|approval|human\s+gate)\s+(?:is\s+)?required\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:no|without|not)\s+(?:manual\s+recovery|external\s+state)\s+(?:is\s+)?required\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:operator\s+decision|decision|approval|human\s+gate)\s+(?:is\s+)?(?:not|isn't|isnt|wasn't|wasnt)\s+required\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:manual\s+recovery|external\s+state)\s+(?:is\s+)?(?:not|isn't|isnt|wasn't|wasnt)\s+required\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:not|no|without)\s+awaiting\s+(?:operator\s+)?decision\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:not|no|without)\s+(?:awaiting|waiting\s+(?:for|on))\s+approval\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:does\s+not|doesn't|doesnt|not|no|never)\s+requires?\s+(?:an?\s+)?approval\b/g,
-      " "
+      " ",
     )
     .replace(
       /\b(?:does\s+not|doesn't|doesnt|not|no|never)\s+requires?\s+(?:an?\s+)?(?:manual\s+recovery|external\s+state|human\s+gate)\b/g,
-      " "
+      " ",
     );
   return (
     /\boperator[_ -]?decision[_ -]?required\b/.test(normalized) ||
@@ -1353,7 +1405,10 @@ function hasActiveNoMistakesGateMarkerText(value: string): boolean {
 }
 
 function isNoMistakesGateOrFindingLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[ _-]+/g, "-");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[ _-]+/g, "-");
   return (
     normalized === "gate" ||
     normalized === "gates" ||
@@ -1376,7 +1431,10 @@ function isNoMistakesGateOrFindingLabel(value: string): boolean {
 }
 
 function isNoMistakesExternalStateContainerLabel(value: string): boolean {
-  const normalized = value.trim().toLowerCase().replace(/[ _-]+/g, "");
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[ _-]+/g, "");
   return normalized === "externalstate";
 }
 
@@ -1389,15 +1447,11 @@ function isNoMistakesOpenContainerValue(value: string): boolean {
 }
 
 function parseNoMistakesGateOrFindingLabelLine(
-  line: string
+  line: string,
 ): { label: string; value: string } | null {
-  const match = /^(?<left>.*?)\s*(?::|=>|=)\s*(?<value>.*?)\s*,?$/.exec(
-    line
-  );
+  const match = /^(?<left>.*?)\s*(?::|=>|=)\s*(?<value>.*?)\s*,?$/.exec(line);
   if (match === null) return null;
-  const left = (match.groups?.left ?? "")
-    .trim()
-    .replace(/^["']|["']$/g, "");
+  const left = (match.groups?.left ?? "").trim().replace(/^["']|["']$/g, "");
   const words = left
     .replace(/[ _-]+/g, " ")
     .trim()
@@ -1405,7 +1459,7 @@ function parseNoMistakesGateOrFindingLabelLine(
     .filter((word) => word.length > 0);
   const labelStart = words.findIndex((_, index) => {
     const scope = normalizeNoMistakesStatusScope(
-      words.slice(0, index).join(" ")
+      words.slice(0, index).join(" "),
     );
     const label = words.slice(index).join(" ");
     return (
@@ -1415,21 +1469,23 @@ function parseNoMistakesGateOrFindingLabelLine(
   if (labelStart < 0) return null;
   return {
     label: words.slice(labelStart).join(" "),
-    value: match.groups?.value ?? ""
+    value: match.groups?.value ?? "",
   };
 }
 
 function parseNoMistakesGateOrFindingLabelLines(
-  line: string
+  line: string,
 ): Array<{ label: string; value: string }> {
   const parsedWholeLine = parseNoMistakesGateOrFindingLabelLine(line);
   const parsedFields = splitNoMistakesTopLevelFields(line)
     .map((field) => parseNoMistakesGateOrFindingLabelLine(field))
-    .filter((value): value is { label: string; value: string } => value !== null);
+    .filter(
+      (value): value is { label: string; value: string } => value !== null,
+    );
   if (parsedWholeLine === null) return parsedFields;
   if (parsedFields.length === 0) return [parsedWholeLine];
   const wholeValueContainsNestedField = parsedFields.some(
-    (field) => field.value !== parsedWholeLine.value
+    (field) => field.value !== parsedWholeLine.value,
   );
   return wholeValueContainsNestedField ? parsedFields : [parsedWholeLine];
 }
@@ -1484,7 +1540,7 @@ function parseNoMistakesYamlListItem(line: string): string | null {
 type NoMistakesRequiredGateFlag = "active" | "inactive";
 
 function classifyNoMistakesJsonRequiredGateFlags(
-  object: Record<string, unknown>
+  object: Record<string, unknown>,
 ): NoMistakesRequiredGateFlag[] {
   const flags: NoMistakesRequiredGateFlag[] = [];
   for (const [key, value] of Object.entries(object)) {
@@ -1498,25 +1554,26 @@ function classifyNoMistakesJsonRequiredGateFlags(
 }
 
 function classifyNoMistakesJsonRequiredGateFlagValues(
-  value: unknown
+  value: unknown,
 ): NoMistakesRequiredGateFlag[] {
   if (Array.isArray(value)) {
     return value.flatMap((item) =>
-      classifyNoMistakesJsonRequiredGateFlagValues(item)
+      classifyNoMistakesJsonRequiredGateFlagValues(item),
     );
   }
   if (value === null || typeof value !== "object") return [];
   return classifyNoMistakesJsonRequiredGateFlags(
-    value as Record<string, unknown>
+    value as Record<string, unknown>,
   );
 }
 
 function classifyNoMistakesRequiredGateFlagLine(
-  line: string
+  line: string,
 ): NoMistakesRequiredGateFlag | null {
-  const match = /["']?([a-z][a-z0-9 _-]*required)["']?\s*(?::|=>|=|\s+)\s*["']?([a-z0-9_-]+)["']?\s*[,!.}]?$/.exec(
-    line
-  );
+  const match =
+    /["']?([a-z][a-z0-9 _-]*required)["']?\s*(?::|=>|=|\s+)\s*["']?([a-z0-9_-]+)["']?\s*[,!.}]?$/.exec(
+      line,
+    );
   if (match === null) return null;
   if (!isNoMistakesRequiredGateFlagLabel(match[1] ?? "")) return null;
   return classifyNoMistakesRequiredGateFlagValue(match[2] ?? "");
@@ -1525,7 +1582,7 @@ function classifyNoMistakesRequiredGateFlagLine(
 function stripInactiveNoMistakesRequiredGateFlagEvidence(line: string): string {
   return line.replace(
     /(?:^|[;,]\s*)["']?[a-z][a-z0-9 _-]*required["']?\s*(?::|=>|=|\s+)\s*["']?(?:false|no|0|null|none|n\/a|not-required)["']?\s*[,!.}]?/g,
-    " "
+    " ",
   );
 }
 
@@ -1540,11 +1597,11 @@ const REQUIRED_NO_MISTAKES_GATE_FLAG_LABELS = new Set([
   "manualrecoveryrequired",
   "externalstaterequired",
   "humangaterequired",
-  "decisionrequired"
+  "decisionrequired",
 ]);
 
 function classifyNoMistakesRequiredGateFlagValue(
-  value: unknown
+  value: unknown,
 ): NoMistakesRequiredGateFlag {
   if (value === false || value === null || value === 0) return "inactive";
   if (value === true) return "active";
@@ -1564,9 +1621,8 @@ function classifyNoMistakesRequiredGateFlagValue(
 function isActiveNoMistakesJsonValue(value: unknown): boolean {
   if (value === null) return false;
   if (Array.isArray(value)) {
-    return (
-      value.length > 0 &&
-      value.some((item) => item === null || isActiveNoMistakesJsonValue(item))
+    return value.some(
+      (item) => item === null || isActiveNoMistakesJsonValue(item),
     );
   }
   if (typeof value === "string") return isActiveNoMistakesValue(value);
@@ -1578,13 +1634,16 @@ function isActiveNoMistakesJsonValue(value: unknown): boolean {
     if (resolution === "resolved") return false;
     if (resolution === "active") return true;
     const values = Object.values(object);
-    return values.length === 0 || values.some((item) => isActiveNoMistakesJsonValue(item));
+    return (
+      values.length === 0 ||
+      values.some((item) => isActiveNoMistakesJsonValue(item))
+    );
   }
   return true;
 }
 
 function classifyNoMistakesJsonObjectResolution(
-  object: Record<string, unknown>
+  object: Record<string, unknown>,
 ): "resolved" | "active" | null {
   let hasResolvedMarker = false;
   let hasEmptyResolutionMarker = false;
@@ -1601,7 +1660,7 @@ function classifyNoMistakesJsonObjectResolution(
         const normalizedValue = value.trim().replace(/[ _-]+/g, "-");
         if (
           /^(?:true|yes|1|resolved|closed|complete|completed|done|dismissed)$/.test(
-            normalizedValue
+            normalizedValue,
           )
         ) {
           hasResolvedMarker = true;
@@ -1610,16 +1669,14 @@ function classifyNoMistakesJsonObjectResolution(
         return "active";
       }
     }
-    if (
-      !(
-        normalizedKey === "status" ||
-        normalizedKey === "state" ||
-        normalizedKey === "outcome" ||
-        normalizedKey === "resolution" ||
-        normalizedKey === "decision-status" ||
-        normalizedKey === "finding-status"
-      )
-    ) {
+    if (!(
+      normalizedKey === "status" ||
+      normalizedKey === "state" ||
+      normalizedKey === "outcome" ||
+      normalizedKey === "resolution" ||
+      normalizedKey === "decision-status" ||
+      normalizedKey === "finding-status"
+    )) {
       continue;
     }
     if (value === null) {
@@ -1632,7 +1689,11 @@ function classifyNoMistakesJsonObjectResolution(
       hasResolvedMarker = true;
       continue;
     }
-    if (/^(?:resolved|closed|complete|completed|done|dismissed)$/.test(normalizedValue)) {
+    if (
+      /^(?:resolved|closed|complete|completed|done|dismissed)$/.test(
+        normalizedValue,
+      )
+    ) {
       hasResolvedMarker = true;
       continue;
     }
@@ -1657,7 +1718,9 @@ function isActiveNoMistakesValue(value: string): boolean {
   if (isInactiveNoMistakesStandaloneValue(trimmed)) {
     return false;
   }
-  if (/^(?:no|zero) (?:active )?(?:gates?|findings?|decisions?)$/.test(trimmed)) {
+  if (
+    /^(?:no|zero) (?:active )?(?:gates?|findings?|decisions?)$/.test(trimmed)
+  ) {
     return false;
   }
   return !/^(?:empty array|all resolved|resolved decisions?)$/.test(trimmed);
@@ -1671,10 +1734,10 @@ function isInactiveNoMistakesStandaloneValue(value: string): boolean {
   return (
     trimmed.length === 0 ||
     /^(?:\[\s*\]|\{\s*\}|none|null|false|0|no|not|not[ _-]required|empty|n\/a|resolved)$/.test(
-      trimmed
+      trimmed,
     ) ||
     /^(?:no|not|without)\s+(?:operator[ _-]?decision|decision|approval|human[ _-]?gate|manual[ _-]?recovery|external[ _-]?state)\s+(?:is\s+)?required$/.test(
-      trimmed
+      trimmed,
     )
   );
 }
@@ -1687,31 +1750,27 @@ function isCleanPullRequestEvidenceLine(line: string): boolean {
     return false;
   }
   if (
-    lineHasCopularEvidenceValue(line, ["clean"], [
-      "false",
-      "no",
-      "0",
-      "unknown",
-      "pending"
-    ])
+    lineHasCopularEvidenceValue(
+      line,
+      ["clean"],
+      ["false", "no", "0", "unknown", "pending"],
+    )
   ) {
     return false;
   }
   if (lineHasExplicitNonPositiveEvidenceValue(line, ["clean"])) return false;
   if (
-    lineHasTrailingEvidenceValue(line, ["clean"], [
-      "false",
-      "no",
-      "0",
-      "unknown",
-      "pending"
-    ])
+    lineHasTrailingEvidenceValue(
+      line,
+      ["clean"],
+      ["false", "no", "0", "unknown", "pending"],
+    )
   ) {
     return false;
   }
   if (
     /\b(?:not|isn't|isnt|wasn't|wasnt|can't|cant|cannot|never)\b[^\n]*\bclean\b/.test(
-      line
+      line,
     )
   ) {
     return false;
@@ -1734,13 +1793,13 @@ const CHECKS_POSITIVE_TOKENS = "passed|successful|succeeded|green";
 const CHECKS_NEGATIVE_STATE_TOKENS =
   "failed|failure|failing|red|unsuccessful|cancelled|canceled|timed out|timeout|pending|running|in[ -]?progress|queued|waiting|awaiting|blocked|gated|skipped|neutral|unknown|action[_ -]?required";
 const CHECKS_NEGATED_BEFORE_SUBJECT_PATTERN = new RegExp(
-  `\\b(?:${CHECKS_NEGATION_TOKENS})\\b[^\\n]*\\b(?:checks?|ci)\\b[^\\n]*\\b(?:${CHECKS_POSITIVE_TOKENS})\\b`
+  `\\b(?:${CHECKS_NEGATION_TOKENS})\\b[^\\n]*\\b(?:checks?|ci)\\b[^\\n]*\\b(?:${CHECKS_POSITIVE_TOKENS})\\b`,
 );
 const CHECKS_NEGATED_AFTER_SUBJECT_PATTERN = new RegExp(
-  `\\b(?:checks?|ci)\\b[^\\n]*\\b(?:${CHECKS_NEGATION_TOKENS})\\b[^\\n]*\\b(?:${CHECKS_POSITIVE_TOKENS})\\b`
+  `\\b(?:checks?|ci)\\b[^\\n]*\\b(?:${CHECKS_NEGATION_TOKENS})\\b[^\\n]*\\b(?:${CHECKS_POSITIVE_TOKENS})\\b`,
 );
 const CHECKS_NEGATIVE_BEFORE_SUBJECT_PATTERN = new RegExp(
-  `\\b(?:${CHECKS_NEGATIVE_STATE_TOKENS})\\b[^\\n]*\\b(?:checks?|ci)\\b`
+  `\\b(?:${CHECKS_NEGATIVE_STATE_TOKENS})\\b[^\\n]*\\b(?:checks?|ci)\\b`,
 );
 
 function isGreenChecksEvidenceLine(line: string): boolean {
@@ -1752,7 +1811,7 @@ function isGreenChecksEvidenceLine(line: string): boolean {
       "successful",
       "succeeded",
       "green",
-      "reported"
+      "reported",
     ])
   ) {
     return false;
@@ -1764,7 +1823,7 @@ function isGreenChecksEvidenceLine(line: string): boolean {
     lineHasTrailingEvidenceValue(
       line,
       ["passed", "successful", "succeeded", "green", "reported"],
-      ["false", "no", "0"]
+      ["false", "no", "0"],
     )
   ) {
     return false;
@@ -1782,8 +1841,8 @@ function isGreenChecksEvidenceLine(line: string): boolean {
         "skipped",
         "neutral",
         "action_required",
-        "action-required"
-      ]
+        "action-required",
+      ],
     )
   ) {
     return false;
@@ -1796,7 +1855,7 @@ function isGreenChecksEvidenceLine(line: string): boolean {
   }
   if (
     /\b(?:checks?|ci)\b[^\n]*\b(?:not|failed|failure|failing|red|unsuccessful|cancelled|canceled|timed out|timeout|pending|running|awaiting|skipped|neutral|unknown|action[_ -]?required)\b/.test(
-      line
+      line,
     )
   ) {
     return false;
@@ -1806,7 +1865,7 @@ function isGreenChecksEvidenceLine(line: string): boolean {
     lineHasNoMistakesCiStateValue(line, ["passed", "none"]) ||
     /\bchecks?\s+(passed|successful|succeeded|green)\b/.test(line) ||
     /\b(all|github|ci)\b[^\n]*\bchecks?\b[^\n]*\b(passed|successful|succeeded|green)\b/.test(
-      line
+      line,
     ) ||
     /\bci\b[^\n]*\b(passed|successful|succeeded|green)\b/.test(line)
   );
@@ -1814,7 +1873,7 @@ function isGreenChecksEvidenceLine(line: string): boolean {
 
 function isNoChecksReportedEvidenceLine(line: string): boolean {
   return /\bno checks reported\s*(?:(?::|=>|=)\s*["']?(?:true|yes|1)["']?)?\s*[.!]?$/.test(
-    line
+    line,
   );
 }
 
@@ -1834,115 +1893,113 @@ function isHistoricalNoMistakesEvidenceOnlyLine(line: string): boolean {
 
 function stripNoMistakesHistoricalAnnotationSegments(line: string): string {
   return line.replace(
-    /\s*[\[(][^\])]*(?:previous|previously|historical|stale|prior|past)[^\])]*[\])]/g,
-    ""
+    /\s*(?:\[[^\]]*(?:previous|previously|historical|stale|prior|past)[^\]]*\]|\([^)]*(?:previous|previously|historical|stale|prior|past)[^)]*\))/g,
+    "",
   );
 }
 
 function lineHasNoMistakesCiStateValue(
   line: string,
-  values: readonly string[]
+  values: readonly string[],
 ): boolean {
   return new RegExp(
-    `\\bci[_ -]?state\\b["']?\\s*(?::|=>|=)?\\s*["']?(?:${values.join("|")})\\b`
+    `\\bci[_ -]?state\\b["']?\\s*(?::|=>|=)?\\s*["']?(?:${values.join("|")})\\b`,
   ).test(line);
 }
 
 function lineHasNonSuccessNoMistakesCiStateValue(line: string): boolean {
   const matches = line.matchAll(
-    /\bci[_ -]?state\b["']?\s*(?:(?::|=>|=)\s*)?["']?([a-z0-9_-]+)\b/g
+    /\bci[_ -]?state\b["']?\s*(?:(?::|=>|=)\s*)?["']?([a-z0-9_-]+)\b/g,
   );
   return Array.from(matches).some(
-    (match) => !/^(?:passed|none)$/.test(match[1] ?? "")
+    (match) => !/^(?:passed|none)$/.test(match[1] ?? ""),
   );
 }
 
 function lineHasNonSuccessCheckConclusionValue(line: string): boolean {
   const matches = line.matchAll(
-    /(?:^|[,{;]\s*)(?:(?:current|latest|run|state)\s+)?["']?(?:check[_ -]?conclusion|conclusion)["']?\s*(?::|=>|=)\s*["']?([a-z0-9_-]+)\b/g
+    /(?:^|[,{;]\s*)(?:(?:current|latest|run|state)\s+)?["']?(?:check[_ -]?conclusion|conclusion)["']?\s*(?::|=>|=)\s*["']?([a-z0-9_-]+)\b/g,
   );
   return Array.from(matches).some(
     (match) =>
-      !/^(?:success|successful|passed|passing|green)$/.test(match[1] ?? "")
+      !/^(?:success|successful|passed|passing|green)$/.test(match[1] ?? ""),
   );
 }
 
 function lineHasExplicitNonPositiveCheckSuccessValue(line: string): boolean {
   if (!/\b(?:checks?|ci)\b/.test(line)) return false;
   const matches = line.matchAll(
-    /\b(?:passed|successful|succeeded|green)\b["']?\s*(?::|=>|=)\s*["']?([a-z0-9_-]+)\b/g
+    /\b(?:passed|successful|succeeded|green)\b["']?\s*(?::|=>|=)\s*["']?([a-z0-9_-]+)\b/g,
   );
   return Array.from(matches).some(
     (match) =>
       !/^(?:true|yes|1|passed|successful|succeeded|green|success)$/.test(
-        match[1] ?? ""
-      )
+        match[1] ?? "",
+      ),
   );
 }
 
 function lineHasExplicitNegativeEvidenceValue(
   line: string,
-  evidenceTerms: readonly string[]
+  evidenceTerms: readonly string[],
 ): boolean {
   return new RegExp(
-    `\\b(?:${evidenceTerms.join("|")})\\b["']?\\s*(?::|=>|=)\\s*["']?(?:false|no|0)\\b`
+    `\\b(?:${evidenceTerms.join("|")})\\b["']?\\s*(?::|=>|=)\\s*["']?(?:false|no|0)\\b`,
   ).test(line);
 }
 
 function lineHasExplicitNonPositiveEvidenceValue(
   line: string,
-  evidenceTerms: readonly string[]
+  evidenceTerms: readonly string[],
 ): boolean {
   const matches = line.matchAll(
     new RegExp(
       `\\b(?:${evidenceTerms.join("|")})\\b["']?\\s*(?::|=>|=)\\s*["']?([a-z0-9_-]+)\\b`,
-      "g"
-    )
+      "g",
+    ),
   );
   return Array.from(matches).some(
-    (match) => !/^(?:true|yes|1|clean)$/.test(match[1] ?? "")
+    (match) => !/^(?:true|yes|1|clean)$/.test(match[1] ?? ""),
   );
 }
 
 function lineHasTrailingEvidenceValue(
   line: string,
   evidenceTerms: readonly string[],
-  values: readonly string[]
+  values: readonly string[],
 ): boolean {
   return new RegExp(
-    `\\b(?:${evidenceTerms.join("|")})\\b\\s+["']?(?:${values.join("|")})["']?\\s*[,!.]?$`
+    `\\b(?:${evidenceTerms.join("|")})\\b\\s+["']?(?:${values.join("|")})["']?\\s*[,!.]?$`,
   ).test(line);
 }
 
 function lineHasCopularEvidenceValue(
   line: string,
   evidenceTerms: readonly string[],
-  values: readonly string[]
+  values: readonly string[],
 ): boolean {
   return new RegExp(
-    `\\b(?:${evidenceTerms.join("|")})\\b\\s+(?:is|are|was|were)\\s+["']?(?:${values.join("|")})["']?\\s*[,!.]?$`
+    `\\b(?:${evidenceTerms.join("|")})\\b\\s+(?:is|are|was|were)\\s+["']?(?:${values.join("|")})["']?\\s*[,!.]?$`,
   ).test(line);
 }
 
 function lineHasDraftPullRequestEvidence(line: string): boolean {
   if (
     /\bis[_ -]?draft\b["']?\s*(?::|=>|=|\s+)\s*["']?(?:true|yes|1|draft)\b/.test(
-      line
+      line,
     )
   ) {
     return true;
   }
   if (
     /(?:^|[,{;]\s*)(?:(?:current|latest|pr|pull request)\s+)?["']?draft["']?\s*(?::|=>|=)\s*["']?(?:true|yes|1)\b/.test(
-      line
+      line,
     )
   ) {
     return true;
   }
   if (!/\b(?:pr|pull request)\b/.test(line)) return false;
-  if (
-    /\bdraft\b\s*(?::|=>|=)\s*["']?(?:true|yes|1)\b/.test(line)
-  ) {
+  if (/\bdraft\b\s*(?::|=>|=)\s*["']?(?:true|yes|1)\b/.test(line)) {
     return true;
   }
   if (/\b(?:not|isn't|isnt|wasn't|wasnt|no|non)\b[^\n]*\bdraft\b/.test(line)) {
@@ -1950,7 +2007,7 @@ function lineHasDraftPullRequestEvidence(line: string): boolean {
   }
   if (
     /\bdraft\b[^\n]*(?::|=>|=|\bis\b|\bwas\b)\s*["']?(?:false|no|0)\b/.test(
-      line
+      line,
     )
   ) {
     return false;
@@ -1960,10 +2017,10 @@ function lineHasDraftPullRequestEvidence(line: string): boolean {
 
 function lineHasNonMergeableEvidenceValue(line: string): boolean {
   const matches = line.matchAll(
-    /\bmergeable\b(?![_ -]?state\b)["']?\s*(?:(?::|=>|=)\s*|\s+)["']?([a-z0-9_-]+)\b/g
+    /\bmergeable\b(?![_ -]?state\b)["']?\s*(?:(?::|=>|=)\s*|\s+)["']?([a-z0-9_-]+)\b/g,
   );
   return Array.from(matches).some(
-    (match) => !/^(?:true|yes|1|mergeable|clean)$/.test(match[1] ?? "")
+    (match) => !/^(?:true|yes|1|mergeable|clean)$/.test(match[1] ?? ""),
   );
 }
 
@@ -1973,19 +2030,19 @@ type ConfigLoadResult =
 
 function processSetupFailure(
   deps: Pick<CodingWorkflowWrapperDeps, "stderr">,
-  summary: string
+  summary: string,
 ): CodingWorkflowWrapperOutcome {
   deps.stderr(`${CODING_WORKFLOW_WRAPPER_RECOVERY_MARKER}\n`);
   deps.stderr(`${summary}\n`);
   return {
     exitCode: 1,
     success: false,
-    summary
+    summary,
   };
 }
 
 export function loadCodingWorkflowWrapperConfig(
-  deps: Pick<CodingWorkflowWrapperDeps, "env" | "readFile">
+  deps: Pick<CodingWorkflowWrapperDeps, "env" | "readFile">,
 ): ConfigLoadResult {
   const configPath = deps.env[CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]?.trim();
   if (configPath === undefined || configPath.length === 0) {
@@ -1999,7 +2056,7 @@ export function loadCodingWorkflowWrapperConfig(
     const detail = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      error: `Could not read coding workflow wrapper config ${configPath}: ${detail}`
+      error: `Could not read coding workflow wrapper config ${configPath}: ${detail}`,
     };
   }
 
@@ -2008,12 +2065,12 @@ export function loadCodingWorkflowWrapperConfig(
 
 export function parseCodingWorkflowWrapperConfig(
   value: unknown,
-  source?: string
+  source?: string,
 ): ConfigLoadResult {
   if (!isRecord(value)) {
     return {
       ok: false,
-      error: `Coding workflow wrapper config must be an object${source === undefined ? "." : ` at ${source}.`}`
+      error: `Coding workflow wrapper config must be an object${source === undefined ? "." : ` at ${source}.`}`,
     };
   }
 
@@ -2022,7 +2079,7 @@ export function parseCodingWorkflowWrapperConfig(
     WRAPPER_CONFIG_TOP_LEVEL_FIELDS,
     {},
     "wrapper config",
-    source
+    source,
   );
   if (!topLevelUnknown.ok) {
     return topLevelUnknown;
@@ -2032,20 +2089,26 @@ export function parseCodingWorkflowWrapperConfig(
   if (rawSteps !== undefined && !isRecord(rawSteps)) {
     return {
       ok: false,
-      error: `Coding workflow wrapper config 'steps' must be an object${source === undefined ? "." : ` at ${source}.`}`
+      error: `Coding workflow wrapper config 'steps' must be an object${source === undefined ? "." : ` at ${source}.`}`,
     };
   }
 
-  const steps: Partial<Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>> = {};
+  const steps: Partial<
+    Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>
+  > = {};
   if (isRecord(rawSteps)) {
     for (const [kind, rawStep] of Object.entries(rawSteps)) {
       if (!WORKFLOW_STEP_KIND_SET.has(kind)) {
         return {
           ok: false,
-          error: `Unsupported workflow step kind ${kind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`
+          error: `Unsupported workflow step kind ${kind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`,
         };
       }
-      const parsedStep = parseStepConfig(kind as WorkflowStepKind, rawStep, source);
+      const parsedStep = parseStepConfig(
+        kind as WorkflowStepKind,
+        rawStep,
+        source,
+      );
       if (!parsedStep.ok) return parsedStep;
       steps[kind as WorkflowStepKind] = parsedStep.config;
     }
@@ -2061,10 +2124,13 @@ type StepConfigParse =
 function parseStepConfig(
   kind: WorkflowStepKind,
   value: unknown,
-  source?: string
+  source?: string,
 ): StepConfigParse {
   if (!isRecord(value)) {
-    return { ok: false, error: `Wrapper config for ${kind} must be an object.` };
+    return {
+      ok: false,
+      error: `Wrapper config for ${kind} must be an object.`,
+    };
   }
 
   const unknownStepKey = findUnknownKeys(
@@ -2072,7 +2138,7 @@ function parseStepConfig(
     WRAPPER_STEP_CONFIG_FIELDS,
     WRAPPER_STEP_CONFIG_ALIASES,
     `steps.${kind}`,
-    source
+    source,
   );
   if (!unknownStepKey.ok) {
     return unknownStepKey;
@@ -2083,13 +2149,16 @@ function parseStepConfig(
   if (!args.ok) return args;
   const cwd = readCwd(value["cwd"]);
   if (!cwd.ok) return cwd;
-  const timeoutSec = readPositiveInteger(value["timeout_sec"], DEFAULT_TIMEOUT_SEC);
+  const timeoutSec = readPositiveInteger(
+    value["timeout_sec"],
+    DEFAULT_TIMEOUT_SEC,
+  );
   if (!timeoutSec.ok) return timeoutSec;
   const envAllow = readOptionalStringArray(value["env_allow"], "env_allow");
   if (!envAllow.ok) return envAllow;
   const noMistakesRunnerProfile = readNoMistakesRunnerProfile(
     value["runner_profile"],
-    kind
+    kind,
   );
   if (!noMistakesRunnerProfile.ok) return noMistakesRunnerProfile;
   const commit = readCommit(value["commit"], kind);
@@ -2097,17 +2166,17 @@ function parseStepConfig(
 
   const keyChangesMade = readOptionalStringArray(
     value["key_changes_made"],
-    "key_changes_made"
+    "key_changes_made",
   );
   if (!keyChangesMade.ok) return keyChangesMade;
   const keyLearnings = readOptionalStringArray(
     value["key_learnings"],
-    "key_learnings"
+    "key_learnings",
   );
   if (!keyLearnings.ok) return keyLearnings;
   const remainingWork = readOptionalStringArray(
     value["remaining_work"],
-    "remaining_work"
+    "remaining_work",
   );
   if (!remainingWork.ok) return remainingWork;
   const resultFile = readOptionalResultFile(value["result_file"]);
@@ -2133,12 +2202,14 @@ function parseStepConfig(
       keyChangesMade: keyChangesMade.value,
       keyLearnings: keyLearnings.value,
       remainingWork: remainingWork.value,
-      ...(resultFile.value !== undefined ? { resultFile: resultFile.value } : {}),
+      ...(resultFile.value !== undefined
+        ? { resultFile: resultFile.value }
+        : {}),
       commit: commit.value,
       ...(mergeCleanup.value !== undefined
         ? { mergeCleanup: mergeCleanup.value }
-        : {})
-    }
+        : {}),
+    },
   };
 }
 
@@ -2147,7 +2218,7 @@ function findUnknownKeys(
   allowed: ReadonlySet<string>,
   aliasMap: Record<string, string> = {},
   location: string = "root",
-  source?: string
+  source?: string,
 ): { ok: true } | { ok: false; error: string } {
   const supported = [...allowed].sort().join(", ");
   for (const key of Object.keys(value)) {
@@ -2156,27 +2227,27 @@ function findUnknownKeys(
     if (alias !== undefined) {
       return {
         ok: false,
-        error: `Unknown key "${key}" in ${location}; replace with "${alias}" to use the required snake_case schema at ${source ?? "this config file"}.`
+        error: `Unknown key "${key}" in ${location}; replace with "${alias}" to use the required snake_case schema at ${source ?? "this config file"}.`,
       };
     }
     return {
       ok: false,
-        error: `Unknown key "${key}" in ${location}; supported keys: ${supported} at ${source ?? "this config file"}.`
-      };
+      error: `Unknown key "${key}" in ${location}; supported keys: ${supported} at ${source ?? "this config file"}.`,
+    };
   }
   return { ok: true };
 }
 
 function preflightNoMistakesRunnerProfile(
   config: CodingWorkflowWrapperStepConfig,
-  childEnv: NodeJS.ProcessEnv
+  childEnv: NodeJS.ProcessEnv,
 ): { ok: true } | { ok: false; error: string } {
   const profile = config.noMistakesRunnerProfile;
   if (profile === undefined) {
     return {
       ok: false,
       error:
-        "No no-mistakes runner profile is configured. Set wrapper config steps.no-mistakes.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes."
+        "No no-mistakes runner profile is configured. Set wrapper config steps.no-mistakes.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes.",
     };
   }
 
@@ -2187,14 +2258,14 @@ function preflightNoMistakesRunnerProfile(
   if (missing.length > 0) {
     return {
       ok: false,
-      error: `No-mistakes runner profile is missing required environment: ${missing.join(", ")}. Update env_allow or the daemon environment before running no-mistakes.`
+      error: `No-mistakes runner profile is missing required environment: ${missing.join(", ")}. Update env_allow or the daemon environment before running no-mistakes.`,
     };
   }
 
   if (!isExecutableFile(profile.agentPath)) {
     return {
       ok: false,
-      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.no-mistakes.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`
+      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.no-mistakes.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`,
     };
   }
 
@@ -2202,7 +2273,7 @@ function preflightNoMistakesRunnerProfile(
   if (selectedAgent !== undefined && selectedAgent !== profile.agent) {
     return {
       ok: false,
-      error: `No-mistakes selected agent ${selectedAgent} does not match runner_profile.agent ${profile.agent}. Update the route selection, no-mistakes config, or the Momentum runner profile before running no-mistakes.`
+      error: `No-mistakes selected agent ${selectedAgent} does not match runner_profile.agent ${profile.agent}. Update the route selection, no-mistakes config, or the Momentum runner profile before running no-mistakes.`,
     };
   }
 
@@ -2213,26 +2284,27 @@ function preflightNoMistakesRunnerProfile(
   if (noMistakesConfig.value.agent !== profile.agent) {
     return {
       ok: false,
-      error: `No-mistakes configured agent ${noMistakesConfig.value.agent} does not match runner_profile.agent ${profile.agent}. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+      error: `No-mistakes configured agent ${noMistakesConfig.value.agent} does not match runner_profile.agent ${profile.agent}. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`,
     };
   }
-  const configuredAgentPath = noMistakesConfig.value.agentPathOverrides[profile.agent];
+  const configuredAgentPath =
+    noMistakesConfig.value.agentPathOverrides[profile.agent];
   if (configuredAgentPath === undefined) {
     return {
       ok: false,
-      error: `No-mistakes config must set agent_path_override.${profile.agent} to the executable declared by runner_profile.agent_path.`
+      error: `No-mistakes config must set agent_path_override.${profile.agent} to the executable declared by runner_profile.agent_path.`,
     };
   }
   if (!path.isAbsolute(configuredAgentPath)) {
     return {
       ok: false,
-      error: `No-mistakes agent_path_override.${profile.agent} must be an absolute path before running no-mistakes.`
+      error: `No-mistakes agent_path_override.${profile.agent} must be an absolute path before running no-mistakes.`,
     };
   }
   if (path.resolve(configuredAgentPath) !== path.resolve(profile.agentPath)) {
     return {
       ok: false,
-      error: `No-mistakes agent_path_override.${profile.agent} does not match runner_profile.agent_path. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+      error: `No-mistakes agent_path_override.${profile.agent} does not match runner_profile.agent_path. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`,
     };
   }
 
@@ -2249,9 +2321,7 @@ function isExecutableFile(filePath: string): boolean {
   }
 }
 
-function readNoMistakesAgentConfig(
-  childEnv: NodeJS.ProcessEnv
-):
+function readNoMistakesAgentConfig(childEnv: NodeJS.ProcessEnv):
   | {
       ok: true;
       value: {
@@ -2265,7 +2335,7 @@ function readNoMistakesAgentConfig(
     return {
       ok: false,
       error:
-        "No-mistakes runner profile cannot verify no-mistakes agent config because HOME is missing from the filtered child environment."
+        "No-mistakes runner profile cannot verify no-mistakes agent config because HOME is missing from the filtered child environment.",
     };
   }
   const configPath = path.join(home, ".no-mistakes", "config.yaml");
@@ -2276,7 +2346,7 @@ function readNoMistakesAgentConfig(
     return {
       ok: false,
       error:
-        "No-mistakes config is not readable from HOME/.no-mistakes/config.yaml; cannot verify configured agent and agent_path_override before running no-mistakes."
+        "No-mistakes config is not readable from HOME/.no-mistakes/config.yaml; cannot verify configured agent and agent_path_override before running no-mistakes.",
     };
   }
 
@@ -2284,35 +2354,35 @@ function readNoMistakesAgentConfig(
   if (!parsed.ok) {
     return {
       ok: false,
-      error: parsed.error
+      error: parsed.error,
     };
   }
   if (parsed.agent === undefined) {
     return {
       ok: false,
       error:
-        "No-mistakes config must set an explicit supported agent before Momentum can run no-mistakes."
+        "No-mistakes config must set an explicit supported agent before Momentum can run no-mistakes.",
     };
   }
   if (parsed.agent === "auto") {
     return {
       ok: false,
       error:
-        "No-mistakes config agent=auto is not deterministic enough for Momentum native workflow; set agent to claude, codex, opencode, or rovodev."
+        "No-mistakes config agent=auto is not deterministic enough for Momentum native workflow; set agent to claude, codex, opencode, or rovodev.",
     };
   }
   if (!isNoMistakesRunnerAgent(parsed.agent)) {
     return {
       ok: false,
-      error: `No-mistakes config agent ${parsed.agent} is not supported by Momentum runner profiles. Supported agents: ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+      error: `No-mistakes config agent ${parsed.agent} is not supported by Momentum runner profiles. Supported agents: ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`,
     };
   }
   return {
     ok: true,
     value: {
       agent: parsed.agent,
-      agentPathOverrides: parsed.agentPathOverrides
-    }
+      agentPathOverrides: parsed.agentPathOverrides,
+    },
   };
 }
 
@@ -2329,7 +2399,7 @@ function parseNoMistakesAgentConfig(contents: string):
   }
   const document = parseDocument(contents, {
     strict: true,
-    uniqueKeys: true
+    uniqueKeys: true,
   });
   if (document.errors.length > 0) {
     const duplicate = isMap(document.contents)
@@ -2338,13 +2408,13 @@ function parseNoMistakesAgentConfig(contents: string):
     if (duplicate?.scope === "top-level") {
       return {
         ok: false,
-        error: `No-mistakes config has duplicate top-level key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+        error: `No-mistakes config has duplicate top-level key ${duplicate.key}; remove duplicate keys before running no-mistakes.`,
       };
     }
     if (duplicate?.scope === "agent_path_override") {
       return {
         ok: false,
-        error: `No-mistakes config has duplicate agent_path_override key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+        error: `No-mistakes config has duplicate agent_path_override key ${duplicate.key}; remove duplicate keys before running no-mistakes.`,
       };
     }
     const firstError = document.errors[0]?.message ?? "invalid YAML";
@@ -2352,19 +2422,19 @@ function parseNoMistakesAgentConfig(contents: string):
       return {
         ok: false,
         error:
-          "No-mistakes config uses tab indentation; use spaces before running no-mistakes."
+          "No-mistakes config uses tab indentation; use spaces before running no-mistakes.",
       };
     }
     if (firstError.includes("Missing closing")) {
       return {
         ok: false,
         error:
-          "No-mistakes config contains malformed scalar syntax; fix YAML before running no-mistakes."
+          "No-mistakes config contains malformed scalar syntax; fix YAML before running no-mistakes.",
       };
     }
     return {
       ok: false,
-      error: `No-mistakes config contains invalid YAML: ${firstError.split("\n")[0] ?? firstError}`
+      error: `No-mistakes config contains invalid YAML: ${firstError.split("\n")[0] ?? firstError}`,
     };
   }
   if (!isMap(document.contents)) {
@@ -2374,8 +2444,7 @@ function parseNoMistakesAgentConfig(contents: string):
   if (!isRecord(resolved)) {
     return { ok: true, agent: undefined, agentPathOverrides: {} };
   }
-  const agent =
-    typeof resolved.agent === "string" ? resolved.agent : undefined;
+  const agent = typeof resolved.agent === "string" ? resolved.agent : undefined;
   const agentPathOverrideNode = resolved.agent_path_override;
   const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
   if (agentPathOverrideNode !== undefined && agentPathOverrideNode !== null) {
@@ -2383,7 +2452,7 @@ function parseNoMistakesAgentConfig(contents: string):
       return {
         ok: false,
         error:
-          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
+          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes.",
       };
     }
     for (const [key, value] of Object.entries(agentPathOverrideNode)) {
@@ -2394,7 +2463,9 @@ function parseNoMistakesAgentConfig(contents: string):
   return { ok: true, agent, agentPathOverrides };
 }
 
-function findNoMistakesYamlSeparatorError(contents: string): string | undefined {
+function findNoMistakesYamlSeparatorError(
+  contents: string,
+): string | undefined {
   const lines = contents.split(/\r?\n/u);
   let inAgentPathOverride = false;
   let sectionIndent = 0;
@@ -2445,7 +2516,7 @@ function findNoMistakesYamlSeparatorError(contents: string): string | undefined 
 }
 
 function findDuplicateNoMistakesConfigKey(
-  map: YAMLMap
+  map: YAMLMap,
 ):
   | { scope: "top-level"; key: string }
   | { scope: "agent_path_override"; key: string }
@@ -2470,34 +2541,28 @@ function findDuplicateNoMistakesConfigKey(
   return undefined;
 }
 
-function getYamlMapValue(map: YAMLMap, key: string): unknown {
-  for (const item of map.items) {
-    if (yamlScalarString(item.key) === key) return item.value;
-  }
-  return undefined;
-}
-
 function yamlScalarString(value: unknown): string | undefined {
   if (!isScalar(value)) return undefined;
   if (typeof value.value !== "string") return undefined;
   return value.value;
 }
 
-function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
+function isNoMistakesRunnerAgent(
+  value: string,
+): value is NoMistakesRunnerAgent {
   return (NO_MISTAKES_RUNNER_AGENTS as readonly string[]).includes(value);
 }
 
-function parseYamlMappingEntry(value: string):
+function parseYamlMappingEntry(
+  value: string,
+):
   | { ok: true; key: string; value: string | undefined }
   | { ok: false; key: string }
   | undefined {
   const parsedKey = parseYamlMappingKeyPrefix(value);
   if (parsedKey === undefined) return undefined;
   const separatorIndex = parsedKey.rest.search(/\S/u);
-  if (
-    separatorIndex === -1 ||
-    parsedKey.rest[separatorIndex] !== ":"
-  ) {
+  if (separatorIndex === -1 || parsedKey.rest[separatorIndex] !== ":") {
     return undefined;
   }
   const afterSeparator = parsedKey.rest.slice(separatorIndex + 1);
@@ -2508,12 +2573,12 @@ function parseYamlMappingEntry(value: string):
   return {
     ok: true,
     key: parsedKey.key,
-    value: trimmedValue.length > 0 ? trimmedValue : undefined
+    value: trimmedValue.length > 0 ? trimmedValue : undefined,
   };
 }
 
 function parseYamlMappingKeyPrefix(
-  value: string
+  value: string,
 ): { key: string; rest: string } | undefined {
   if (value.startsWith('"') || value.startsWith("'")) {
     return parseQuotedYamlMappingKeyPrefix(value);
@@ -2524,7 +2589,7 @@ function parseYamlMappingKeyPrefix(
 }
 
 function parseQuotedYamlMappingKeyPrefix(
-  value: string
+  value: string,
 ): { key: string; rest: string } | undefined {
   const quote = value[0];
   let key = "";
@@ -2562,7 +2627,7 @@ function writeFailureResult(
   resultPath: string,
   summary: string,
   kind: WorkflowStepKind = "preflight",
-  config?: CodingWorkflowWrapperStepConfig
+  config?: CodingWorkflowWrapperStepConfig,
 ): CodingWorkflowWrapperOutcome {
   return writeRunnerResult(deps, resultPath, {
     success: false,
@@ -2571,14 +2636,14 @@ function writeFailureResult(
     key_learnings: [],
     remaining_work: [summary],
     goal_complete: false,
-    commit: config?.commit ?? defaultCommit(kind)
+    commit: config?.commit ?? defaultCommit(kind),
   });
 }
 
 function writeRunnerResult(
   deps: Pick<CodingWorkflowWrapperDeps, "mkdir" | "writeFile">,
   resultPath: string,
-  result: RunnerResult
+  result: RunnerResult,
 ): CodingWorkflowWrapperOutcome {
   const normalized = normalizeRunnerResult(result);
   if (!normalized.ok) {
@@ -2586,7 +2651,7 @@ function writeRunnerResult(
       exitCode: 1,
       success: false,
       summary: normalized.error,
-      resultPath
+      resultPath,
     };
   }
 
@@ -2596,7 +2661,7 @@ function writeRunnerResult(
     exitCode: 0,
     success: normalized.value.success,
     summary: normalized.value.summary,
-    resultPath
+    resultPath,
   };
 }
 
@@ -2604,7 +2669,7 @@ function summarizeCommandResult(
   kind: WorkflowStepKind,
   config: CodingWorkflowWrapperStepConfig,
   result: SpawnSyncReturns<string>,
-  success: boolean
+  success: boolean,
 ): string {
   if (success) {
     return config.successSummary ?? `${kind} command completed successfully.`;
@@ -2621,12 +2686,15 @@ function summarizeCommandResult(
 
 function resolveStepCwd(
   cwd: CodingWorkflowWrapperCwd,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ): { ok: true; path: string } | { ok: false; error: string } {
   if (cwd === "repo") {
     const repoPath = readRequiredEnv(env, "MOMENTUM_REPO_PATH");
     if (repoPath === undefined) {
-      return { ok: false, error: "MOMENTUM_REPO_PATH is required for cwd=repo." };
+      return {
+        ok: false,
+        error: "MOMENTUM_REPO_PATH is required for cwd=repo.",
+      };
     }
     return { ok: true, path: repoPath };
   }
@@ -2634,7 +2702,7 @@ function resolveStepCwd(
   if (iterationDir === undefined) {
     return {
       ok: false,
-      error: "MOMENTUM_ITERATION_DIR is required for cwd=iteration."
+      error: "MOMENTUM_ITERATION_DIR is required for cwd=iteration.",
     };
   }
   return { ok: true, path: iterationDir };
@@ -2643,14 +2711,15 @@ function resolveStepCwd(
 function resolveConfiguredResultPath(
   config: CodingWorkflowWrapperStepConfig,
   env: NodeJS.ProcessEnv,
-  resultPath: string
+  resultPath: string,
 ): { ok: true } | { ok: false; error: string } {
   if (config.resultFile === undefined) return { ok: true };
   const iterationDir = readRequiredEnv(env, "MOMENTUM_ITERATION_DIR");
   if (iterationDir === undefined) {
     return {
       ok: false,
-      error: "MOMENTUM_ITERATION_DIR is required when wrapper config `result_file` is set."
+      error:
+        "MOMENTUM_ITERATION_DIR is required when wrapper config `result_file` is set.",
     };
   }
   const base = path.resolve(iterationDir);
@@ -2665,14 +2734,14 @@ function resolveConfiguredResultPath(
     return {
       ok: false,
       error:
-        "Wrapper config `result_file` must resolve inside the iteration artifact directory."
+        "Wrapper config `result_file` must resolve inside the iteration artifact directory.",
     };
   }
   if (path.resolve(resultPath) !== resolved) {
     return {
       ok: false,
       error:
-        "Wrapper config `result_file` must match the live wrapper MOMENTUM_RESULT_PATH."
+        "Wrapper config `result_file` must match the live wrapper MOMENTUM_RESULT_PATH.",
     };
   }
   return { ok: true };
@@ -2680,7 +2749,7 @@ function resolveConfiguredResultPath(
 
 function buildChildEnv(
   env: NodeJS.ProcessEnv,
-  envAllow: readonly string[]
+  envAllow: readonly string[],
 ): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const key of envAllow) {
@@ -2706,20 +2775,20 @@ function readGitHubMergeCleanupPullRequest(input: {
         "view",
         input.target.pullRequestId,
         "--json",
-        "number,headRefName,headRefOid,state,isDraft,mergeable,mergeStateStatus"
+        "number,headRefName,headRefOid,state,isDraft,mergeable,mergeStateStatus",
       ],
       {
         cwd: input.cwd,
         env: input.env,
         timeout: GITHUB_STATE_READ_TIMEOUT_MS,
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"]
-      }
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
   } catch (error) {
     return {
       ok: false,
-      error: `gh pr view failed: ${errorDetail(error)}`
+      error: `gh pr view failed: ${errorDetail(error)}`,
     };
   }
 
@@ -2729,7 +2798,7 @@ function readGitHubMergeCleanupPullRequest(input: {
   } catch (error) {
     return {
       ok: false,
-      error: `gh pr view returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+      error: `gh pr view returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
   if (!isRecord(parsed)) {
@@ -2742,14 +2811,14 @@ function readGitHubMergeCleanupPullRequest(input: {
   if (id === undefined || headBranch === undefined || headSha === undefined) {
     return {
       ok: false,
-      error: "gh pr view did not include a pull request number, headRefName, and headRefOid."
+      error:
+        "gh pr view did not include a pull request number, headRefName, and headRefOid.",
     };
   }
 
-  const cleanupBranch =
-    isMergedPullRequestState(parsed["state"])
-      ? readCleanupBranchDeleted(input)
-      : { ok: true as const, branchDeleted: false };
+  const cleanupBranch = isMergedPullRequestState(parsed["state"])
+    ? readCleanupBranchDeleted(input)
+    : { ok: true as const, branchDeleted: false };
   if (!cleanupBranch.ok) {
     return { ok: false, error: cleanupBranch.error };
   }
@@ -2761,9 +2830,12 @@ function readGitHubMergeCleanupPullRequest(input: {
       headSha,
       state: readPullRequestState(parsed["state"]),
       draft: parsed["isDraft"] === true,
-      mergeable: readPullRequestMergeable(parsed["mergeable"], parsed["mergeStateStatus"]),
-      branchDeleted: cleanupBranch.branchDeleted
-    }
+      mergeable: readPullRequestMergeable(
+        parsed["mergeable"],
+        parsed["mergeStateStatus"],
+      ),
+      branchDeleted: cleanupBranch.branchDeleted,
+    },
   };
 }
 
@@ -2777,15 +2849,15 @@ function readCleanupBranchDeleted(input: {
       "gh",
       [
         "api",
-        `repos/:owner/:repo/branches/${encodeURIComponent(input.target.cleanupBranch)}`
+        `repos/:owner/:repo/branches/${encodeURIComponent(input.target.cleanupBranch)}`,
       ],
       {
         cwd: input.cwd,
         env: input.env,
         timeout: GITHUB_STATE_READ_TIMEOUT_MS,
         encoding: "utf8",
-        stdio: ["ignore", "ignore", "pipe"]
-      }
+        stdio: ["ignore", "ignore", "pipe"],
+      },
     );
     return { ok: true, branchDeleted: false };
   } catch (error) {
@@ -2794,7 +2866,7 @@ function readCleanupBranchDeleted(input: {
     }
     return {
       ok: false,
-      error: `gh branch lookup failed: ${errorDetail(error)}`
+      error: `gh branch lookup failed: ${errorDetail(error)}`,
     };
   }
 }
@@ -2806,8 +2878,11 @@ function readPullRequestId(value: unknown): string | undefined {
   return readOptionalString(value);
 }
 
-function readPullRequestState(value: unknown): MergeCleanupPullRequestState["state"] {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+function readPullRequestState(
+  value: unknown,
+): MergeCleanupPullRequestState["state"] {
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
   if (normalized === "open") return "open";
   if (normalized === "merged") return "merged";
   return "closed";
@@ -2819,13 +2894,18 @@ function isMergedPullRequestState(value: unknown): boolean {
 
 function readPullRequestMergeable(
   mergeable: unknown,
-  mergeStateStatus: unknown
+  mergeStateStatus: unknown,
 ): MergeCleanupPullRequestState["mergeable"] {
   const state =
-    typeof mergeStateStatus === "string" ? mergeStateStatus.trim().toLowerCase() : "";
-  const value = typeof mergeable === "string" ? mergeable.trim().toLowerCase() : "";
-  if (state === "blocked" || state === "behind" || state === "dirty") return "blocked";
-  if (state !== "clean") return value === "conflicting" ? "conflicting" : "unknown";
+    typeof mergeStateStatus === "string"
+      ? mergeStateStatus.trim().toLowerCase()
+      : "";
+  const value =
+    typeof mergeable === "string" ? mergeable.trim().toLowerCase() : "";
+  if (state === "blocked" || state === "behind" || state === "dirty")
+    return "blocked";
+  if (state !== "clean")
+    return value === "conflicting" ? "conflicting" : "unknown";
   if (value === "mergeable") return "mergeable";
   if (value === "conflicting") return "conflicting";
   return "unknown";
@@ -2858,12 +2938,18 @@ function errorIndicatesGitHubNotFound(error: unknown): boolean {
   return /\b(?:HTTP\s+)?404\b|\bnot found\b/i.test(stderr);
 }
 
-function readWorkflowStepKind(value: string | undefined): WorkflowStepKind | undefined {
-  if (value === undefined || !WORKFLOW_STEP_KIND_SET.has(value)) return undefined;
+function readWorkflowStepKind(
+  value: string | undefined,
+): WorkflowStepKind | undefined {
+  if (value === undefined || !WORKFLOW_STEP_KIND_SET.has(value))
+    return undefined;
   return value as WorkflowStepKind;
 }
 
-function readRequiredEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
+function readRequiredEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+): string | undefined {
   const value = env[key]?.trim();
   return value && value.length > 0 ? value : undefined;
 }
@@ -2875,13 +2961,13 @@ function readOptionalString(value: unknown): string | undefined {
 }
 
 function readOptionalResultFile(
-  value: unknown
+  value: unknown,
 ): { ok: true; value?: string } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true };
   if (typeof value !== "string" || value.trim().length === 0) {
     return {
       ok: false,
-      error: "Wrapper config `result_file` must be a non-empty string."
+      error: "Wrapper config `result_file` must be a non-empty string.",
     };
   }
   const trimmed = value.trim();
@@ -2896,7 +2982,7 @@ function readOptionalResultFile(
     return {
       ok: false,
       error:
-        "Wrapper config `result_file` must be a relative path inside the iteration artifact directory."
+        "Wrapper config `result_file` must be a relative path inside the iteration artifact directory.",
     };
   }
   return { ok: true, value: trimmed };
@@ -2904,7 +2990,7 @@ function readOptionalResultFile(
 
 function readMergeCleanupTarget(
   value: unknown,
-  kind: WorkflowStepKind
+  kind: WorkflowStepKind,
 ):
   | { ok: true; value?: MergeCleanupTargetIdentity }
   | { ok: false; error: string } {
@@ -2913,13 +2999,13 @@ function readMergeCleanupTarget(
     return {
       ok: false,
       error:
-        "Wrapper config `merge_cleanup` is only supported for the merge-cleanup step."
+        "Wrapper config `merge_cleanup` is only supported for the merge-cleanup step.",
     };
   }
   if (!isRecord(value)) {
     return {
       ok: false,
-      error: "Wrapper config `merge_cleanup` must be an object."
+      error: "Wrapper config `merge_cleanup` must be an object.",
     };
   }
   const pullRequestId = readOptionalString(value["pull_request_id"]);
@@ -2933,47 +3019,46 @@ function readMergeCleanupTarget(
     return {
       ok: false,
       error:
-        "Wrapper config `merge_cleanup` requires pull_request_id, expected_head_sha, and cleanup_branch."
+        "Wrapper config `merge_cleanup` requires pull_request_id, expected_head_sha, and cleanup_branch.",
     };
   }
   if (!/^[0-9a-f]{40}$/i.test(expectedHeadSha)) {
     return {
       ok: false,
       error:
-        "Wrapper config `merge_cleanup.expected_head_sha` must be a 40-character hex SHA."
+        "Wrapper config `merge_cleanup.expected_head_sha` must be a 40-character hex SHA.",
     };
   }
   return {
     ok: true,
-    value: { pullRequestId, expectedHeadSha, cleanupBranch }
+    value: { pullRequestId, expectedHeadSha, cleanupBranch },
   };
 }
 
 function readNoMistakesRunnerProfile(
   value: unknown,
-  kind: WorkflowStepKind
+  kind: WorkflowStepKind,
 ):
-  | { ok: true; value?: NoMistakesRunnerProfile }
-  | { ok: false; error: string } {
+  { ok: true; value?: NoMistakesRunnerProfile } | { ok: false; error: string } {
   if (value === undefined || value === null) {
     if (kind !== "no-mistakes") return { ok: true };
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile` is required for the no-mistakes step."
+        "Wrapper config `runner_profile` is required for the no-mistakes step.",
     };
   }
   if (kind !== "no-mistakes") {
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile` is only supported for the no-mistakes step."
+        "Wrapper config `runner_profile` is only supported for the no-mistakes step.",
     };
   }
   if (!isRecord(value)) {
     return {
       ok: false,
-      error: "Wrapper config `runner_profile` must be an object."
+      error: "Wrapper config `runner_profile` must be an object.",
     };
   }
 
@@ -2982,26 +3067,26 @@ function readNoMistakesRunnerProfile(
     "stdin",
     "agent",
     "required_env",
-    "agent_path"
+    "agent_path",
   ]);
   const unknown = findUnknownKeys(
     value,
     allowed,
     {},
-    "steps.no-mistakes.runner_profile"
+    "steps.no-mistakes.runner_profile",
   );
   if (!unknown.ok) return unknown;
 
   if (value["interface"] !== "axi") {
     return {
       ok: false,
-      error: 'Wrapper config `runner_profile.interface` must be "axi".'
+      error: 'Wrapper config `runner_profile.interface` must be "axi".',
     };
   }
   if (value["stdin"] !== "closed") {
     return {
       ok: false,
-      error: 'Wrapper config `runner_profile.stdin` must be "closed".'
+      error: 'Wrapper config `runner_profile.stdin` must be "closed".',
     };
   }
   const agentValue = readOptionalString(value["agent"]);
@@ -3009,53 +3094,55 @@ function readNoMistakesRunnerProfile(
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile.agent` must be one of claude, codex, opencode, or rovodev."
+        "Wrapper config `runner_profile.agent` must be one of claude, codex, opencode, or rovodev.",
     };
   }
   if (agentValue === "auto") {
     return {
       ok: false,
       error:
-        'Wrapper config `runner_profile.agent` must not be "auto"; choose claude, codex, opencode, or rovodev for deterministic execution.'
+        'Wrapper config `runner_profile.agent` must not be "auto"; choose claude, codex, opencode, or rovodev for deterministic execution.',
     };
   }
   if (!isNoMistakesRunnerAgent(agentValue)) {
     return {
       ok: false,
-      error: `Wrapper config \`runner_profile.agent\` must be one of ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+      error: `Wrapper config \`runner_profile.agent\` must be one of ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`,
     };
   }
 
   const requiredEnv = readOptionalStringArray(
     value["required_env"],
-    "runner_profile.required_env"
+    "runner_profile.required_env",
   );
   if (!requiredEnv.ok) return requiredEnv;
   if (requiredEnv.value.length === 0) {
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile.required_env` must list HOME and PATH, plus any selected-agent environment such as CODEX_HOME for Codex."
+        "Wrapper config `runner_profile.required_env` must list HOME and PATH, plus any selected-agent environment such as CODEX_HOME for Codex.",
     };
   }
-  const invalidEnvName = requiredEnv.value.find((entry) => !isEnvVarName(entry));
+  const invalidEnvName = requiredEnv.value.find(
+    (entry) => !isEnvVarName(entry),
+  );
   if (invalidEnvName !== undefined) {
     return {
       ok: false,
-      error: `Wrapper config \`runner_profile.required_env\` contains invalid environment variable name "${invalidEnvName}".`
+      error: `Wrapper config \`runner_profile.required_env\` contains invalid environment variable name "${invalidEnvName}".`,
     };
   }
   const requiredForAgent = [
     ...REQUIRED_NO_MISTAKES_BASE_ENV,
-    ...REQUIRED_NO_MISTAKES_AGENT_ENV[agentValue]
+    ...REQUIRED_NO_MISTAKES_AGENT_ENV[agentValue],
   ];
   const missingRequired = requiredForAgent.filter(
-    (key) => !requiredEnv.value.includes(key)
+    (key) => !requiredEnv.value.includes(key),
   );
   if (missingRequired.length > 0) {
     return {
       ok: false,
-      error: `Wrapper config \`runner_profile.required_env\` must include ${missingRequired.join(", ")}.`
+      error: `Wrapper config \`runner_profile.required_env\` must include ${missingRequired.join(", ")}.`,
     };
   }
 
@@ -3063,13 +3150,15 @@ function readNoMistakesRunnerProfile(
   if (agentPath === undefined) {
     return {
       ok: false,
-      error: "Wrapper config `runner_profile.agent_path` must be a non-empty string."
+      error:
+        "Wrapper config `runner_profile.agent_path` must be a non-empty string.",
     };
   }
   if (!path.isAbsolute(agentPath)) {
     return {
       ok: false,
-      error: "Wrapper config `runner_profile.agent_path` must be an absolute path."
+      error:
+        "Wrapper config `runner_profile.agent_path` must be an absolute path.",
     };
   }
 
@@ -3080,8 +3169,8 @@ function readNoMistakesRunnerProfile(
       stdin: "closed",
       agent: agentValue,
       requiredEnv: requiredEnv.value,
-      agentPath
-    }
+      agentPath,
+    },
   };
 }
 
@@ -3090,15 +3179,17 @@ function hasParentTraversalSegment(value: string): boolean {
 }
 
 type StringArrayParse =
-  | { ok: true; value: string[] }
-  | { ok: false; error: string };
+  { ok: true; value: string[] } | { ok: false; error: string };
 
-function readOptionalStringArray(value: unknown, field: string): StringArrayParse {
+function readOptionalStringArray(
+  value: unknown,
+  field: string,
+): StringArrayParse {
   if (value === undefined || value === null) return { ok: true, value: [] };
   if (!Array.isArray(value)) {
     return {
       ok: false,
-      error: `Wrapper config \`${field}\` must be an array of strings.`
+      error: `Wrapper config \`${field}\` must be an array of strings.`,
     };
   }
   const out: string[] = [];
@@ -3106,7 +3197,7 @@ function readOptionalStringArray(value: unknown, field: string): StringArrayPars
     if (typeof entry !== "string") {
       return {
         ok: false,
-        error: `Wrapper config \`${field}\` must be an array of strings.`
+        error: `Wrapper config \`${field}\` must be an array of strings.`,
       };
     }
     out.push(entry);
@@ -3115,30 +3206,34 @@ function readOptionalStringArray(value: unknown, field: string): StringArrayPars
 }
 
 function readCwd(
-  value: unknown
-): { ok: true; value: CodingWorkflowWrapperCwd } | { ok: false; error: string } {
+  value: unknown,
+):
+  { ok: true; value: CodingWorkflowWrapperCwd } | { ok: false; error: string } {
   if (value === undefined || value === null) return { ok: true, value: "repo" };
   if (value === "repo" || value === "iteration") return { ok: true, value };
   return {
     ok: false,
-    error: "Wrapper config `cwd` must be either `repo` or `iteration`."
+    error: "Wrapper config `cwd` must be either `repo` or `iteration`.",
   };
 }
 
 function readPositiveInteger(
   value: unknown,
-  fallback: number
+  fallback: number,
 ): { ok: true; value: number } | { ok: false; error: string } {
-  if (value === undefined || value === null) return { ok: true, value: fallback };
+  if (value === undefined || value === null)
+    return { ok: true, value: fallback };
   if (Number.isInteger(value) && typeof value === "number" && value > 0) {
     return { ok: true, value };
   }
-  return { ok: false, error: "Wrapper config `timeout_sec` must be a positive integer." };
+  return {
+    ok: false,
+    error: "Wrapper config `timeout_sec` must be a positive integer.",
+  };
 }
 
 type CommitParse =
-  | { ok: true; value: CommitIntent }
-  | { ok: false; error: string };
+  { ok: true; value: CommitIntent } | { ok: false; error: string };
 
 function readCommit(value: unknown, kind: WorkflowStepKind): CommitParse {
   if (value === undefined || value === null) {
@@ -3150,9 +3245,11 @@ function readCommit(value: unknown, kind: WorkflowStepKind): CommitParse {
   const commit = {
     type: readOptionalString(value["type"]) ?? defaultCommit(kind).type,
     scope: readOptionalString(value["scope"]),
-    subject: readOptionalString(value["subject"]) ?? defaultCommit(kind).subject,
+    subject:
+      readOptionalString(value["subject"]) ?? defaultCommit(kind).subject,
     body: readOptionalString(value["body"]) ?? "",
-    breaking: typeof value["breaking"] === "boolean" ? value["breaking"] : false
+    breaking:
+      typeof value["breaking"] === "boolean" ? value["breaking"] : false,
   };
   const normalized = normalizeRunnerResult({
     success: true,
@@ -3161,7 +3258,7 @@ function readCommit(value: unknown, kind: WorkflowStepKind): CommitParse {
     key_learnings: [],
     remaining_work: [],
     goal_complete: false,
-    commit
+    commit,
   });
   if (!normalized.ok) return { ok: false, error: normalized.error };
   return { ok: true, value: normalized.value.commit };
@@ -3173,7 +3270,7 @@ function defaultCommit(kind: WorkflowStepKind): CommitIntent {
     scope: undefined,
     subject: `complete ${kind}`,
     body: "",
-    breaking: false
+    breaking: false,
   };
 }
 

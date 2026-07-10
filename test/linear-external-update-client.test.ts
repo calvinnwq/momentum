@@ -5,14 +5,14 @@ import {
   previewExternalUpdate,
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterPreview,
-  type ExternalUpdateAdapterTarget
+  type ExternalUpdateAdapterTarget,
 } from "../src/adapters/external-update-adapter.js";
 import {
   DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT,
   LINEAR_EXTERNAL_UPDATE_RESULT_CODES,
   buildLinearExternalUpdateClient,
   type FetchLike,
-  type LinearExternalUpdateInput
+  type LinearExternalUpdateInput,
 } from "../src/adapters/linear-external-update-client.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
@@ -26,7 +26,7 @@ function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
       goalState: "completed",
       evidenceType: "no_mistakes_complete",
       sourceExternalId: "linear-issue-1",
-      sourceExternalKey: "NGX-1"
+      sourceExternalKey: "NGX-1",
     },
     reason:
       "Goal completed with verification evidence (no_mistakes_complete); source item NGX-1 appears satisfied.",
@@ -43,12 +43,12 @@ function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
     appliedAt: null,
     skippedAt: null,
     canceledAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function buildTarget(
-  overrides: Partial<ExternalUpdateAdapterTarget> = {}
+  overrides: Partial<ExternalUpdateAdapterTarget> = {},
 ): ExternalUpdateAdapterTarget {
   return {
     adapterKind: "linear",
@@ -56,32 +56,35 @@ function buildTarget(
     externalKey: "NGX-1",
     url: "https://linear.app/example/issue/NGX-1",
     title: "Example issue title",
-    ...overrides
+    ...overrides,
   };
 }
 
 function buildPreviewInput(
-  overrides: Partial<ExternalUpdateAdapterInput> = {}
+  overrides: Partial<ExternalUpdateAdapterInput> = {},
 ): ExternalUpdateAdapterInput {
   const base: ExternalUpdateAdapterInput = {
     intent: buildIntent(),
     target: buildTarget(),
-    operator: { reason: "Operator confirmed Goal completion.", actor: "calvin" },
+    operator: {
+      reason: "Operator confirmed Goal completion.",
+      actor: "calvin",
+    },
     policy: {
       intentApplyPolicy: "external_apply_allowed",
-      allowStatusMutation: false
-    }
+      allowStatusMutation: false,
+    },
   };
   return { ...base, ...overrides };
 }
 
 function buildPreview(
-  overrides: Partial<ExternalUpdateAdapterInput> = {}
+  overrides: Partial<ExternalUpdateAdapterInput> = {},
 ): ExternalUpdateAdapterPreview {
   const result = previewExternalUpdate(buildPreviewInput(overrides));
   if (!result.ok) {
     throw new Error(
-      `expected preview to succeed for test setup; got ${result.code}: ${result.error}`
+      `expected preview to succeed for test setup; got ${result.code}: ${result.error}`,
     );
   }
   return result.preview;
@@ -112,12 +115,12 @@ function buildMockFetch(responses: MockGraphqlResponse[]): {
       endpoint: input,
       method: init.method,
       headers: init.headers,
-      body
+      body,
     });
     const next = responses[cursor++];
     if (!next) {
       throw new Error(
-        `mock fetch ran out of responses on call #${calls.length}; query=${JSON.stringify(body["query"]).slice(0, 80)}`
+        `mock fetch ran out of responses on call #${calls.length}; query=${JSON.stringify(body["query"]).slice(0, 80)}`,
       );
     }
     if (next.kind === "hang") {
@@ -127,7 +130,7 @@ function buildMockFetch(responses: MockGraphqlResponse[]): {
       return {
         ok: next.status >= 200 && next.status < 300,
         status: next.status,
-        text: () => new Promise<string>(() => {})
+        text: () => new Promise<string>(() => {}),
       };
     }
     if (next.kind === "json") {
@@ -135,13 +138,13 @@ function buildMockFetch(responses: MockGraphqlResponse[]): {
       return {
         ok: next.status >= 200 && next.status < 300,
         status: next.status,
-        text: async () => serialized
+        text: async () => serialized,
       };
     }
     return {
       ok: next.status >= 200 && next.status < 300,
       status: next.status,
-      text: async () => next.text
+      text: async () => next.text,
     };
   };
   return { fetch, calls };
@@ -168,15 +171,15 @@ function issueLookupBody(options: {
           nodes: (options.comments ?? []).map((c) => ({
             id: c.id,
             body: c.body,
-            url: c.url ?? null
+            url: c.url ?? null,
           })),
           pageInfo: options.commentsPageInfo ?? {
             hasNextPage: false,
-            endCursor: null
-          }
-        }
-      }
-    }
+            endCursor: null,
+          },
+        },
+      },
+    },
   };
 }
 
@@ -191,10 +194,11 @@ function commentCreateBody(options: {
         success: options.success ?? true,
         comment: {
           id: options.id ?? "comment-1",
-          url: options.url ?? "https://linear.app/example/issue/NGX-1#comment-1"
-        }
-      }
-    }
+          url:
+            options.url ?? "https://linear.app/example/issue/NGX-1#comment-1",
+        },
+      },
+    },
   };
 }
 
@@ -208,10 +212,10 @@ function issueUpdateBody(options: {
         success: options.success ?? true,
         issue: {
           id: "linear-issue-1",
-          state: options.state ?? { id: "state-done", name: "Done" }
-        }
-      }
-    }
+          state: options.state ?? { id: "state-done", name: "Done" },
+        },
+      },
+    },
   };
 }
 
@@ -221,9 +225,9 @@ function workflowStatesBody(options: {
   return {
     data: {
       workflowStates: {
-        nodes: options.nodes
-      }
-    }
+        nodes: options.nodes,
+      },
+    },
   };
 }
 
@@ -238,15 +242,15 @@ function issueCommentsPageBody(options: {
           nodes: (options.comments ?? []).map((c) => ({
             id: c.id,
             body: c.body,
-            url: c.url ?? null
+            url: c.url ?? null,
           })),
           pageInfo: options.pageInfo ?? {
             hasNextPage: false,
-            endCursor: null
-          }
-        }
-      }
-    }
+            endCursor: null,
+          },
+        },
+      },
+    },
   };
 }
 
@@ -261,7 +265,7 @@ describe("LINEAR_EXTERNAL_UPDATE_RESULT_CODES", () => {
       "write_timeout",
       "malformed_response",
       "validation_failed",
-      "adapter_threw"
+      "adapter_threw",
     ]);
   });
 });
@@ -281,13 +285,13 @@ describe("buildLinearExternalUpdateClient — credentials are never persisted", 
       {
         kind: "json",
         status: 200,
-        body: commentCreateBody({ id: "comment-1" })
-      }
+        body: commentCreateBody({ id: "comment-1" }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     await client.apply({ preview: buildPreview() });
     for (const call of calls) {
@@ -307,15 +311,15 @@ describe("buildLinearExternalUpdateClient — comment success", () => {
         status: 200,
         body: commentCreateBody({
           id: "comment-xyz",
-          url: "https://linear.app/example/issue/NGX-1#comment-xyz"
-        })
-      }
+          url: "https://linear.app/example/issue/NGX-1#comment-xyz",
+        }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview });
@@ -325,18 +329,18 @@ describe("buildLinearExternalUpdateClient — comment success", () => {
     expect(result.issue).toEqual({
       id: "linear-issue-1",
       key: "NGX-1",
-      url: "https://linear.app/example/issue/NGX-1"
+      url: "https://linear.app/example/issue/NGX-1",
     });
     expect(result.comment).toEqual({
       id: "comment-xyz",
-      url: "https://linear.app/example/issue/NGX-1#comment-xyz"
+      url: "https://linear.app/example/issue/NGX-1#comment-xyz",
     });
     expect(result.status).toEqual({
       transitioned: false,
       previousStateId: "state-todo",
       previousStateName: "Todo",
       nextStateId: null,
-      nextStateName: null
+      nextStateName: null,
     });
     expect(result.idempotencyMarker).toBe(preview.idempotencyMarker);
 
@@ -353,14 +357,14 @@ describe("buildLinearExternalUpdateClient — comment success", () => {
   it("targets the configured endpoint or the default Linear endpoint", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
-      { kind: "json", status: 200, body: commentCreateBody({}) }
+      { kind: "json", status: 200, body: commentCreateBody({}) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
       endpoint: "http://127.0.0.1:0/momentum-mock/graphql",
-      fetch
+      fetch,
     });
 
     await client.apply({ preview: buildPreview() });
@@ -375,13 +379,13 @@ describe("buildLinearExternalUpdateClient — comment-only default", () => {
   it("does not issue an issueUpdate when no status mutation is configured", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
-      { kind: "json", status: 200, body: commentCreateBody({}) }
+      { kind: "json", status: 200, body: commentCreateBody({}) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview: buildPreview() });
@@ -405,20 +409,20 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
         kind: "json",
         status: 200,
         body: issueUpdateBody({
-          state: { id: "state-done", name: "Done" }
-        })
-      }
+          state: { id: "state-done", name: "Done" },
+        }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -427,14 +431,14 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
       previousStateId: "state-todo",
       previousStateName: "Todo",
       nextStateId: "state-done",
-      nextStateName: "Done"
+      nextStateName: "Done",
     });
 
     const lastCall = calls[calls.length - 1]!;
     expect(String(lastCall.body["query"])).toContain("issueUpdate");
     expect(lastCall.body["variables"]).toEqual({
       id: "linear-issue-1",
-      input: { stateId: "state-done" }
+      input: { stateId: "state-done" },
     });
   });
 
@@ -445,21 +449,21 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
         kind: "json",
         status: 200,
         body: issueLookupBody({
-          state: { id: "state-done", name: "Done" }
-        })
+          state: { id: "state-done", name: "Done" },
+        }),
       },
-      { kind: "json", status: 200, body: commentCreateBody({}) }
+      { kind: "json", status: 200, body: commentCreateBody({}) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview,
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -469,11 +473,15 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
       previousStateId: "state-done",
       previousStateName: "Done",
       nextStateId: null,
-      nextStateName: null
+      nextStateName: null,
     });
     expect(calls).toHaveLength(2);
     expect(String(calls[1]?.body["query"])).toContain("commentCreate");
-    expect(calls.every((call) => !String(call.body["query"]).includes("issueUpdate"))).toBe(true);
+    expect(
+      calls.every(
+        (call) => !String(call.body["query"]).includes("issueUpdate"),
+      ),
+    ).toBe(true);
   });
 
   it("rejects issueUpdate when the returned state is missing", async () => {
@@ -487,22 +495,22 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
           data: {
             issueUpdate: {
               success: true,
-              issue: { id: "linear-issue-1", state: null }
-            }
-          }
-        }
-      }
+              issue: { id: "linear-issue-1", state: null },
+            },
+          },
+        },
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -510,7 +518,7 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
     expect(result.error).toContain("issue.state.id");
     expect(result.partial?.comment).toEqual({
       id: "comment-1",
-      url: "https://linear.app/example/issue/NGX-1#comment-1"
+      url: "https://linear.app/example/issue/NGX-1#comment-1",
     });
   });
 
@@ -521,19 +529,21 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
       {
         kind: "json",
         status: 200,
-        body: issueUpdateBody({ state: { id: "state-blocked", name: "Blocked" } })
-      }
+        body: issueUpdateBody({
+          state: { id: "state-blocked", name: "Blocked" },
+        }),
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -549,26 +559,26 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
         kind: "json",
         status: 200,
         body: workflowStatesBody({
-          nodes: [{ id: "state-done", name: "Done" }]
-        })
+          nodes: [{ id: "state-done", name: "Done" }],
+        }),
       },
       { kind: "json", status: 200, body: commentCreateBody({}) },
       {
         kind: "json",
         status: 200,
-        body: issueUpdateBody({ state: { id: "state-done", name: "Done" } })
-      }
+        body: issueUpdateBody({ state: { id: "state-done", name: "Done" } }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_name", stateName: "Done" }
+      statusMutation: { kind: "by_name", stateName: "Done" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -580,7 +590,7 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
     expect(String(workflowCall.body["query"])).toContain("workflowStates");
     expect(workflowCall.body["variables"]).toEqual({
       teamId: "team-1",
-      name: "Done"
+      name: "Done",
     });
   });
 });
@@ -589,27 +599,27 @@ describe("buildLinearExternalUpdateClient — ambiguous / missing status target"
   it("returns target_state_ambiguous when no workflow state matches the requested name", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
-      { kind: "json", status: 200, body: workflowStatesBody({ nodes: [] }) }
+      { kind: "json", status: 200, body: workflowStatesBody({ nodes: [] }) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_name", stateName: "DoesNotExist" }
+      statusMutation: { kind: "by_name", stateName: "DoesNotExist" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("target_state_ambiguous");
     expect(result.error).toContain("DoesNotExist");
     expect(calls).toHaveLength(2);
-    expect(calls.every((c) => !String(c.body["query"]).includes("commentCreate"))).toBe(
-      true
-    );
+    expect(
+      calls.every((c) => !String(c.body["query"]).includes("commentCreate")),
+    ).toBe(true);
   });
 
   it("returns target_state_ambiguous when multiple workflow states match the requested name", async () => {
@@ -621,21 +631,21 @@ describe("buildLinearExternalUpdateClient — ambiguous / missing status target"
         body: workflowStatesBody({
           nodes: [
             { id: "state-done-1", name: "Done" },
-            { id: "state-done-2", name: "Done" }
-          ]
-        })
-      }
+            { id: "state-done-2", name: "Done" },
+          ],
+        }),
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_name", stateName: "Done" }
+      statusMutation: { kind: "by_name", stateName: "Done" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -654,24 +664,24 @@ describe("buildLinearExternalUpdateClient — ambiguous / missing status target"
           team: null,
           comments: {
             nodes: [],
-            pageInfo: { hasNextPage: false, endCursor: null }
-          }
-        }
-      }
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
     };
     const fetchResponses: MockGraphqlResponse[] = [
-      { kind: "json", status: 200, body: issueWithNoTeam }
+      { kind: "json", status: 200, body: issueWithNoTeam },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview: buildPreview(),
-      statusMutation: { kind: "by_name", stateName: "In Progress" }
+      statusMutation: { kind: "by_name", stateName: "In Progress" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -693,17 +703,17 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
             {
               id: "earlier-comment",
               body: `Some prior body\n${preview.idempotencyMarker}\n`,
-              url: "https://linear.app/example/issue/NGX-1#earlier-comment"
-            }
-          ]
-        })
-      }
+              url: "https://linear.app/example/issue/NGX-1#earlier-comment",
+            },
+          ],
+        }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview });
@@ -712,7 +722,7 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     expect(result.alreadyApplied).toBe(true);
     expect(result.comment).toEqual({
       id: "earlier-comment",
-      url: "https://linear.app/example/issue/NGX-1#earlier-comment"
+      url: "https://linear.app/example/issue/NGX-1#earlier-comment",
     });
     expect(calls).toHaveLength(1);
     expect(String(calls[0]?.body["query"])).toContain("issue(id: $id)");
@@ -726,8 +736,8 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
         status: 200,
         body: issueLookupBody({
           comments: [{ id: "comment-1", body: "first page" }],
-          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" }
-        })
+          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+        }),
       },
       {
         kind: "json",
@@ -737,17 +747,17 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
             {
               id: "comment-51",
               body: `later page body\n${preview.idempotencyMarker}`,
-              url: "https://linear.app/example/issue/NGX-1#comment-51"
-            }
-          ]
-        })
-      }
+              url: "https://linear.app/example/issue/NGX-1#comment-51",
+            },
+          ],
+        }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview });
@@ -756,15 +766,15 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     expect(result.alreadyApplied).toBe(true);
     expect(result.comment).toEqual({
       id: "comment-51",
-      url: "https://linear.app/example/issue/NGX-1#comment-51"
+      url: "https://linear.app/example/issue/NGX-1#comment-51",
     });
     expect(calls).toHaveLength(2);
     expect(String(calls[1]?.body["query"])).toContain(
-      "comments(first: 50, after: $after)"
+      "comments(first: 50, after: $after)",
     );
     expect(calls[1]?.body["variables"]).toEqual({
       id: "linear-issue-1",
-      after: "cursor-1"
+      after: "cursor-1",
     });
   });
 
@@ -779,27 +789,27 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
             {
               id: "earlier-comment",
               body: `Some prior body\n${preview.idempotencyMarker}\n`,
-              url: "https://linear.app/example/issue/NGX-1#earlier-comment"
-            }
-          ]
-        })
+              url: "https://linear.app/example/issue/NGX-1#earlier-comment",
+            },
+          ],
+        }),
       },
       {
         kind: "json",
         status: 200,
-        body: issueUpdateBody({ state: { id: "state-done", name: "Done" } })
-      }
+        body: issueUpdateBody({ state: { id: "state-done", name: "Done" } }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview,
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -809,13 +819,13 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
       previousStateId: "state-todo",
       previousStateName: "Todo",
       nextStateId: "state-done",
-      nextStateName: "Done"
+      nextStateName: "Done",
     });
     expect(calls).toHaveLength(2);
     expect(String(calls[1]?.body["query"])).toContain("issueUpdate");
     expect(calls[1]?.body["variables"]).toEqual({
       id: "linear-issue-1",
-      input: { stateId: "state-done" }
+      input: { stateId: "state-done" },
     });
   });
 
@@ -831,22 +841,22 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
             {
               id: "earlier-comment",
               body: `Some prior body\n${preview.idempotencyMarker}\n`,
-              url: "https://linear.app/example/issue/NGX-1#earlier-comment"
-            }
-          ]
-        })
-      }
+              url: "https://linear.app/example/issue/NGX-1#earlier-comment",
+            },
+          ],
+        }),
+      },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({
       preview,
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -856,11 +866,10 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
       previousStateId: "state-done",
       previousStateName: "Done",
       nextStateId: null,
-      nextStateName: null
+      nextStateName: null,
     });
     expect(calls).toHaveLength(1);
   });
-
 
   it("returns malformed_response instead of posting when issue lookup comments are malformed", async () => {
     const malformedIssue = issueLookupBody({}) as {
@@ -869,19 +878,19 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     malformedIssue.data.issue.comments = { nodes: [] };
 
     const { fetch, calls } = buildMockFetch([
-      { kind: "json", status: 200, body: malformedIssue }
+      { kind: "json", status: 200, body: malformedIssue },
     ]);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "malformed_response" });
     expect(calls).toHaveLength(1);
-    expect(calls.some((c) => String(c.body["query"]).includes("commentCreate"))).toBe(
-      false
-    );
+    expect(
+      calls.some((c) => String(c.body["query"]).includes("commentCreate")),
+    ).toBe(false);
   });
 
   it("returns malformed_response instead of posting when a later comments page is malformed", async () => {
@@ -891,8 +900,8 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
         status: 200,
         body: issueLookupBody({
           comments: [{ id: "comment-1", body: "first page" }],
-          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" }
-        })
+          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+        }),
       },
       {
         kind: "json",
@@ -902,24 +911,24 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
             issue: {
               comments: {
                 nodes: [{ id: "comment-51" }],
-                pageInfo: { hasNextPage: false, endCursor: null }
-              }
-            }
-          }
-        }
-      }
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        },
+      },
     ]);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
 
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "malformed_response" });
     expect(calls).toHaveLength(2);
-    expect(calls.some((c) => String(c.body["query"]).includes("commentCreate"))).toBe(
-      false
-    );
+    expect(
+      calls.some((c) => String(c.body["query"]).includes("commentCreate")),
+    ).toBe(false);
   });
 
   it("embeds the marker the boundary built into the comment body it posts", async () => {
@@ -927,24 +936,24 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     const expectedMarker = buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: "update_intent_test_1",
-      payload: buildIntent().payload
+      payload: buildIntent().payload,
     });
     expect(preview.idempotencyMarker).toBe(expectedMarker);
 
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
-      { kind: "json", status: 200, body: commentCreateBody({}) }
+      { kind: "json", status: 200, body: commentCreateBody({}) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     await client.apply({ preview });
 
     const commentBody = (
-      calls[1]?.body["variables"] as { input: { body: string } }
+      calls[1]!.body["variables"] as { input: { body: string } }
     ).input.body;
     expect(commentBody).toContain(expectedMarker);
   });
@@ -953,12 +962,16 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
 describe("buildLinearExternalUpdateClient — auth failure", () => {
   it("returns auth_unavailable on HTTP 401", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
-      { kind: "json", status: 401, body: { errors: [{ message: "unauthorized" }] } }
+      {
+        kind: "json",
+        status: 401,
+        body: { errors: [{ message: "unauthorized" }] },
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "auth_unavailable" });
@@ -973,16 +986,16 @@ describe("buildLinearExternalUpdateClient — auth failure", () => {
           errors: [
             {
               message: "API key is required",
-              extensions: { code: "AUTHENTICATION_ERROR" }
-            }
-          ]
-        }
-      }
+              extensions: { code: "AUTHENTICATION_ERROR" },
+            },
+          ],
+        },
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "auth_unavailable" });
@@ -999,17 +1012,17 @@ describe("buildLinearExternalUpdateClient — GraphQL validation error", () => {
         body: {
           errors: [
             {
-              message: "Argument \"input\" has invalid value",
-              extensions: { code: "ARGUMENT_VALIDATION_FAILED" }
-            }
-          ]
-        }
-      }
+              message: 'Argument "input" has invalid value',
+              extensions: { code: "ARGUMENT_VALIDATION_FAILED" },
+            },
+          ],
+        },
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result.ok).toBe(false);
@@ -1024,13 +1037,13 @@ describe("buildLinearExternalUpdateClient — GraphQL validation error", () => {
       {
         kind: "json",
         status: 200,
-        body: commentCreateBody({ success: false })
-      }
+        body: commentCreateBody({ success: false }),
+      },
     ];
     const { fetch } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "write_rejected" });
@@ -1044,39 +1057,39 @@ describe("buildLinearExternalUpdateClient — network / timeout failure", () => 
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
       fetch,
-      requestTimeoutMs: 10
+      requestTimeoutMs: 10,
     });
 
     const result = await Promise.race([
       client.apply({ preview: buildPreview() }),
       new Promise<"unsettled">((resolve) =>
-        setTimeout(() => resolve("unsettled"), 100)
-      )
+        setTimeout(() => resolve("unsettled"), 100),
+      ),
     ]);
     expect(result).not.toBe("unsettled");
     expect(result).toMatchObject({
       ok: false,
       code: "write_timeout",
-      error: expect.stringContaining("timed out after 10ms")
+      error: expect.stringContaining("timed out after 10ms"),
     });
   });
 
   it("returns write_timeout when the response body read stalls past the timeout", async () => {
     const responses: MockGraphqlResponse[] = [
-      { kind: "hang-body", status: 200 }
+      { kind: "hang-body", status: 200 },
     ];
     const { fetch } = buildMockFetch(responses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
       fetch,
-      requestTimeoutMs: 10
+      requestTimeoutMs: 10,
     });
 
     const result = await Promise.race([
       client.apply({ preview: buildPreview() }),
       new Promise<"unsettled">((resolve) =>
-        setTimeout(() => resolve("unsettled"), 100)
-      )
+        setTimeout(() => resolve("unsettled"), 100),
+      ),
     ]);
     expect(result).not.toBe("unsettled");
     expect(result).toMatchObject({ ok: false, code: "write_timeout" });
@@ -1091,13 +1104,13 @@ describe("buildLinearExternalUpdateClient — transport error", () => {
     };
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({
       ok: false,
       code: "adapter_threw",
-      error: expect.stringContaining("ECONNREFUSED")
+      error: expect.stringContaining("ECONNREFUSED"),
     });
   });
 });
@@ -1105,12 +1118,12 @@ describe("buildLinearExternalUpdateClient — transport error", () => {
 describe("buildLinearExternalUpdateClient — malformed JSON", () => {
   it("returns malformed_response when the body is not valid JSON", async () => {
     const responses: MockGraphqlResponse[] = [
-      { kind: "text", status: 200, text: "<html>oops</html>" }
+      { kind: "text", status: 200, text: "<html>oops</html>" },
     ];
     const { fetch } = buildMockFetch(responses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "malformed_response" });
@@ -1121,12 +1134,12 @@ describe("buildLinearExternalUpdateClient — missing target", () => {
   it("returns target_missing when the preview has no externalId", async () => {
     const preview: ExternalUpdateAdapterPreview = {
       ...buildPreview(),
-      target: { ...buildTarget(), externalId: "" }
+      target: { ...buildTarget(), externalId: "" },
     };
     const { fetch, calls } = buildMockFetch([]);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview });
     expect(result).toMatchObject({ ok: false, code: "target_missing" });
@@ -1135,12 +1148,12 @@ describe("buildLinearExternalUpdateClient — missing target", () => {
 
   it("returns target_missing when the Linear API responds with issue=null", async () => {
     const responses: MockGraphqlResponse[] = [
-      { kind: "json", status: 200, body: { data: { issue: null } } }
+      { kind: "json", status: 200, body: { data: { issue: null } } },
     ];
     const { fetch } = buildMockFetch(responses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "target_missing" });
@@ -1151,12 +1164,12 @@ describe("buildLinearExternalUpdateClient — input validation", () => {
   it("returns validation_failed when the preview adapter kind is not linear", async () => {
     const preview: ExternalUpdateAdapterPreview = {
       ...buildPreview(),
-      adapterKind: "github"
+      adapterKind: "github",
     };
     const { fetch, calls } = buildMockFetch([]);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview });
     expect(result).toMatchObject({ ok: false, code: "validation_failed" });
@@ -1166,12 +1179,12 @@ describe("buildLinearExternalUpdateClient — input validation", () => {
   it("returns validation_failed when the commentBody does not embed the marker", async () => {
     const preview: ExternalUpdateAdapterPreview = {
       ...buildPreview(),
-      commentBody: "lorem ipsum without marker"
+      commentBody: "lorem ipsum without marker",
     };
     const { fetch } = buildMockFetch([]);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch
+      fetch,
     });
     const result = await client.apply({ preview });
     expect(result).toMatchObject({ ok: false, code: "validation_failed" });
@@ -1182,13 +1195,13 @@ describe("buildLinearExternalUpdateClient — test harness guard", () => {
   it("never targets the real api.linear.app endpoint in any test in this file", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
-      { kind: "json", status: 200, body: commentCreateBody({}) }
+      { kind: "json", status: 200, body: commentCreateBody({}) },
     ];
     const { fetch, calls } = buildMockFetch(fetchResponses);
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
       endpoint: "http://127.0.0.1:0/momentum-mock/graphql",
-      fetch
+      fetch,
     });
     await client.apply({ preview: buildPreview() });
     for (const call of calls) {
@@ -1198,19 +1211,19 @@ describe("buildLinearExternalUpdateClient — test harness guard", () => {
 
   it("fails fast if a test inadvertently omits the mock fetch and the default endpoint is api.linear.app", () => {
     expect(DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT).toBe(
-      "https://api.linear.app/graphql"
+      "https://api.linear.app/graphql",
     );
     const guard: FetchLike = async (input) => {
       if (/api\.linear\.app/.test(input)) {
         throw new Error(
-          `test guard tripped: real api.linear.app calls are forbidden (target was ${input})`
+          `test guard tripped: real api.linear.app calls are forbidden (target was ${input})`,
         );
       }
       throw new Error("test guard tripped: unexpected fetch target");
     };
     const client = buildLinearExternalUpdateClient({
       apiKey: "lin_api_secret",
-      fetch: guard
+      fetch: guard,
     });
     expect(client).toBeDefined();
   });
@@ -1220,7 +1233,7 @@ describe("LinearExternalUpdateInput type sanity", () => {
   it("accepts a status mutation config on the input shape (compile-time check)", () => {
     const input: LinearExternalUpdateInput = {
       preview: buildPreview(),
-      statusMutation: { kind: "by_id", stateId: "state-done" }
+      statusMutation: { kind: "by_id", stateId: "state-done" },
     };
     expect(input.statusMutation?.kind).toBe("by_id");
   });

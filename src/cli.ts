@@ -4,11 +4,11 @@ import {
   renderHelp,
   usageError,
   write,
-  type CliIo
+  type CliIo,
 } from "./renderers/cli-output.js";
 import {
   createMomentumCommandRegistry,
-  dispatchMomentumCommand
+  dispatchMomentumCommand,
 } from "./commands/index.js";
 import { source } from "./commands/source/index.js";
 import { project } from "./commands/project/index.js";
@@ -26,25 +26,25 @@ import {
   emitDaemonStatusFailure,
   emitDaemonStopFailure,
   emitDaemonStopSuccess,
-  summarizeExistingDaemonRun
+  summarizeExistingDaemonRun,
 } from "./renderers/daemon.js";
 import {
   emitRecoveryClear,
-  emitRecoveryClearDataDirFailure
+  emitRecoveryClearDataDirFailure,
 } from "./renderers/recovery.js";
 import {
   emitDoctor,
   type DoctorEvidencePayload,
   type DoctorExternalApplyPayload,
   type DoctorPolicyPayload,
-  type DoctorSourcesPayload
+  type DoctorSourcesPayload,
 } from "./renderers/doctor.js";
-import { isUniqueViolation, openDb, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, openDb } from "./adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "./config/data-dir.js";
 import { loadDaemonStatus } from "./core/daemon/status.js";
 import {
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
-  DEFAULT_DAEMON_STALE_AFTER_MS
+  DEFAULT_DAEMON_STALE_AFTER_MS,
 } from "./config/daemon-defaults.js";
 import {
   getActiveDaemonRun,
@@ -52,50 +52,50 @@ import {
   getLatestDaemonRun,
   requestDaemonRunImmediateStop,
   requestDaemonRunStop,
-  startDaemonRun
+  startDaemonRun,
 } from "./core/daemon/runs.js";
 import {
   runDaemonLoop,
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
-  DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
+  DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
 } from "./core/daemon/loop.js";
 import {
   runStartupRecovery,
-  type StartupRecoveryResult
+  type StartupRecoveryResult,
 } from "./core/daemon/stale-recovery.js";
 import {
   clearGoalManualRecoveryGuarded,
-  type ClearGoalManualRecoveryGuardedResult
+  type ClearGoalManualRecoveryGuardedResult,
 } from "./core/goal/recovery.js";
 import {
   BUILTIN_RUNNER_KINDS,
   DEFAULT_RUNNER_KIND,
   buildRunnerProfile,
-  safeRunnerProfileSummary
+  safeRunnerProfileSummary,
 } from "./core/executors/runner/profile.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,
-  resolveIntentApplyPolicy
+  resolveIntentApplyPolicy,
 } from "./core/intent/policy.js";
 import {
   listSourceReconciliationRuns,
-  type SourceReconciliationRun
+  type SourceReconciliationRun,
 } from "./core/source/reconciliation-runs.js";
 import { type LinearReconciliationClient } from "./core/source/reconciliation.js";
 import {
   summarizeEvidenceRecords,
-  type EvidenceRecordsSummary
+  type EvidenceRecordsSummary,
 } from "./core/evidence/records.js";
 import { executeWorkflowStepDispatch } from "./core/workflow/dispatch/execute.js";
 import {
   resolveDaemonWorkflowStepDispatch,
-  type DaemonWorkflowDispatchResolution
+  type DaemonWorkflowDispatchResolution,
 } from "./core/daemon/workflow-dispatch.js";
 import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,
-  listIntentApplyAudits
+  listIntentApplyAudits,
 } from "./core/intent/apply-audits.js";
 import { type LinearExternalUpdateClient } from "./adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "./adapters/linear-issue-refresh.js";
@@ -126,13 +126,13 @@ export type LinearIssueRefreshClientFactoryInput = {
 
 export type CliDeps = {
   buildLinearReconciliationClient?: (
-    input: LinearReconciliationClientFactoryInput
+    input: LinearReconciliationClientFactoryInput,
   ) => LinearReconciliationClient;
   buildLinearExternalUpdateClient?: (
-    input: LinearExternalUpdateClientFactoryInput
+    input: LinearExternalUpdateClientFactoryInput,
   ) => LinearExternalUpdateClient;
   buildLinearIssueRefreshClient?: (
-    input: LinearIssueRefreshClientFactoryInput
+    input: LinearIssueRefreshClientFactoryInput,
   ) => LinearIssueRefreshClient | null;
   openClawWatchOnce?: OpenClawWatchOnce;
 };
@@ -200,7 +200,7 @@ type ParsedFlags = {
 export async function runCli(
   argv: string[],
   io: CliIo = defaultIo(),
-  deps: CliDeps = {}
+  deps: CliDeps = {},
 ): Promise<number> {
   const parsed = parseFlags(argv);
   if (parsed.error) {
@@ -209,7 +209,12 @@ export async function runCli(
 
   const [command, subcommand] = parsed.args;
 
-  if (!command || command === "help" || command === "--help" || command === "-h") {
+  if (
+    !command ||
+    command === "help" ||
+    command === "--help" ||
+    command === "-h"
+  ) {
     write(io.stdout, renderHelp());
     return 0;
   }
@@ -220,14 +225,21 @@ export async function runCli(
   }
 
   if (parsed.now && !(command === "daemon" && subcommand === "stop")) {
-    return usageError("--now is only supported by `momentum daemon stop`.", parsed, io);
+    return usageError(
+      "--now is only supported by `momentum daemon stop`.",
+      parsed,
+      io,
+    );
   }
 
-  if (parsed.externalApply && !(command === "intent" && subcommand === "apply")) {
+  if (
+    parsed.externalApply &&
+    !(command === "intent" && subcommand === "apply")
+  ) {
     return usageError(
       "--external-apply is only supported by `momentum intent apply`.",
       parsed,
-      io
+      io,
     );
   }
 
@@ -242,21 +254,25 @@ export async function runCli(
     return usageError(
       "--advance is only supported by `momentum workflow run monitor`.",
       parsed,
-      io
+      io,
     );
   }
 
-  const commandRegistry = createMomentumCommandRegistry<ParsedFlags, CliIo, CliDeps>({
+  const commandRegistry = createMomentumCommandRegistry<
+    ParsedFlags,
+    CliIo,
+    CliDeps
+  >({
     doctor,
     extraRoutes: [
       { command: "workflow", run: workflow },
-      { command: "openclaw", run: openclaw }
-    ]
+      { command: "openclaw", run: openclaw },
+    ],
   });
   const routedCommand = await dispatchMomentumCommand(commandRegistry, {
     parsed,
     io,
-    deps
+    deps,
   });
   if (routedCommand.handled) {
     return routedCommand.code;
@@ -282,7 +298,6 @@ export async function runCli(
     return evidence(parsed, io);
   }
 
-
   if (command === "intent") {
     return intent(parsed, io, deps);
   }
@@ -290,15 +305,13 @@ export async function runCli(
   return usageError(`Unknown command: ${command}`, parsed, io);
 }
 
-
-
 function recovery(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
       "Missing required subcommand for recovery. Expected: clear.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "clear") {
@@ -313,14 +326,14 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       "Missing required <goal-id> for recovery clear.",
       parsed,
-      io
+      io,
     );
   }
   if (parsed.args.length > 3) {
     return usageError(
       `Unexpected argument for recovery clear: ${parsed.args[3]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -334,7 +347,7 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitRecoveryClearDataDirFailure(parsed, io, {
       goalId,
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -342,7 +355,7 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
   let result: ClearGoalManualRecoveryGuardedResult;
   try {
     const input: Parameters<typeof clearGoalManualRecoveryGuarded>[1] = {
-      goalId
+      goalId,
     };
     if (parsed.reason !== undefined && parsed.reason.length > 0) {
       input.operatorReason = parsed.reason;
@@ -358,14 +371,14 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
 function daemon(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps
+  deps: CliDeps,
 ): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
       "Missing required subcommand for daemon. Expected: start, stop, status.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "status") {
@@ -385,7 +398,7 @@ function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for daemon status: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -397,7 +410,7 @@ function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
   if (!result.ok) {
     return emitDaemonStatusFailure(parsed, io, {
       code: result.code,
-      message: result.error
+      message: result.error,
     });
   }
 
@@ -407,13 +420,13 @@ function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
 async function daemonStart(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps
+  deps: CliDeps,
 ): Promise<number> {
   if (parsed.args.length > 2) {
     return usageError(
       `Unexpected argument for daemon start: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -427,7 +440,7 @@ async function daemonStart(
   } catch (err) {
     return emitDaemonStartFailure(parsed, io, {
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -442,7 +455,7 @@ async function daemonStart(
     return usageError(
       "--poll-interval-ms requires --max-loop-iterations or --max-idle-cycles.",
       parsed,
-      io
+      io,
     );
   }
 
@@ -458,7 +471,7 @@ async function daemonStart(
       preLoopStartupRecovery = runStartupRecovery(db, {
         now,
         graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
-        dataDir
+        dataDir,
       });
       existing = getActiveDaemonRun(db);
     }
@@ -469,24 +482,24 @@ async function daemonStart(
         message: existingSummary.stale
           ? `An active daemon run already exists (${existing.id}, state ${existing.state}, stale heartbeat). Resolve it before starting another.`
           : `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`,
-        existing: existingSummary
+        existing: existingSummary,
       });
     }
 
     let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
       ok: true,
-      dispatch: executeWorkflowStepDispatch
+      dispatch: executeWorkflowStepDispatch,
     };
     if (loopRequested) {
       workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
         io.env ?? {},
         executeWorkflowStepDispatch,
-        deps
+        deps,
       );
       if (!workflowDispatchResolution.ok) {
         return emitDaemonStartFailure(parsed, io, {
           code: "daemon_live_wrapper_profile_invalid",
-          message: workflowDispatchResolution.message
+          message: workflowDispatchResolution.message,
         });
       }
     }
@@ -506,7 +519,7 @@ async function daemonStart(
         message: existing
           ? `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`
           : "An active daemon run already exists. Stop it before starting another.",
-        ...(existingSummary ? { existing: existingSummary } : {})
+        ...(existingSummary ? { existing: existingSummary } : {}),
       });
     }
 
@@ -518,7 +531,7 @@ async function daemonStart(
         host: run.host,
         state: run.state,
         startedAt: run.started_at,
-        heartbeatAt: run.heartbeat_at
+        heartbeatAt: run.heartbeat_at,
       });
     }
 
@@ -533,8 +546,7 @@ async function daemonStart(
       ...(parsed.maxIdleCycles !== undefined
         ? { maxIdleCycles: parsed.maxIdleCycles }
         : {}),
-      pollIntervalMs:
-        parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
+      pollIntervalMs: parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
       // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
       // drive the workflow scheduler lane. Register-only `daemon start` returns
       // above and never reaches here, so it stays inert. The lane is harmlessly
@@ -545,9 +557,9 @@ async function daemonStart(
         dispatch: workflowDispatchResolution.dispatch,
         ...(workflowDispatchResolution.leaseDurationMs !== undefined
           ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }
-          : {})
+          : {}),
       },
-      ...(preLoopStartupRecovery !== null ? { preLoopStartupRecovery } : {})
+      ...(preLoopStartupRecovery !== null ? { preLoopStartupRecovery } : {}),
     });
 
     return emitDaemonStartLoopResult(parsed, io, {
@@ -556,7 +568,7 @@ async function daemonStart(
       pid: run.pid,
       host: run.host,
       startedAt: run.started_at,
-      loop: loopResult
+      loop: loopResult,
     });
   } finally {
     db.close();
@@ -571,7 +583,7 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for daemon stop: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -593,7 +605,7 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitDaemonStopFailure(parsed, io, {
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -615,9 +627,9 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
               pid: latest.pid,
               host: latest.host,
               startedAt: latest.started_at,
-              finishedAt: latest.finished_at
+              finishedAt: latest.finished_at,
             }
-          : null
+          : null,
       });
     }
 
@@ -628,12 +640,12 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
       ? requestDaemonRunImmediateStop(db, {
           runId: active.id,
           reason,
-          now
+          now,
         })
       : requestDaemonRunStop(db, {
           runId: active.id,
           reason,
-          now
+          now,
         });
     if (!result.ok) {
       // The active record disappeared (or transitioned terminal) between
@@ -647,15 +659,15 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
           pid: active.pid,
           host: active.host,
           startedAt: active.started_at,
-          finishedAt: active.finished_at
-        }
+          finishedAt: active.finished_at,
+        },
       });
     }
 
     const updated = getDaemonRun(db, active.id);
     if (!updated) {
       throw new Error(
-        `daemon stop: run ${active.id} disappeared after stop request`
+        `daemon stop: run ${active.id} disappeared after stop request`,
       );
     }
 
@@ -677,7 +689,7 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
       stopNowRequestedAt: updated.stop_now_requested_at,
       heartbeatAt: updated.heartbeat_at,
       heartbeatAgeMs,
-      stale
+      stale,
     });
   } finally {
     db.close();
@@ -702,12 +714,12 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
         staleRepoLockCount: daemonStatus.staleRepoLocks.length,
         staleClaimedJobCount: daemonStatus.staleClaimedJobs.length,
         goalsNeedingRecoveryCount: daemonStatus.goalsNeedingRecovery.length,
-        runId: daemonStatus.daemonRun?.runId ?? null
+        runId: daemonStatus.daemonRun?.runId ?? null,
       }
     : {
         ok: false as const,
         code: daemonStatus.code,
-        message: daemonStatus.error
+        message: daemonStatus.error,
       };
 
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
@@ -727,20 +739,20 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       supported: [...BUILTIN_RUNNER_KINDS],
       default: DEFAULT_RUNNER_KIND,
       profiles: BUILTIN_RUNNER_KINDS.map((kind) =>
-        safeRunnerProfileSummary(buildRunnerProfile(kind))
-      )
+        safeRunnerProfileSummary(buildRunnerProfile(kind)),
+      ),
     },
     policy: policyPayload,
     sources: sourcesPayload,
     evidence: evidencePayload,
-    externalApply: externalApplyPayload
+    externalApply: externalApplyPayload,
   } as const;
 
   return emitDoctor(parsed, io, payload);
 }
 
 function buildDoctorEvidencePayload(
-  dataDirOptions: DataDirOptions
+  dataDirOptions: DataDirOptions,
 ): DoctorEvidencePayload {
   let dataDir: string;
   try {
@@ -749,7 +761,7 @@ function buildDoctorEvidencePayload(
     return {
       ok: false,
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     };
   }
   const db = openDb(dataDir);
@@ -761,7 +773,7 @@ function buildDoctorEvidencePayload(
         totalRecords: summary.totalRecords,
         goalLinkedRecords: summary.goalLinkedRecords,
         sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
-        lastRecord: null
+        lastRecord: null,
       };
     }
     return {
@@ -776,8 +788,8 @@ function buildDoctorEvidencePayload(
         occurredAt: summary.lastRecord.occurredAt,
         summary: summary.lastRecord.summary,
         goalId: summary.lastRecord.goalId,
-        sourceItemId: summary.lastRecord.sourceItemId
-      }
+        sourceItemId: summary.lastRecord.sourceItemId,
+      },
     };
   } finally {
     db.close();
@@ -785,7 +797,7 @@ function buildDoctorEvidencePayload(
 }
 
 function buildDoctorExternalApplyPayload(
-  dataDirOptions: DataDirOptions
+  dataDirOptions: DataDirOptions,
 ): DoctorExternalApplyPayload {
   let dataDir: string;
   try {
@@ -794,7 +806,7 @@ function buildDoctorExternalApplyPayload(
     return {
       ok: false,
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     };
   }
   const db = openDb(dataDir);
@@ -816,7 +828,7 @@ function buildDoctorExternalApplyPayload(
       totalAttempts,
       latestAttempt: latest
         ? { intentId: latest.intentId, ...intentApplyAuditToJsonShape(latest) }
-        : null
+        : null,
     };
   } finally {
     db.close();
@@ -824,7 +836,7 @@ function buildDoctorExternalApplyPayload(
 }
 
 function buildDoctorSourcesPayload(
-  dataDirOptions: DataDirOptions
+  dataDirOptions: DataDirOptions,
 ): DoctorSourcesPayload {
   let dataDir: string;
   try {
@@ -833,7 +845,7 @@ function buildDoctorSourcesPayload(
     return {
       ok: false,
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     };
   }
   const db = openDb(dataDir);
@@ -843,7 +855,7 @@ function buildDoctorSourcesPayload(
         `SELECT
             COUNT(*) AS total,
             SUM(CASE WHEN goal_id IS NULL THEN 0 ELSE 1 END) AS linked
-           FROM source_items`
+           FROM source_items`,
       )
       .get() as { total: number; linked: number | null } | undefined;
     const totalSourceItems = counts?.total ?? 0;
@@ -857,7 +869,7 @@ function buildDoctorSourcesPayload(
         totalSourceItems,
         linkedSourceItems,
         unlinkedSourceItems,
-        lastReconciliation: null
+        lastReconciliation: null,
       };
     }
     const last = runs[runs.length - 1] as SourceReconciliationRun;
@@ -875,8 +887,8 @@ function buildDoctorSourcesPayload(
         error: last.error,
         itemsSeen: last.itemsSeen,
         itemsUpserted: last.itemsUpserted,
-        paginationStopped: sourceReconciliationPaginationStopped(last)
-      }
+        paginationStopped: sourceReconciliationPaginationStopped(last),
+      },
     };
   } finally {
     db.close();
@@ -886,7 +898,7 @@ function buildDoctorSourcesPayload(
 function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
   const defaultEffective = {
     value: DEFAULT_INTENT_APPLY_POLICY,
-    source: "builtin_default" as const
+    source: "builtin_default" as const,
   };
   if (typeof repoOverride !== "string" || repoOverride.trim().length === 0) {
     return {
@@ -897,7 +909,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       hasNotes: false,
       config: null,
       effectiveIntentApply: defaultEffective,
-      error: null
+      error: null,
     };
   }
   const repoPath = repoOverride;
@@ -911,7 +923,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       hasNotes: false,
       config: null,
       effectiveIntentApply: defaultEffective,
-      error: { code: load.code, message: load.error }
+      error: { code: load.code, message: load.error },
     };
   }
   if (!load.present) {
@@ -923,7 +935,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       hasNotes: false,
       config: null,
       effectiveIntentApply: defaultEffective,
-      error: null
+      error: null,
     };
   }
   return {
@@ -939,16 +951,18 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
           ? null
           : [...load.policy.config.verification],
       verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null,
-      intentApplyPolicy: load.policy.config.intentApplyPolicy ?? null
+      intentApplyPolicy: load.policy.config.intentApplyPolicy ?? null,
     },
     effectiveIntentApply: resolveIntentApplyPolicy(load.policy.config),
-    error: null
+    error: null,
   };
 }
 
 function isExistingDaemonRunStale(
-  run: ReturnType<typeof getActiveDaemonRun> extends infer T ? NonNullable<T> : never,
-  now: number
+  run: ReturnType<typeof getActiveDaemonRun> extends infer T
+    ? NonNullable<T>
+    : never,
+  now: number,
 ): boolean {
   const heartbeatAgeMs = Math.max(0, now - run.heartbeat_at);
   const staleAfterMs =
@@ -1669,12 +1683,13 @@ function parseFlags(argv: string[]): ParsedFlags {
     advance,
     once,
     stream,
-    jsonl
+    jsonl,
   };
   if (repo !== undefined) parsed.repo = repo;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
   if (reason !== undefined) parsed.reason = reason;
-  if (maxLoopIterations !== undefined) parsed.maxLoopIterations = maxLoopIterations;
+  if (maxLoopIterations !== undefined)
+    parsed.maxLoopIterations = maxLoopIterations;
   if (maxIdleCycles !== undefined) parsed.maxIdleCycles = maxIdleCycles;
   if (pollIntervalMs !== undefined) parsed.pollIntervalMs = pollIntervalMs;
   if (adapter !== undefined) parsed.adapter = adapter;
@@ -1708,7 +1723,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (sinceFlag !== undefined) parsed.since = sinceFlag;
   if (actorFlag !== undefined) parsed.actor = actorFlag;
   if (approvalPathFlag !== undefined) parsed.approvalPath = approvalPathFlag;
-  if (approvalDigestFlag !== undefined) parsed.approvalDigest = approvalDigestFlag;
+  if (approvalDigestFlag !== undefined)
+    parsed.approvalDigest = approvalDigestFlag;
   if (phraseFlag !== undefined) parsed.phrase = phraseFlag;
   if (stepFlag !== undefined) parsed.step = stepFlag;
   if (actionFlag !== undefined) parsed.action = actionFlag;
@@ -1748,6 +1764,6 @@ function defaultIo(): CliIo {
   return {
     stdout: process.stdout,
     stderr: process.stderr,
-    env: process.env
+    env: process.env,
   };
 }
