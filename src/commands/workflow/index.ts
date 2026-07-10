@@ -63,7 +63,10 @@ import {
   type WorkflowMonitorState,
 } from "../../core/workflow/monitor/state.js";
 import { deriveWorkflowWatchAdvisory } from "../../core/workflow/monitor/watch-advisory.js";
-import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch/execute.js";
+import {
+  executeWorkflowStepDispatch,
+  resolveWorkflowStepDispatchRouteSelection,
+} from "../../core/workflow/dispatch/execute.js";
 import { resolveClaimedWorkflowStepFamily } from "../../core/workflow/dispatch/persist.js";
 import {
   resolveDaemonWorkflowStepDispatch,
@@ -2637,7 +2640,11 @@ async function runWorkflowWatchDispatcherTick(
   if (canDispatchNextStep) {
     if (
       isWorkflowWatchLiveWrapperProfileRequired(db, envelope) &&
-      !hasDaemonLiveWrapperProfileConfigured(env)
+      !hasDaemonLiveWrapperProfileConfigured(env) &&
+      resolveWorkflowStepDispatchRouteSelection(db, {
+        runId: envelope.runId,
+        stepId,
+      }).ok
     ) {
       return {
         code: "daemon_live_wrapper_profile_required",

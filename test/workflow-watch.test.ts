@@ -700,6 +700,68 @@ describe("momentum workflow run watch", () => {
     }
   });
 
+  it("validates the implementation route before requiring a live-wrapper profile", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-invalid-route-precedence";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch route validation precedence",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        route: { implementationEngine: "current-gnhf-cwfp" },
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 1",
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'",
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+
+    const after = openDb(dataDir);
+    try {
+      const gate = after
+        .prepare(
+          `SELECT evidence, reason
+             FROM workflow_gates
+            WHERE workflow_run_id = ? AND resolved_at IS NULL`,
+        )
+        .get(runId) as { evidence: string; reason: string };
+      expect(gate.evidence).toBe("route_config_invalid");
+      expect(gate.reason).toContain("current-gnhf-cwfp");
+      const recovery = after
+        .prepare(
+          `SELECT needs_manual_recovery AS needsManualRecovery
+             FROM workflow_runs
+            WHERE id = ?`,
+        )
+        .get(runId) as { needsManualRecovery: number };
+      expect(recovery.needsManualRecovery).toBe(1);
+    } finally {
+      after.close();
+    }
+  });
+
   it("does not start an approved merge-cleanup tail step from a watch tick", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-watch-merge-cleanup-approved";

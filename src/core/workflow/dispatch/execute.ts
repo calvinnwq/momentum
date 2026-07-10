@@ -146,7 +146,7 @@ export function executeWorkflowStepDispatch(
     });
   }
 
-  const selection = resolveDispatchRoundSelection(db, claim);
+  const selection = resolveWorkflowStepDispatchRouteSelection(db, claim);
   if (!selection.ok) {
     return failClosedDispatch(db, claim, {
       code: "route_config_invalid",
@@ -395,7 +395,7 @@ function buildRoundScaffold(
   };
 }
 
-type DispatchRouteSelectionResolution =
+export type WorkflowStepDispatchRouteSelectionResolution =
   | { ok: true; selection: CodingStepExecutorSelection }
   | { ok: false; reason: string };
 
@@ -411,10 +411,10 @@ const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
   effort: null,
 };
 
-function resolveDispatchRoundSelection(
+export function resolveWorkflowStepDispatchRouteSelection(
   db: MomentumDb,
-  claim: ClaimedWorkflowStep,
-): DispatchRouteSelectionResolution {
+  claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
+): WorkflowStepDispatchRouteSelectionResolution {
   const row = db
     .prepare(
       `SELECT source, workflow_definition_key, route_json
