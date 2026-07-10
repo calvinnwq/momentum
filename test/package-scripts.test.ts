@@ -71,6 +71,9 @@ describe("package verification scripts", () => {
     expect(fs.existsSync(prettierConfigPath)).toBe(true);
     expect(fs.existsSync(prettierIgnorePath)).toBe(true);
     expect(fs.readFileSync(prettierIgnorePath, "utf8")).toContain("docs/");
+    expect(fs.readFileSync(prettierIgnorePath, "utf8")).toContain(
+      "CHANGELOG.md",
+    );
   });
 
   it("checks committed branch changes against the default branch when no base is supplied", () => {
