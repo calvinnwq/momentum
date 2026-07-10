@@ -302,7 +302,7 @@ Behaviour:
   "state": "pending",
   "approvalBoundary": null,
   "definitionKey": "coding-workflow",
-  "definitionVersion": 1,
+  "definitionVersion": 2,
   "route": {},
   "implementationEngine": null,
   "repoPath": "/path/to/repo",
@@ -384,7 +384,7 @@ The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `
 
 ```text
 Workflow run started: run-1
-Definition: coding-workflow v1
+Definition: coding-workflow v2
 State: pending
 Approval boundary: (none)
 Steps: 6

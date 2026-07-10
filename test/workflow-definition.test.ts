@@ -203,6 +203,23 @@ describe("validateWorkflowDefinition", () => {
     }
   });
 
+  it("rejects config objects that cannot round-trip as JSON objects", () => {
+    for (const config of [new Date("2026-01-01T00:00:00Z"), new Map()]) {
+      const invalid = baseValidDefinition();
+      invalid.steps[1]!.config = config as unknown as Record<string, unknown>;
+      const result = validateWorkflowDefinition(invalid);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors).toContainEqual(
+          expect.objectContaining({
+            code: "step_config_invalid",
+            path: "steps[1].config",
+          }),
+        );
+      }
+    }
+  });
+
   it("rejects duplicate step keys", () => {
     const def = baseValidDefinition();
     def.steps[1]!.key = def.steps[0]!.key;

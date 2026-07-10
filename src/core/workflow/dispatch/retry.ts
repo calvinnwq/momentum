@@ -1,9 +1,10 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import { insertExecutorRound } from "../../executors/loop/persist.js";
-import type {
-  ExecutorRoundRecord,
-  WorkflowExecutorFamily,
-} from "../../executors/loop/reducer.js";
+import type { ExecutorRoundRecord } from "../../executors/loop/reducer.js";
+import {
+  isWorkflowExecutorFamily,
+  type WorkflowExecutorFamily,
+} from "../definition/definition.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import type { WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
@@ -349,18 +350,4 @@ function buildRetryRound(
 
 function isRetryableDispatchStepKind(value: string): value is WorkflowStepKind {
   return value === "no-mistakes" || value === "merge-cleanup";
-}
-
-function isWorkflowExecutorFamily(
-  value: string,
-): value is WorkflowExecutorFamily {
-  return (
-    value === "goal-loop" ||
-    value === "one-shot" ||
-    value === "script" ||
-    value === "no-mistakes" ||
-    value === "delegate-supervisor" ||
-    value === "external-apply" ||
-    value === "subworkflow"
-  );
 }
