@@ -2,6 +2,8 @@
 
 import crypto from "node:crypto";
 
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
+
 import type {
   ExecutorArtifactRecord,
   ExecutorCheckpointRecord,
@@ -113,6 +115,12 @@ export function singleShotExecutorConfigError(
     return `${family} config.timeoutMs must be a whole number of seconds (a multiple of 1000).`;
   }
   if (
+    value["timeoutMs"] !== undefined &&
+    (value["timeoutMs"] as number) > MAX_BUILT_IN_PROCESS_TIMEOUT_MS
+  ) {
+    return `${family} config.timeoutMs must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_MS}.`;
+  }
+  if (
     value["policyEnvelope"] !== undefined &&
     (typeof value["policyEnvelope"] !== "string" ||
       value["policyEnvelope"].length === 0)
@@ -214,7 +222,12 @@ export const AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA = {
   description: "Portable configuration for one bounded agent turn.",
   properties: {
     agent: AGENT_CONFIG_SCHEMA,
-    timeoutMs: { type: "integer", minimum: 1_000, multipleOf: 1_000 },
+    timeoutMs: {
+      type: "integer",
+      minimum: 1_000,
+      maximum: MAX_BUILT_IN_PROCESS_TIMEOUT_MS,
+      multipleOf: 1_000,
+    },
     policyEnvelope: { type: "string", minLength: 1 },
   },
   additionalProperties: false,
@@ -232,7 +245,12 @@ export const SCRIPT_EXECUTOR_CONFIG_SCHEMA = {
         "Portable command identity; the host resolves the executable path.",
     },
     args: { type: "array", items: { type: "string" } },
-    timeoutMs: { type: "integer", minimum: 1_000, multipleOf: 1_000 },
+    timeoutMs: {
+      type: "integer",
+      minimum: 1_000,
+      maximum: MAX_BUILT_IN_PROCESS_TIMEOUT_MS,
+      multipleOf: 1_000,
+    },
     policyEnvelope: { type: "string", minLength: 1 },
   },
   required: ["command"],
@@ -290,29 +308,44 @@ export class SingleShotExecutor implements Executor<
       context.config,
     );
     if (configError !== null) throw new Error(configError);
+    const config = immutableSingleShotConfig(context.config);
+    const hostBindings = immutableSingleShotHostBindings(context.hostBindings);
     if (
       context.state.rounds.length > 0 &&
-      context.hostBindings.roundAlreadyMaterialized !== true
+      hostBindings.roundAlreadyMaterialized !== true
     ) {
-      return resumeCompletedSingleShotRound(this.name, context);
+      return resumeCompletedSingleShotRound(this.name, {
+        ...context,
+        config,
+        hostBindings,
+      });
     }
 
-    const selection = singleShotSelectionFromSdkConfig(context.config);
+    const selection = singleShotSelectionFromSdkConfig(config);
     const start = planSingleShotRoundStart({
-      ...context.hostBindings.start,
+      ...hostBindings.start,
       family: this.name,
       selection,
     });
     const frozenLogPaths = [...start.logPaths];
+    const dispatchBinding = dispatchBindingDetail(
+      this.name,
+      config,
+      hostBindings.start,
+    );
     const durableStart =
-      context.hostBindings.roundAlreadyMaterialized === true
-        ? loadMaterializedSingleShotRound(this.name, context)
+      hostBindings.roundAlreadyMaterialized === true
+        ? loadMaterializedSingleShotRound(this.name, {
+            ...context,
+            config,
+            hostBindings,
+          })
         : context.envelope.startRound(roundStartForSdk(start));
     context.signal.throwIfAborted();
 
     const mechanism = await this.#runRound(cloneRoundForRunner(durableStart), {
-      config: context.config,
-      hostBindings: context.hostBindings,
+      config,
+      hostBindings,
       signal: context.signal,
     });
     validateSingleShotMechanismResult(this.name, mechanism);
@@ -353,11 +386,7 @@ export class SingleShotExecutor implements Executor<
     if (roundStartedCheckpoint === undefined) {
       throw new Error("Single-shot checkpoint plan omitted round_started.");
     }
-    roundStartedCheckpoint.detail = dispatchBindingDetail(
-      this.name,
-      context.config,
-      context.hostBindings.start,
-    );
+    roundStartedCheckpoint.detail = dispatchBinding;
     const classificationCheckpoint = checkpointPlan.at(-1);
     if (classificationCheckpoint === undefined) {
       throw new Error(
@@ -614,6 +643,36 @@ function sameStringArray(
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   );
+}
+
+function immutableSingleShotConfig(
+  config: Readonly<SingleShotExecutorConfig>,
+): Readonly<SingleShotExecutorConfig> {
+  const agent = config.agent === undefined ? undefined : { ...config.agent };
+  const args = config.args === undefined ? undefined : [...config.args];
+  if (agent !== undefined) Object.freeze(agent);
+  if (args !== undefined) Object.freeze(args);
+  return Object.freeze({
+    ...config,
+    ...(agent !== undefined ? { agent } : {}),
+    ...(args !== undefined ? { args } : {}),
+  });
+}
+
+function immutableSingleShotHostBindings(
+  hostBindings: Readonly<SingleShotExecutorHostBindings>,
+): Readonly<SingleShotExecutorHostBindings> {
+  const logPaths =
+    hostBindings.start.logPaths === undefined
+      ? undefined
+      : [...hostBindings.start.logPaths];
+  if (logPaths !== undefined) Object.freeze(logPaths);
+  const start = {
+    ...hostBindings.start,
+    ...(logPaths !== undefined ? { logPaths } : {}),
+  };
+  Object.freeze(start);
+  return Object.freeze({ ...hostBindings, start });
 }
 
 function singleShotOutcomeFromCheckpoint(

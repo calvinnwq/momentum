@@ -819,6 +819,82 @@ describe("single-shot built-in SDK proof", () => {
     expect(loadExecutorRound(db, roundId)?.state).toBe("running");
   });
 
+  it("isolates durable dispatch binding from runner mutations", async () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 40,
+    });
+    const roundId = `${invocation.invocationId}::round::0`;
+    const config = { agent: { harness: "codex", model: "gpt-5" } };
+    const hostBindings = {
+      start: {
+        roundId,
+        invocationId: invocation.invocationId,
+        workflowRunId: invocation.workflowRunId,
+        stepRunId: invocation.stepRunId,
+        stepKey: invocation.stepKey,
+        family: "one-shot" as const,
+        attempt: invocation.attempt,
+        inputDigest: "sha256:input",
+        artifactRoot: "/artifacts/round-0",
+        logPaths: ["/artifacts/round-0/executor.log"],
+        startedAt: 10,
+      },
+    };
+    const first = new SingleShotExecutor("one-shot", (_round, context) => {
+      expect(() => {
+        (context.config.agent as { harness?: string }).harness = "mutated";
+      }).toThrow();
+      expect(() => {
+        (context.hostBindings.start as { inputDigest: string }).inputDigest =
+          "sha256:mutated";
+      }).toThrow();
+      return {
+        outcome: { ok: true },
+        result: {
+          success: true,
+          summary: "completed before host classification",
+          key_changes_made: [],
+          key_learnings: [],
+          remaining_work: [],
+          goal_complete: true,
+          commit: {
+            type: "test",
+            scope: "sdk",
+            subject: "freeze dispatch binding",
+            body: "",
+            breaking: false,
+          },
+        },
+      };
+    });
+
+    await first.tick({
+      state: envelope.snapshot(),
+      config,
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+
+    let reran = false;
+    const resumed = await new SingleShotExecutor("one-shot", () => {
+      reran = true;
+      throw new Error("mechanism must not rerun");
+    }).tick({
+      state: envelope.snapshot(),
+      config,
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+
+    expect(reran).toBe(false);
+    expect(resumed.recommendation).toBe("complete");
+  });
+
   it("resumes daemon classification from a durable mechanism checkpoint", async () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
@@ -932,10 +1008,18 @@ describe("single-shot built-in SDK proof", () => {
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties).toHaveProperty("command");
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.required).toEqual(["command"]);
     expect(AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA.properties.timeoutMs).toEqual(
-      expect.objectContaining({ minimum: 1_000, multipleOf: 1_000 }),
+      expect.objectContaining({
+        minimum: 1_000,
+        maximum: 2_147_453_000,
+        multipleOf: 1_000,
+      }),
     );
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties.timeoutMs).toEqual(
-      expect.objectContaining({ minimum: 1_000, multipleOf: 1_000 }),
+      expect.objectContaining({
+        minimum: 1_000,
+        maximum: 2_147_453_000,
+        multipleOf: 1_000,
+      }),
     );
     const commandPattern = new RegExp(
       SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties.command.pattern,

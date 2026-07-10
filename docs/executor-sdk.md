@@ -115,7 +115,7 @@ The shipped schemas accept these shapes:
 
 Every shown field is optional for the `one-shot` family.
 The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command` and `args`.
-Agent and policy strings must be non-empty, `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000), and every `args` item is a string.
+Agent and policy strings must be non-empty, `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000) no greater than 2,147,453,000, and every `args` item is a string.
 A script command is a portable identity, not a path or shell fragment: it starts with an alphanumeric character or `@`, then uses only alphanumerics plus `.`, `_`, `:`, `@`, `+`, and `-`; `.` and `..` and Windows drive prefixes are rejected.
 Both top-level schemas and the nested `agent` object reject unknown properties.
 

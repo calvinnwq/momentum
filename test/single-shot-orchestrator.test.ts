@@ -803,6 +803,28 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     );
   });
 
+  it("materializes the effective portable selection when explicit config overrides resolution", async () => {
+    const db = openStepDb();
+    const result = await runSingleShotStep({
+      db,
+      family: "one-shot",
+      config: { agent: { harness: "codex", model: "gpt-5" } },
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      stepKey: "implementation",
+      attempt: 1,
+      selection: resolveSingleShotRoundSelection({}),
+      resolveRoundInputs: roundInputs,
+      now: monotonicClock(),
+      runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
+    });
+
+    expect(result.round.round).toMatchObject({
+      agentProvider: "codex",
+      model: "gpt-5",
+    });
+  });
+
   it("materializes a script invocation and reaches a terminal success", async () => {
     const db = openStepDb();
     let observedCommand: string | undefined;
@@ -928,6 +950,11 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         family: "one-shot",
         config: { timeoutMs: 1_500 },
         message: "timeoutMs must be a whole number of seconds",
+      },
+      {
+        family: "one-shot",
+        config: { timeoutMs: 2_147_454_000 },
+        message: "timeoutMs must not exceed 2147453000",
       },
     ] as const;
 

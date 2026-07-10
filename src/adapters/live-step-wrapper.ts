@@ -54,6 +54,10 @@ import type {
 import { parseRunnerResult } from "../core/executors/runner/result.js";
 import type { RunnerResult } from "../core/executors/runner/types.js";
 import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
+import {
+  MAX_BUILT_IN_PROCESS_TIMEOUT_MS,
+  MAX_BUILT_IN_PROCESS_TIMEOUT_SEC,
+} from "../shared/process-limits.js";
 
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the
@@ -938,6 +942,12 @@ function validatePositiveTimeoutSec(
       error: `live step ${field} must be a positive integer (seconds).`,
     };
   }
+  if (value > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+    return {
+      ok: false,
+      error: `live step ${field} must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
+    };
+  }
   return { ok: true };
 }
 
@@ -979,6 +989,16 @@ export function runProcessGroupSync(
   args: string[],
   options: ProcessGroupOptions,
 ): SpawnSyncReturns<string> {
+  const optionsError = processGroupOptionsError(options);
+  if (optionsError !== undefined) {
+    return spawnReturn({
+      status: null,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      error: optionsError,
+    });
+  }
   const tempDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "momentum-live-step-spawn-"),
   );
@@ -1092,6 +1112,18 @@ export function runProcessGroup(
   args: string[],
   options: AsyncProcessGroupOptions,
 ): Promise<SpawnSyncReturns<string>> {
+  const optionsError = processGroupOptionsError(options);
+  if (optionsError !== undefined) {
+    return Promise.resolve(
+      spawnReturn({
+        status: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: optionsError,
+      }),
+    );
+  }
   return new Promise((resolve, reject) => {
     if (options.signal?.aborted === true) {
       resolve(
@@ -1407,6 +1439,28 @@ export function runProcessGroup(
     options.signal?.addEventListener("abort", abort, { once: true });
     if (abortRequested(options.signal)) abort();
   });
+}
+
+function processGroupOptionsError(
+  options: ProcessGroupOptions,
+): Error | undefined {
+  if (
+    !Number.isSafeInteger(options.timeoutMs) ||
+    options.timeoutMs <= 0 ||
+    options.timeoutMs > MAX_BUILT_IN_PROCESS_TIMEOUT_MS
+  ) {
+    return spawnError(
+      "EINVAL",
+      `process timeoutMs must be a positive safe integer not exceeding ${MAX_BUILT_IN_PROCESS_TIMEOUT_MS}`,
+    );
+  }
+  if (!Number.isSafeInteger(options.maxBuffer) || options.maxBuffer <= 0) {
+    return spawnError(
+      "EINVAL",
+      "process maxBuffer must be a positive safe integer",
+    );
+  }
+  return undefined;
 }
 
 function abortRequested(signal: AbortSignal | undefined): boolean {

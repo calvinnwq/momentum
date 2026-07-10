@@ -170,7 +170,7 @@ live-wrapper command. Each wrapper requires:
 - `command` — absolute executable path.
 - `args` — array of strings or numbers; use `[]` when no arguments are needed.
 - `cwd` — `repo` or `iteration`.
-- `timeout_sec` — positive integer seconds.
+- `timeout_sec` — positive integer seconds no greater than 2,147,453.
 - `env_allow` — environment variable names copied from the daemon process;
   include `PATH` explicitly if the wrapper or its child processes need it.
 - `result_file` — relative path inside the workflow run directory where the

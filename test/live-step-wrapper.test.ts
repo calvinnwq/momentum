@@ -7,6 +7,7 @@ import { sigtermImmuneSleep, waitMs } from "./helpers/process-kill-harness.js";
 import {
   LIVE_STEP_WRAPPER_RESULT_MAX_BYTES,
   runProcessGroup,
+  runProcessGroupSync,
   runLiveStepWrapper,
   type LiveStepWrapperInput,
 } from "../src/adapters/live-step-wrapper.js";
@@ -784,6 +785,71 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(out.error).toContain("timeout_sec");
     expect(fs.existsSync(markerPath)).toBe(false);
     expect(readLog(input)).not.toContain("[live-step] command:");
+  });
+
+  it("rejects process options that cannot be supervised safely", async () => {
+    const root = makeTempDir("momentum-live-step-options-");
+    for (const maxBuffer of [Number.NaN, Number.POSITIVE_INFINITY, 0, 1.5]) {
+      const sync = runProcessGroupSync(process.execPath, ["-e", ""], {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 1_000,
+        maxBuffer,
+      });
+      expect((sync.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+        "EINVAL",
+      );
+
+      const asyncResult = await runProcessGroup(process.execPath, ["-e", ""], {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 1_000,
+        maxBuffer,
+      });
+      expect(
+        (asyncResult.error as NodeJS.ErrnoException | undefined)?.code,
+      ).toBe("EINVAL");
+    }
+
+    const excessiveTimeout = await runProcessGroup(
+      process.execPath,
+      ["-e", ""],
+      {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 2_147_454_000,
+        maxBuffer: 1_024,
+      },
+    );
+    expect(
+      (excessiveTimeout.error as NodeJS.ErrnoException | undefined)?.code,
+    ).toBe("EINVAL");
+  });
+
+  it("rejects direct-caller timeouts above the supervisor timer limit", () => {
+    const markerPath = path.join(
+      makeTempDir("momentum-live-step-marker-"),
+      "spawned",
+    );
+    const input = setup({
+      config: {
+        timeoutSec: 2_147_454,
+        args: [
+          "-c",
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
+    });
+
+    const out = runLiveStepWrapper(input);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runtime_unavailable");
+    expect(out.error).toContain("must not exceed 2147453 seconds");
+    expect(fs.existsSync(markerPath)).toBe(false);
   });
 
   it("returns output_overflow when stdout/stderr exceed the configured byte cap", () => {

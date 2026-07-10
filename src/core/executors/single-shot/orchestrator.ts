@@ -94,6 +94,7 @@ import {
   SingleShotExecutor,
   singleShotExecutorConfigError,
   singleShotSdkConfigFromSelection,
+  singleShotSelectionFromSdkConfig,
   type AgentOnceExecutorConfig,
   type ScriptExecutorConfig,
   type SingleShotExecutorConfig,
@@ -400,6 +401,7 @@ export async function runSingleShotStep(
     effectiveConfig,
   );
   if (configError !== null) throw new Error(configError);
+  const effectiveSelection = singleShotSelectionFromSdkConfig(effectiveConfig);
 
   // Resolve caller-owned clocks and filesystem inputs before insertion. If one
   // aborts or throws, no invocation exists without a round to carry recovery.
@@ -427,7 +429,7 @@ export async function runSingleShotStep(
   let invocation = plannedInvocation;
   let start = planSingleShotRoundStartForInvocation({
     invocation: plannedInvocation,
-    selection: input.selection,
+    selection: effectiveSelection,
     runtime,
     startedAt: roundStartedAt,
   });
@@ -458,7 +460,7 @@ export async function runSingleShotStep(
     invocation = existingInvocation;
     start = planSingleShotRoundStartForInvocation({
       invocation,
-      selection: input.selection,
+      selection: effectiveSelection,
       runtime,
       startedAt: roundStartedAt,
     });
