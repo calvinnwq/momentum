@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
   CODING_WORKFLOW_DEFINITION,
+  CODING_WORKFLOW_DEFINITION_V1,
   CODING_WORKFLOW_DEFINITION_KEY,
   WORKFLOW_EXECUTOR_FAMILIES,
   getBuiltInWorkflowDefinition,
@@ -10,7 +11,7 @@ import {
   listBuiltInWorkflowDefinitionKeys,
   selectBuiltInWorkflowDefinition,
   validateWorkflowDefinition,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 
 function baseValidDefinition(): WorkflowDefinition {
@@ -24,16 +25,16 @@ function baseValidDefinition(): WorkflowDefinition {
         kind: "preflight",
         executor: "one-shot",
         order: 0,
-        required: true
+        required: true,
       },
       {
         key: "implementation",
         kind: "implementation",
         executor: "goal-loop",
         order: 1,
-        required: true
-      }
-    ]
+        required: true,
+      },
+    ],
   };
 }
 
@@ -43,15 +44,17 @@ describe("workflow executor families", () => {
       "goal-loop",
       "one-shot",
       "no-mistakes",
+      "delegate-supervisor",
       "script",
       "external-apply",
-      "subworkflow"
+      "subworkflow",
     ]);
   });
 
   it("classifies known and unknown executor families", () => {
     expect(isWorkflowExecutorFamily("goal-loop")).toBe(true);
     expect(isWorkflowExecutorFamily("no-mistakes")).toBe(true);
+    expect(isWorkflowExecutorFamily("delegate-supervisor")).toBe(true);
     expect(isWorkflowExecutorFamily("subworkflow")).toBe(true);
     expect(isWorkflowExecutorFamily("not-a-family")).toBe(false);
     expect(isWorkflowExecutorFamily("")).toBe(false);
@@ -73,7 +76,7 @@ describe("validateWorkflowDefinition", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.errors.map((e) => e.code)).toContain(
-          "definition_not_object"
+          "definition_not_object",
         );
       }
     }
@@ -85,7 +88,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "definition_key_invalid"
+        "definition_key_invalid",
       );
     }
   });
@@ -96,7 +99,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "definition_key_invalid"
+        "definition_key_invalid",
       );
     }
   });
@@ -107,7 +110,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "definition_title_invalid"
+        "definition_title_invalid",
       );
     }
   });
@@ -119,7 +122,7 @@ describe("validateWorkflowDefinition", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.errors.map((e) => e.code)).toContain(
-          "definition_version_invalid"
+          "definition_version_invalid",
         );
       }
     }
@@ -131,7 +134,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "definition_steps_empty"
+        "definition_steps_empty",
       );
     }
   });
@@ -142,7 +145,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "definition_steps_empty"
+        "definition_steps_empty",
       );
     }
   });
@@ -176,7 +179,26 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "step_executor_invalid"
+        "step_executor_invalid",
+      );
+    }
+  });
+
+  it("accepts portable step config and rejects non-JSON config", () => {
+    const configured = baseValidDefinition();
+    configured.steps[1]!.config = { tool: "gnhf", options: ["durable"] };
+    expect(validateWorkflowDefinition(configured).ok).toBe(true);
+
+    const invalid = baseValidDefinition();
+    invalid.steps[1]!.config = { tool: undefined };
+    const result = validateWorkflowDefinition(invalid);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({
+          code: "step_config_invalid",
+          path: "steps[1].config",
+        }),
       );
     }
   });
@@ -198,7 +220,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "step_order_duplicate"
+        "step_order_duplicate",
       );
     }
   });
@@ -210,7 +232,9 @@ describe("validateWorkflowDefinition", () => {
       const result = validateWorkflowDefinition(def);
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.errors.map((e) => e.code)).toContain("step_order_invalid");
+        expect(result.errors.map((e) => e.code)).toContain(
+          "step_order_invalid",
+        );
       }
     }
   });
@@ -222,7 +246,7 @@ describe("validateWorkflowDefinition", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors.map((e) => e.code)).toContain(
-        "step_required_invalid"
+        "step_required_invalid",
       );
     }
   });
@@ -249,15 +273,36 @@ describe("built-in coding workflow definition", () => {
       CODING_WORKFLOW_DEFINITION.steps.map((step) => ({
         kind: step.kind,
         executor: step.executor,
-        order: step.order
-      }))
+        order: step.order,
+      })),
     ).toEqual([
       { kind: "preflight", executor: "one-shot", order: 0 },
-      { kind: "implementation", executor: "goal-loop", order: 1 },
+      {
+        kind: "implementation",
+        executor: "delegate-supervisor",
+        order: 1,
+      },
       { kind: "postflight", executor: "one-shot", order: 2 },
-      { kind: "no-mistakes", executor: "no-mistakes", order: 3 },
+      {
+        kind: "no-mistakes",
+        executor: "delegate-supervisor",
+        order: 3,
+      },
       { kind: "merge-cleanup", executor: "script", order: 4 },
-      { kind: "linear-refresh", executor: "external-apply", order: 5 }
+      { kind: "linear-refresh", executor: "external-apply", order: 5 },
+    ]);
+  });
+
+  it("keeps delegated tools in step config instead of executor names", () => {
+    expect(
+      CODING_WORKFLOW_DEFINITION.steps.map((step) => [step.key, step.config]),
+    ).toEqual([
+      ["preflight", undefined],
+      ["implementation", { tool: "gnhf" }],
+      ["postflight", undefined],
+      ["no-mistakes", { tool: "no-mistakes" }],
+      ["merge-cleanup", undefined],
+      ["linear-refresh", undefined],
     ]);
   });
 
@@ -281,20 +326,25 @@ describe("built-in workflow definition registry", () => {
 
   it("looks up a built-in definition by key", () => {
     expect(getBuiltInWorkflowDefinition("coding-workflow")).toEqual(
-      CODING_WORKFLOW_DEFINITION
+      CODING_WORKFLOW_DEFINITION,
     );
     expect(getBuiltInWorkflowDefinition("coding-workflow", 1)).toEqual(
-      CODING_WORKFLOW_DEFINITION
+      CODING_WORKFLOW_DEFINITION_V1,
+    );
+    expect(getBuiltInWorkflowDefinition("coding-workflow", 2)).toEqual(
+      CODING_WORKFLOW_DEFINITION,
     );
     expect(getBuiltInWorkflowDefinition("missing")).toBeUndefined();
-    expect(getBuiltInWorkflowDefinition("coding-workflow", 999)).toBeUndefined();
+    expect(
+      getBuiltInWorkflowDefinition("coding-workflow", 999),
+    ).toBeUndefined();
   });
 
   it("can select an older built-in version when the latest version changes", () => {
     const v1: WorkflowDefinition = {
       ...CODING_WORKFLOW_DEFINITION,
       version: 1,
-      steps: CODING_WORKFLOW_DEFINITION.steps.map((step) => ({ ...step }))
+      steps: CODING_WORKFLOW_DEFINITION.steps.map((step) => ({ ...step })),
     };
     const v2: WorkflowDefinition = {
       ...CODING_WORKFLOW_DEFINITION,
@@ -302,25 +352,25 @@ describe("built-in workflow definition registry", () => {
       steps: [
         {
           ...CODING_WORKFLOW_DEFINITION.steps[0]!,
-          executor: "script"
+          executor: "script",
         },
         ...CODING_WORKFLOW_DEFINITION.steps
           .slice(1)
-          .map((step) => ({ ...step }))
-      ]
+          .map((step) => ({ ...step })),
+      ],
     };
 
-    expect(selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow")).toEqual(
-      v2
-    );
     expect(
-      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 1)
-    ).toEqual(v1);
-    expect(
-      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 2)
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow"),
     ).toEqual(v2);
     expect(
-      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 3)
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 1),
+    ).toEqual(v1);
+    expect(
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 2),
+    ).toEqual(v2);
+    expect(
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 3),
     ).toBeUndefined();
   });
 

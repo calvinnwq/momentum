@@ -4,7 +4,7 @@ import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch/re
 import {
   PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
   WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
-  planWorkflowStepDispatch
+  planWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/dispatch.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
@@ -23,6 +23,7 @@ describe("runtime consolidation contract", () => {
       "one-shot",
       "script",
       "no-mistakes",
+      "delegate-supervisor",
       "external-apply",
       "subworkflow",
     ]);
@@ -41,13 +42,15 @@ describe("runtime consolidation contract", () => {
       planWorkflowStepDispatch({
         ok: false,
         failure: "definition_unlinked",
-      })
+      }),
     ).toMatchObject({
       action: "fail_closed",
       code: "workflow_definition_unlinked",
       gateType: "manual_recovery_required",
     });
-    expect(planWorkflowStepDispatch({ ok: true, executorFamily: "subworkflow" })).toEqual({
+    expect(
+      planWorkflowStepDispatch({ ok: true, executorFamily: "subworkflow" }),
+    ).toEqual({
       action: "dispatch",
       executorFamily: "subworkflow",
     });
@@ -61,14 +64,20 @@ describe("runtime consolidation contract", () => {
       action: "finalize",
       stepState: "succeeded",
     });
-    expect(planWorkflowStepReconciliation("manual_recovery_required")).toMatchObject({
+    expect(
+      planWorkflowStepReconciliation("manual_recovery_required"),
+    ).toMatchObject({
       action: "manual_recovery",
       invocationState: "manual_recovery_required",
     });
   });
 
   it("keeps runtime-consolidation guidance out of the public docs front door", () => {
-    expect(readRepoFile("README.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
-    expect(readRepoFile("docs/index.html")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
+    expect(readRepoFile("README.md")).not.toMatch(
+      /runtime-consolidation|RC-2|RC-4b/,
+    );
+    expect(readRepoFile("docs/index.html")).not.toMatch(
+      /runtime-consolidation|RC-2|RC-4b/,
+    );
   });
 });

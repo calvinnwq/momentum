@@ -6,7 +6,7 @@ import {
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRunStartInput,
   preflightCodingWorkflowWrapperConfig,
-  preflightCodingWorkflowRouteSteps
+  preflightCodingWorkflowRouteSteps,
 } from "../src/core/workflow/preflight/structural.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
@@ -14,7 +14,7 @@ describe("coding workflow structural preflight", () => {
   it("resolves the built-in coding workflow definition with compact passed evidence", () => {
     const result = preflightCodingWorkflowBuiltInDefinition(
       "coding-workflow",
-      1
+      undefined,
     );
 
     expect(result.ok).toBe(true);
@@ -28,18 +28,18 @@ describe("coding workflow structural preflight", () => {
         path: "workflow.definition",
         key: "definition",
         message: "Built-in coding workflow definition resolved.",
-        recommendedAction: "No action required."
-      }
+        recommendedAction: "No action required.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
   it("refuses missing built-in coding workflow versions with compact evidence", () => {
     const result = preflightCodingWorkflowBuiltInDefinition(
       "coding-workflow",
-      99
+      99,
     );
 
     expect(result.ok).toBe(false);
@@ -53,23 +53,23 @@ describe("coding workflow structural preflight", () => {
         key: "definitionVersion",
         message: "Built-in coding workflow definition version was not found.",
         recommendedAction:
-          "Use the supported built-in coding workflow definition key and version."
-      }
+          "Use the supported built-in coding workflow definition key and version.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
   it("returns normalized route step overrides with compact passed evidence", () => {
     const result = preflightCodingWorkflowRouteSteps({
-      implementation: { model: " opus " }
+      implementation: { model: " opus " },
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected passed preflight");
     expect(result.overrides).toEqual({
-      implementation: { model: "opus" }
+      implementation: { model: "opus" },
     });
     expect(result.evidence).toEqual([
       {
@@ -79,17 +79,17 @@ describe("coding workflow structural preflight", () => {
         path: "route.steps",
         key: "steps",
         message: "Coding route steps are structurally valid.",
-        recommendedAction: "No action required."
-      }
+        recommendedAction: "No action required.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
   it("refuses unsupported route steps with stable compact evidence fields", () => {
     const result = preflightCodingWorkflowRouteSteps({
-      "linear-refresh": { model: "opus" }
+      "linear-refresh": { model: "opus" },
     });
 
     expect(result.ok).toBe(false);
@@ -104,11 +104,11 @@ describe("coding workflow structural preflight", () => {
         message:
           'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key."
-      }
+          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -126,11 +126,11 @@ describe("coding workflow structural preflight", () => {
         path: "route.profile",
         key: "profile",
         message: "Coding route profile is structurally valid.",
-        recommendedAction: "No action required."
-      }
+        recommendedAction: "No action required.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -146,13 +146,14 @@ describe("coding workflow structural preflight", () => {
         severity: "error",
         path: "route.profile",
         key: "profile",
-        message: "Coding route profile must be a non-empty string when provided.",
+        message:
+          "Coding route profile must be a non-empty string when provided.",
         recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
-      }
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -163,7 +164,7 @@ describe("coding workflow structural preflight", () => {
       repoPath: "/tmp/momentum-repo",
       objective: "Validate the structural run shape",
       now: 123,
-      approvalBoundary: "through-linear-refresh"
+      approvalBoundary: "through-linear-refresh",
     });
 
     expect(result.ok).toBe(false);
@@ -177,8 +178,8 @@ describe("coding workflow structural preflight", () => {
         key: "approvalBoundary",
         message: "Approval boundary is not a known workflow approval boundary.",
         recommendedAction:
-          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
-      }
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.",
+      },
     ]);
     const evidence = result.evidence[0];
     if (evidence === undefined) throw new Error("expected preflight evidence");
@@ -192,7 +193,7 @@ describe("coding workflow structural preflight", () => {
       repoPath: "/tmp/momentum-repo",
       objective: "Validate the structural run shape",
       now: 123,
-      issueScope: { identifier: "   " }
+      issueScope: { identifier: "   " },
     });
 
     expect(result.ok).toBe(false);
@@ -204,10 +205,11 @@ describe("coding workflow structural preflight", () => {
         severity: "error",
         path: "issueScope.identifier",
         key: "issueScope.identifier",
-        message: "Issue scope identifier must be a non-empty string when provided.",
+        message:
+          "Issue scope identifier must be a non-empty string when provided.",
         recommendedAction:
-          "Set issueScope.identifier to the target issue identifier, or omit issueScope."
-      }
+          "Set issueScope.identifier to the target issue identifier, or omit issueScope.",
+      },
     ]);
     const evidence = result.evidence[0];
     if (evidence === undefined) throw new Error("expected preflight evidence");
@@ -222,9 +224,9 @@ describe("coding workflow structural preflight", () => {
           args: ["-c", "true"],
           timeout_sec: 30,
           env_allow: ["PATH"],
-          result_file: "result.json"
-        }
-      }
+          result_file: "result.json",
+        },
+      },
     });
 
     expect(result.ok).toBe(true);
@@ -238,11 +240,11 @@ describe("coding workflow structural preflight", () => {
         path: "wrapper.config",
         key: "steps",
         message: "Coding workflow wrapper config is structurally valid.",
-        recommendedAction: "No action required."
-      }
+        recommendedAction: "No action required.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -251,9 +253,9 @@ describe("coding workflow structural preflight", () => {
       steps: {
         preflight: {
           command: "/bin/sh",
-          envAllow: ["PATH"]
-        }
-      }
+          envAllow: ["PATH"],
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -267,18 +269,18 @@ describe("coding workflow structural preflight", () => {
         key: "envAllow",
         message:
           'Unknown key "envAllow" in steps.preflight; replace with "env_allow" to use the required snake_case schema at this config file.',
-        recommendedAction: 'Replace "envAllow" with "env_allow".'
-      }
+        recommendedAction: 'Replace "envAllow" with "env_allow".',
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
   it("refuses unknown top-level wrapper config keys with field-level evidence", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {},
-      unsupportedRootKey: true
+      unsupportedRootKey: true,
     });
 
     expect(result.ok).toBe(false);
@@ -293,11 +295,11 @@ describe("coding workflow structural preflight", () => {
         message:
           'Unknown key "unsupportedRootKey" in wrapper config; supported keys: steps at this config file.',
         recommendedAction:
-          'Remove wrapper.config.unsupportedRootKey or replace it with supported key "steps".'
-      }
+          'Remove wrapper.config.unsupportedRootKey or replace it with supported key "steps".',
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -305,9 +307,9 @@ describe("coding workflow structural preflight", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
         "deploy-production": {
-          command: "/bin/sh"
-        }
-      }
+          command: "/bin/sh",
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -322,11 +324,11 @@ describe("coding workflow structural preflight", () => {
         message:
           "Unsupported workflow step kind deploy-production in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG.",
         recommendedAction:
-          "Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.deploy-production."
-      }
+          "Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.deploy-production.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -335,9 +337,9 @@ describe("coding workflow structural preflight", () => {
       steps: {
         preflight: {
           command: "/bin/sh",
-          env_allow: "PATH"
-        }
-      }
+          env_allow: "PATH",
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -351,11 +353,11 @@ describe("coding workflow structural preflight", () => {
         key: "env_allow",
         message: "Wrapper config `env_allow` must be an array of strings.",
         recommendedAction:
-          "Set wrapper.config.steps.preflight.env_allow to an array of environment variable names."
-      }
+          "Set wrapper.config.steps.preflight.env_allow to an array of environment variable names.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -364,9 +366,9 @@ describe("coding workflow structural preflight", () => {
       steps: {
         preflight: {
           command: "/bin/sh",
-          result_file: "../result.json"
-        }
-      }
+          result_file: "../result.json",
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -381,11 +383,11 @@ describe("coding workflow structural preflight", () => {
         message:
           "Wrapper config `result_file` must be a relative path inside the iteration artifact directory.",
         recommendedAction:
-          "Set wrapper.config.steps.preflight.result_file to a safe relative path inside the iteration artifact directory."
-      }
+          "Set wrapper.config.steps.preflight.result_file to a safe relative path inside the iteration artifact directory.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -395,12 +397,12 @@ describe("coding workflow structural preflight", () => {
         steps: {
           "merge-cleanup": {
             command: "/bin/sh",
-            result_file: "merge-cleanup-result.json"
-          }
-        }
+            result_file: "merge-cleanup-result.json",
+          },
+        },
       },
       undefined,
-      { expectedResultFile: "result.json" }
+      { expectedResultFile: "result.json" },
     );
 
     expect(result.ok).toBe(false);
@@ -415,11 +417,11 @@ describe("coding workflow structural preflight", () => {
         message:
           'Wrapper config `result_file` must match the expected live-wrapper result file "result.json".',
         recommendedAction:
-          'Set wrapper.config.steps.merge-cleanup.result_file to "result.json", or remove the override.'
-      }
+          'Set wrapper.config.steps.merge-cleanup.result_file to "result.json", or remove the override.',
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -428,9 +430,9 @@ describe("coding workflow structural preflight", () => {
       steps: {
         preflight: {
           command: "/bin/sh",
-          timeout_sec: 0
-        }
-      }
+          timeout_sec: 0,
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -444,11 +446,11 @@ describe("coding workflow structural preflight", () => {
         key: "timeout_sec",
         message: "Wrapper config `timeout_sec` must be a positive integer.",
         recommendedAction:
-          "Set wrapper.config.steps.preflight.timeout_sec to a positive integer number of seconds."
-      }
+          "Set wrapper.config.steps.preflight.timeout_sec to a positive integer number of seconds.",
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -457,9 +459,9 @@ describe("coding workflow structural preflight", () => {
       steps: {
         "no-mistakes": {
           command: "/bin/sh",
-          env_allow: ["PATH", "HOME", "CODEX_HOME"]
-        }
-      }
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -474,11 +476,11 @@ describe("coding workflow structural preflight", () => {
         message:
           "Wrapper config `runner_profile` is required for the no-mistakes step.",
         recommendedAction:
-          'Add a no-mistakes runner_profile with interface="axi", stdin="closed", agent, required_env, and agent_path.'
-      }
+          'Add a no-mistakes runner_profile with interface="axi", stdin="closed", agent, required_env, and agent_path.',
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -493,21 +495,23 @@ describe("coding workflow structural preflight", () => {
             stdin: "closed",
             agent: "codex",
             required_env: ["HOME", "CODEX_HOME", "PATH"],
-            agent_path: "/tmp/codex-runner"
-          }
-        }
-      }
+            agent_path: "/tmp/codex-runner",
+          },
+        },
+      },
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected passed preflight");
-    expect(result.config.steps["no-mistakes"]?.noMistakesRunnerProfile).toEqual({
-      interface: "axi",
-      stdin: "closed",
-      agent: "codex",
-      requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
-      agentPath: "/tmp/codex-runner"
-    });
+    expect(result.config.steps["no-mistakes"]?.noMistakesRunnerProfile).toEqual(
+      {
+        interface: "axi",
+        stdin: "closed",
+        agent: "codex",
+        requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
+        agentPath: "/tmp/codex-runner",
+      },
+    );
   });
 
   it("refuses no-mistakes runner profiles with required env outside env_allow", () => {
@@ -521,10 +525,10 @@ describe("coding workflow structural preflight", () => {
             stdin: "closed",
             agent: "codex",
             required_env: ["HOME", "CODEX_HOME", "PATH"],
-            agent_path: "/tmp/codex-runner"
-          }
-        }
-      }
+            agent_path: "/tmp/codex-runner",
+          },
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -539,11 +543,11 @@ describe("coding workflow structural preflight", () => {
         message:
           "Wrapper config `env_allow` must include runner_profile.required_env entries: CODEX_HOME.",
         recommendedAction:
-          'Add "CODEX_HOME" to wrapper.config.steps.no-mistakes.env_allow so the runner profile environment can reach no-mistakes.'
-      }
+          'Add "CODEX_HOME" to wrapper.config.steps.no-mistakes.env_allow so the runner profile environment can reach no-mistakes.',
+      },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 
@@ -558,10 +562,10 @@ describe("coding workflow structural preflight", () => {
             stdin: "closed",
             agent: "codex",
             required_env: ["HOME", "CODEX_HOME", "PATH"],
-            agent_path: "codex-runner"
-          }
-        }
-      }
+            agent_path: "codex-runner",
+          },
+        },
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -570,10 +574,10 @@ describe("coding workflow structural preflight", () => {
       path: "wrapper.config.steps.no-mistakes.runner_profile.agent_path",
       key: "agent_path",
       recommendedAction:
-        "Set wrapper.config.steps.no-mistakes.runner_profile.agent_path to an absolute executable path."
+        "Set wrapper.config.steps.no-mistakes.runner_profile.agent_path to an absolute executable path.",
     });
     expect(Object.keys(result.evidence[0])).toEqual(
-      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
     );
   });
 });

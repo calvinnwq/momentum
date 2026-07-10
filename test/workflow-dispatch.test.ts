@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   WORKFLOW_EXECUTOR_FAMILIES,
-  type WorkflowExecutorFamily
+  type WorkflowExecutorFamily,
 } from "../src/core/workflow/definition/definition.js";
 import {
   PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
@@ -10,11 +10,11 @@ import {
   WORKFLOW_STEP_RESOLUTION_FAILURES,
   isPhase1DispatchableExecutorFamily,
   planWorkflowStepDispatch,
-  type WorkflowStepDispatchResolution
+  type WorkflowStepDispatchResolution,
 } from "../src/core/workflow/dispatch/dispatch.js";
 
 function resolved(
-  executorFamily: WorkflowExecutorFamily
+  executorFamily: WorkflowExecutorFamily,
 ): WorkflowStepDispatchResolution {
   return { ok: true, executorFamily };
 }
@@ -26,12 +26,13 @@ describe("phase-1 dispatchable executor families", () => {
     expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES].sort()).toEqual(
       [
         "external-apply",
+        "delegate-supervisor",
         "goal-loop",
         "no-mistakes",
         "one-shot",
         "script",
-        "subworkflow"
-      ].sort()
+        "subworkflow",
+      ].sort(),
     );
   });
 
@@ -42,7 +43,7 @@ describe("phase-1 dispatchable executor families", () => {
     // Post-NGX-498 the phase-1 set covers every executor family; it can never
     // exceed the full vocabulary.
     expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThanOrEqual(
-      WORKFLOW_EXECUTOR_FAMILIES.length
+      WORKFLOW_EXECUTOR_FAMILIES.length,
     );
   });
 
@@ -50,6 +51,9 @@ describe("phase-1 dispatchable executor families", () => {
     expect(isPhase1DispatchableExecutorFamily("goal-loop")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("one-shot")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("no-mistakes")).toBe(true);
+    expect(isPhase1DispatchableExecutorFamily("delegate-supervisor")).toBe(
+      true,
+    );
     expect(isPhase1DispatchableExecutorFamily("script")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(true);
@@ -74,7 +78,9 @@ describe("planWorkflowStepDispatch — every executor family is now dispatchable
     // executor-family vocabulary now routes to a real dispatch.
     for (const family of WORKFLOW_EXECUTOR_FAMILIES) {
       expect(isPhase1DispatchableExecutorFamily(family)).toBe(true);
-      expect(planWorkflowStepDispatch(resolved(family)).action).toBe("dispatch");
+      expect(planWorkflowStepDispatch(resolved(family)).action).toBe(
+        "dispatch",
+      );
     }
   });
 
@@ -85,7 +91,7 @@ describe("planWorkflowStepDispatch — every executor family is now dispatchable
     // recovery gate rather than silently dispatching.
     const plan = planWorkflowStepDispatch({
       ok: true,
-      executorFamily: "future-unlanded-family" as WorkflowExecutorFamily
+      executorFamily: "future-unlanded-family" as WorkflowExecutorFamily,
     });
     expect(plan.action).toBe("fail_closed");
     if (plan.action === "fail_closed") {
@@ -105,9 +111,9 @@ describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
     { failure: "definition_unlinked", code: "workflow_definition_unlinked" },
     {
       failure: "step_definition_not_found",
-      code: "step_definition_not_found"
+      code: "step_definition_not_found",
     },
-    { failure: "unknown_executor_family", code: "unknown_executor_family" }
+    { failure: "unknown_executor_family", code: "unknown_executor_family" },
   ];
 
   for (const { failure, code } of cases) {
@@ -126,7 +132,7 @@ describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
     const plan = planWorkflowStepDispatch({
       ok: false,
       failure: "unknown_executor_family",
-      detail: "legacy-family"
+      detail: "legacy-family",
     });
     expect(plan.action).toBe("fail_closed");
     if (plan.action === "fail_closed") {
@@ -142,7 +148,7 @@ describe("planWorkflowStepDispatch totality", () => {
     }
     for (const failure of WORKFLOW_STEP_RESOLUTION_FAILURES) {
       expect(() =>
-        planWorkflowStepDispatch({ ok: false, failure })
+        planWorkflowStepDispatch({ ok: false, failure }),
       ).not.toThrow();
     }
   });

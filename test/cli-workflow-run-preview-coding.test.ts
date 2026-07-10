@@ -8,7 +8,10 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function readDoc(relative: string): string {
   return fs.readFileSync(path.join(repoRoot, relative), "utf8");
@@ -45,15 +48,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -87,8 +90,8 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-native-1",
-        objective: "Inspect before approval"
-      })
+        objective: "Inspect before approval",
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -101,9 +104,9 @@ describe("momentum workflow run preview-coding", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 1,
+      definitionVersion: 2,
       repoPath: repoDir,
-      objective: "Inspect before approval"
+      objective: "Inspect before approval",
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(6);
     expect(payload["steps"]).toEqual([
@@ -113,15 +116,16 @@ describe("momentum workflow run preview-coding", () => {
         executor: "one-shot",
         order: 0,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "delegate-supervisor",
+        config: { tool: "gnhf" },
         order: 1,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "postflight",
@@ -129,15 +133,16 @@ describe("momentum workflow run preview-coding", () => {
         executor: "one-shot",
         order: 2,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "no-mistakes",
         kind: "no-mistakes",
-        executor: "no-mistakes",
+        executor: "delegate-supervisor",
+        config: { tool: "no-mistakes" },
         order: 3,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "merge-cleanup",
@@ -145,7 +150,7 @@ describe("momentum workflow run preview-coding", () => {
         executor: "script",
         order: 4,
         required: true,
-        state: "pending"
+        state: "pending",
       },
       {
         stepId: "linear-refresh",
@@ -153,8 +158,8 @@ describe("momentum workflow run preview-coding", () => {
         executor: "external-apply",
         order: 5,
         required: true,
-        state: "pending"
-      }
+        state: "pending",
+      },
     ]);
   });
 
@@ -167,8 +172,8 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-current-engine",
         objective: "Inspect the current fallback route",
-        extra: ["--implementation-engine", "current-gnhf-cwfp"]
-      })
+        extra: ["--implementation-engine", "current-gnhf-cwfp"],
+      }),
     );
 
     expect(result.code).toBe(0);
@@ -179,20 +184,22 @@ describe("momentum workflow run preview-coding", () => {
       runId: "preview-current-engine",
       implementationEngine: "current-gnhf-cwfp",
       route: {
-        implementationEngine: "current-gnhf-cwfp"
-      }
+        implementationEngine: "current-gnhf-cwfp",
+      },
     });
     expect(payload["steps"]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           stepId: "implementation",
-          executor: "goal-loop"
+          executor: "delegate-supervisor",
+          config: { tool: "gnhf" },
         }),
         expect.objectContaining({
           stepId: "no-mistakes",
-          executor: "no-mistakes"
-        })
-      ])
+          executor: "delegate-supervisor",
+          config: { tool: "no-mistakes" },
+        }),
+      ]),
     );
   });
 
@@ -207,9 +214,9 @@ describe("momentum workflow run preview-coding", () => {
         objective: "Block bad route config",
         extra: [
           "--steps-json",
-          JSON.stringify({ "linear-refresh": { model: "opus" } })
-        ]
-      })
+          JSON.stringify({ "linear-refresh": { model: "opus" } }),
+        ],
+      }),
     );
 
     expect(result.code).toBe(1);
@@ -219,7 +226,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "route_config_invalid",
-      runId: "preview-invalid-route-steps"
+      runId: "preview-invalid-route-steps",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -231,8 +238,8 @@ describe("momentum workflow run preview-coding", () => {
         message:
           'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key."
-      }
+          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key.",
+      },
     ]);
   });
 
@@ -246,8 +253,8 @@ describe("momentum workflow run preview-coding", () => {
             repoDir,
             runId: "readiness-preview-malformed-steps",
             objective: "Block malformed preview route config",
-            extra: ["--steps-json", "{ not json"]
-          })
+            extra: ["--steps-json", "{ not json"],
+          }),
       },
       {
         name: "start-coding",
@@ -265,9 +272,9 @@ describe("momentum workflow run preview-coding", () => {
           dataDir,
           "--json",
           "--steps-json",
-          "{ not json"
-        ]
-      }
+          "{ not json",
+        ],
+      },
     ];
 
     for (const command of commands) {
@@ -281,7 +288,7 @@ describe("momentum workflow run preview-coding", () => {
       expect(payload, command.name).toMatchObject({
         ok: false,
         command: `workflow run ${command.name}`,
-        code: "route_config_invalid"
+        code: "route_config_invalid",
       });
       expect(payload["preflightEvidence"], command.name).toEqual([
         {
@@ -292,12 +299,13 @@ describe("momentum workflow run preview-coding", () => {
           key: "steps",
           message: "Coding route steps must be valid JSON.",
           recommendedAction:
-            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route."
-        }
+            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route.",
+        },
       ]);
-      expect(fs.existsSync(path.join(dataDir, "momentum.db")), command.name).toBe(
-        false
-      );
+      expect(
+        fs.existsSync(path.join(dataDir, "momentum.db")),
+        command.name,
+      ).toBe(false);
     }
   });
 
@@ -310,8 +318,8 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-invalid-profile",
         objective: "Block blank profile",
-        extra: ["--profile", "   "]
-      })
+        extra: ["--profile", "   "],
+      }),
     );
 
     expect(result.code).toBe(1);
@@ -321,7 +329,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "route_config_invalid",
-      runId: "preview-invalid-profile"
+      runId: "preview-invalid-profile",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -330,10 +338,11 @@ describe("momentum workflow run preview-coding", () => {
         severity: "error",
         path: "route.profile",
         key: "profile",
-        message: "Coding route profile must be a non-empty string when provided.",
+        message:
+          "Coding route profile must be a non-empty string when provided.",
         recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
-      }
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
+      },
     ]);
 
     const db = openDb(dataDir);
@@ -356,8 +365,8 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-invalid-approval",
         objective: "Block bad approval boundary",
-        extra: ["--approval-boundary", "through-linear-refresh"]
-      })
+        extra: ["--approval-boundary", "through-linear-refresh"],
+      }),
     );
 
     expect(result.code).toBe(1);
@@ -367,7 +376,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "invalid_run_start",
-      runId: "preview-invalid-approval"
+      runId: "preview-invalid-approval",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -378,8 +387,8 @@ describe("momentum workflow run preview-coding", () => {
         key: "approvalBoundary",
         message: "Approval boundary is not a known workflow approval boundary.",
         recommendedAction:
-          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
-      }
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.",
+      },
     ]);
 
     const db = openDb(dataDir);
@@ -401,8 +410,8 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-no-write",
-        objective: "Preview only"
-      })
+        objective: "Preview only",
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -429,7 +438,7 @@ describe("momentum workflow run preview-coding", () => {
       repoDir,
       runId: "preview-stable",
       objective: "Stable for Discord",
-      extra: ["--profile", "live-wrapper", "--issue-scope", "NGX-509"]
+      extra: ["--profile", "live-wrapper", "--issue-scope", "NGX-509"],
     });
     const first = await run(args);
     const second = await run(args);
@@ -451,9 +460,9 @@ describe("momentum workflow run preview-coding", () => {
           "--profile",
           "live-wrapper",
           "--approval-boundary",
-          "through-implementation"
-        ]
-      })
+          "through-implementation",
+        ],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -463,18 +472,18 @@ describe("momentum workflow run preview-coding", () => {
       approvalBoundary: "through-implementation",
       route: {
         profile: "live-wrapper",
-        implementationEngine: "native-goal-loop"
+        implementationEngine: "gnhf",
       },
-      implementationEngine: "native-goal-loop"
+      implementationEngine: "gnhf",
     });
     const steps = payload["steps"] as Array<{ stepId: string; state: string }>;
     const stateByStep = Object.fromEntries(
-      steps.map((step) => [step.stepId, step.state])
+      steps.map((step) => [step.stepId, step.state]),
     );
     expect(stateByStep).toMatchObject({
       preflight: "approved",
       implementation: "approved",
-      postflight: "pending"
+      postflight: "pending",
     });
   });
 
@@ -488,16 +497,17 @@ describe("momentum workflow run preview-coding", () => {
         runId: "preview-human",
         objective: "Readable plan",
         json: false,
-        extra: ["--profile", "live-wrapper"]
-      })
+        extra: ["--profile", "live-wrapper"],
+      }),
     );
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("preview-human");
-    expect(result.stdout).toContain("coding-workflow v1");
+    expect(result.stdout).toContain("coding-workflow v2");
     expect(result.stdout).toContain("Profile: live-wrapper");
-    expect(result.stdout).toContain("Implementation engine: native-goal-loop");
+    expect(result.stdout).toContain("Implementation engine: gnhf");
     expect(result.stdout).toContain("implementation");
-    expect(result.stdout).toContain("goal-loop");
+    expect(result.stdout).toContain("delegate-supervisor");
+    expect(result.stdout).toContain('config={"tool":"gnhf"}');
     expect(result.stdout).toContain("external-apply");
   });
 
@@ -515,24 +525,24 @@ describe("momentum workflow run preview-coding", () => {
           "--steps-json",
           JSON.stringify({
             implementation: { harness: "gnhf", model: "opus" },
-            "merge-cleanup": { effort: "low" }
-          })
-        ]
-      })
+            "merge-cleanup": { effort: "low" },
+          }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
     // The run-level profile line stays, and the per-step selections are now
     // auditable in the default (non-JSON) preview alongside it.
     expect(result.stdout).toContain("Per-step route:");
     expect(result.stdout).toContain(
-      "implementation: harness=gnhf, model=opus, effort=(default)"
+      "implementation: harness=gnhf, model=opus, effort=(default)",
     );
     expect(result.stdout).toContain(
-      "merge-cleanup: harness=(default), model=(default), effort=low"
+      "merge-cleanup: harness=(default), model=(default), effort=low",
     );
     // Unconfigured steps still render so defaults are visible before approval.
     expect(result.stdout).toContain(
-      "postflight: harness=(default), model=(default), effort=(default)"
+      "postflight: harness=(default), model=(default), effort=(default)",
     );
   });
 
@@ -549,10 +559,10 @@ describe("momentum workflow run preview-coding", () => {
           "--steps-json",
           JSON.stringify({
             "merge-cleanup": { effort: "low" },
-            implementation: { harness: "gnhf", model: "opus" }
-          })
-        ]
-      })
+            implementation: { harness: "gnhf", model: "opus" },
+          }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -563,9 +573,9 @@ describe("momentum workflow run preview-coding", () => {
       route: {
         steps: {
           implementation: { harness: "gnhf", model: "opus" },
-          "merge-cleanup": { effort: "low" }
-        }
-      }
+          "merge-cleanup": { effort: "low" },
+        },
+      },
     });
 
     // A preview still writes nothing durable.
@@ -596,33 +606,33 @@ describe("momentum workflow run preview-coding", () => {
             implementation: {
               harness: "claude",
               model: "sonnet",
-              effort: "high"
+              effort: "high",
             },
             "no-mistakes": {
               harness: "codex",
               model: "openai/gpt-5.5",
-              effort: "high"
+              effort: "high",
             },
             postflight: {
               harness: "opencode",
-              model: "glm-5.2"
-            }
-          })
-        ]
-      })
+              model: "glm-5.2",
+            },
+          }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "implementation: harness=claude, model=claude-sonnet-4-6, effort=high"
+      "implementation: harness=claude, model=claude-sonnet-4-6, effort=high",
     );
     expect(result.stdout).not.toContain(
-      "implementation: harness=claude, model=sonnet, effort=high"
+      "implementation: harness=claude, model=sonnet, effort=high",
     );
     expect(result.stdout).toContain(
-      "postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)"
+      "postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)",
     );
     expect(result.stdout).toContain(
-      "no-mistakes: harness=codex, model=gpt-5.5, effort=high"
+      "no-mistakes: harness=codex, model=gpt-5.5, effort=high",
     );
 
     const jsonResult = await run(
@@ -637,20 +647,20 @@ describe("momentum workflow run preview-coding", () => {
             implementation: {
               harness: "claude",
               model: "sonnet",
-              effort: "high"
+              effort: "high",
             },
             "no-mistakes": {
               harness: "codex",
               model: "openai/gpt-5.5",
-              effort: "high"
+              effort: "high",
             },
             postflight: {
               harness: "opencode",
-              model: "glm-5.2"
-            }
-          })
-        ]
-      })
+              model: "glm-5.2",
+            },
+          }),
+        ],
+      }),
     );
     expect(jsonResult.code).toBe(0);
     const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
@@ -660,19 +670,19 @@ describe("momentum workflow run preview-coding", () => {
           implementation: {
             harness: "claude",
             model: "claude-sonnet-4-6",
-            effort: "high"
+            effort: "high",
           },
           postflight: {
             harness: "opencode",
-            model: "opencode-go/glm-5.2"
+            model: "opencode-go/glm-5.2",
           },
           "no-mistakes": {
             harness: "codex",
             model: "gpt-5.5",
-            effort: "high"
-          }
-        }
-      }
+            effort: "high",
+          },
+        },
+      },
     });
   });
 
@@ -685,8 +695,11 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-bad-steps",
         objective: "Reject unsupported step",
-        extra: ["--steps-json", JSON.stringify({ preflight: { model: "opus" } })]
-      })
+        extra: [
+          "--steps-json",
+          JSON.stringify({ preflight: { model: "opus" } }),
+        ],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -694,7 +707,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "route_config_invalid",
-      runId: "preview-bad-steps"
+      runId: "preview-bad-steps",
     });
     // The refusal is actionable: it names the offending step and the supported set.
     expect(payload["message"]).toContain("preflight");
@@ -716,7 +729,7 @@ describe("momentum workflow run preview-coding", () => {
       "Existing run",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(started.code).toBe(0);
 
@@ -725,8 +738,8 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "preview-existing",
-        objective: "Preview duplicate"
-      })
+        objective: "Preview duplicate",
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -734,7 +747,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "run_exists",
-      runId: "preview-existing"
+      runId: "preview-existing",
     });
   });
 
@@ -747,7 +760,7 @@ describe("momentum workflow run preview-coding", () => {
       "--issue-scope",
       "NGX-509",
       "--approval-boundary",
-      "through-implementation"
+      "through-implementation",
     ];
 
     const preview = await run(
@@ -756,11 +769,14 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-equiv",
         objective: "Equivalence",
-        extra: sharedExtra
-      })
+        extra: sharedExtra,
+      }),
     );
     expect(preview.code).toBe(0);
-    const previewPayload = JSON.parse(preview.stdout) as Record<string, unknown>;
+    const previewPayload = JSON.parse(preview.stdout) as Record<
+      string,
+      unknown
+    >;
     const previewSteps = previewPayload["steps"] as Array<{
       stepId: string;
       kind: string;
@@ -783,7 +799,7 @@ describe("momentum workflow run preview-coding", () => {
       "--data-dir",
       dataDir,
       "--json",
-      ...sharedExtra
+      ...sharedExtra,
     ]);
     expect(started.code).toBe(0);
 
@@ -793,7 +809,7 @@ describe("momentum workflow run preview-coding", () => {
         .prepare(
           `SELECT workflow_definition_key, workflow_definition_version,
                   approval_boundary, route_json
-             FROM workflow_runs WHERE id = ?`
+             FROM workflow_runs WHERE id = ?`,
         )
         .get("preview-equiv") as {
         workflow_definition_key: string;
@@ -802,10 +818,10 @@ describe("momentum workflow run preview-coding", () => {
         route_json: string;
       };
       expect(runRow.workflow_definition_key).toBe(
-        previewPayload["definitionKey"]
+        previewPayload["definitionKey"],
       );
       expect(runRow.workflow_definition_version).toBe(
-        previewPayload["definitionVersion"]
+        previewPayload["definitionVersion"],
       );
       expect(runRow.approval_boundary).toBe(previewPayload["approvalBoundary"]);
       expect(JSON.parse(runRow.route_json)).toEqual(previewPayload["route"]);
@@ -813,7 +829,7 @@ describe("momentum workflow run preview-coding", () => {
       const persistedSteps = db
         .prepare(
           `SELECT step_id, kind, step_order, required, state
-             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`
+             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
         )
         .all("preview-equiv") as Array<{
         step_id: string;
@@ -828,16 +844,16 @@ describe("momentum workflow run preview-coding", () => {
           kind: step.kind,
           order: step.step_order,
           required: step.required === 1,
-          state: step.state
-        }))
+          state: step.state,
+        })),
       ).toEqual(
         previewSteps.map((step) => ({
           stepId: step.stepId,
           kind: step.kind,
           order: step.order,
           required: step.required,
-          state: step.state
-        }))
+          state: step.state,
+        })),
       );
     } finally {
       db.close();
@@ -846,7 +862,7 @@ describe("momentum workflow run preview-coding", () => {
     // Executor families in the preview are reconstructable from the durable
     // (key, version) pin alone, so dispatch/approval can reference them later.
     expect(previewSteps.map((step) => step.executor)).toEqual(
-      CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor)
+      CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor),
     );
   });
 
@@ -859,9 +875,9 @@ describe("momentum workflow run preview-coding", () => {
       implementation: {
         harness: "codex",
         model: "openai/gpt-5.5",
-        effort: "high"
+        effort: "high",
       },
-      postflight: { harness: "opencode", model: "glm-5.2" }
+      postflight: { harness: "opencode", model: "glm-5.2" },
     });
     const sharedExtra = [
       "--profile",
@@ -871,7 +887,7 @@ describe("momentum workflow run preview-coding", () => {
       "--approval-boundary",
       "through-implementation",
       "--steps-json",
-      stepsJson
+      stepsJson,
     ];
 
     const preview = await run(
@@ -880,11 +896,14 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId,
         objective,
-        extra: sharedExtra
-      })
+        extra: sharedExtra,
+      }),
     );
     expect(preview.code).toBe(0);
-    const previewPayload = JSON.parse(preview.stdout) as Record<string, unknown>;
+    const previewPayload = JSON.parse(preview.stdout) as Record<
+      string,
+      unknown
+    >;
     const previewSteps = previewPayload["steps"] as Array<{
       stepId: string;
       state: string;
@@ -903,18 +922,18 @@ describe("momentum workflow run preview-coding", () => {
           implementation: {
             harness: "codex",
             model: "gpt-5.5",
-            effort: "high"
+            effort: "high",
           },
-          postflight: { harness: "opencode", model: "opencode-go/glm-5.2" }
-        }
-      }
+          postflight: { harness: "opencode", model: "opencode-go/glm-5.2" },
+        },
+      },
     });
     expect(
-      Object.fromEntries(previewSteps.map((step) => [step.stepId, step.state]))
+      Object.fromEntries(previewSteps.map((step) => [step.stepId, step.state])),
     ).toMatchObject({
       preflight: "approved",
       implementation: "approved",
-      postflight: "pending"
+      postflight: "pending",
     });
 
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
@@ -932,7 +951,7 @@ describe("momentum workflow run preview-coding", () => {
       "--data-dir",
       dataDir,
       "--json",
-      ...sharedExtra
+      ...sharedExtra,
     ]);
     expect(started.code).toBe(0);
     expect(JSON.parse(started.stdout)).toMatchObject({
@@ -940,7 +959,7 @@ describe("momentum workflow run preview-coding", () => {
       command: "workflow run start-coding",
       runId,
       state: "approved",
-      approvalBoundary: "through-implementation"
+      approvalBoundary: "through-implementation",
     });
 
     const db = openDb(dataDir);
@@ -948,7 +967,7 @@ describe("momentum workflow run preview-coding", () => {
       const runRow = db
         .prepare(
           `SELECT approval_boundary, issue_scope_json, route_json
-             FROM workflow_runs WHERE id = ?`
+             FROM workflow_runs WHERE id = ?`,
         )
         .get(runId) as {
         approval_boundary: string | null;
@@ -957,34 +976,34 @@ describe("momentum workflow run preview-coding", () => {
       };
       expect(runRow.approval_boundary).toBe("through-implementation");
       expect(JSON.parse(runRow.issue_scope_json)).toEqual({
-        identifier: "NGX-575"
+        identifier: "NGX-575",
       });
       expect(JSON.parse(runRow.route_json)).toEqual(previewPayload["route"]);
 
       const persistedStepStates = db
         .prepare(
           `SELECT step_id, state
-             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`
+             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       expect(
         Object.fromEntries(
-          persistedStepStates.map((step) => [step.step_id, step.state])
-        )
+          persistedStepStates.map((step) => [step.step_id, step.state]),
+        ),
       ).toMatchObject({
         preflight: "approved",
         implementation: "approved",
-        postflight: "pending"
+        postflight: "pending",
       });
 
       const approval = db
         .prepare(
-          `SELECT boundary, actor FROM workflow_approvals WHERE run_id = ?`
+          `SELECT boundary, actor FROM workflow_approvals WHERE run_id = ?`,
         )
         .get(runId) as { boundary: string; actor: string } | undefined;
       expect(approval).toEqual({
         boundary: "through-implementation",
-        actor: "momentum-native-coding"
+        actor: "momentum-native-coding",
       });
     } finally {
       db.close();
@@ -999,8 +1018,8 @@ describe("momentum workflow run preview-coding", () => {
         dataDir,
         repoDir,
         runId: "cwfp-should-refuse",
-        objective: "Reserved"
-      })
+        objective: "Reserved",
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1008,7 +1027,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "reserved_run_id",
-      runId: "cwfp-should-refuse"
+      runId: "cwfp-should-refuse",
     });
   });
 
@@ -1021,15 +1040,15 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-bad-def",
         objective: "Wrong definition",
-        extra: ["--definition", "custom-flow"]
-      })
+        extra: ["--definition", "custom-flow"],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run preview-coding",
-      code: "definition_not_allowed"
+      code: "definition_not_allowed",
     });
   });
 
@@ -1038,13 +1057,13 @@ describe("momentum workflow run preview-coding", () => {
     const repoDir = makeTempDir();
 
     const noRunId = await run(
-      previewCodingArgs({ dataDir, repoDir, objective: "no run id" })
+      previewCodingArgs({ dataDir, repoDir, objective: "no run id" }),
     );
     expect(noRunId.code).toBe(1);
     expect(JSON.parse(noRunId.stderr)).toMatchObject({
       ok: false,
       command: "workflow run preview-coding",
-      code: "run_id_required"
+      code: "run_id_required",
     });
 
     const noObjective = await run([
@@ -1057,14 +1076,17 @@ describe("momentum workflow run preview-coding", () => {
       repoDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(noObjective.code).toBe(1);
-    const noObjectivePayload = JSON.parse(noObjective.stderr) as Record<string, unknown>;
+    const noObjectivePayload = JSON.parse(noObjective.stderr) as Record<
+      string,
+      unknown
+    >;
     expect(noObjectivePayload).toMatchObject({
       ok: false,
       command: "workflow run preview-coding",
-      code: "objective_required"
+      code: "objective_required",
     });
     expect(noObjectivePayload["preflightEvidence"]).toEqual([
       {
@@ -1075,8 +1097,8 @@ describe("momentum workflow run preview-coding", () => {
         key: "objective",
         message: "Objective must be a non-empty string.",
         recommendedAction:
-          "Set objective to a non-empty objective before starting the run."
-      }
+          "Set objective to a non-empty objective before starting the run.",
+      },
     ]);
   });
 
@@ -1094,7 +1116,7 @@ describe("momentum workflow run preview-coding", () => {
       "Reject blank repo",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1103,7 +1125,7 @@ describe("momentum workflow run preview-coding", () => {
       ok: false,
       command: "workflow run preview-coding",
       code: "repo_required",
-      runId: "preview-blank-repo"
+      runId: "preview-blank-repo",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -1114,8 +1136,8 @@ describe("momentum workflow run preview-coding", () => {
         key: "repoPath",
         message: "Repo path must be a non-empty string.",
         recommendedAction:
-          "Set repoPath to a non-empty repository path before starting the run."
-      }
+          "Set repoPath to a non-empty repository path before starting the run.",
+      },
     ]);
   });
 });
@@ -1136,14 +1158,14 @@ describe("workflow run start surfaces are unchanged by preview-coding", () => {
       "Generic start path",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       command: "workflow run start",
-      source: "workflow-definition"
+      source: "workflow-definition",
     });
     expect(payload["preview"]).toBeUndefined();
 

@@ -3,26 +3,25 @@ import type { WorkflowRunEvents } from "../core/workflow/run/events.js";
 import type { WorkflowHandoffEnvelope } from "../core/workflow/run/handoff.js";
 import type {
   WorkflowRunLogRound,
-  WorkflowRunLogsEnvelope
+  WorkflowRunLogsEnvelope,
 } from "../core/workflow/run/logs.js";
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor/envelope.js";
 import type { WorkflowMonitorProgressTick } from "../core/workflow/monitor/progress.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor/state.js";
-import type {
-  WorkflowWatchAdvisory
-} from "../core/workflow/monitor/watch-advisory.js";
+import type { WorkflowWatchAdvisory } from "../core/workflow/monitor/watch-advisory.js";
 import type { WorkflowWatchActionRecommendation } from "../core/workflow/monitor/action-authority.js";
 import type { WorkflowWatchStreamRecord } from "../core/workflow/monitor/watch-stream.js";
-import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run/import.js";
+import type {
+  WorkflowRunImport,
+  WorkflowRunImportDiagnostic,
+} from "../core/workflow/run/import.js";
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run/import-persist.js";
 import type { WorkflowRunManualRecoveryState } from "../core/workflow/run/recovery.js";
 import type { PersistWorkflowRunStartSummary } from "../core/workflow/run/start-persist.js";
-import type {
-  StructuralPreflightEvidence
-} from "../core/workflow/preflight/structural.js";
+import type { StructuralPreflightEvidence } from "../core/workflow/preflight/structural.js";
 import type {
   WorkflowCodingPlanPreview,
-  WorkflowRunStartError
+  WorkflowRunStartError,
 } from "../core/workflow/run/start.js";
 import type {
   WorkflowApprovalRow,
@@ -31,7 +30,7 @@ import type {
   WorkflowRunDetail,
   WorkflowRunRow,
   WorkflowRunSummary,
-  WorkflowStepRow
+  WorkflowStepRow,
 } from "../core/workflow/run/status.js";
 import type { ClearWorkflowRunManualRecoveryGuardedResult } from "../core/workflow/run/recovery.js";
 import type { ReconcileWorkflowRunManualRecoveryResult } from "../core/workflow/recovery/reconcile.js";
@@ -69,7 +68,7 @@ export function emitWorkflowRunStartSuccess(
     policyPresent: boolean;
     policyPath: string;
     command?: WorkflowRunStartCommand;
-  }
+  },
 ): number {
   const { summary } = result;
   const payload = {
@@ -87,7 +86,7 @@ export function emitWorkflowRunStartSuccess(
     repoPath: result.repoPath,
     objective: result.objective,
     counts: { steps: summary.stepCount },
-    policy: { present: result.policyPresent, path: result.policyPath }
+    policy: { present: result.policyPresent, path: result.policyPath },
   };
 
   if (parsed.json) {
@@ -108,7 +107,7 @@ export function emitWorkflowRunStartSuccess(
     `Objective: ${result.objective}`,
     `Policy: ${result.policyPresent ? result.policyPath : "(none)"}`,
     `Data dir: ${result.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -119,11 +118,11 @@ export function emitWorkflowRunStartFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: WorkflowRunStartCommand;
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: failure.command ?? "workflow run start"
+    command: failure.command ?? "workflow run start",
   });
 }
 
@@ -147,16 +146,17 @@ export function emitWorkflowRunPreviewCodingSuccess(
     policyPresent: boolean;
     policyPath: string;
     stepRouteLines: string[];
-  }
+  },
 ): number {
   const { preview } = result;
   const steps = preview.steps.map((step) => ({
     stepId: step.stepId,
     kind: step.kind,
     executor: step.executor,
+    ...(step.config === undefined ? {} : { config: step.config }),
     order: step.order,
     required: step.required,
-    state: step.state
+    state: step.state,
   }));
   const payload = {
     ok: true,
@@ -177,7 +177,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     skillRevision: preview.skillRevision,
     steps,
     counts: { steps: steps.length },
-    policy: { present: result.policyPresent, path: result.policyPath }
+    policy: { present: result.policyPresent, path: result.policyPath },
   };
 
   if (parsed.json) {
@@ -211,11 +211,13 @@ export function emitWorkflowRunPreviewCodingSuccess(
     `Steps (${steps.length}):`,
     ...steps.map(
       (step) =>
-        `  ${step.order}. ${step.stepId} (${step.kind}) -> ${step.executor} [${
-          step.required ? "required" : "optional"
-        }, ${step.state}]`
+        `  ${step.order}. ${step.stepId} (${step.kind}) -> ${step.executor}${
+          step.config === undefined
+            ? ""
+            : ` config=${JSON.stringify(step.config)}`
+        } [${step.required ? "required" : "optional"}, ${step.state}]`,
     ),
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -231,7 +233,7 @@ export function emitWorkflowImportSuccess(
     importResult: WorkflowRunImport;
     recovery: ReconcileWorkflowRunManualRecoveryResult;
     recoveryState: WorkflowRunManualRecoveryState | undefined;
-  }
+  },
 ): number {
   const { summary, importResult } = result;
   const needsManualRecovery =
@@ -256,10 +258,10 @@ export function emitWorkflowImportSuccess(
     counts: {
       steps: summary.stepCount,
       approvals: summary.approvalCount,
-      diagnostics: importResult.diagnostics.length
+      diagnostics: importResult.diagnostics.length,
     },
     diagnostics: importResult.diagnostics.map((diagnostic) => ({
-      ...diagnostic
+      ...diagnostic,
     })),
     monitor: importResult.monitor === null ? null : { ...importResult.monitor },
     needsManualRecovery,
@@ -274,8 +276,8 @@ export function emitWorkflowImportSuccess(
             artifactWriteError:
               marked.outcome === "artifact_write_failed"
                 ? { ...marked.artifactWriteError }
-                : null
-          }
+                : null,
+          },
   };
 
   if (parsed.json) {
@@ -299,7 +301,7 @@ export function emitWorkflowImportSuccess(
         ? "Manual recovery: flagged (clear explicitly once resolved)"
         : "Manual recovery: not required",
     `Data dir: ${result.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -310,11 +312,11 @@ export function emitWorkflowImportFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow import";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow import"
+    command: "workflow import",
   });
 }
 
@@ -326,7 +328,7 @@ export function emitWorkflowStatusList(
   },
   io: CliIo,
   dataDir: string,
-  summaries: WorkflowRunSummary[]
+  summaries: WorkflowRunSummary[],
 ): number {
   const payload = {
     ok: true,
@@ -335,7 +337,7 @@ export function emitWorkflowStatusList(
     state: parsed.state ?? null,
     filter: parsed.filter ?? null,
     count: summaries.length,
-    runs: summaries.map(summaryToJsonShape)
+    runs: summaries.map(summaryToJsonShape),
   };
 
   if (parsed.json) {
@@ -358,7 +360,7 @@ export function emitWorkflowStatusList(
           ` next=${summary.monitor.nextAction.code}` +
           (summary.monitor.recovery
             ? ` recovery=${summary.monitor.recovery.code}`
-            : "")
+            : ""),
       );
     }
   }
@@ -371,7 +373,7 @@ export function emitWorkflowStatusDetail(
   parsed: { json: boolean },
   io: CliIo,
   dataDir: string,
-  detail: WorkflowRunDetail
+  detail: WorkflowRunDetail,
 ): number {
   const payload = {
     ok: true,
@@ -383,10 +385,10 @@ export function emitWorkflowStatusDetail(
     leases: detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(
       detail.monitor,
-      workflowActionClassContextForRun(detail.run, detail.gates)
+      workflowActionClassContextForRun(detail.run, detail.gates),
     ),
     evidence: detail.evidence.map(workflowEvidenceToJsonShape),
-    gates: detail.gates.map(workflowGateToJsonShape)
+    gates: detail.gates.map(workflowGateToJsonShape),
   };
 
   if (parsed.json) {
@@ -401,7 +403,7 @@ export function emitWorkflowStatusDetail(
 export function emitWorkflowStatusFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -419,7 +421,7 @@ export function emitWorkflowRunList(
   },
   io: CliIo,
   dataDir: string,
-  summaries: WorkflowRunSummary[]
+  summaries: WorkflowRunSummary[],
 ): number {
   const payload = {
     ok: true,
@@ -433,7 +435,7 @@ export function emitWorkflowRunList(
     updatedSince: parsed.updatedSince ?? null,
     updatedUntil: parsed.updatedUntil ?? null,
     count: summaries.length,
-    runs: summaries.map(summaryToJsonShape)
+    runs: summaries.map(summaryToJsonShape),
   };
 
   if (parsed.json) {
@@ -449,10 +451,10 @@ export function emitWorkflowRunList(
   lines.push(`Repo: ${parsed.repo ?? "(any)"}`);
   lines.push(`Issue scope: ${parsed.issueScope ?? "(any)"}`);
   lines.push(
-    `Updated since: ${parsed.updatedSince === undefined ? "(any)" : String(parsed.updatedSince)}`
+    `Updated since: ${parsed.updatedSince === undefined ? "(any)" : String(parsed.updatedSince)}`,
   );
   lines.push(
-    `Updated until: ${parsed.updatedUntil === undefined ? "(any)" : String(parsed.updatedUntil)}`
+    `Updated until: ${parsed.updatedUntil === undefined ? "(any)" : String(parsed.updatedUntil)}`,
   );
   lines.push(`Data dir: ${dataDir}`);
   if (summaries.length === 0) {
@@ -467,7 +469,7 @@ export function emitWorkflowRunList(
           ` next=${summary.monitor.nextAction.code}` +
           (summary.monitor.recovery
             ? ` recovery=${summary.monitor.recovery.code}`
-            : "")
+            : ""),
       );
     }
   }
@@ -479,7 +481,7 @@ export function emitWorkflowRunList(
 export function emitWorkflowRunListFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -499,7 +501,7 @@ export function emitWorkflowRunApproveSuccess(
     artifactDigest: string;
     recordedAt: number;
   },
-  artifactPath: string | undefined
+  artifactPath: string | undefined,
 ): number {
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -513,7 +515,7 @@ export function emitWorkflowRunApproveSuccess(
     `Actor: ${payload.actor ?? "(unset)"}`,
     `Artifact: ${artifactPath ?? "(inline/implicit)"}`,
     `Data dir: ${payload.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -522,7 +524,7 @@ export function emitWorkflowRunApproveSuccess(
 export function emitWorkflowRunApproveFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -542,7 +544,7 @@ export function emitWorkflowRunDecideSuccess(
     resolution: string | null;
     resolvedAt: number | null;
     allowedActions: readonly string[];
-  }
+  },
 ): number {
   const payload = {
     ok: true,
@@ -557,7 +559,7 @@ export function emitWorkflowRunDecideSuccess(
     mode: resolved.resolutionMode,
     resolution: resolved.resolution,
     resolvedAt: resolved.resolvedAt,
-    allowedActions: resolved.allowedActions
+    allowedActions: resolved.allowedActions,
   };
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -571,7 +573,7 @@ export function emitWorkflowRunDecideSuccess(
     `Resolved by: ${resolved.resolvedBy} (${resolved.resolutionMode})`,
     `Note: ${resolved.resolution ?? "(none)"}`,
     `Data dir: ${dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -580,7 +582,7 @@ export function emitWorkflowRunDecideSuccess(
 export function emitWorkflowRunDecideFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -596,7 +598,7 @@ export function emitWorkflowRunUpdateStepSuccess(
     reason: string;
     actor: string | null;
     dataDir: string;
-  }
+  },
 ): number {
   if (parsed.json) {
     writeJson(io.stdout, resultPayload);
@@ -611,7 +613,7 @@ export function emitWorkflowRunUpdateStepSuccess(
     `Reason: ${input.reason}`,
     `Actor: ${input.actor ?? "(unset)"}`,
     `Data dir: ${input.dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -620,7 +622,7 @@ export function emitWorkflowRunUpdateStepSuccess(
 export function emitWorkflowRunUpdateStepFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -630,7 +632,7 @@ export function emitWorkflowRunClearRecovery(
   io: CliIo,
   dataDir: string,
   runId: string,
-  result: ClearWorkflowRunManualRecoveryGuardedResult
+  result: ClearWorkflowRunManualRecoveryGuardedResult,
 ): number {
   if (!result.ok) {
     const payload: Record<string, unknown> = {
@@ -639,7 +641,7 @@ export function emitWorkflowRunClearRecovery(
       code: result.reason,
       message: result.message,
       runId,
-      dataDir
+      dataDir,
     };
     if (result.recoveryCode !== undefined) {
       payload["recoveryCode"] = result.recoveryCode;
@@ -662,7 +664,7 @@ export function emitWorkflowRunClearRecovery(
     dataDir,
     previousReason: result.previousReason,
     previousMarkedAt: result.previousMarkedAt,
-    clearedAt: result.clearedAt
+    clearedAt: result.clearedAt,
   };
   if (result.retryPrepared !== undefined) {
     payload["retryPrepared"] = result.retryPrepared;
@@ -683,16 +685,16 @@ export function emitWorkflowRunClearRecovery(
     `Cleared at: ${result.clearedAt}`,
     ...(result.retryPrepared !== undefined
       ? [
-          `Retry prepared: ${result.retryPrepared.stepId} (${result.retryPrepared.recoveryCode})`
+          `Retry prepared: ${result.retryPrepared.stepId} (${result.retryPrepared.recoveryCode})`,
         ]
       : []),
     ...(result.reconciledStep !== undefined
       ? [
-          `Reconciled step: ${result.reconciledStep.stepId} (${result.reconciledStep.recoveryCode} -> ${result.reconciledStep.state})`
+          `Reconciled step: ${result.reconciledStep.stepId} (${result.reconciledStep.recoveryCode} -> ${result.reconciledStep.state})`,
         ]
       : []),
     `Data dir: ${dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -703,11 +705,11 @@ export function emitWorkflowRunClearRecoveryFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow run clear-recovery";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run clear-recovery"
+    command: "workflow run clear-recovery",
   });
 }
 
@@ -717,7 +719,7 @@ export function emitWorkflowRunMonitor(
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  advanced = false
+  advanced = false,
 ): number {
   const payload = {
     ok: true,
@@ -741,7 +743,7 @@ export function emitWorkflowRunMonitor(
           kind: envelope.activeStep.kind,
           state: envelope.activeStep.state,
           order: envelope.activeStep.order,
-          required: envelope.activeStep.required
+          required: envelope.activeStep.required,
         }
       : null,
     leases: envelope.leases.map((lease) => ({
@@ -750,14 +752,14 @@ export function emitWorkflowRunMonitor(
       classification: lease.classification,
       expiresAt: lease.expiresAt,
       heartbeatAt: lease.heartbeatAt,
-      releasedAt: lease.releasedAt
+      releasedAt: lease.releasedAt,
     })),
     lastCheckpoint: envelope.lastCheckpoint
       ? {
           stepId: envelope.lastCheckpoint.stepId,
           at: envelope.lastCheckpoint.at,
           source: envelope.lastCheckpoint.source,
-          digest: envelope.lastCheckpoint.digest
+          digest: envelope.lastCheckpoint.digest,
         }
       : null,
     monitorDrift: envelope.monitorDrift
@@ -766,18 +768,18 @@ export function emitWorkflowRunMonitor(
           advisoryTerminal: envelope.monitorDrift.advisoryTerminal,
           actualState: envelope.monitorDrift.actualState,
           drifted: envelope.monitorDrift.drifted,
-          reason: envelope.monitorDrift.reason
+          reason: envelope.monitorDrift.reason,
         }
       : null,
     nextAction: nextActionToJsonShape(
       envelope,
-      workflowActionClassContextForMonitorEnvelope(envelope)
+      workflowActionClassContextForMonitorEnvelope(envelope),
     ),
     recovery: envelope.recovery
       ? {
           code: envelope.recovery.code,
           message: envelope.recovery.message,
-          stepId: envelope.recovery.stepId
+          stepId: envelope.recovery.stepId,
         }
       : null,
     evidence: envelope.evidence.map(workflowEvidenceToJsonShape),
@@ -788,7 +790,7 @@ export function emitWorkflowRunMonitor(
       approvals: envelope.counts.approvals,
       leases: envelope.counts.leases,
       gates: envelope.counts.gates,
-      gatesOpen: envelope.counts.gatesOpen
+      gatesOpen: envelope.counts.gatesOpen,
     },
     progress: {
       phase: progress.phase,
@@ -801,8 +803,8 @@ export function emitWorkflowRunMonitor(
       lastEvent: progress.lastEvent,
       nextAction: progress.nextAction,
       blockerReason: progress.blockerReason,
-      digest: progress.digest
-    }
+      digest: progress.digest,
+    },
   };
 
   if (parsed.json) {
@@ -812,7 +814,7 @@ export function emitWorkflowRunMonitor(
 
   write(
     io.stdout,
-    renderWorkflowMonitorText(dataDir, envelope, progress, advanced)
+    renderWorkflowMonitorText(dataDir, envelope, progress, advanced),
   );
   return 0;
 }
@@ -822,11 +824,11 @@ export function emitWorkflowRunMonitorFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow run monitor";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run monitor"
+    command: "workflow run monitor",
   });
 }
 
@@ -846,7 +848,7 @@ export const WORKFLOW_WATCH_RECOMMENDED_ACTIONS = [
   "approve",
   "operator_decision",
   "recover",
-  "release"
+  "release",
 ] as const;
 export type WorkflowWatchRecommendedAction =
   (typeof WORKFLOW_WATCH_RECOMMENDED_ACTIONS)[number];
@@ -858,7 +860,7 @@ export type WorkflowWatchStuckRisk =
 export const WORKFLOW_WATCH_HUMAN_ACTION_CODES = [
   "approve",
   "resolve_gate",
-  "clear_recovery"
+  "clear_recovery",
 ] as const;
 export type WorkflowWatchHumanActionCode =
   (typeof WORKFLOW_WATCH_HUMAN_ACTION_CODES)[number];
@@ -873,7 +875,7 @@ export const WORKFLOW_OPERATOR_ACTION_CLASSES = [
   "operator_decision",
   "resolve_gate",
   "retry_failed_step",
-  "stop_monitoring"
+  "stop_monitoring",
 ] as const;
 export type WorkflowOperatorActionClass =
   (typeof WORKFLOW_OPERATOR_ACTION_CLASSES)[number];
@@ -891,7 +893,7 @@ export function emitWorkflowRunWatch(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
   advisory: WorkflowWatchAdvisory,
-  recommendation: WorkflowWatchActionRecommendation
+  recommendation: WorkflowWatchActionRecommendation,
 ): number {
   const nextAction = buildWorkflowWatchNextAction(envelope);
   const payload = {
@@ -913,7 +915,7 @@ export function emitWorkflowRunWatch(
           kind: envelope.activeStep.kind,
           state: envelope.activeStep.state,
           order: envelope.activeStep.order,
-          required: envelope.activeStep.required
+          required: envelope.activeStep.required,
         }
       : null,
     nextAction,
@@ -926,7 +928,7 @@ export function emitWorkflowRunWatch(
     stuckRisk: advisory.stuckRisk,
     inspectionCommand: advisory.inspectionCommand,
     cleanup: progress.cleanup,
-    digest: progress.digest
+    digest: progress.digest,
   };
 
   if (parsed.json) {
@@ -936,7 +938,7 @@ export function emitWorkflowRunWatch(
 
   write(
     io.stdout,
-    renderWorkflowWatchText(dataDir, envelope, progress, payload)
+    renderWorkflowWatchText(dataDir, envelope, progress, payload),
   );
   return 0;
 }
@@ -946,11 +948,11 @@ export function emitWorkflowRunWatchFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow run watch";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run watch"
+    command: "workflow run watch",
   });
 }
 
@@ -964,7 +966,7 @@ export function emitWorkflowRunWatchFailure(
  */
 export function emitWorkflowRunWatchStreamRecord(
   io: CliIo,
-  record: WorkflowWatchStreamRecord
+  record: WorkflowWatchStreamRecord,
 ): void {
   write(io.stdout, `${JSON.stringify(record)}\n`);
 }
@@ -973,7 +975,7 @@ export function emitWorkflowRunEvents(
   parsed: { json: boolean },
   io: CliIo,
   dataDir: string,
-  envelope: WorkflowRunEvents
+  envelope: WorkflowRunEvents,
 ): number {
   const payload = {
     ok: true,
@@ -988,9 +990,9 @@ export function emitWorkflowRunEvents(
       timestamp: event.timestamp,
       type: event.type,
       stepId: event.stepId,
-      payload: event.payload
+      payload: event.payload,
     })),
-    counts: { events: envelope.events.length }
+    counts: { events: envelope.events.length },
   };
 
   if (parsed.json) {
@@ -1007,11 +1009,11 @@ export function emitWorkflowRunEvents(
       [
         `  ${event.timestamp} ${event.type}`,
         event.stepId === null ? "" : ` step=${event.stepId}`,
-        ` cursor=${event.cursor}`
-      ].join("")
+        ` cursor=${event.cursor}`,
+      ].join(""),
     ),
     `Data dir: ${dataDir}`,
-    ""
+    "",
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -1022,17 +1024,15 @@ export function emitWorkflowRunEventsFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow run events";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run events"
+    command: "workflow run events",
   });
 }
 
-function buildWorkflowWatchHumanAction(
-  envelope: WorkflowMonitorEnvelope
-): {
+function buildWorkflowWatchHumanAction(envelope: WorkflowMonitorEnvelope): {
   code: WorkflowWatchHumanActionCode;
   command: string;
   detail: string | null;
@@ -1060,7 +1060,7 @@ function buildWorkflowWatchHumanAction(
         `momentum workflow run clear-recovery ${envelope.runId} ` +
         "--evidence-pointer <ref>",
       detail: envelope.recovery.message,
-      gateType: null
+      gateType: null,
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1071,7 +1071,7 @@ function buildWorkflowWatchHumanAction(
         envelope.manualRecoveryReason ??
         envelope.recovery?.message ??
         envelope.nextAction.detail,
-      gateType: null
+      gateType: null,
     };
   }
   if (envelope.recovery !== null) {
@@ -1083,7 +1083,7 @@ function buildWorkflowWatchHumanAction(
       code: "resolve_gate",
       command: `momentum workflow run decide ${openGate.gateId} --action <action> --actor <name>`,
       detail: openGate.reason,
-      gateType: openGate.gateType
+      gateType: openGate.gateType,
     };
   }
   if (
@@ -1091,7 +1091,7 @@ function buildWorkflowWatchHumanAction(
     envelope.activeStep !== null
   ) {
     const boundary = workflowWatchApprovalBoundaryForStepKind(
-      envelope.activeStep.kind
+      envelope.activeStep.kind,
     );
     if (boundary !== null) {
       return {
@@ -1101,7 +1101,7 @@ function buildWorkflowWatchHumanAction(
           `--approval-boundary ${boundary} ` +
           `--phrase "approve plan ${envelope.runId} ${boundary}"`,
         detail: envelope.nextAction.detail,
-        gateType: null
+        gateType: null,
       };
     }
   }
@@ -1109,7 +1109,7 @@ function buildWorkflowWatchHumanAction(
 }
 
 function workflowWatchApprovalBoundaryForStepKind(
-  kind: NonNullable<WorkflowMonitorEnvelope["activeStep"]>["kind"]
+  kind: NonNullable<WorkflowMonitorEnvelope["activeStep"]>["kind"],
 ): string | null {
   switch (kind) {
     case "preflight":
@@ -1144,12 +1144,12 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
       detail: envelope.nextAction.detail,
       actionClass: workflowOperatorActionClassForMonitor(envelope, {
         manualRecoveryReason: envelope.manualRecoveryReason,
-        needsManualRecovery: envelope.needsManualRecovery
+        needsManualRecovery: envelope.needsManualRecovery,
       }),
       recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
         manualRecoveryReason: envelope.manualRecoveryReason,
-        needsManualRecovery: envelope.needsManualRecovery
-      })
+        needsManualRecovery: envelope.needsManualRecovery,
+      }),
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1164,12 +1164,12 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
         detail: envelope.nextAction.detail,
         actionClass: workflowOperatorActionClassForMonitor(envelope, {
           manualRecoveryReason: envelope.manualRecoveryReason,
-          needsManualRecovery: envelope.needsManualRecovery
+          needsManualRecovery: envelope.needsManualRecovery,
         }),
         recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
           manualRecoveryReason: envelope.manualRecoveryReason,
-          needsManualRecovery: envelope.needsManualRecovery
-        })
+          needsManualRecovery: envelope.needsManualRecovery,
+        }),
       };
     }
     return {
@@ -1185,12 +1185,12 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
         "Run is flagged for manual recovery. Clear recovery after resolving the underlying cause.",
       actionClass: workflowOperatorActionClassForMonitor(envelope, {
         manualRecoveryReason: envelope.manualRecoveryReason,
-        needsManualRecovery: envelope.needsManualRecovery
+        needsManualRecovery: envelope.needsManualRecovery,
       }),
       recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
         manualRecoveryReason: envelope.manualRecoveryReason,
-        needsManualRecovery: envelope.needsManualRecovery
-      })
+        needsManualRecovery: envelope.needsManualRecovery,
+      }),
     };
   }
   return {
@@ -1200,18 +1200,18 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
     detail: envelope.nextAction.detail,
     actionClass: workflowOperatorActionClassForMonitor(envelope, {
       manualRecoveryReason: envelope.manualRecoveryReason,
-      needsManualRecovery: envelope.needsManualRecovery
+      needsManualRecovery: envelope.needsManualRecovery,
     }),
     recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
       manualRecoveryReason: envelope.manualRecoveryReason,
-      needsManualRecovery: envelope.needsManualRecovery
-    })
+      needsManualRecovery: envelope.needsManualRecovery,
+    }),
   };
 }
 
 function workflowOperatorActionClassForMonitor(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: WorkflowOperatorActionClassContext = {}
+  options: WorkflowOperatorActionClassContext = {},
 ): WorkflowOperatorActionClass {
   if (isSetupConfigRecoveryReason(options.manualRecoveryReason ?? null)) {
     return "fix_setup_config_then_retry";
@@ -1267,7 +1267,7 @@ function workflowOperatorActionClassForMonitor(
 }
 
 function workflowMonitorHasExternalTailAdvance(
-  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
 ): boolean {
   return (
     monitor.nextAction.code === "advance_to_step" &&
@@ -1278,30 +1278,32 @@ function workflowMonitorHasExternalTailAdvance(
 
 function workflowMonitorHasOpenGate(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: WorkflowOperatorActionClassContext
+  options: WorkflowOperatorActionClassContext,
 ): boolean {
   const gates =
     options.gates ??
-    ("gates" in monitor ? monitor.gates : ([] as readonly { resolvedAt: number | null }[]));
+    ("gates" in monitor
+      ? monitor.gates
+      : ([] as readonly { resolvedAt: number | null }[]));
   return gates.some((gate) => gate.resolvedAt === null);
 }
 
 function workflowRecoveryDetailForMonitor(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: WorkflowOperatorActionClassContext = {}
+  options: WorkflowOperatorActionClassContext = {},
 ): Record<string, unknown> | null {
   if (isInterruptedNoMistakesRecovery(monitor, options)) {
     return {
       kind: "no_mistakes_deterministic_evidence",
       evidencePointerRequired: true,
-      refusalReason: null
+      refusalReason: null,
     };
   }
   if (monitor.recovery?.code === "failed_external_side_effect_step") {
     return {
       kind: "external_tail_reconcile",
       evidencePointerRequired: true,
-      refusalReason: null
+      refusalReason: null,
     };
   }
   return null;
@@ -1309,7 +1311,7 @@ function workflowRecoveryDetailForMonitor(
 
 function isInterruptedNoMistakesRecovery(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: WorkflowOperatorActionClassContext
+  options: WorkflowOperatorActionClassContext,
 ): boolean {
   if (
     monitor.activeStep?.kind !== "no-mistakes" ||
@@ -1323,7 +1325,7 @@ function isInterruptedNoMistakesRecovery(
     options.needsManualRecovery === true &&
     (reason === "interrupted_no_mistakes_checks_passed" ||
       /^interrupted[-_ ]+no[-_ ]mistakes[-_ ]+(?:checks[-_ ]passed[-_ ]+evidence|deterministic[-_ ]+evidence)[-_ ]+(?:needs[-_ ]+)?reconciliation$/i.test(
-        reason
+        reason,
       ))
   );
 }
@@ -1334,7 +1336,7 @@ function isSetupConfigRecoveryReason(reason: string | null): boolean {
 }
 
 function workflowWatchRecoveryHasNoDirectClearCommand(
-  recoveryCode: string | undefined
+  recoveryCode: string | undefined,
 ): boolean {
   return (
     recoveryCode === "stale_running_step" ||
@@ -1343,7 +1345,9 @@ function workflowWatchRecoveryHasNoDirectClearCommand(
   );
 }
 
-function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolean {
+function isWorkflowWatchCleanTerminal(
+  envelope: WorkflowMonitorEnvelope,
+): boolean {
   return (
     envelope.terminal &&
     envelope.recovery === null &&
@@ -1352,7 +1356,7 @@ function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolea
 }
 
 function recommendWorkflowWatchPollSeconds(
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
 ): number {
   if (progress.cleanup === "release") return 0;
   if (progress.phase === "blocked" || progress.phase === "awaiting_approval") {
@@ -1379,7 +1383,7 @@ function renderWorkflowWatchText(
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  payload: WorkflowWatchTextPayload
+  payload: WorkflowWatchTextPayload,
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run watch: ${envelope.runId}`);
@@ -1391,7 +1395,7 @@ function renderWorkflowWatchText(
   lines.push(`Next action: ${payload.nextAction.code}`);
   lines.push(`Recommended action: ${payload.recommendedAction}`);
   lines.push(
-    `Recommended action policy: ${payload.recommendedActionPolicy.authority} (${payload.recommendedActionPolicy.risk})`
+    `Recommended action policy: ${payload.recommendedActionPolicy.authority} (${payload.recommendedActionPolicy.risk})`,
   );
   lines.push(`Next poll seconds: ${payload.nextPollSeconds}`);
   lines.push(`Quiet for seconds: ${payload.quietForSeconds}`);
@@ -1417,7 +1421,7 @@ export function emitWorkflowHandoff(
   parsed: { json: boolean },
   io: CliIo,
   dataDir: string,
-  envelope: WorkflowHandoffEnvelope
+  envelope: WorkflowHandoffEnvelope,
 ): number {
   const payload = {
     ok: true,
@@ -1433,8 +1437,8 @@ export function emitWorkflowHandoff(
       envelope.detail.monitor,
       workflowActionClassContextForRun(
         envelope.detail.run,
-        envelope.detail.gates
-      )
+        envelope.detail.gates,
+      ),
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
@@ -1442,9 +1446,9 @@ export function emitWorkflowHandoff(
       envelope.detail.monitor,
       workflowActionClassContextForRun(
         envelope.detail.run,
-        envelope.detail.gates
-      )
-    )
+        envelope.detail.gates,
+      ),
+    ),
   };
 
   if (parsed.json) {
@@ -1459,7 +1463,7 @@ export function emitWorkflowHandoff(
 export function emitWorkflowHandoffFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
 }
@@ -1468,7 +1472,7 @@ export function emitWorkflowRunLogs(
   parsed: { json: boolean },
   io: CliIo,
   dataDir: string,
-  envelope: WorkflowRunLogsEnvelope
+  envelope: WorkflowRunLogsEnvelope,
 ): number {
   const payload = {
     ok: true,
@@ -1484,8 +1488,8 @@ export function emitWorkflowRunLogs(
       envelope.detail.monitor,
       workflowActionClassContextForRun(
         envelope.detail.run,
-        envelope.detail.gates
-      )
+        envelope.detail.gates,
+      ),
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
@@ -1495,9 +1499,9 @@ export function emitWorkflowRunLogs(
       envelope.detail.monitor,
       workflowActionClassContextForRun(
         envelope.detail.run,
-        envelope.detail.gates
-      )
-    )
+        envelope.detail.gates,
+      ),
+    ),
   };
 
   if (parsed.json) {
@@ -1514,16 +1518,16 @@ export function emitWorkflowRunLogsFailure(
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
     command?: "workflow run logs";
-  }
+  },
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run logs"
+    command: "workflow run logs",
   });
 }
 
 export function workflowRoundToJsonShape(
-  round: WorkflowRunLogRound
+  round: WorkflowRunLogRound,
 ): Record<string, unknown> {
   return {
     roundId: round.roundId,
@@ -1564,12 +1568,12 @@ export function workflowRoundToJsonShape(
     artifacts: round.artifacts.map((artifact) => ({ ...artifact })),
     checkpoints: round.checkpoints.map((checkpoint) => ({ ...checkpoint })),
     findings: round.findings.map((finding) => ({ ...finding })),
-    decisions: round.decisions.map((decision) => ({ ...decision }))
+    decisions: round.decisions.map((decision) => ({ ...decision })),
   };
 }
 
 function workflowNativeRoundEvidence(
-  round: WorkflowRunLogRound
+  round: WorkflowRunLogRound,
 ): Record<string, unknown> {
   return {
     schema: "momentum.native-goal-loop.round-result.v1",
@@ -1584,27 +1588,27 @@ function workflowNativeRoundEvidence(
         command: result.command,
         exitCode: result.exitCode,
         durationMs: result.durationMs,
-        timedOut: result.timedOut
-      }))
+        timedOut: result.timedOut,
+      })),
     },
     artifacts: round.artifacts.map((artifact) => ({
       class: artifact.artifactClass,
       path: artifact.path,
-      digest: artifact.digest
+      digest: artifact.digest,
     })),
     checkpoints: round.checkpoints.map((checkpoint) => ({
       stage: checkpoint.stage,
-      detail: checkpoint.detail
+      detail: checkpoint.detail,
     })),
     changedFiles: round.changedFiles,
     commitSha: round.commitSha,
     recoveryReason: round.recoveryCode,
-    remainingWork: round.remainingWork
+    remainingWork: round.remainingWork,
   };
 }
 
 function workflowShouldEmitNativeRoundEvidence(
-  round: WorkflowRunLogRound
+  round: WorkflowRunLogRound,
 ): boolean {
   return (
     round.executorFamily === "goal-loop" &&
@@ -1613,7 +1617,7 @@ function workflowShouldEmitNativeRoundEvidence(
 }
 
 function workflowRoundCompletionRecommendation(
-  round: WorkflowRunLogRound
+  round: WorkflowRunLogRound,
 ): string {
   if (round.executorRecommendation != null) {
     return round.executorRecommendation;
@@ -1628,7 +1632,7 @@ function workflowRoundCompletionRecommendation(
 }
 
 export function workflowInvocationToJsonShape(
-  invocation: WorkflowRunLogsEnvelope["invocations"][number]
+  invocation: WorkflowRunLogsEnvelope["invocations"][number],
 ): Record<string, unknown> {
   return {
     invocationId: invocation.invocationId,
@@ -1640,13 +1644,13 @@ export function workflowInvocationToJsonShape(
     attempt: invocation.attempt,
     startedAt: invocation.startedAt,
     heartbeatAt: invocation.heartbeatAt,
-    finishedAt: invocation.finishedAt
+    finishedAt: invocation.finishedAt,
   };
 }
 
 export function renderWorkflowRunLogsText(
   dataDir: string,
-  envelope: WorkflowRunLogsEnvelope
+  envelope: WorkflowRunLogsEnvelope,
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run logs: ${envelope.detail.run.runId}`);
@@ -1654,7 +1658,7 @@ export function renderWorkflowRunLogsText(
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
   const implementationEngine = workflowRunImplementationEngine(
-    envelope.detail.run.route
+    envelope.detail.run.route,
   );
   if (implementationEngine !== null) {
     lines.push(`Implementation engine: ${implementationEngine}`);
@@ -1663,10 +1667,10 @@ export function renderWorkflowRunLogsText(
   lines.push(`Approvals: ${envelope.detail.approvals.length}`);
   lines.push(`Leases: ${envelope.detail.leases.length}`);
   const openGates = envelope.detail.gates.filter(
-    (gate) => gate.resolvedAt === null
+    (gate) => gate.resolvedAt === null,
   );
   lines.push(
-    `Gates: ${envelope.detail.gates.length} (open: ${openGates.length})`
+    `Gates: ${envelope.detail.gates.length} (open: ${openGates.length})`,
   );
   for (const gate of openGates) {
     lines.push(
@@ -1674,7 +1678,7 @@ export function renderWorkflowRunLogsText(
         ` allowed=${gate.allowedActions.join(",")}` +
         (gate.recommendedAction !== null
           ? ` recommended=${gate.recommendedAction}`
-          : "")
+          : ""),
     );
   }
   lines.push(`Executor invocations: ${envelope.invocations.length}`);
@@ -1682,7 +1686,7 @@ export function renderWorkflowRunLogsText(
     lines.push(
       `- ${invocation.invocationId} [${invocation.stepKey}/${invocation.state}]` +
         ` attempt=${invocation.attempt}` +
-        ` executor=${invocation.executorFamily}`
+        ` executor=${invocation.executorFamily}`,
     );
   }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);
@@ -1690,7 +1694,7 @@ export function renderWorkflowRunLogsText(
     lines.push(
       `- ${round.roundId} [${round.stepKey}/${round.state}]` +
         (round.classification !== null ? ` ${round.classification}` : "") +
-        ` outcome=${workflowRoundOutcome(round)}`
+        ` outcome=${workflowRoundOutcome(round)}`,
     );
     if (round.summary !== null) {
       lines.push(`    summary: ${round.summary}`);
@@ -1713,9 +1717,7 @@ export function renderWorkflowRunLogsText(
     lines.push(
       `    verification: ${round.verificationStatus ?? "(none)"}` +
         ` commit: ${round.commitSha ?? "(none)"}` +
-        (round.recoveryCode !== null
-          ? ` recovery: ${round.recoveryCode}`
-          : "")
+        (round.recoveryCode !== null ? ` recovery: ${round.recoveryCode}` : ""),
     );
     if (round.verificationResults && round.verificationResults.length > 0) {
       lines.push(
@@ -1724,9 +1726,9 @@ export function renderWorkflowRunLogsText(
             (result) =>
               `${result.command} (exit=${result.exitCode}, duration=${
                 result.durationMs ?? "unknown"
-              }ms, timedOut=${result.timedOut})`
+              }ms, timedOut=${result.timedOut})`,
           )
-          .join("; ")}`
+          .join("; ")}`,
       );
     }
     if (round.logPaths.length > 0) {
@@ -1745,26 +1747,26 @@ export function renderWorkflowRunLogsText(
     }
     if (round.artifacts.length > 0) {
       lines.push(
-        `    artifacts: ${round.artifacts.map((artifact) => artifact.path).join(", ")}`
+        `    artifacts: ${round.artifacts.map((artifact) => artifact.path).join(", ")}`,
       );
     }
     if (round.checkpoints.length > 0) {
       lines.push(
         `    checkpoints: ${round.checkpoints
           .map((checkpoint) => `${checkpoint.sequence}:${checkpoint.stage}`)
-          .join(", ")}`
+          .join(", ")}`,
       );
     }
     if (round.findings.length > 0) {
       lines.push(
-        `    findings: ${round.findings.map((finding) => finding.title).join(", ")}`
+        `    findings: ${round.findings.map((finding) => finding.title).join(", ")}`,
       );
     }
     if (round.decisions.length > 0) {
       lines.push(
         `    decisions: ${round.decisions
           .map((decision) => decision.summary)
-          .join(", ")}`
+          .join(", ")}`,
       );
     }
   }
@@ -1775,7 +1777,7 @@ export function renderWorkflowRunLogsText(
 }
 
 function workflowRunImplementationEngine(
-  route: Record<string, unknown>
+  route: Record<string, unknown>,
 ): string | null {
   const value = route["implementationEngine"];
   if (typeof value !== "string") return null;
@@ -1824,13 +1826,13 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
 function emitWorkflowFailure(
   parsed: { json: boolean },
   io: CliIo,
-  failure: WorkflowRendererFailure
+  failure: WorkflowRendererFailure,
 ): number {
   const payload: Record<string, unknown> = {
     ok: false,
     command: failure.command,
     code: failure.code,
-    message: failure.message
+    message: failure.message,
   };
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
@@ -1842,13 +1844,15 @@ function emitWorkflowFailure(
     payload["errors"] = failure.errors.map((error) => ({ ...error }));
   }
   if (failure.preflightEvidence !== undefined) {
-    payload["preflightEvidence"] = failure.preflightEvidence.map((evidence) => ({
-      ...evidence
-    }));
+    payload["preflightEvidence"] = failure.preflightEvidence.map(
+      (evidence) => ({
+        ...evidence,
+      }),
+    );
   }
   if (failure.diagnostics !== undefined) {
     payload["diagnostics"] = failure.diagnostics.map((diagnostic) => ({
-      ...diagnostic
+      ...diagnostic,
     }));
   } else if (failure.command === "workflow import") {
     payload["diagnostics"] = [];
@@ -1864,7 +1868,7 @@ function emitWorkflowFailure(
 }
 
 export function summaryToJsonShape(
-  summary: WorkflowRunSummary
+  summary: WorkflowRunSummary,
 ): Record<string, unknown> {
   return {
     run: workflowRunToJsonShape(summary.run),
@@ -1872,16 +1876,18 @@ export function summaryToJsonShape(
       steps: summary.counts.steps,
       stepsByState: summary.counts.stepsByState,
       approvals: summary.counts.approvals,
-      leases: summary.counts.leases
+      leases: summary.counts.leases,
     },
     monitor: workflowMonitorToJsonShape(
       summary.monitor,
-      workflowActionClassContextForRun(summary.run, summary.gates)
-    )
+      workflowActionClassContextForRun(summary.run, summary.gates),
+    ),
   };
 }
 
-export function workflowRunToJsonShape(run: WorkflowRunRow): Record<string, unknown> {
+export function workflowRunToJsonShape(
+  run: WorkflowRunRow,
+): Record<string, unknown> {
   return {
     runId: run.runId,
     state: run.state,
@@ -1902,17 +1908,17 @@ export function workflowRunToJsonShape(run: WorkflowRunRow): Record<string, unkn
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     createdAt: run.createdAt,
-    updatedAt: run.updatedAt
+    updatedAt: run.updatedAt,
   };
 }
 
 function workflowActionClassContextForRun(
   run: Pick<WorkflowRunRow, "manualRecoveryReason" | "needsManualRecovery">,
-  gates?: readonly WorkflowGateRecord[]
+  gates?: readonly WorkflowGateRecord[],
 ): WorkflowOperatorActionClassContext {
   const context: WorkflowOperatorActionClassContext = {
     manualRecoveryReason: run.manualRecoveryReason,
-    needsManualRecovery: run.needsManualRecovery
+    needsManualRecovery: run.needsManualRecovery,
   };
   if (gates !== undefined) {
     context.gates = gates;
@@ -1921,17 +1927,17 @@ function workflowActionClassContextForRun(
 }
 
 function workflowActionClassContextForMonitorEnvelope(
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
 ): WorkflowOperatorActionClassContext {
   return {
     manualRecoveryReason: envelope.manualRecoveryReason,
     needsManualRecovery: envelope.needsManualRecovery,
-    gates: envelope.gates
+    gates: envelope.gates,
   };
 }
 
 export function workflowStepToJsonShape(
-  step: WorkflowStepRow
+  step: WorkflowStepRow,
 ): Record<string, unknown> {
   return {
     runId: step.runId,
@@ -1947,12 +1953,12 @@ export function workflowStepToJsonShape(
     startedAt: step.startedAt,
     finishedAt: step.finishedAt,
     createdAt: step.createdAt,
-    updatedAt: step.updatedAt
+    updatedAt: step.updatedAt,
   };
 }
 
 export function workflowApprovalToJsonShape(
-  approval: WorkflowApprovalRow
+  approval: WorkflowApprovalRow,
 ): Record<string, unknown> {
   return {
     runId: approval.runId,
@@ -1964,12 +1970,12 @@ export function workflowApprovalToJsonShape(
     recordedAt: approval.recordedAt,
     dischargedAt: approval.dischargedAt,
     createdAt: approval.createdAt,
-    updatedAt: approval.updatedAt
+    updatedAt: approval.updatedAt,
   };
 }
 
 export function workflowLeaseToJsonShape(
-  lease: WorkflowLeaseRow
+  lease: WorkflowLeaseRow,
 ): Record<string, unknown> {
   return {
     runId: lease.runId,
@@ -1981,13 +1987,13 @@ export function workflowLeaseToJsonShape(
     releasedAt: lease.releasedAt,
     stalePolicy: lease.stalePolicy,
     createdAt: lease.createdAt,
-    updatedAt: lease.updatedAt
+    updatedAt: lease.updatedAt,
   };
 }
 
 export function workflowMonitorToJsonShape(
   monitor: WorkflowMonitorState,
-  options: WorkflowOperatorActionClassContext = {}
+  options: WorkflowOperatorActionClassContext = {},
 ): Record<string, unknown> {
   return {
     runId: monitor.runId,
@@ -2000,7 +2006,7 @@ export function workflowMonitorToJsonShape(
           kind: monitor.activeStep.kind,
           state: monitor.activeStep.state,
           order: monitor.activeStep.order,
-          required: monitor.activeStep.required
+          required: monitor.activeStep.required,
         }
       : null,
     leases: monitor.leases.map((lease) => ({
@@ -2009,14 +2015,14 @@ export function workflowMonitorToJsonShape(
       classification: lease.classification,
       expiresAt: lease.expiresAt,
       heartbeatAt: lease.heartbeatAt,
-      releasedAt: lease.releasedAt
+      releasedAt: lease.releasedAt,
     })),
     lastCheckpoint: monitor.lastCheckpoint
       ? {
           stepId: monitor.lastCheckpoint.stepId,
           at: monitor.lastCheckpoint.at,
           source: monitor.lastCheckpoint.source,
-          digest: monitor.lastCheckpoint.digest
+          digest: monitor.lastCheckpoint.digest,
         }
       : null,
     monitorDrift: monitor.monitorDrift
@@ -2025,7 +2031,7 @@ export function workflowMonitorToJsonShape(
           advisoryTerminal: monitor.monitorDrift.advisoryTerminal,
           actualState: monitor.monitorDrift.actualState,
           drifted: monitor.monitorDrift.drifted,
-          reason: monitor.monitorDrift.reason
+          reason: monitor.monitorDrift.reason,
         }
       : null,
     nextAction: nextActionToJsonShape(monitor, options),
@@ -2034,15 +2040,15 @@ export function workflowMonitorToJsonShape(
       ? {
           code: monitor.recovery.code,
           message: monitor.recovery.message,
-          stepId: monitor.recovery.stepId
+          stepId: monitor.recovery.stepId,
         }
-      : null
+      : null,
   };
 }
 
 export function nextActionToJsonShape(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: WorkflowOperatorActionClassContext = {}
+  options: WorkflowOperatorActionClassContext = {},
 ): Record<string, unknown> {
   return {
     code: monitor.nextAction.code,
@@ -2050,12 +2056,12 @@ export function nextActionToJsonShape(
     leaseKind: monitor.nextAction.leaseKind,
     detail: monitor.nextAction.detail,
     actionClass: workflowOperatorActionClassForMonitor(monitor, options),
-    recoveryDetail: workflowRecoveryDetailForMonitor(monitor, options)
+    recoveryDetail: workflowRecoveryDetailForMonitor(monitor, options),
   };
 }
 
 export function workflowEvidenceToJsonShape(
-  evidence: WorkflowEvidenceLink
+  evidence: WorkflowEvidenceLink,
 ): Record<string, unknown> {
   return {
     evidenceRecordId: evidence.evidenceRecordId,
@@ -2065,12 +2071,12 @@ export function workflowEvidenceToJsonShape(
     occurredAt: evidence.occurredAt,
     summary: evidence.summary,
     runId: evidence.runId,
-    stepId: evidence.stepId
+    stepId: evidence.stepId,
   };
 }
 
 export function workflowGateToJsonShape(
-  gate: WorkflowGateRecord
+  gate: WorkflowGateRecord,
 ): Record<string, unknown> {
   return {
     gateId: gate.gateId,
@@ -2093,13 +2099,13 @@ export function workflowGateToJsonShape(
     resolvedBy: gate.resolvedBy,
     resolutionMode: gate.resolutionMode,
     chosenAction: gate.chosenAction,
-    resolution: gate.resolution
+    resolution: gate.resolution,
   };
 }
 
 export function renderWorkflowDetailText(
   dataDir: string,
-  detail: WorkflowRunDetail
+  detail: WorkflowRunDetail,
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run: ${detail.run.runId}`);
@@ -2125,7 +2131,7 @@ export function renderWorkflowDetailText(
     lines.push(
       `- ${step.stepId} [${step.state}] kind=${step.kind} ` +
         `order=${step.order} required=${step.required ? "yes" : "no"}` +
-        (step.errorCode ? ` error=${step.errorCode}` : "")
+        (step.errorCode ? ` error=${step.errorCode}` : ""),
     );
   }
   lines.push("");
@@ -2137,7 +2143,7 @@ export function renderWorkflowDetailText(
         `recorded=${approval.recordedAt}` +
         (approval.dischargedAt !== null
           ? ` discharged=${approval.dischargedAt}`
-          : "")
+          : ""),
     );
   }
   lines.push("");
@@ -2147,7 +2153,7 @@ export function renderWorkflowDetailText(
     lines.push(
       `- ${lease.leaseKind} holder=${lease.holder} stale_policy=${lease.stalePolicy} ` +
         `expires=${lease.expiresAt} heartbeat=${lease.heartbeatAt}` +
-        (lease.releasedAt !== null ? ` released=${lease.releasedAt}` : "")
+        (lease.releasedAt !== null ? ` released=${lease.releasedAt}` : ""),
     );
   }
   lines.push("");
@@ -2158,7 +2164,7 @@ export function renderWorkflowDetailText(
   lines.push(`- Blocked: ${detail.monitor.blocked ? "yes" : "no"}`);
   if (detail.monitor.activeStep) {
     lines.push(
-      `- Active step: ${detail.monitor.activeStep.stepId} (${detail.monitor.activeStep.state})`
+      `- Active step: ${detail.monitor.activeStep.stepId} (${detail.monitor.activeStep.state})`,
     );
   } else {
     lines.push("- Active step: (none)");
@@ -2166,22 +2172,22 @@ export function renderWorkflowDetailText(
   if (detail.monitor.lastCheckpoint) {
     lines.push(
       `- Last checkpoint: ${detail.monitor.lastCheckpoint.stepId} ` +
-        `at ${detail.monitor.lastCheckpoint.at} (source=${detail.monitor.lastCheckpoint.source})`
+        `at ${detail.monitor.lastCheckpoint.at} (source=${detail.monitor.lastCheckpoint.source})`,
     );
   } else {
     lines.push("- Last checkpoint: (none)");
   }
   lines.push(
-    `- Next action: ${detail.monitor.nextAction.code} - ${detail.monitor.nextAction.detail}`
+    `- Next action: ${detail.monitor.nextAction.code} - ${detail.monitor.nextAction.detail}`,
   );
   if (detail.monitor.recovery) {
     lines.push(
-      `- Recovery: ${detail.monitor.recovery.code} - ${detail.monitor.recovery.message}`
+      `- Recovery: ${detail.monitor.recovery.code} - ${detail.monitor.recovery.message}`,
     );
   }
   if (detail.monitor.monitorDrift?.drifted) {
     lines.push(
-      `- Monitor drift: ${detail.monitor.monitorDrift.reason ?? "(unspecified)"}`
+      `- Monitor drift: ${detail.monitor.monitorDrift.reason ?? "(unspecified)"}`,
     );
   }
   lines.push("");
@@ -2190,13 +2196,13 @@ export function renderWorkflowDetailText(
   for (const record of detail.evidence) {
     lines.push(
       `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}` +
-        (record.stepId !== null ? ` step=${record.stepId}` : "")
+        (record.stepId !== null ? ` step=${record.stepId}` : ""),
     );
   }
   lines.push("");
 
   const openGateCount = detail.gates.filter(
-    (gate) => gate.resolvedAt === null
+    (gate) => gate.resolvedAt === null,
   ).length;
   lines.push(`Gates: ${detail.gates.length} (open: ${openGateCount})`);
   for (const gate of detail.gates) {
@@ -2210,7 +2216,7 @@ export function renderWorkflowDetailText(
           `action=${gate.chosenAction ?? "(none)"} ` +
           `(${gate.resolutionMode ?? "?"})`;
     lines.push(
-      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`,
     );
   }
   lines.push("");
@@ -2219,7 +2225,7 @@ export function renderWorkflowDetailText(
 
 export function renderWorkflowHandoffText(
   dataDir: string,
-  envelope: WorkflowHandoffEnvelope
+  envelope: WorkflowHandoffEnvelope,
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow handoff: ${envelope.detail.run.runId}`);
@@ -2234,7 +2240,7 @@ export function renderWorkflowMonitorText(
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  advanced = false
+  advanced = false,
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run monitor: ${envelope.runId}`);
@@ -2256,15 +2262,15 @@ export function renderWorkflowMonitorText(
   }
   if (envelope.activeStep) {
     lines.push(
-      `Active step: ${envelope.activeStep.stepId} [${envelope.activeStep.state}]`
+      `Active step: ${envelope.activeStep.stepId} [${envelope.activeStep.state}]`,
     );
   }
   lines.push(
     `Steps: ${envelope.counts.steps}` +
-      ` approvals=${envelope.counts.approvals} leases=${envelope.counts.leases}`
+      ` approvals=${envelope.counts.approvals} leases=${envelope.counts.leases}`,
   );
   lines.push(
-    `Gates: ${envelope.counts.gates} (open: ${envelope.counts.gatesOpen})`
+    `Gates: ${envelope.counts.gates} (open: ${envelope.counts.gatesOpen})`,
   );
   for (const gate of envelope.gates) {
     if (gate.resolvedAt !== null) continue;
@@ -2273,7 +2279,7 @@ export function renderWorkflowMonitorText(
         `allowed=${gate.allowedActions.join(",") || "(none)"}` +
         (gate.recommendedAction !== null
           ? ` recommended=${gate.recommendedAction}`
-          : "")
+          : ""),
     );
   }
   lines.push(`Progress phase: ${progress.phase}`);

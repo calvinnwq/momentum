@@ -4,23 +4,23 @@ import path from "node:path";
 import {
   emitHelp,
   usageError,
-  type CliIo
+  type CliIo,
 } from "../../renderers/cli-output.js";
 import {
   isUniqueViolation,
   openDb,
   openExistingDbReadOnly,
-  type MomentumDb
+  type MomentumDb,
 } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
   isReservedCompatibilityRunId,
-  parseWorkflowRunImport
+  parseWorkflowRunImport,
 } from "../../core/workflow/run/import.js";
 import {
   persistWorkflowRunImport,
-  type PersistWorkflowRunImportSummary
+  type PersistWorkflowRunImportSummary,
 } from "../../core/workflow/run/import-persist.js";
 import {
   WORKFLOW_STATUS_FILTER_KEYS,
@@ -28,7 +28,7 @@ import {
   loadWorkflowRunDetail,
   type WorkflowRunDetail,
   type WorkflowRunSummary,
-  type WorkflowStatusFilterKey
+  type WorkflowStatusFilterKey,
 } from "../../core/workflow/run/status.js";
 import {
   highestWorkflowApprovalBoundary,
@@ -39,43 +39,44 @@ import {
   WORKFLOW_RUN_STATES,
   workflowStepKindsForApprovalBoundary,
   type WorkflowRunState,
-  type WorkflowStepState
+  type WorkflowStepState,
 } from "../../core/workflow/run/reducer.js";
 import {
   loadWorkflowHandoff,
-  type WorkflowHandoffEnvelope
+  type WorkflowHandoffEnvelope,
 } from "../../core/workflow/run/handoff.js";
 import {
   loadWorkflowRunLogs,
-  type WorkflowRunLogsEnvelope
+  type WorkflowRunLogsEnvelope,
 } from "../../core/workflow/run/logs.js";
 import {
   loadWorkflowMonitorEnvelope,
-  type WorkflowMonitorEnvelope
+  type WorkflowMonitorEnvelope,
 } from "../../core/workflow/monitor/envelope.js";
 import { deriveWorkflowWatchActionRecommendation } from "../../core/workflow/monitor/action-authority.js";
 import {
   deriveWorkflowMonitorProgress,
-  type WorkflowMonitorProgressTick
+  type WorkflowMonitorProgressTick,
 } from "../../core/workflow/monitor/progress.js";
 import {
   deriveWorkflowMonitorState,
-  type WorkflowMonitorState
+  type WorkflowMonitorState,
 } from "../../core/workflow/monitor/state.js";
 import { deriveWorkflowWatchAdvisory } from "../../core/workflow/monitor/watch-advisory.js";
 import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch/execute.js";
+import { resolveClaimedWorkflowStepFamily } from "../../core/workflow/dispatch/persist.js";
 import {
   resolveDaemonWorkflowStepDispatch,
-  type DaemonWorkflowDispatchDeps
+  type DaemonWorkflowDispatchDeps,
 } from "../../core/daemon/workflow-dispatch.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../../core/workflow/live-wrapper/daemon-profile.js";
 import {
   runWorkflowSchedulerOnceAsync,
-  type RecoverStaleWorkflowLeasesResult
+  type RecoverStaleWorkflowLeasesResult,
 } from "../../core/workflow/dispatch/scheduler.js";
 import {
   loadWorkflowRuntimeStateRows,
-  refreshWorkflowRunRuntimeState
+  refreshWorkflowRunRuntimeState,
 } from "../../core/workflow/run/runtime-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
@@ -83,71 +84,72 @@ import {
   isBlockingWorkflowRecoveryCode,
   type ClearWorkflowRunManualRecoveryGuardedInput,
   type ClearWorkflowRunManualRecoveryGuardedResult,
-  type WorkflowRunManualRecoveryState
+  type WorkflowRunManualRecoveryState,
 } from "../../core/workflow/run/recovery.js";
 import {
   reconcileWorkflowRunManualRecovery,
-  type ReconcileWorkflowRunManualRecoveryResult
+  type ReconcileWorkflowRunManualRecoveryResult,
 } from "../../core/workflow/recovery/reconcile.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../../core/workflow/definition/definition.js";
 import {
   loadWorkflowDefinition,
-  persistWorkflowDefinition
+  persistWorkflowDefinition,
 } from "../../core/workflow/definition/persist.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   materializeWorkflowCodingPlanPreview,
-  type WorkflowRunStartInput
+  type WorkflowRunStartInput,
 } from "../../core/workflow/run/start.js";
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
+  GNHF_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   formatCodingRouteStepSelectionLines,
   isCodingImplementationEngine,
   resolveCodingRouteStepSelections,
   writeCodingStepRouteOverrides,
   type CodingImplementationEngine,
-  type CodingStepRouteOverrides
+  type CodingStepRouteOverrides,
 } from "../../core/workflow/route/coding.js";
 import {
   preflightCodingWorkflowBuiltInDefinition,
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRouteStepsJson,
   preflightCodingWorkflowRunStartInput,
-  type StructuralPreflightEvidence
+  type StructuralPreflightEvidence,
 } from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart,
-  type PersistWorkflowRunStartSummary
+  type PersistWorkflowRunStartSummary,
 } from "../../core/workflow/run/start-persist.js";
 import {
   GATE_DECISION_MODES,
   type GateDecisionMode,
-  type GateDecisionRequest
+  type GateDecisionRequest,
 } from "../../core/workflow/gate/gate.js";
 import {
   WorkflowGateDecisionError,
   WorkflowGateNotFoundError,
-  resolveWorkflowGate
+  resolveWorkflowGate,
 } from "../../core/workflow/gate/persist.js";
 import {
   InvalidWorkflowEventCursorError,
   appendWorkflowEvent,
   loadWorkflowRunEvents,
-  type WorkflowEventType
+  type WorkflowEventType,
 } from "../../core/workflow/run/events.js";
 import { runWorkflowWatchStream } from "../../core/workflow/monitor/watch-stream.js";
 import {
   createWorkflowWatchStreamDbPoll,
-  WorkflowWatchStreamRunNotFoundError
+  WorkflowWatchStreamRunNotFoundError,
 } from "../../core/workflow/monitor/watch-stream-source.js";
 import {
   emitWorkflowHandoff,
@@ -179,7 +181,7 @@ import {
   emitWorkflowStatusDetail,
   emitWorkflowStatusFailure,
   emitWorkflowStatusList,
-  type WorkflowRunStartCommand
+  type WorkflowRunStartCommand,
 } from "../../renderers/workflow.js";
 
 type ParsedFlags = {
@@ -227,14 +229,14 @@ export type CliDeps = DaemonWorkflowDispatchDeps;
 export function workflow(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps = {}
+  deps: CliDeps = {},
 ): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
       "Missing required subcommand for workflow. Expected: import, status, handoff, run.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "import") {
@@ -255,7 +257,7 @@ export function workflow(
 function workflowRun(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps
+  deps: CliDeps,
 ): number | Promise<number> {
   if (parsed.args.includes("--help") || parsed.args.includes("-h")) {
     return emitHelp(io);
@@ -266,7 +268,7 @@ function workflowRun(
     return usageError(
       "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, events, monitor, watch, logs.",
       parsed,
-      io
+      io,
     );
   }
   if (subcommand === "start") {
@@ -308,7 +310,7 @@ function workflowRun(
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
     parsed,
-    io
+    io,
   );
 }
 
@@ -323,14 +325,14 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunEventsFailure(parsed, io, {
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run events."
+      message: "Missing required <run-id> for workflow run events.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run events: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -346,7 +348,7 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunEventsFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -356,19 +358,19 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
       code: "run_not_found",
       message: `Workflow run not found: ${runId}`,
       dataDir,
-      runId
+      runId,
     });
   }
   try {
     const envelope = loadWorkflowRunEvents(db, runId, {
-      since: parsed.since
+      since: parsed.since,
     });
     if (envelope === null) {
       return emitWorkflowRunEventsFailure(parsed, io, {
         code: "run_not_found",
         message: `Workflow run not found: ${runId}`,
         dataDir,
-        runId
+        runId,
       });
     }
     return emitWorkflowRunEvents(parsed, io, dataDir, envelope);
@@ -378,7 +380,7 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
         code: error.code,
         message: error.message,
         dataDir,
-        runId
+        runId,
       });
     }
     throw error;
@@ -398,7 +400,7 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
 function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run start",
-    coding: false
+    coding: false,
   });
 }
 
@@ -417,7 +419,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
  *   - it records the coding implementation engine under
- *     `route.implementationEngine`, defaulting to `native-goal-loop` while
+ *     `route.implementationEngine`, defaulting to the honest `gnhf` label while
+ *     retaining persisted `native-goal-loop` compatibility and
  *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
@@ -431,7 +434,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
 function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run start-coding",
-    coding: true
+    coding: true,
   });
 }
 
@@ -452,7 +455,7 @@ function workflowRunPreviewCoding(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run preview-coding",
     coding: true,
-    preview: true
+    preview: true,
   });
 }
 
@@ -474,7 +477,7 @@ type WorkflowStartCommandOptions = {
  */
 function buildCodingRequiredInputPreflightEvidence(
   parsed: ParsedFlags,
-  evidencePath: "repoPath" | "objective"
+  evidencePath: "repoPath" | "objective",
 ): readonly StructuralPreflightEvidence[] {
   const structuralPreflight = preflightCodingWorkflowRunStartInput({
     definition: CODING_WORKFLOW_DEFINITION,
@@ -487,18 +490,18 @@ function buildCodingRequiredInputPreflightEvidence(
       : {}),
     ...(parsed.issueScope !== undefined
       ? { issueScope: { identifier: parsed.issueScope } }
-      : {})
+      : {}),
   });
   if (structuralPreflight.ok) return [];
   return structuralPreflight.evidence.filter(
-    (evidence) => evidence.path === evidencePath
+    (evidence) => evidence.path === evidencePath,
   );
 }
 
 function runWorkflowStartCommand(
   parsed: ParsedFlags,
   io: CliIo,
-  options: WorkflowStartCommandOptions
+  options: WorkflowStartCommandOptions,
 ): number {
   const { command } = options;
   const positional = parsed.args.slice(3);
@@ -506,7 +509,7 @@ function runWorkflowStartCommand(
     return usageError(
       `Unexpected argument for ${command}: ${positional[0]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -515,7 +518,7 @@ function runWorkflowStartCommand(
     return emitWorkflowRunStartFailure(parsed, io, {
       command,
       code: "run_id_required",
-      message: `Missing required --run-id <id> for ${command}.`
+      message: `Missing required --run-id <id> for ${command}.`,
     });
   }
   if (parsed.repo === undefined || parsed.repo.trim().length === 0) {
@@ -525,8 +528,13 @@ function runWorkflowStartCommand(
       message: `Missing required --repo <path> for ${command}.`,
       runId,
       ...(options.coding
-        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "repoPath") }
-        : {})
+        ? {
+            preflightEvidence: buildCodingRequiredInputPreflightEvidence(
+              parsed,
+              "repoPath",
+            ),
+          }
+        : {}),
     });
   }
   if (parsed.objective === undefined || parsed.objective.length === 0) {
@@ -536,8 +544,13 @@ function runWorkflowStartCommand(
       message: `Missing required --objective <text> for ${command}.`,
       runId,
       ...(options.coding
-        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "objective") }
-        : {})
+        ? {
+            preflightEvidence: buildCodingRequiredInputPreflightEvidence(
+              parsed,
+              "objective",
+            ),
+          }
+        : {}),
     });
   }
 
@@ -550,7 +563,7 @@ function runWorkflowStartCommand(
       command,
       code: "definition_not_allowed",
       message: `${command} always uses the built-in ${CODING_WORKFLOW_DEFINITION_KEY} definition; drop --definition or use \`workflow run start\` to start a different definition.`,
-      runId
+      runId,
     });
   }
 
@@ -559,19 +572,19 @@ function runWorkflowStartCommand(
       command,
       code: "reserved_run_id",
       message: `Run id "${runId}" is reserved for CWFP/overnight compatibility imports; choose a Momentum-native run id for ${command}.`,
-      runId
+      runId,
     });
   }
 
   let implementationEngine: CodingImplementationEngine =
-    NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE;
+    GNHF_IMPLEMENTATION_ENGINE;
   if (parsed.implementationEngine !== undefined) {
     if (!options.coding) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "route_config_not_allowed",
         message: `--implementation-engine is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept coding implementation engine routes.`,
-        runId
+        runId,
       });
     }
     const normalizedEngine = parsed.implementationEngine.trim();
@@ -580,10 +593,11 @@ function runWorkflowStartCommand(
         command,
         code: "route_config_invalid",
         message: `--implementation-engine must be one of: ${[
+          GNHF_IMPLEMENTATION_ENGINE,
           NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
-          CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+          CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
         ].join(", ")}.`,
-        runId
+        runId,
       });
     }
     implementationEngine = normalizedEngine;
@@ -600,7 +614,9 @@ function runWorkflowStartCommand(
   // before any durable write.
   let routeProfile: string | undefined;
   if (parsed.profile !== undefined) {
-    const structuralPreflight = preflightCodingWorkflowRouteProfile(parsed.profile);
+    const structuralPreflight = preflightCodingWorkflowRouteProfile(
+      parsed.profile,
+    );
     if (!structuralPreflight.ok) {
       const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -608,7 +624,7 @@ function runWorkflowStartCommand(
         code: "route_config_invalid",
         message: `--profile is invalid (${failedCheck.path}): ${failedCheck.message}`,
         runId,
-        preflightEvidence: structuralPreflight.evidence
+        preflightEvidence: structuralPreflight.evidence,
       });
     }
     routeProfile = structuralPreflight.profile;
@@ -621,11 +637,12 @@ function runWorkflowStartCommand(
         command,
         code: "route_config_not_allowed",
         message: `--steps-json is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept per-step coding route overrides.`,
-        runId
+        runId,
       });
     }
-    const structuralPreflight =
-      preflightCodingWorkflowRouteStepsJson(parsed.stepsJson);
+    const structuralPreflight = preflightCodingWorkflowRouteStepsJson(
+      parsed.stepsJson,
+    );
     if (!structuralPreflight.ok) {
       const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -633,7 +650,7 @@ function runWorkflowStartCommand(
         code: "route_config_invalid",
         message: `--steps-json is invalid (${failedCheck.path}): ${failedCheck.message}`,
         runId,
-        preflightEvidence: structuralPreflight.evidence
+        preflightEvidence: structuralPreflight.evidence,
       });
     }
     stepRouteOverrides = structuralPreflight.overrides;
@@ -643,7 +660,7 @@ function runWorkflowStartCommand(
   const objective = parsed.objective;
   const definitionKey = options.coding
     ? CODING_WORKFLOW_DEFINITION_KEY
-    : parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY;
+    : (parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY);
   const now = Date.now();
 
   const dataDirOptions: DataDirOptions = {};
@@ -658,7 +675,7 @@ function runWorkflowStartCommand(
       command,
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -671,7 +688,7 @@ function runWorkflowStartCommand(
       code: "policy_invalid",
       message: `Repo policy is invalid (${policy.code}): ${policy.error}`,
       dataDir,
-      runId
+      runId,
     });
   }
 
@@ -679,7 +696,7 @@ function runWorkflowStartCommand(
   if (options.coding) {
     const structuralPreflight = preflightCodingWorkflowBuiltInDefinition(
       definitionKey,
-      parsed.definitionVersion
+      parsed.definitionVersion,
     );
     if (!structuralPreflight.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -691,7 +708,7 @@ function runWorkflowStartCommand(
             : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
         dataDir,
         runId,
-        preflightEvidence: structuralPreflight.evidence
+        preflightEvidence: structuralPreflight.evidence,
       });
     }
     codingDefinition = structuralPreflight.definition;
@@ -711,7 +728,7 @@ function runWorkflowStartCommand(
       parsed,
       stepRouteOverrides,
       routeProfile,
-      implementationEngine
+      implementationEngine,
     });
     const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
     if (!structuralPreflight.ok) {
@@ -724,7 +741,7 @@ function runWorkflowStartCommand(
         dataDir,
         runId,
         errors: structuralPreflight.errors,
-        preflightEvidence: structuralPreflight.evidence
+        preflightEvidence: structuralPreflight.evidence,
       });
     }
     preflightedCodingInput = input;
@@ -746,7 +763,7 @@ function runWorkflowStartCommand(
           .join(", ")}`,
         dataDir,
         runId,
-        errors: previewResult.errors
+        errors: previewResult.errors,
       });
     }
     if (workflowRunExistsReadOnly(dataDir, runId)) {
@@ -755,7 +772,7 @@ function runWorkflowStartCommand(
         code: "run_exists",
         message: `Workflow run already exists: ${runId}.`,
         dataDir,
-        runId
+        runId,
       });
     }
     return emitWorkflowRunPreviewCodingSuccess(parsed, io, {
@@ -766,8 +783,8 @@ function runWorkflowStartCommand(
       // Humanize the same validated per-step overrides that built the preview
       // route so the default (non-JSON) preview can audit the selection.
       stepRouteLines: formatCodingRouteStepSelectionLines(
-        resolveCodingRouteStepSelections(stepRouteOverrides)
-      )
+        resolveCodingRouteStepSelections(stepRouteOverrides),
+      ),
     });
   }
 
@@ -779,7 +796,7 @@ function runWorkflowStartCommand(
           db,
           definitionKey,
           parsed.definitionVersion,
-          now
+          now,
         );
     if (definition === undefined) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -790,7 +807,7 @@ function runWorkflowStartCommand(
             ? `No workflow definition found for key: ${definitionKey}.`
             : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
         dataDir,
-        runId
+        runId,
       });
     }
 
@@ -806,7 +823,7 @@ function runWorkflowStartCommand(
         parsed,
         stepRouteOverrides,
         routeProfile,
-        implementationEngine
+        implementationEngine,
       });
 
     if (!options.coding) {
@@ -821,7 +838,7 @@ function runWorkflowStartCommand(
           dataDir,
           runId,
           errors: structuralPreflight.errors,
-          preflightEvidence: structuralPreflight.evidence
+          preflightEvidence: structuralPreflight.evidence,
         });
       }
     }
@@ -837,7 +854,7 @@ function runWorkflowStartCommand(
           message: error.message,
           dataDir,
           runId,
-          errors: error.errors
+          errors: error.errors,
         });
       }
       if (error instanceof WorkflowRunStartConflictError) {
@@ -846,7 +863,7 @@ function runWorkflowStartCommand(
           code: "run_exists",
           message: `Workflow run already exists: ${runId}.`,
           dataDir,
-          runId
+          runId,
         });
       }
       throw error;
@@ -859,7 +876,7 @@ function runWorkflowStartCommand(
       objective,
       summary,
       policyPresent: policy.present === true,
-      policyPath: policy.path
+      policyPath: policy.path,
     });
   } finally {
     db.close();
@@ -876,17 +893,14 @@ function resolveWorkflowRunStartDefinition(
   db: MomentumDb,
   key: string,
   version: number | undefined,
-  now: number
+  now: number,
 ): WorkflowDefinition | undefined {
   const persisted = loadWorkflowDefinition(db, key, version);
   if (persisted !== undefined) {
     return persisted;
   }
-  const builtIn = getBuiltInWorkflowDefinition(key);
+  const builtIn = getBuiltInWorkflowDefinition(key, version);
   if (builtIn === undefined) {
-    return undefined;
-  }
-  if (version !== undefined && builtIn.version !== version) {
     return undefined;
   }
   persistWorkflowDefinition(db, builtIn, { now });
@@ -901,7 +915,7 @@ function workflowRunExistsReadOnly(dataDir: string, runId: string): boolean {
   try {
     const hasWorkflowRuns = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_runs'"
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_runs'",
       )
       .get();
     if (hasWorkflowRuns === undefined) {
@@ -944,14 +958,14 @@ function buildWorkflowRunStartInput(args: {
     parsed,
     stepRouteOverrides,
     routeProfile,
-    implementationEngine
+    implementationEngine,
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
     runId,
     repoPath,
     objective,
-    now
+    now,
   };
   if (coding) {
     input.source = MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE;
@@ -989,13 +1003,13 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for workflow import: ${parsed.args[2]}`,
       parsed,
-      io
+      io,
     );
   }
   if (parsed.path === undefined || parsed.path.length === 0) {
     return emitWorkflowImportFailure(parsed, io, {
       code: "path_required",
-      message: "Missing required --path <run-dir> for workflow import."
+      message: "Missing required --path <run-dir> for workflow import.",
     });
   }
   const artifactPath = parsed.path;
@@ -1011,7 +1025,7 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowImportFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      path: artifactPath
+      path: artifactPath,
     });
   }
 
@@ -1022,7 +1036,7 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
       message: parseResult.message,
       dataDir,
       path: artifactPath,
-      diagnostics: parseResult.diagnostics
+      diagnostics: parseResult.diagnostics,
     });
   }
 
@@ -1035,7 +1049,7 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     recovery = reconcileWorkflowRunManualRecovery(db, {
       runId: summary.runId,
       agentWorkflowsDir: path.dirname(artifactPath),
-      artifactRunDir: artifactPath
+      artifactRunDir: artifactPath,
     });
     recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
   } finally {
@@ -1048,7 +1062,7 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     summary,
     importResult: parseResult.import,
     recovery,
-    recoveryState
+    recoveryState,
   });
 }
 
@@ -1058,7 +1072,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for workflow status: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -1070,7 +1084,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
       code: "invalid_state",
-      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`
+      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`,
     });
   }
   if (
@@ -1080,7 +1094,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
       code: "invalid_filter",
-      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`
+      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`,
     });
   }
   if (
@@ -1090,7 +1104,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
       code: "invalid_limit",
-      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`
+      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`,
     });
   }
 
@@ -1105,7 +1119,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -1123,7 +1137,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
         code: "run_not_found",
         message: `Workflow run not found: ${runId}`,
         dataDir,
-        runId
+        runId,
       });
     }
     return emitWorkflowStatusDetail(parsed, io, dataDir, detail);
@@ -1155,7 +1169,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for workflow run list: ${parsed.args[3]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -1166,7 +1180,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
       code: "invalid_state",
-      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`
+      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`,
     });
   }
   if (
@@ -1176,7 +1190,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
       code: "invalid_filter",
-      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`
+      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`,
     });
   }
   if (
@@ -1186,7 +1200,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
       code: "invalid_limit",
-      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`
+      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`,
     });
   }
 
@@ -1201,7 +1215,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
       code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err)
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -1247,21 +1261,21 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunApproveFailure(parsed, io, {
       command: "workflow run approve",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run approve."
+      message: "Missing required <run-id> for workflow run approve.",
     });
   }
   if (positional[0] === undefined) {
     return emitWorkflowRunApproveFailure(parsed, io, {
       command: "workflow run approve",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run approve."
+      message: "Missing required <run-id> for workflow run approve.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run approve: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -1269,7 +1283,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunApproveFailure(parsed, io, {
       command: "workflow run approve",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run approve."
+      message: "Missing required <run-id> for workflow run approve.",
     });
   }
   if (!parsed.approvalBoundary) {
@@ -1277,7 +1291,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run approve",
       code: "invalid_boundary",
       message: "Missing required --approval-boundary for workflow run approve.",
-      runId
+      runId,
     });
   }
   if (!isWorkflowApprovalBoundary(parsed.approvalBoundary)) {
@@ -1285,7 +1299,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run approve",
       code: "invalid_boundary",
       message: `Invalid --approval-boundary: ${parsed.approvalBoundary}.`,
-      runId
+      runId,
     });
   }
   const boundary = parsed.approvalBoundary;
@@ -1295,7 +1309,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       code: "invalid_boundary",
       message: "Missing required --phrase for workflow run approve.",
       runId,
-      boundary
+      boundary,
     });
   }
   const phrase = parsed.phrase.trim();
@@ -1305,7 +1319,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       code: "invalid_boundary",
       message: `Invalid phrase for boundary ${boundary}: ${phrase}.`,
       runId,
-      boundary
+      boundary,
     });
   }
 
@@ -1322,7 +1336,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       runId,
-      boundary
+      boundary,
     });
   }
 
@@ -1333,9 +1347,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
   const db = openDb(dataDir);
   try {
     const existingRun = db
-      .prepare(
-        "SELECT id FROM workflow_runs WHERE id = ?"
-      )
+      .prepare("SELECT id FROM workflow_runs WHERE id = ?")
       .get(runId) as
       | {
           id: string;
@@ -1348,13 +1360,13 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
         message: `Workflow run not found: ${runId}`,
         dataDir,
         runId,
-        boundary
+        boundary,
       });
     }
 
     const duplicate = db
       .prepare(
-        "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+        "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
       )
       .get(runId, boundary);
     if (duplicate) {
@@ -1364,14 +1376,14 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
         message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
         dataDir,
         runId,
-        boundary
+        boundary,
       });
     }
 
     const resolvedDigest = resolveApprovalArtifactDigest(
       artifactPath,
       parsed.approvalDigest,
-      `approve:${runId}:${boundary}:${phrase}`
+      `approve:${runId}:${boundary}:${phrase}`,
     );
     if (resolvedDigest === null) {
       return emitWorkflowRunApproveFailure(parsed, io, {
@@ -1382,7 +1394,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
           : "Missing approval artifact digest compatibility for durable approval entry.",
         dataDir,
         runId,
-        boundary
+        boundary,
       });
     }
 
@@ -1394,7 +1406,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
     try {
       const runRow = db
         .prepare(
-          "SELECT id, state, approval_boundary, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT id, state, approval_boundary, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
         | {
@@ -1413,13 +1425,13 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
           message: `Workflow run not found: ${runId}`,
           dataDir,
           runId,
-          boundary
+          boundary,
         });
       }
 
       const duplicateInTransaction = db
         .prepare(
-          "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+          "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
         )
         .get(runId, boundary);
       if (duplicateInTransaction) {
@@ -1430,7 +1442,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
           message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
           dataDir,
           runId,
-          boundary
+          boundary,
         });
       }
 
@@ -1442,7 +1454,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
           message: `Workflow run is terminal and cannot be approved: ${runId} (${runRow.state})`,
           dataDir,
           runId,
-          boundary
+          boundary,
         });
       }
       if (runRow.needs_manual_recovery === 1) {
@@ -1455,7 +1467,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
             `Workflow run requires manual recovery before approval: ${runId}`,
           dataDir,
           runId,
-          boundary
+          boundary,
         });
       }
 
@@ -1463,7 +1475,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path,
            artifact_digest, recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         boundary,
@@ -1474,15 +1486,15 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
         recordedAt,
         null,
         recordedAt,
-        recordedAt
+        recordedAt,
       );
 
       const nextApprovalBoundary = highestWorkflowApprovalBoundary(
         runRow.approval_boundary,
-        boundary
+        boundary,
       );
       db.prepare(
-        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run(nextApprovalBoundary, recordedAt, runId);
 
       const approvedKinds = workflowStepKindsForApprovalBoundary(boundary);
@@ -1492,12 +1504,12 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
              SET state = 'approved', updated_at = ?
            WHERE run_id = ?
              AND state = 'pending'
-             AND kind IN (${approvedKinds.map(() => "?").join(", ")})`
+             AND kind IN (${approvedKinds.map(() => "?").join(", ")})`,
         ).run(recordedAt, runId, ...approvedKinds);
       }
 
       db.prepare(
-        "UPDATE workflow_runs SET state = 'approved', updated_at = ? WHERE id = ? AND state = 'pending'"
+        "UPDATE workflow_runs SET state = 'approved', updated_at = ? WHERE id = ? AND state = 'pending'",
       ).run(recordedAt, runId);
 
       refreshWorkflowRunMonitorAdvisory(db, runId, recordedAt);
@@ -1516,7 +1528,7 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
           message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
           dataDir,
           runId,
-          boundary
+          boundary,
         });
       }
       throw error;
@@ -1536,11 +1548,12 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       boundary,
       phrase,
       actor: parsed.actor ?? null,
-      artifactPath: artifactPath ?? `workflow-run-approve://${runId}/${boundary}`,
+      artifactPath:
+        artifactPath ?? `workflow-run-approve://${runId}/${boundary}`,
       artifactDigest: approvalArtifactDigest,
-      recordedAt
+      recordedAt,
     },
-    artifactPath
+    artifactPath,
   );
 }
 
@@ -1566,14 +1579,14 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunDecideFailure(parsed, io, {
       command: "workflow run decide",
       code: "gate_id_required",
-      message: "Missing required <gate-id> for workflow run decide."
+      message: "Missing required <gate-id> for workflow run decide.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run decide: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
 
@@ -1583,7 +1596,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run decide",
       code: "action_required",
       message: "Missing required --action <action> for workflow run decide.",
-      gateId
+      gateId,
     });
   }
 
@@ -1593,7 +1606,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run decide",
       code: "actor_required",
       message: "Missing required --actor <name> for workflow run decide.",
-      gateId
+      gateId,
     });
   }
 
@@ -1603,7 +1616,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run decide",
       code: "invalid_mode",
       message: `Invalid --mode: ${modeRaw}. Expected one of: ${GATE_DECISION_MODES.join(", ")}.`,
-      gateId
+      gateId,
     });
   }
 
@@ -1619,7 +1632,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run decide",
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      gateId
+      gateId,
     });
   }
 
@@ -1627,7 +1640,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
     action,
     actor,
     mode: modeRaw,
-    resolutionNote: parsed.note ?? null
+    resolutionNote: parsed.note ?? null,
   };
 
   const db = openDb(dataDir);
@@ -1641,7 +1654,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
         code: "gate_not_found",
         message: error.message,
         dataDir,
-        gateId
+        gateId,
       });
     }
     if (error instanceof WorkflowGateDecisionError) {
@@ -1650,7 +1663,7 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
         code: error.code,
         message: error.message,
         dataDir,
-        gateId
+        gateId,
       });
     }
     throw error;
@@ -1665,17 +1678,17 @@ const WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES = [
   "skipped",
   "failed",
   "blocked",
-  "canceled"
+  "canceled",
 ] as const satisfies readonly WorkflowStepState[];
 
 type WorkflowRunUpdateStepTargetState =
   (typeof WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES)[number];
 
 function isWorkflowRunUpdateStepTargetState(
-  value: string
+  value: string,
 ): value is WorkflowRunUpdateStepTargetState {
   return (WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES as readonly string[]).includes(
-    value
+    value,
   );
 }
 
@@ -1685,14 +1698,14 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunUpdateStepFailure(parsed, io, {
       command: "workflow run update-step",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run update-step."
+      message: "Missing required <run-id> for workflow run update-step.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run update-step: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -1704,7 +1717,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       code: "step_not_found",
       message:
         "Missing required --step <step-id> for workflow run update-step.",
-      runId
+      runId,
     });
   }
 
@@ -1716,7 +1729,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         `Invalid --state target for workflow run update-step: ${parsed.state ?? "(unset)"}. ` +
         `Expected one of ${WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES.join(", ")}.`,
       runId,
-      stepId
+      stepId,
     });
   }
   const targetState = parsed.state;
@@ -1728,7 +1741,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       code: "invalid_transition",
       message: "Missing required --reason <text> for workflow run update-step.",
       runId,
-      stepId
+      stepId,
     });
   }
 
@@ -1749,7 +1762,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       runId,
-      stepId
+      stepId,
     });
   }
 
@@ -1761,7 +1774,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
     try {
       const runRow = db
         .prepare(
-          "SELECT id, state, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+          "SELECT id, state, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
         )
         .get(runId) as
         | {
@@ -1779,7 +1792,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           message: `Workflow run not found: ${runId}`,
           dataDir,
           runId,
-          stepId
+          stepId,
         });
       }
       const stepRow = db
@@ -1787,7 +1800,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           `SELECT state, kind, step_order, required, operator_reason, operator_actor,
                   operator_evidence_pointer, operator_ledger_pointer,
                   operator_transition_at
-             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
         )
         .get(runId, stepId) as
         | {
@@ -1810,7 +1823,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           message: `Workflow step not found: runId=${runId}, stepId=${stepId}`,
           dataDir,
           runId,
-          stepId
+          stepId,
         });
       }
 
@@ -1829,7 +1842,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
             runId,
             stepId,
             targetState,
-            now
+            now,
           });
         if (!resolvesManualRecovery) {
           db.exec("ROLLBACK");
@@ -1841,7 +1854,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
               `Workflow run requires manual recovery before step updates: ${runId}`,
             dataDir,
             runId,
-            stepId
+            stepId,
           });
         }
       }
@@ -1856,7 +1869,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           message: `Workflow run is terminal and cannot be updated: ${runId} (${runRow.state})`,
           dataDir,
           runId,
-          stepId
+          stepId,
         });
       }
       if (!transition.ok) {
@@ -1867,7 +1880,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           message: transition.errorMessage,
           dataDir,
           runId,
-          stepId
+          stepId,
         });
       }
 
@@ -1884,7 +1897,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
             message: `Workflow step ${stepId} is already ${targetState}; refusing to rewrite operator audit context.`,
             dataDir,
             runId,
-            stepId
+            stepId,
           });
         }
         idempotent = true;
@@ -1900,7 +1913,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
                  operator_transition_at = ?,
                  finished_at = COALESCE(?, finished_at),
                  updated_at = ?
-           WHERE run_id = ? AND step_id = ?`
+           WHERE run_id = ? AND step_id = ?`,
         ).run(
           targetState,
           reason,
@@ -1911,7 +1924,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           finishedAt,
           now,
           runId,
-          stepId
+          stepId,
         );
         if (targetState === "blocked") {
           appendWorkflowEvent(db, {
@@ -1927,15 +1940,15 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
               actor,
               evidencePointer,
               ledgerPointer,
-              previousState
-            }
+              previousState,
+            },
           });
         }
       }
 
       const monitorState = refreshWorkflowRunRuntimeState(db, {
         runId,
-        now
+        now,
       });
       const runState = monitorState.runState;
 
@@ -1954,7 +1967,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         actor,
         evidencePointer,
         ledgerPointer,
-        idempotent
+        idempotent,
       };
     } catch (error) {
       try {
@@ -1978,7 +1991,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
     targetState,
     reason,
     actor,
-    dataDir
+    dataDir,
   });
 }
 
@@ -1989,13 +2002,11 @@ function workflowRunStepUpdateResolvesManualRecovery(
     stepId: string;
     targetState: WorkflowStepState;
     now: number;
-  }
+  },
 ): boolean {
   const rows = loadWorkflowRuntimeStateRows(db, input.runId);
   const steps = rows.steps.map((step) =>
-    step.stepId === input.stepId
-      ? { ...step, state: input.targetState }
-      : step
+    step.stepId === input.stepId ? { ...step, state: input.targetState } : step,
   );
   const monitor = deriveWorkflowMonitorState({
     runId: input.runId,
@@ -2003,7 +2014,7 @@ function workflowRunStepUpdateResolvesManualRecovery(
     leases: rows.leases,
     monitor: null,
     lastCheckpoint: null,
-    now: input.now
+    now: input.now,
   });
   return (
     monitor.recovery === null ||
@@ -2014,7 +2025,7 @@ function workflowRunStepUpdateResolvesManualRecovery(
 function refreshWorkflowRunMonitorAdvisory(
   db: MomentumDb,
   runId: string,
-  now: number
+  now: number,
 ): WorkflowMonitorState {
   const rows = loadWorkflowRuntimeStateRows(db, runId);
   const monitorState = deriveWorkflowMonitorState({
@@ -2023,7 +2034,7 @@ function refreshWorkflowRunMonitorAdvisory(
     leases: rows.leases,
     monitor: null,
     lastCheckpoint: null,
-    now
+    now,
   });
   db.prepare(
     `UPDATE workflow_runs
@@ -2035,13 +2046,13 @@ function refreshWorkflowRunMonitorAdvisory(
            monitor_last_emitted_digest = NULL,
            monitor_last_seen_at = NULL,
            monitor_last_emitted_at = NULL
-     WHERE id = ?`
+     WHERE id = ?`,
   ).run(
     now,
     monitorState.runState,
     monitorState.terminal ? 1 : 0,
     monitorState.activeStep?.stepId ?? null,
-    runId
+    runId,
   );
   return monitorState;
 }
@@ -2051,14 +2062,14 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunClearRecoveryFailure(parsed, io, {
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run clear-recovery."
+      message: "Missing required <run-id> for workflow run clear-recovery.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run clear-recovery: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -2074,7 +2085,7 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunClearRecoveryFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2106,14 +2117,14 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunMonitorFailure(parsed, io, {
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run monitor."
+      message: "Missing required <run-id> for workflow run monitor.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run monitor: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -2129,7 +2140,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunMonitorFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2143,7 +2154,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       dataDir,
-      runId
+      runId,
     });
   } finally {
     db?.close();
@@ -2154,7 +2165,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
       code: "run_not_found",
       message: `Workflow run not found: ${runId}`,
       dataDir,
-      runId
+      runId,
     });
   }
   if (
@@ -2166,7 +2177,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
       message:
         "`--advance` is only supported for Momentum-native coding workflow runs.",
       dataDir,
-      runId
+      runId,
     });
   }
 
@@ -2174,7 +2185,7 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   // suppressing against the last emitted digest. The default read stays
   // read-only: the emitted digest is read as the baseline but not advanced.
   const progress = deriveWorkflowMonitorProgress(envelope, {
-    priorDigest: envelope.monitorLastEmittedDigest
+    priorDigest: envelope.monitorLastEmittedDigest,
   });
 
   // Opt-in activation writer: `--advance` persists this tick's digest and
@@ -2201,15 +2212,21 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
                  monitor_last_emitted_digest = ?,
                  monitor_last_seen_at = ?,
                  monitor_last_emitted_at = ?
-           WHERE id = ?`
+           WHERE id = ?`,
         )
-        .run(progress.digest, emittedDigest, envelope.generatedAt, emittedAt, runId);
+        .run(
+          progress.digest,
+          emittedDigest,
+          envelope.generatedAt,
+          emittedAt,
+          runId,
+        );
     } catch (err) {
       return emitWorkflowRunMonitorFailure(parsed, io, {
         code: "data_dir_failed",
         message: err instanceof Error ? err.message : String(err),
         dataDir,
-        runId
+        runId,
       });
     } finally {
       writeDb?.close();
@@ -2217,13 +2234,20 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     advanced = progress.emit;
   }
 
-  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope, progress, advanced);
+  return emitWorkflowRunMonitor(
+    parsed,
+    io,
+    dataDir,
+    envelope,
+    progress,
+    advanced,
+  );
 }
 
 async function workflowRunWatch(
   parsed: ParsedFlags,
   io: CliIo,
-  deps: CliDeps
+  deps: CliDeps,
 ): Promise<number> {
   const positional = parsed.args.slice(3);
   const streamJsonFailureParsed =
@@ -2231,7 +2255,7 @@ async function workflowRunWatch(
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run watch."
+      message: "Missing required <run-id> for workflow run watch.",
     });
   }
   if (positional.length > 1) {
@@ -2239,13 +2263,13 @@ async function workflowRunWatch(
       return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
         code: "usage_error",
         message: `Unexpected argument for workflow run watch: ${positional[1]}`,
-        exitCode: 2
+        exitCode: 2,
       });
     }
     return usageError(
       `Unexpected argument for workflow run watch: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -2256,7 +2280,7 @@ async function workflowRunWatch(
   if (!parsed.once) {
     return emitWorkflowRunWatchFailure(parsed, io, {
       code: "once_required",
-      message: "workflow run watch currently requires --once."
+      message: "workflow run watch currently requires --once.",
     });
   }
 
@@ -2271,7 +2295,7 @@ async function workflowRunWatch(
     return emitWorkflowRunWatchFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2285,13 +2309,13 @@ async function workflowRunWatch(
         db,
         envelope,
         io.env ?? {},
-        deps
+        deps,
       );
       if (tickFailure !== null) {
         return emitWorkflowRunWatchFailure(parsed, io, {
           ...tickFailure,
           dataDir,
-          runId
+          runId,
         });
       }
       envelope = loadWorkflowMonitorEnvelope(db, runId);
@@ -2301,7 +2325,7 @@ async function workflowRunWatch(
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       dataDir,
-      runId
+      runId,
     });
   } finally {
     db?.close();
@@ -2312,7 +2336,7 @@ async function workflowRunWatch(
       code: "run_not_found",
       message: `Workflow run not found: ${runId}`,
       dataDir,
-      runId
+      runId,
     });
   }
   if (envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE) {
@@ -2321,19 +2345,19 @@ async function workflowRunWatch(
       message:
         "`workflow run watch --once` is only supported for Momentum-native coding workflow runs.",
       dataDir,
-      runId
+      runId,
     });
   }
 
   const progress = deriveWorkflowMonitorProgress(envelope, {
-    priorDigest: envelope.monitorLastEmittedDigest
+    priorDigest: envelope.monitorLastEmittedDigest,
   });
   const advisory = deriveWorkflowWatchAdvisory(envelope, progress, {
-    dataDir
+    dataDir,
   });
   const recommendation = deriveWorkflowWatchActionRecommendation(
     envelope,
-    progress
+    progress,
   );
   const emittedDigest = advisory.emit
     ? progress.digest
@@ -2352,16 +2376,22 @@ async function workflowRunWatch(
                monitor_last_emitted_digest = ?,
                monitor_last_seen_at = ?,
                monitor_last_emitted_at = ?
-         WHERE id = ?`
+         WHERE id = ?`,
       )
-      .run(progress.digest, emittedDigest, envelope.generatedAt, emittedAt, runId);
+      .run(
+        progress.digest,
+        emittedDigest,
+        envelope.generatedAt,
+        emittedAt,
+        runId,
+      );
     appendWorkflowWatchAdvisoryEvent(writeDb, envelope, progress, advisory);
   } catch (err) {
     return emitWorkflowRunWatchFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       dataDir,
-      runId
+      runId,
     });
   } finally {
     writeDb?.close();
@@ -2374,7 +2404,7 @@ async function workflowRunWatch(
     envelope,
     progress,
     advisory,
-    recommendation
+    recommendation,
   );
 }
 
@@ -2394,11 +2424,11 @@ async function workflowRunWatch(
 async function workflowRunWatchStream(
   parsed: ParsedFlags,
   io: CliIo,
-  runId: string
+  runId: string,
 ): Promise<number> {
   const failureJson = parsed.json === true || parsed.jsonl === true;
   const emitStreamFailure = (
-    failure: Parameters<typeof emitWorkflowRunWatchFailure>[2]
+    failure: Parameters<typeof emitWorkflowRunWatchFailure>[2],
   ): number => emitWorkflowRunWatchFailure({ json: failureJson }, io, failure);
 
   if (parsed.once) {
@@ -2406,14 +2436,14 @@ async function workflowRunWatchStream(
       code: "stream_once_conflict",
       message:
         "workflow run watch cannot combine --stream with --once; choose one mode.",
-      runId
+      runId,
     });
   }
   if (!parsed.jsonl) {
     return emitStreamFailure({
       code: "jsonl_required",
       message: "workflow run watch --stream currently requires --jsonl.",
-      runId
+      runId,
     });
   }
 
@@ -2428,7 +2458,7 @@ async function workflowRunWatchStream(
     return emitStreamFailure({
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2446,13 +2476,13 @@ async function workflowRunWatchStream(
         code: "run_not_found",
         message: `Workflow run not found: ${runId}`,
         dataDir,
-        runId
+        runId,
       });
     }
     const streamInput: Parameters<typeof runWorkflowWatchStream>[0] = {
       poll: createWorkflowWatchStreamDbPoll(db, runId),
       write: (record) => emitWorkflowRunWatchStreamRecord(io, record),
-      signal: controller.signal
+      signal: controller.signal,
     };
     if (parsed.since !== undefined) streamInput.since = parsed.since;
     await runWorkflowWatchStream(streamInput);
@@ -2463,7 +2493,7 @@ async function workflowRunWatchStream(
         code: err.code,
         message: err.message,
         dataDir,
-        runId
+        runId,
       });
     }
     if (err instanceof InvalidWorkflowEventCursorError) {
@@ -2471,14 +2501,14 @@ async function workflowRunWatchStream(
         code: err.code,
         message: err.message,
         dataDir,
-        runId
+        runId,
       });
     }
     return emitStreamFailure({
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       dataDir,
-      runId
+      runId,
     });
   } finally {
     if (signalCapable) process.removeListener("SIGINT", onSigint);
@@ -2490,7 +2520,7 @@ function appendWorkflowWatchAdvisoryEvent(
   db: MomentumDb,
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  advisory: ReturnType<typeof deriveWorkflowWatchAdvisory>
+  advisory: ReturnType<typeof deriveWorkflowWatchAdvisory>,
 ): void {
   const type = workflowEventTypeForWatchAdvisory(advisory.reason);
   if (type === null || !advisory.emit) return;
@@ -2506,13 +2536,13 @@ function appendWorkflowWatchAdvisoryEvent(
       quietThresholdSeconds: advisory.quietThresholdSeconds,
       stuckRisk: advisory.stuckRisk,
       inspectionCommand: advisory.inspectionCommand,
-      digest: progress.digest
-    }
+      digest: progress.digest,
+    },
   });
 }
 
 function workflowEventTypeForWatchAdvisory(
-  reason: ReturnType<typeof deriveWorkflowWatchAdvisory>["reason"]
+  reason: ReturnType<typeof deriveWorkflowWatchAdvisory>["reason"],
 ): WorkflowEventType | null {
   if (reason === "stuck_risk") return "monitor_stuck_risk";
   if (reason === "quiet_heartbeat") return "monitor_quiet_heartbeat";
@@ -2520,7 +2550,7 @@ function workflowEventTypeForWatchAdvisory(
 }
 
 function seedMissingMonitorEmittedAt(
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
 ): number | null {
   if (envelope.monitorLastEmittedAt !== null) {
     return envelope.monitorLastEmittedAt;
@@ -2546,7 +2576,7 @@ class WorkflowWatchDispatchConfigError extends Error {
 }
 
 function isWorkflowWatchTailStepDispatchBlocked(
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
 ): boolean {
   const stepId = envelope.nextAction.stepId;
   if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
@@ -2556,17 +2586,24 @@ function isWorkflowWatchTailStepDispatchBlocked(
 }
 
 function isWorkflowWatchLiveWrapperProfileRequired(
-  envelope: WorkflowMonitorEnvelope
+  db: MomentumDb,
+  envelope: WorkflowMonitorEnvelope,
 ): boolean {
   const stepId = envelope.nextAction.stepId;
   if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
     return false;
   }
-  return stepId === "preflight" || stepId === "postflight";
+  if (stepId === "preflight" || stepId === "postflight") return true;
+
+  const resolution = resolveClaimedWorkflowStepFamily(db, {
+    runId: envelope.runId,
+    stepId,
+  });
+  return resolution.ok && resolution.executorFamily === "delegate-supervisor";
 }
 
 function hasDaemonLiveWrapperProfileConfigured(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): boolean {
   return (env[DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR] ?? "").trim().length > 0;
 }
@@ -2575,7 +2612,7 @@ async function runWorkflowWatchDispatcherTick(
   db: MomentumDb,
   envelope: WorkflowMonitorEnvelope,
   env: Record<string, string | undefined>,
-  deps: CliDeps
+  deps: CliDeps,
 ): Promise<WorkflowWatchDispatchFailure | null> {
   const stepId = envelope.nextAction.stepId;
   const canDispatchNextStep =
@@ -2599,7 +2636,7 @@ async function runWorkflowWatchDispatcherTick(
   > | null = null;
   if (canDispatchNextStep) {
     if (
-      isWorkflowWatchLiveWrapperProfileRequired(envelope) &&
+      isWorkflowWatchLiveWrapperProfileRequired(db, envelope) &&
       !hasDaemonLiveWrapperProfileConfigured(env)
     ) {
       return {
@@ -2607,24 +2644,24 @@ async function runWorkflowWatchDispatcherTick(
         message:
           `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required before ` +
           `workflow run watch --once can dispatch ${stepId}; refusing to ` +
-          "start the step without terminal live-wrapper evidence."
+          "start the step without terminal live-wrapper evidence.",
       };
     }
     dispatchResolution = resolveDaemonWorkflowStepDispatch(
       env,
       executeWorkflowStepDispatch,
-      deps
+      deps,
     );
     if (!dispatchResolution.ok) {
       return {
         code: "daemon_live_wrapper_profile_invalid",
-        message: dispatchResolution.message
+        message: dispatchResolution.message,
       };
     }
   }
   const recovery: RecoverStaleWorkflowLeasesResult = {
     recovered: [],
-    skipped: []
+    skipped: [],
   };
   try {
     await runWorkflowSchedulerOnceAsync({
@@ -2635,12 +2672,12 @@ async function runWorkflowWatchDispatcherTick(
         dispatchResolution ??= resolveDaemonWorkflowStepDispatch(
           env,
           executeWorkflowStepDispatch,
-          deps
+          deps,
         );
         if (!dispatchResolution.ok) {
           throw new WorkflowWatchDispatchConfigError({
             code: "daemon_live_wrapper_profile_invalid",
-            message: dispatchResolution.message
+            message: dispatchResolution.message,
           });
         }
         return dispatchResolution.dispatch(claim, context);
@@ -2651,8 +2688,8 @@ async function runWorkflowWatchDispatcherTick(
         ? { leaseDurationMs: dispatchResolution.leaseDurationMs }
         : {}),
       deps: {
-        recoverStaleLeases: () => recovery
-      }
+        recoverStaleLeases: () => recovery,
+      },
     });
   } catch (error) {
     if (error instanceof WorkflowWatchDispatchConfigError) {
@@ -2668,14 +2705,14 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunLogsFailure(parsed, io, {
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run logs."
+      message: "Missing required <run-id> for workflow run logs.",
     });
   }
   if (positional.length > 1) {
     return usageError(
       `Unexpected argument for workflow run logs: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -2691,7 +2728,7 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowRunLogsFailure(parsed, io, {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2705,7 +2742,7 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       dataDir,
-      runId
+      runId,
     });
   } finally {
     db?.close();
@@ -2716,7 +2753,7 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
       code: "run_not_found",
       message: `Workflow run not found: ${runId}`,
       dataDir,
-      runId
+      runId,
     });
   }
 
@@ -2725,7 +2762,7 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
 
 function isExplicitBoundaryPhraseForApproval(
   phrase: string,
-  boundary: string
+  boundary: string,
 ): boolean {
   const normalizedPhrase = phrase.trim().toLowerCase();
   const normalizedBoundary = boundary.trim().toLowerCase();
@@ -2740,7 +2777,7 @@ function isExplicitBoundaryPhraseForApproval(
     "yeah",
     "ok",
     "okay",
-    "k"
+    "k",
   ]);
   if (casualPhrases.has(normalizedPhrase)) {
     return false;
@@ -2752,7 +2789,9 @@ function isExplicitBoundaryPhraseForApproval(
     .split(/\s+/u)
     .map((word) => word.trim())
     .filter((word) => word.length > 0);
-  const boundaryWords = normalizedBoundary.split("-").filter((word) => word.length > 0);
+  const boundaryWords = normalizedBoundary
+    .split("-")
+    .filter((word) => word.length > 0);
   if (!phraseWords.includes("approve")) return false;
   if (hasApprovalNegation(phraseWords, boundaryWords)) return false;
   return boundaryWords.every((word) => phraseWords.includes(word));
@@ -2760,7 +2799,7 @@ function isExplicitBoundaryPhraseForApproval(
 
 function hasApprovalNegation(
   words: readonly string[],
-  boundaryWords: readonly string[]
+  boundaryWords: readonly string[],
 ): boolean {
   const negationWords = new Set(["not", "never", "cannot", "cant", "wont"]);
   if (words.some((word) => negationWords.has(word))) return true;
@@ -2768,7 +2807,7 @@ function hasApprovalNegation(
     words.some(
       (word, index) =>
         word === "no" &&
-        !isWordIndexCoveredByBoundaryPhrase(words, boundaryWords, index)
+        !isWordIndexCoveredByBoundaryPhrase(words, boundaryWords, index),
     )
   ) {
     return true;
@@ -2788,10 +2827,14 @@ function hasApprovalNegation(
 function isWordIndexCoveredByBoundaryPhrase(
   words: readonly string[],
   boundaryWords: readonly string[],
-  wordIndex: number
+  wordIndex: number,
 ): boolean {
   if (!boundaryWords.includes("no")) return false;
-  for (let start = 0; start <= words.length - boundaryWords.length; start += 1) {
+  for (
+    let start = 0;
+    start <= words.length - boundaryWords.length;
+    start += 1
+  ) {
     const end = start + boundaryWords.length;
     if (wordIndex < start || wordIndex >= end) continue;
     if (boundaryWords.every((word, offset) => words[start + offset] === word)) {
@@ -2804,7 +2847,7 @@ function isWordIndexCoveredByBoundaryPhrase(
 function resolveApprovalArtifactDigest(
   artifactPath: string | undefined,
   providedDigest: string | undefined,
-  fallbackInput: string
+  fallbackInput: string,
 ): { value: string } | null {
   if (!artifactPath) {
     const fallbackDigest = crypto
@@ -2812,7 +2855,9 @@ function resolveApprovalArtifactDigest(
       .update(fallbackInput)
       .digest("hex");
     if (providedDigest !== undefined) {
-      return providedDigest === fallbackDigest ? { value: fallbackDigest } : null;
+      return providedDigest === fallbackDigest
+        ? { value: fallbackDigest }
+        : null;
     }
     return { value: fallbackDigest };
   }
@@ -2835,7 +2880,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
     return usageError(
       `Unexpected argument for workflow handoff: ${positional[1]}`,
       parsed,
-      io
+      io,
     );
   }
   const runId = positional[0];
@@ -2843,7 +2888,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowHandoffFailure(parsed, io, {
       command: "workflow handoff",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow handoff."
+      message: "Missing required <run-id> for workflow handoff.",
     });
   }
 
@@ -2859,7 +2904,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow handoff",
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
-      runId
+      runId,
     });
   }
 
@@ -2877,7 +2922,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
       code: "run_not_found",
       message: `Workflow run not found: ${runId}`,
       dataDir,
-      runId
+      runId,
     });
   }
 

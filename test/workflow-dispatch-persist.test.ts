@@ -4,13 +4,16 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import {
+  CODING_WORKFLOW_DEFINITION,
+  CODING_WORKFLOW_DEFINITION_V1,
+} from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   resolveClaimedWorkflowStepFamily,
-  resolveWorkflowStepDispatchPlan
+  resolveWorkflowStepDispatchPlan,
 } from "../src/core/workflow/dispatch/persist.js";
 
 const NOW = 1_700_000_000_000;
@@ -27,7 +30,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-workflow-dispatch-persist-")
+    path.join(os.tmpdir(), "momentum-workflow-dispatch-persist-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -47,7 +50,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-367",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -57,9 +60,37 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     const db = openSeededDb();
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
-    expect(resolution).toEqual({ ok: true, executorFamily: "goal-loop" });
+    expect(resolution).toEqual({
+      ok: true,
+      executorFamily: "delegate-supervisor",
+    });
+  });
+
+  it("keeps a native version-1 run on its recorded legacy executor", () => {
+    const db = openDb(makeTempDir());
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION_V1,
+      runId: "native-v1",
+      repoPath: "/repos/momentum",
+      objective: "Resume legacy durable state",
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      now: NOW,
+    });
+
+    expect(
+      resolveClaimedWorkflowStepFamily(db, {
+        runId: "native-v1",
+        stepId: "implementation",
+      }),
+    ).toEqual({ ok: true, executorFamily: "goal-loop" });
+    expect(
+      resolveClaimedWorkflowStepFamily(db, {
+        runId: "native-v1",
+        stepId: "no-mistakes",
+      }),
+    ).toEqual({ ok: true, executorFamily: "no-mistakes" });
   });
 
   it("resolves a step to a real-but-unsupported executor family (still ok)", () => {
@@ -68,7 +99,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     // external-apply; the supportability decision is the brain's job.
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "linear-refresh"
+      stepId: "linear-refresh",
     });
     expect(resolution).toEqual({ ok: true, executorFamily: "external-apply" });
   });
@@ -77,7 +108,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     const db = openSeededDb();
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: "run-does-not-exist",
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(resolution).toEqual({ ok: false, failure: "run_not_found" });
   });
@@ -87,11 +118,11 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     db.prepare(
       `UPDATE workflow_runs
          SET workflow_definition_key = NULL, workflow_definition_version = NULL
-       WHERE id = ?`
+       WHERE id = ?`,
     ).run(RUN_ID);
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(resolution).toEqual({ ok: false, failure: "definition_unlinked" });
   });
@@ -99,11 +130,11 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
   it("treats a partially-null definition link as unlinked", () => {
     const db = openSeededDb();
     db.prepare(
-      `UPDATE workflow_runs SET workflow_definition_version = NULL WHERE id = ?`
+      `UPDATE workflow_runs SET workflow_definition_version = NULL WHERE id = ?`,
     ).run(RUN_ID);
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(resolution).toEqual({ ok: false, failure: "definition_unlinked" });
   });
@@ -112,7 +143,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     const db = openSeededDb();
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "ghost-step"
+      stepId: "ghost-step",
     });
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
@@ -132,26 +163,28 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
         steps: CODING_WORKFLOW_DEFINITION.steps.map((step) =>
           step.key === "implementation"
             ? { ...step, executor: "external-apply" }
-            : { ...step }
-        )
+            : { ...step },
+        ),
       },
-      { now: NOW + 1 }
+      { now: NOW + 1 },
     );
     db.prepare(
       `UPDATE workflow_runs
          SET source = ?, workflow_definition_version = ?
-       WHERE id = ?`
+       WHERE id = ?`,
     ).run(MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE, 999, RUN_ID);
 
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
 
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
       expect(resolution.failure).toBe("step_definition_not_found");
-      expect(resolution.detail).toBe("coding-workflow@999 step 'implementation'");
+      expect(resolution.detail).toBe(
+        "coding-workflow@999 step 'implementation'",
+      );
     }
   });
 
@@ -160,16 +193,16 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     db.prepare(
       `UPDATE step_definitions
          SET executor = ?
-       WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+       WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
       "legacy-family",
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
-      "implementation"
+      "implementation",
     );
     const resolution = resolveClaimedWorkflowStepFamily(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
@@ -184,20 +217,23 @@ describe("resolveWorkflowStepDispatchPlan — composed durable decision", () => 
     const db = openSeededDb();
     const plan = resolveWorkflowStepDispatchPlan(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
-    expect(plan).toEqual({ action: "dispatch", executorFamily: "goal-loop" });
+    expect(plan).toEqual({
+      action: "dispatch",
+      executorFamily: "delegate-supervisor",
+    });
   });
 
   it("routes the external-apply family to a real dispatch plan", () => {
     const db = openSeededDb();
     const plan = resolveWorkflowStepDispatchPlan(db, {
       runId: RUN_ID,
-      stepId: "linear-refresh"
+      stepId: "linear-refresh",
     });
     expect(plan).toEqual({
       action: "dispatch",
-      executorFamily: "external-apply"
+      executorFamily: "external-apply",
     });
   });
 
@@ -206,11 +242,11 @@ describe("resolveWorkflowStepDispatchPlan — composed durable decision", () => 
     db.prepare(
       `UPDATE workflow_runs
          SET workflow_definition_key = NULL, workflow_definition_version = NULL
-       WHERE id = ?`
+       WHERE id = ?`,
     ).run(RUN_ID);
     const plan = resolveWorkflowStepDispatchPlan(db, {
       runId: RUN_ID,
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(plan.action).toBe("fail_closed");
     if (plan.action === "fail_closed") {

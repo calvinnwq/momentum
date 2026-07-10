@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import {
   WORKFLOW_APPROVAL_BOUNDARIES,
-  workflowStepKindsForApprovalBoundary
+  workflowStepKindsForApprovalBoundary,
 } from "../src/core/workflow/run/reducer.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
@@ -14,7 +14,7 @@ describe("Momentum-owned coding workflow contract", () => {
     expectSpecSection(spec, "Coding Workflow Ownership");
     expect(spec).toContain("cwfp-*");
     expect(spec).toContain(
-      "CWFP remains the default coding-workflow start and rollback route"
+      "CWFP remains the default coding-workflow start and rollback route",
     );
   });
 
@@ -30,15 +30,33 @@ describe("Momentum-owned coding workflow contract", () => {
         key: step.key,
         kind: step.kind,
         executor: step.executor,
-      }))
+      })),
     ).toEqual([
       { key: "preflight", kind: "preflight", executor: "one-shot" },
-      { key: "implementation", kind: "implementation", executor: "goal-loop" },
+      {
+        key: "implementation",
+        kind: "implementation",
+        executor: "delegate-supervisor",
+      },
       { key: "postflight", kind: "postflight", executor: "one-shot" },
-      { key: "no-mistakes", kind: "no-mistakes", executor: "no-mistakes" },
+      {
+        key: "no-mistakes",
+        kind: "no-mistakes",
+        executor: "delegate-supervisor",
+      },
       { key: "merge-cleanup", kind: "merge-cleanup", executor: "script" },
-      { key: "linear-refresh", kind: "linear-refresh", executor: "external-apply" },
+      {
+        key: "linear-refresh",
+        kind: "linear-refresh",
+        executor: "external-apply",
+      },
     ]);
+    expect(CODING_WORKFLOW_DEFINITION.steps[1]?.config).toEqual({
+      tool: "gnhf",
+    });
+    expect(CODING_WORKFLOW_DEFINITION.steps[3]?.config).toEqual({
+      tool: "no-mistakes",
+    });
   });
 
   it("keeps approval boundaries mapped to concrete workflow steps", () => {
@@ -69,7 +87,9 @@ describe("Momentum-owned coding workflow contract", () => {
       "postflight",
       "no-mistakes",
     ]);
-    expect(workflowStepKindsForApprovalBoundary("through-merge-cleanup")).toEqual([
+    expect(
+      workflowStepKindsForApprovalBoundary("through-merge-cleanup"),
+    ).toEqual([
       "preflight",
       "implementation",
       "postflight",

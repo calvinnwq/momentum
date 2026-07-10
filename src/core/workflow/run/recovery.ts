@@ -33,11 +33,11 @@ import type { WorkflowMonitorRecoveryCode } from "../monitor/state.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import {
   isExternalSideEffectTailStepKind,
-  type WorkflowStepKind
+  type WorkflowStepKind,
 } from "./reducer.js";
 import {
   classifyNoMistakesDeterministicEvidence,
-  type NoMistakesEvidenceExpectedIdentity
+  type NoMistakesEvidenceExpectedIdentity,
 } from "../recovery/no-mistakes-evidence.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
@@ -58,7 +58,7 @@ export type MarkWorkflowRunNeedsManualRecoveryResult =
  */
 export function markWorkflowRunNeedsManualRecovery(
   db: MomentumDb,
-  input: MarkWorkflowRunNeedsManualRecoveryInput
+  input: MarkWorkflowRunNeedsManualRecoveryInput,
 ): MarkWorkflowRunNeedsManualRecoveryResult {
   if (typeof input.runId !== "string" || input.runId.length === 0) {
     throw new Error("markWorkflowRunNeedsManualRecovery: runId is required");
@@ -74,7 +74,7 @@ export function markWorkflowRunNeedsManualRecovery(
   const before = db
     .prepare(
       `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
-         FROM workflow_runs WHERE id = ?`
+         FROM workflow_runs WHERE id = ?`,
     )
     .get(input.runId) as
     | {
@@ -93,7 +93,7 @@ export function markWorkflowRunNeedsManualRecovery(
            manual_recovery_reason = ?,
            manual_recovery_at = ?,
            updated_at = ?
-     WHERE id = ?`
+     WHERE id = ?`,
   ).run(input.reason, now, now, input.runId);
 
   if (
@@ -107,8 +107,8 @@ export function markWorkflowRunNeedsManualRecovery(
       payload: {
         reason: input.reason,
         previousReason: before.manual_recovery_reason,
-        previousMarkedAt: before.manual_recovery_at
-      }
+        previousMarkedAt: before.manual_recovery_at,
+      },
     });
   }
 
@@ -121,8 +121,7 @@ export type ClearWorkflowRunManualRecoveryInput = {
 };
 
 export type ClearWorkflowRunManualRecoveryResult =
-  | { ok: true; wasMarked: boolean }
-  | { ok: false; reason: "run_not_found" };
+  { ok: true; wasMarked: boolean } | { ok: false; reason: "run_not_found" };
 
 /**
  * Clear the durable manual-recovery flag so operator transitions are eligible
@@ -134,7 +133,7 @@ export type ClearWorkflowRunManualRecoveryResult =
  */
 export function clearWorkflowRunManualRecovery(
   db: MomentumDb,
-  input: ClearWorkflowRunManualRecoveryInput
+  input: ClearWorkflowRunManualRecoveryInput,
 ): ClearWorkflowRunManualRecoveryResult {
   if (typeof input.runId !== "string" || input.runId.length === 0) {
     throw new Error("clearWorkflowRunManualRecovery: runId is required");
@@ -147,7 +146,7 @@ export function clearWorkflowRunManualRecovery(
   const before = db
     .prepare(
       `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
-         FROM workflow_runs WHERE id = ?`
+         FROM workflow_runs WHERE id = ?`,
     )
     .get(input.runId) as
     | {
@@ -166,7 +165,7 @@ export function clearWorkflowRunManualRecovery(
            manual_recovery_reason = NULL,
            manual_recovery_at = NULL,
            updated_at = ?
-     WHERE id = ?`
+     WHERE id = ?`,
   ).run(now, input.runId);
 
   if (before.needs_manual_recovery === 1) {
@@ -176,8 +175,8 @@ export function clearWorkflowRunManualRecovery(
       occurredAt: now,
       payload: {
         previousReason: before.manual_recovery_reason,
-        previousMarkedAt: before.manual_recovery_at
-      }
+        previousMarkedAt: before.manual_recovery_at,
+      },
     });
   }
 
@@ -198,12 +197,12 @@ export type WorkflowRunManualRecoveryState = {
  */
 export function getWorkflowRunManualRecoveryState(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): WorkflowRunManualRecoveryState | undefined {
   const row = db
     .prepare(
       `SELECT id, needs_manual_recovery, manual_recovery_reason, manual_recovery_at
-         FROM workflow_runs WHERE id = ?`
+         FROM workflow_runs WHERE id = ?`,
     )
     .get(runId) as
     | {
@@ -218,7 +217,7 @@ export function getWorkflowRunManualRecoveryState(
     runId: row.id,
     needsManualRecovery: row.needs_manual_recovery === 1,
     reason: row.manual_recovery_reason,
-    markedAt: row.manual_recovery_at
+    markedAt: row.manual_recovery_at,
   };
 }
 
@@ -242,11 +241,11 @@ export const BLOCKING_WORKFLOW_RECOVERY_CODES: ReadonlySet<WorkflowMonitorRecove
     "ghost_active_no_lease",
     "stale_running_step",
     "failed_required_step",
-    "failed_external_side_effect_step"
+    "failed_external_side_effect_step",
   ]);
 
 export function isBlockingWorkflowRecoveryCode(
-  code: WorkflowMonitorRecoveryCode
+  code: WorkflowMonitorRecoveryCode,
 ): boolean {
   return BLOCKING_WORKFLOW_RECOVERY_CODES.has(code);
 }
@@ -271,9 +270,7 @@ export type ClearWorkflowRunManualRecoveryGuardedInput = {
 };
 
 export type ClearWorkflowRunManualRecoveryGuardedFailureReason =
-  | "run_not_found"
-  | "not_flagged"
-  | "recovery_clear_refused";
+  "run_not_found" | "not_flagged" | "recovery_clear_refused";
 
 export type ClearWorkflowRunManualRecoveryGuardedResult =
   | {
@@ -327,14 +324,16 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  */
 export function clearWorkflowRunManualRecoveryGuarded(
   db: MomentumDb,
-  input: ClearWorkflowRunManualRecoveryGuardedInput
+  input: ClearWorkflowRunManualRecoveryGuardedInput,
 ): ClearWorkflowRunManualRecoveryGuardedResult {
   if (typeof input.runId !== "string" || input.runId.length === 0) {
     throw new Error("clearWorkflowRunManualRecoveryGuarded: runId is required");
   }
   const now = input.now ?? Date.now();
   if (!Number.isFinite(now)) {
-    throw new Error("clearWorkflowRunManualRecoveryGuarded: now must be finite");
+    throw new Error(
+      "clearWorkflowRunManualRecoveryGuarded: now must be finite",
+    );
   }
 
   const detailOptions: {
@@ -355,7 +354,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
       return {
         ok: false,
         reason: "run_not_found",
-        message: `Workflow run ${input.runId} does not exist.`
+        message: `Workflow run ${input.runId} does not exist.`,
       };
     }
     const wasMarked = detail.run.needsManualRecovery;
@@ -363,7 +362,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
     const preparedRetry = wasMarked
       ? prepareRetryableDispatchedStepForRecoveryClear(db, {
           runId: input.runId,
-          now
+          now,
         })
       : { prepared: false as const };
     let recoveryDetail =
@@ -375,7 +374,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
       return {
         ok: false,
         reason: "run_not_found",
-        message: `Workflow run ${input.runId} disappeared during retry preparation.`
+        message: `Workflow run ${input.runId} disappeared during retry preparation.`,
       };
     }
 
@@ -405,7 +404,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
             `Workflow run ${input.runId} still has a failed external-side-effect tail step ` +
             `(${recoveryBeforeClear.stepId}); pass --evidence-pointer after verifying external state before clearing manual recovery.`,
           recoveryCode: recoveryBeforeClear.code,
-          blockingStepId: recoveryBeforeClear.stepId
+          blockingStepId: recoveryBeforeClear.stepId,
         };
       }
       reconciledStep = reconcileExternalSideEffectTailStepForRecoveryClear(db, {
@@ -413,7 +412,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
         stepId: recoveryBeforeClear.stepId,
         now,
         evidencePointer,
-        ledgerPointer: input.externalSideEffectLedgerPointer ?? null
+        ledgerPointer: input.externalSideEffectLedgerPointer ?? null,
       });
       recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
       if (!recoveryDetail) {
@@ -421,7 +420,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
         return {
           ok: false,
           reason: "run_not_found",
-          message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`
+          message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`,
         };
       }
     }
@@ -432,14 +431,17 @@ export function clearWorkflowRunManualRecoveryGuarded(
     ) {
       const evidencePointer = input.successfulNoMistakesEvidencePointer?.trim();
       if (evidencePointer !== undefined && evidencePointer.length > 0) {
-        reconciledStep = reconcileInterruptedNoMistakesStepForRecoveryClear(db, {
-          runId: input.runId,
-          stepId: recoveryBeforeClear.stepId,
-          now,
-          evidencePointer,
-          successfulNoMistakesEvidence: input.successfulNoMistakesEvidence,
-          ledgerPointer: input.successfulNoMistakesLedgerPointer ?? null
-        });
+        reconciledStep = reconcileInterruptedNoMistakesStepForRecoveryClear(
+          db,
+          {
+            runId: input.runId,
+            stepId: recoveryBeforeClear.stepId,
+            now,
+            evidencePointer,
+            successfulNoMistakesEvidence: input.successfulNoMistakesEvidence,
+            ledgerPointer: input.successfulNoMistakesLedgerPointer ?? null,
+          },
+        );
         if (reconciledStep === undefined) {
           db.exec("ROLLBACK");
           return {
@@ -449,7 +451,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
               `Workflow run ${input.runId} cannot reconcile failed step ` +
               `${recoveryBeforeClear.stepId} from no-mistakes evidence. The step must be a failed required no-mistakes step and the evidence pointer must prove checks-passed.`,
             recoveryCode: recoveryBeforeClear.code,
-            blockingStepId: recoveryBeforeClear.stepId
+            blockingStepId: recoveryBeforeClear.stepId,
           };
         }
         recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
@@ -458,7 +460,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
           return {
             ok: false,
             reason: "run_not_found",
-            message: `Workflow run ${input.runId} disappeared during no-mistakes reconciliation.`
+            message: `Workflow run ${input.runId} disappeared during no-mistakes reconciliation.`,
           };
         }
       }
@@ -469,7 +471,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
       return {
         ok: false,
         reason: "not_flagged",
-        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
+        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`,
       };
     }
 
@@ -483,7 +485,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
           `Workflow run ${input.runId} still has a blocking recovery condition ` +
           `(${recovery.code}); resolve it before clearing manual recovery.`,
         recoveryCode: recovery.code,
-        blockingStepId: recovery.stepId
+        blockingStepId: recovery.stepId,
       };
     }
 
@@ -491,14 +493,14 @@ export function clearWorkflowRunManualRecoveryGuarded(
     const previousMarkedAt = detail.run.manualRecoveryAt;
     const cleared = clearWorkflowRunManualRecovery(db, {
       runId: input.runId,
-      now
+      now,
     });
     if (!cleared.ok) {
       db.exec("ROLLBACK");
       return {
         ok: false,
         reason: "run_not_found",
-        message: `Workflow run ${input.runId} disappeared during clear.`
+        message: `Workflow run ${input.runId} disappeared during clear.`,
       };
     }
     db.exec("COMMIT");
@@ -513,11 +515,11 @@ export function clearWorkflowRunManualRecoveryGuarded(
         ? {
             retryPrepared: {
               stepId: preparedRetry.stepId,
-              recoveryCode: preparedRetry.recoveryCode
-            }
+              recoveryCode: preparedRetry.recoveryCode,
+            },
           }
         : {}),
-      ...(reconciledStep !== undefined ? { reconciledStep } : {})
+      ...(reconciledStep !== undefined ? { reconciledStep } : {}),
     };
   } catch (error) {
     try {
@@ -538,7 +540,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     evidencePointer: string;
     successfulNoMistakesEvidence?: unknown;
     ledgerPointer: string | null;
-  }
+  },
 ):
   | {
       stepId: string;
@@ -553,17 +555,17 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
       input.successfulNoMistakesEvidence ??
       readNoMistakesDeterministicEvidenceFromPointer(
         input.evidencePointer,
-        input.ledgerPointer
+        input.ledgerPointer,
       );
     if (deterministicEvidence === undefined) return undefined;
     const expected = loadNoMistakesEvidenceExpectedIdentity(db, {
       runId: input.runId,
-      stepId: input.stepId
+      stepId: input.stepId,
     });
     if (expected === undefined) return undefined;
     const classified = classifyNoMistakesDeterministicEvidence(
       deterministicEvidence,
-      expected
+      expected,
     );
     if (!classified.ok) return undefined;
   }
@@ -572,11 +574,9 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     .prepare(
       `SELECT kind, state, required, step_order, result_digest, error_code,
               error_message, finished_at, updated_at
-         FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+         FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
     )
-    .get(input.runId, input.stepId) as
-    | FailedStepBeforeReconcileRow
-    | undefined;
+    .get(input.runId, input.stepId) as FailedStepBeforeReconcileRow | undefined;
   if (
     row === undefined ||
     row.kind !== "no-mistakes" ||
@@ -589,7 +589,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
   appendFailedStepEventBeforeReconcile(db, {
     runId: input.runId,
     stepId: input.stepId,
-    row
+    row,
   });
 
   const updated = db
@@ -609,7 +609,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
         WHERE run_id = ?
           AND step_id = ?
           AND kind = 'no-mistakes'
-          AND state = 'failed'`
+          AND state = 'failed'`,
     )
     .run(
       input.evidencePointer,
@@ -618,16 +618,16 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
       input.now,
       input.now,
       input.runId,
-      input.stepId
+      input.stepId,
     );
   if (Number(updated.changes) === 0) return undefined;
 
   const monitorState = refreshWorkflowRunRuntimeState(db, {
     runId: input.runId,
-    now: input.now
+    now: input.now,
   });
   db.prepare(
-    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?"
+    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?",
   ).run(monitorState.terminal ? input.now : null, input.now, input.runId);
 
   return {
@@ -635,7 +635,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     recoveryCode: "interrupted_no_mistakes_checks_passed",
     state: "succeeded",
     evidencePointer: input.evidencePointer,
-    ledgerPointer: input.ledgerPointer
+    ledgerPointer: input.ledgerPointer,
   };
 }
 
@@ -646,7 +646,7 @@ function isNoMistakesChecksPassedEvidencePointer(value: string): boolean {
 
 function readNoMistakesDeterministicEvidenceFromPointer(
   evidencePointer: string,
-  ledgerPointer: string | null
+  ledgerPointer: string | null,
 ): unknown | undefined {
   for (const pointer of [evidencePointer, ledgerPointer]) {
     if (pointer === null) continue;
@@ -676,7 +676,7 @@ function pointerToReadableEvidencePath(pointer: string): string | null {
 
 function loadNoMistakesEvidenceExpectedIdentity(
   db: MomentumDb,
-  input: { runId: string; stepId: string }
+  input: { runId: string; stepId: string },
 ): NoMistakesEvidenceExpectedIdentity | undefined {
   const row = db
     .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
@@ -690,17 +690,17 @@ function loadNoMistakesEvidenceExpectedIdentity(
     ...(issueScope.length > 0 ? { issueScope } : {}),
     branch: {
       name: checkpoint.branch,
-      headSha: checkpoint.headSha
+      headSha: checkpoint.headSha,
     },
     ...(checkpoint.pullRequestId !== undefined
       ? {
           pullRequest: {
             id: checkpoint.pullRequestId,
-            headSha: checkpoint.headSha
-          }
+            headSha: checkpoint.headSha,
+          },
         }
       : {}),
-    noMistakesRunId: checkpoint.noMistakesRunId
+    noMistakesRunId: checkpoint.noMistakesRunId,
   };
 }
 
@@ -715,7 +715,7 @@ const NO_MISTAKES_CHECKPOINT_SHA_RE = /^[0-9a-f]{40}$/i;
 
 function loadCurrentNoMistakesCheckpointIdentity(
   db: MomentumDb,
-  input: { runId: string; stepId: string }
+  input: { runId: string; stepId: string },
 ): NoMistakesCheckpointIdentity | null {
   const rows = db
     .prepare(
@@ -725,11 +725,11 @@ function loadCurrentNoMistakesCheckpointIdentity(
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
         WHERE r.workflow_run_id = ?
           AND r.step_run_id = ?
-          AND r.executor_family = 'no-mistakes'
+          AND r.executor_family IN ('no-mistakes', 'delegate-supervisor')
           AND c.stage IN ('external_state_mirrored', 'expected_external_identity')
         ORDER BY r.attempt DESC, r.round_index DESC,
                  CASE c.stage WHEN 'external_state_mirrored' THEN 0 ELSE 1 END,
-                 c.sequence DESC`
+                 c.sequence DESC`,
     )
     .all(input.runId, input.stepId) as {
     attempt: number;
@@ -740,7 +740,8 @@ function loadCurrentNoMistakesCheckpointIdentity(
   }[];
   const current = rows.filter(
     (row) =>
-      row.attempt === rows[0]?.attempt && row.roundIndex === rows[0]?.roundIndex
+      row.attempt === rows[0]?.attempt &&
+      row.roundIndex === rows[0]?.roundIndex,
   );
   const identities = current.flatMap((row) => {
     const identity = parseNoMistakesCheckpointIdentity(row.detail);
@@ -754,7 +755,7 @@ function loadCurrentNoMistakesCheckpointIdentity(
 }
 
 function parseNoMistakesCheckpointIdentity(
-  detail: string | null
+  detail: string | null,
 ): NoMistakesCheckpointIdentity | null {
   if (detail === null) return null;
   let parsed: unknown;
@@ -775,7 +776,7 @@ function parseNoMistakesCheckpointIdentity(
   }
   const explicitPullRequestId = readNonBlankCheckpointString(
     record,
-    "pullRequestId"
+    "pullRequestId",
   );
   const pullRequestId =
     explicitPullRequestId ?? pullRequestIdFromCheckpointUrl(record["prUrl"]);
@@ -783,13 +784,13 @@ function parseNoMistakesCheckpointIdentity(
     noMistakesRunId,
     branch,
     headSha,
-    ...(pullRequestId !== null ? { pullRequestId } : {})
+    ...(pullRequestId !== null ? { pullRequestId } : {}),
   };
 }
 
 function readNonBlankCheckpointString(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): string | null {
   const value = record[key];
   if (typeof value !== "string" || value.trim().length === 0) return null;
@@ -798,7 +799,7 @@ function readNonBlankCheckpointString(
 
 function readCheckpointSha(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): string | null {
   const value = readNonBlankCheckpointString(record, key);
   if (value === null || !NO_MISTAKES_CHECKPOINT_SHA_RE.test(value)) return null;
@@ -834,14 +835,14 @@ function collectIssueScopeIdentifiers(value: unknown): string[] {
   }
   if (value === null || typeof value !== "object") return [];
   const record = value as Record<string, unknown>;
-  const direct = ["identifier", "id", "issue", "issueId", "key"].flatMap((key) =>
-    typeof record[key] === "string" ? [record[key] as string] : []
+  const direct = ["identifier", "id", "issue", "issueId", "key"].flatMap(
+    (key) => (typeof record[key] === "string" ? [record[key] as string] : []),
   );
   return [
     ...direct,
     ...["issues", "identifiers", "issueScope", "scope"].flatMap((key) =>
-      collectIssueScopeIdentifiers(record[key])
-    )
+      collectIssueScopeIdentifiers(record[key]),
+    ),
   ];
 }
 
@@ -853,7 +854,7 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
     now: number;
     evidencePointer: string;
     ledgerPointer: string | null;
-  }
+  },
 ):
   | {
       stepId: string;
@@ -867,11 +868,9 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
     .prepare(
       `SELECT kind, state, required, step_order, result_digest, error_code,
               error_message, finished_at, updated_at
-         FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+         FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
     )
-    .get(input.runId, input.stepId) as
-    | FailedStepBeforeReconcileRow
-    | undefined;
+    .get(input.runId, input.stepId) as FailedStepBeforeReconcileRow | undefined;
   if (
     row === undefined ||
     row.state !== "failed" ||
@@ -884,7 +883,7 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   appendFailedStepEventBeforeReconcile(db, {
     runId: input.runId,
     stepId: input.stepId,
-    row
+    row,
   });
 
   const updated = db
@@ -903,7 +902,7 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
               updated_at = ?
         WHERE run_id = ?
           AND step_id = ?
-          AND state = 'failed'`
+          AND state = 'failed'`,
     )
     .run(
       input.evidencePointer,
@@ -912,27 +911,23 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
       input.now,
       input.now,
       input.runId,
-      input.stepId
+      input.stepId,
     );
   if (Number(updated.changes) === 0) return undefined;
 
   const monitorState = refreshWorkflowRunRuntimeState(db, {
     runId: input.runId,
-    now: input.now
+    now: input.now,
   });
   db.prepare(
-    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?"
-  ).run(
-    monitorState.terminal ? input.now : null,
-    input.now,
-    input.runId
-  );
+    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?",
+  ).run(monitorState.terminal ? input.now : null, input.now, input.runId);
   return {
     stepId: input.stepId,
     recoveryCode: "failed_external_side_effect_step",
     state: "succeeded",
     evidencePointer: input.evidencePointer,
-    ledgerPointer: input.ledgerPointer
+    ledgerPointer: input.ledgerPointer,
   };
 }
 
@@ -954,7 +949,7 @@ function appendFailedStepEventBeforeReconcile(
     runId: string;
     stepId: string;
     row: FailedStepBeforeReconcileRow;
-  }
+  },
 ): void {
   const occurredAt = input.row.finished_at ?? input.row.updated_at;
   const payload = compactWorkflowEventPayload({
@@ -963,7 +958,7 @@ function appendFailedStepEventBeforeReconcile(
     required: input.row.required === 1,
     resultDigest: input.row.result_digest,
     errorCode: input.row.error_code,
-    errorMessage: input.row.error_message
+    errorMessage: input.row.error_message,
   });
   appendWorkflowEvent(db, {
     runId: input.runId,
@@ -977,15 +972,15 @@ function appendFailedStepEventBeforeReconcile(
       timestamp: occurredAt,
       stepId: input.stepId,
       payload,
-      source: "step"
-    })
+      source: "step",
+    }),
   });
 }
 
 function compactWorkflowEventPayload(
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(payload).filter(([, value]) => value !== null)
+    Object.entries(payload).filter(([, value]) => value !== null),
   );
 }

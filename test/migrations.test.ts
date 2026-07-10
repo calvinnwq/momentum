@@ -34,7 +34,7 @@ function tableNames(db: DatabaseSync): string[] {
   return (
     db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
       )
       .all() as Array<{ name: string }>
   ).map((row) => row.name);
@@ -65,7 +65,7 @@ describe("applyQueueMigrations", () => {
         "updated_at",
         "started_at",
         "finished_at",
-        "error"
+        "error",
       ]) {
         expect(jobColumns, `missing jobs column: ${col}`).toContain(col);
       }
@@ -85,7 +85,7 @@ describe("applyQueueMigrations", () => {
         "heartbeat_at",
         "lease_expires_at",
         "released_at",
-        "updated_at"
+        "updated_at",
       ]) {
         expect(lockColumns, `missing repo_locks column: ${col}`).toContain(col);
       }
@@ -98,7 +98,7 @@ describe("applyQueueMigrations", () => {
       expect(tableNames(db)).toContain("update_intents");
 
       const updateIntentColumns = getColumns(db, "update_intents").map(
-        (row) => row.name
+        (row) => row.name,
       );
       for (const col of [
         "id",
@@ -119,16 +119,16 @@ describe("applyQueueMigrations", () => {
         "updated_at",
         "applied_at",
         "skipped_at",
-        "canceled_at"
+        "canceled_at",
       ]) {
         expect(
           updateIntentColumns,
-          `missing update_intents column: ${col}`
+          `missing update_intents column: ${col}`,
         ).toContain(col);
       }
 
       const evidenceColumns = getColumns(db, "evidence_records").map(
-        (row) => row.name
+        (row) => row.name,
       );
       for (const col of [
         "id",
@@ -146,15 +146,17 @@ describe("applyQueueMigrations", () => {
         "step_id",
         "ingest_key",
         "created_at",
-        "updated_at"
+        "updated_at",
       ]) {
         expect(
           evidenceColumns,
-          `missing evidence_records column: ${col}`
+          `missing evidence_records column: ${col}`,
         ).toContain(col);
       }
 
-      const sourceItemColumns = getColumns(db, "source_items").map((row) => row.name);
+      const sourceItemColumns = getColumns(db, "source_items").map(
+        (row) => row.name,
+      );
       for (const col of [
         "id",
         "adapter_kind",
@@ -167,13 +169,16 @@ describe("applyQueueMigrations", () => {
         "last_observed_at",
         "goal_id",
         "created_at",
-        "updated_at"
+        "updated_at",
       ]) {
-        expect(sourceItemColumns, `missing source_items column: ${col}`).toContain(col);
+        expect(
+          sourceItemColumns,
+          `missing source_items column: ${col}`,
+        ).toContain(col);
       }
 
       const daemonColumns = getColumns(db, "daemon_runs").map(
-        (row) => row.name
+        (row) => row.name,
       );
       for (const col of [
         "id",
@@ -192,17 +197,17 @@ describe("applyQueueMigrations", () => {
         "last_reconciled_at",
         "error",
         "error_at",
-        "updated_at"
+        "updated_at",
       ]) {
         expect(daemonColumns, `missing daemon_runs column: ${col}`).toContain(
-          col
+          col,
         );
       }
 
       const indexes = (
         db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+            "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
           )
           .all() as Array<{ name: string }>
       ).map((row) => row.name);
@@ -226,13 +231,15 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_update_intents_created_at");
       expect(indexes).toContain("idx_workflow_events_run_cursor");
 
-      expect(updateIntentColumns, "missing update_intents column: apply_state")
-        .toContain("apply_state");
+      expect(
+        updateIntentColumns,
+        "missing update_intents column: apply_state",
+      ).toContain("apply_state");
 
       expect(tableNames(db)).toContain("intent_apply_audits");
       expect(tableNames(db)).toContain("workflow_events");
       const workflowEventColumns = getColumns(db, "workflow_events").map(
-        (row) => row.name
+        (row) => row.name,
       );
       for (const col of [
         "event_id",
@@ -241,15 +248,15 @@ describe("applyQueueMigrations", () => {
         "occurred_at",
         "type",
         "payload_json",
-        "created_at"
+        "created_at",
       ]) {
         expect(
           workflowEventColumns,
-          `missing workflow_events column: ${col}`
+          `missing workflow_events column: ${col}`,
         ).toContain(col);
       }
       const auditColumns = getColumns(db, "intent_apply_audits").map(
-        (row) => row.name
+        (row) => row.name,
       );
       for (const col of [
         "id",
@@ -279,11 +286,11 @@ describe("applyQueueMigrations", () => {
         "reconcile_status",
         "reconcile_warning",
         "created_at",
-        "updated_at"
+        "updated_at",
       ]) {
         expect(
           auditColumns,
-          `missing intent_apply_audits column: ${col}`
+          `missing intent_apply_audits column: ${col}`,
         ).toContain(col);
       }
       expect(indexes).toContain("idx_intent_apply_audits_intent_id");
@@ -300,8 +307,8 @@ describe("applyQueueMigrations", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
-      const auditColumns = getColumns(db, "intent_apply_audits").map(
-        (row) => row.name.toLowerCase()
+      const auditColumns = getColumns(db, "intent_apply_audits").map((row) =>
+        row.name.toLowerCase(),
       );
       const forbidden = [
         "credential",
@@ -313,13 +320,13 @@ describe("applyQueueMigrations", () => {
         "authorization",
         "auth_header",
         "request_headers",
-        "headers"
+        "headers",
       ];
       for (const col of auditColumns) {
         for (const banned of forbidden) {
           expect(
             col,
-            `intent_apply_audits should not include credential/header column "${col}"`
+            `intent_apply_audits should not include credential/header column "${col}"`,
           ).not.toContain(banned);
         }
       }
@@ -392,21 +399,23 @@ describe("applyQueueMigrations", () => {
           canceled_at INTEGER
         ) STRICT;
       `);
-      pre.prepare(
-        `INSERT INTO update_intents
+      pre
+        .prepare(
+          `INSERT INTO update_intents
            (id, adapter_kind, intent_type, payload_json, reason,
             status, idempotency_key, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
-      ).run(
-        "intent_legacy_1",
-        "linear",
-        "source_satisfied",
-        "{}",
-        "preserved",
-        "legacy-key-1",
-        1,
-        2
-      );
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+        )
+        .run(
+          "intent_legacy_1",
+          "linear",
+          "source_satisfied",
+          "{}",
+          "preserved",
+          "legacy-key-1",
+          1,
+          2,
+        );
     } finally {
       pre.close();
     }
@@ -414,14 +423,14 @@ describe("applyQueueMigrations", () => {
     const upgraded = openDb(dataDir);
     try {
       const updateIntentCols = getColumns(upgraded, "update_intents").map(
-        (row) => row.name
+        (row) => row.name,
       );
       expect(updateIntentCols).toContain("apply_state");
       expect(tableNames(upgraded)).toContain("intent_apply_audits");
       const preserved = upgraded
         .prepare(
           `SELECT id, status, apply_state, reason
-             FROM update_intents WHERE id = 'intent_legacy_1'`
+             FROM update_intents WHERE id = 'intent_legacy_1'`,
         )
         .get() as {
         id: string;
@@ -462,16 +471,18 @@ describe("applyQueueMigrations", () => {
           updated_at INTEGER NOT NULL
         ) STRICT;
       `);
-      pre.prepare(
-        `INSERT INTO evidence_records
+      pre
+        .prepare(
+          `INSERT INTO evidence_records
            (id, source, type, format_version, artifact_path, external_id,
             occurred_at, summary, metadata_json, ingest_key,
             created_at, updated_at)
          VALUES ('evidence_record_legacy', 'agent-workflow', 'plan_created', 1,
                  '/tmp/.agent-workflows/cwfp-legacy/plan.json', 'cwfp-legacy',
                  1000, 'Legacy plan', '{}',
-                 'agent-workflow:cwfp-legacy:plan_created', 1, 2)`
-      ).run();
+                 'agent-workflow:cwfp-legacy:plan_created', 1, 2)`,
+        )
+        .run();
     } finally {
       pre.close();
     }
@@ -479,13 +490,13 @@ describe("applyQueueMigrations", () => {
     const upgraded = openDb(dataDir);
     try {
       const cols = getColumns(upgraded, "evidence_records").map(
-        (row) => row.name
+        (row) => row.name,
       );
       expect(cols).toContain("run_id");
       expect(cols).toContain("step_id");
 
       const byName = new Map(
-        getColumns(upgraded, "evidence_records").map((row) => [row.name, row])
+        getColumns(upgraded, "evidence_records").map((row) => [row.name, row]),
       );
       // Typed linkage is additive and nullable.
       expect(byName.get("run_id")?.notnull).toBe(0);
@@ -494,7 +505,7 @@ describe("applyQueueMigrations", () => {
       const preserved = upgraded
         .prepare(
           `SELECT id, source, type, external_id, run_id, step_id
-             FROM evidence_records WHERE id = 'evidence_record_legacy'`
+             FROM evidence_records WHERE id = 'evidence_record_legacy'`,
         )
         .get() as Record<string, unknown>;
       expect(preserved["id"]).toBe("evidence_record_legacy");
@@ -508,7 +519,7 @@ describe("applyQueueMigrations", () => {
       const indexes = (
         upgraded
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+            "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
           )
           .all() as Array<{ name: string }>
       ).map((row) => row.name);
@@ -598,15 +609,15 @@ describe("applyQueueMigrations", () => {
       `);
       m1.prepare(
         `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("g1", "Legacy goal", "momentum/legacy", "/tmp/legacy", 1, 2);
       m1.prepare(
         `INSERT INTO jobs (id, goal_id, artifact_path, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?)`,
       ).run("j1", "g1", "/tmp/legacy/iterations/1", 3, 4);
       m1.prepare(
         `INSERT INTO events (goal_id, type, payload, created_at)
-         VALUES (?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?)`,
       ).run("g1", "iteration_started", "{}", 5);
     } finally {
       m1.close();
@@ -621,7 +632,7 @@ describe("applyQueueMigrations", () => {
 
       const job = upgraded
         .prepare(
-          "SELECT id, idempotency_key, worker_id FROM jobs WHERE id = 'j1'"
+          "SELECT id, idempotency_key, worker_id FROM jobs WHERE id = 'j1'",
         )
         .get() as Record<string, unknown>;
       expect(job["id"]).toBe("j1");
@@ -647,14 +658,14 @@ describe("applyQueueMigrations", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES ('g', 't', 'b', '/tmp/x', 1, 1)`
+         VALUES ('g', 't', 'b', '/tmp/x', 1, 1)`,
       ).run();
       const insert = db.prepare(
         `INSERT INTO jobs
            (id, goal_id, type, iteration, state, attempt_count,
             artifact_path, idempotency_key, created_at, updated_at)
          VALUES (?, 'g', 'goal_iteration', 1, 'pending', 0,
-                 '/tmp/x/it/1', ?, 1, 1)`
+                 '/tmp/x/it/1', ?, 1, 1)`,
       );
       insert.run("a", "key-1");
       insert.run("b", null);
@@ -673,7 +684,7 @@ describe("applyQueueMigrations", () => {
         `INSERT INTO repo_locks
            (id, repo_root, holder, goal_id, iteration, job_id,
             state, acquired_at, heartbeat_at, lease_expires_at, updated_at)
-         VALUES (?, ?, 'h', 'g', 1, 'j', ?, 1, 1, 100, 1)`
+         VALUES (?, ?, 'h', 'g', 1, 'j', ?, 1, 1, 100, 1)`,
       );
       insert.run("l1", "/tmp/repo", "active");
       expect(() => insert.run("l2", "/tmp/repo", "active")).toThrow(/UNIQUE/);
@@ -692,11 +703,11 @@ describe("applyQueueMigrations", () => {
         `INSERT INTO update_intents
            (id, adapter_kind, intent_type, payload_json, reason,
             status, idempotency_key, created_at, updated_at)
-         VALUES (?, ?, ?, '{}', ?, 'pending', ?, 1, 1)`
+         VALUES (?, ?, ?, '{}', ?, 'pending', ?, 1, 1)`,
       );
       insert.run("i1", "linear", "source_satisfied", "first", "key-1");
       expect(() =>
-        insert.run("i2", "linear", "source_satisfied", "duplicate", "key-1")
+        insert.run("i2", "linear", "source_satisfied", "duplicate", "key-1"),
       ).toThrow(/UNIQUE/);
       // distinct keys do not collide
       insert.run("i3", "linear", "source_satisfied", "second", "key-2");
@@ -750,7 +761,7 @@ describe("applyQueueMigrations", () => {
       // calling twice should be a no-op
       applyQueueMigrations(db);
       expect(getColumns(db, "jobs").map((c) => c.name)).toContain(
-        "idempotency_key"
+        "idempotency_key",
       );
       expect(tableNames(db)).toContain("repo_locks");
       expect(tableNames(db)).toContain("daemon_runs");
@@ -788,7 +799,7 @@ describe("applyQueueMigrations", () => {
           "started_at",
           "finished_at",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(cols, `missing workflow_runs column: ${col}`).toContain(col);
         }
@@ -817,7 +828,7 @@ describe("applyQueueMigrations", () => {
           "started_at",
           "finished_at",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(cols, `missing workflow_steps column: ${col}`).toContain(col);
         }
@@ -826,19 +837,19 @@ describe("applyQueueMigrations", () => {
           `INSERT INTO workflow_runs
              (id, state, source, plan_json, needs_manual_recovery,
               created_at, updated_at)
-           VALUES ('cwfp-r1', 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+           VALUES ('cwfp-r1', 'pending', 'agent-workflows', '{}', 0, 1, 1)`,
         ).run();
         const insert = db.prepare(
           `INSERT INTO workflow_steps
              (run_id, step_id, kind, state, step_order, required,
               created_at, updated_at)
-           VALUES (?, ?, ?, 'pending', ?, 1, 1, 1)`
+           VALUES (?, ?, ?, 'pending', ?, 1, 1, 1)`,
         );
         insert.run("cwfp-r1", "s1", "preflight", 1);
         // composite primary key rejects duplicates on (run_id, step_id)
-        expect(() =>
-          insert.run("cwfp-r1", "s1", "implementation", 2)
-        ).toThrow(/UNIQUE|PRIMARY KEY/i);
+        expect(() => insert.run("cwfp-r1", "s1", "implementation", 2)).toThrow(
+          /UNIQUE|PRIMARY KEY/i,
+        );
         // distinct step_id under the same run is fine
         insert.run("cwfp-r1", "s2", "implementation", 2);
       } finally {
@@ -851,7 +862,9 @@ describe("applyQueueMigrations", () => {
       const db = openDb(dataDir);
       try {
         expect(tableNames(db)).toContain("workflow_approvals");
-        const cols = getColumns(db, "workflow_approvals").map((row) => row.name);
+        const cols = getColumns(db, "workflow_approvals").map(
+          (row) => row.name,
+        );
         for (const col of [
           "run_id",
           "boundary",
@@ -862,10 +875,10 @@ describe("applyQueueMigrations", () => {
           "recorded_at",
           "discharged_at",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(cols, `missing workflow_approvals column: ${col}`).toContain(
-            col
+            col,
           );
         }
 
@@ -873,20 +886,20 @@ describe("applyQueueMigrations", () => {
           `INSERT INTO workflow_runs
              (id, state, source, plan_json, needs_manual_recovery,
               created_at, updated_at)
-           VALUES ('cwfp-r2', 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+           VALUES ('cwfp-r2', 'pending', 'agent-workflows', '{}', 0, 1, 1)`,
         ).run();
         const insert = db.prepare(
           `INSERT INTO workflow_approvals
              (run_id, boundary, actor, phrase, artifact_path,
               artifact_digest, recorded_at, created_at, updated_at)
-           VALUES (?, ?, 'op', ?, ?, ?, 1, 1, 1)`
+           VALUES (?, ?, 'op', ?, ?, ?, 1, 1, 1)`,
         );
         insert.run(
           "cwfp-r2",
           "implementation",
           "implementation",
           ".agent-workflows/cwfp-r2/approval-implementation.json",
-          "sha256:abc"
+          "sha256:abc",
         );
         expect(() =>
           insert.run(
@@ -894,8 +907,8 @@ describe("applyQueueMigrations", () => {
             "implementation",
             "implementation",
             ".agent-workflows/cwfp-r2/approval-implementation.json",
-            "sha256:abc"
-          )
+            "sha256:abc",
+          ),
         ).toThrow(/UNIQUE|PRIMARY KEY/i);
       } finally {
         db.close();
@@ -918,7 +931,7 @@ describe("applyQueueMigrations", () => {
           "released_at",
           "stale_policy",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(cols, `missing workflow_leases column: ${col}`).toContain(col);
         }
@@ -927,19 +940,23 @@ describe("applyQueueMigrations", () => {
           `INSERT INTO workflow_runs
              (id, state, source, plan_json, needs_manual_recovery,
               created_at, updated_at)
-           VALUES ('cwfp-r3', 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+           VALUES ('cwfp-r3', 'pending', 'agent-workflows', '{}', 0, 1, 1)`,
         ).run();
         const insert = db.prepare(
           `INSERT INTO workflow_leases
              (run_id, lease_kind, holder, acquired_at, expires_at,
               heartbeat_at, stale_policy, created_at, updated_at)
-           VALUES (?, ?, ?, 1, 100, 1, 'auto-release', 1, 1)`
+           VALUES (?, ?, ?, 1, 100, 1, 'auto-release', 1, 1)`,
         );
-        insert.run("cwfp-r3", "monitor", "cron:coding-workflow-monitor:cwfp-r3");
+        insert.run(
+          "cwfp-r3",
+          "monitor",
+          "cron:coding-workflow-monitor:cwfp-r3",
+        );
         // composite primary key rejects duplicates on (run_id, lease_kind)
-        expect(() =>
-          insert.run("cwfp-r3", "monitor", "another")
-        ).toThrow(/UNIQUE|PRIMARY KEY/i);
+        expect(() => insert.run("cwfp-r3", "monitor", "another")).toThrow(
+          /UNIQUE|PRIMARY KEY/i,
+        );
         // distinct lease kind for the same run is fine
         insert.run("cwfp-r3", "dispatch", "intent-apply");
       } finally {
@@ -954,7 +971,7 @@ describe("applyQueueMigrations", () => {
         const indexes = (
           db
             .prepare(
-              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
             )
             .all() as Array<{ name: string }>
         ).map((row) => row.name);
@@ -967,7 +984,7 @@ describe("applyQueueMigrations", () => {
           "idx_workflow_steps_state",
           "idx_workflow_approvals_run",
           "idx_workflow_leases_run",
-          "idx_workflow_leases_expires_at"
+          "idx_workflow_leases_expires_at",
         ]) {
           expect(indexes, `missing index: ${idx}`).toContain(idx);
         }
@@ -987,9 +1004,9 @@ describe("applyQueueMigrations", () => {
               `INSERT INTO workflow_steps
                  (run_id, step_id, kind, state, step_order, required,
                   created_at, updated_at)
-               VALUES ('cwfp-missing', 's1', 'preflight', 'pending', 1, 1, 1, 1)`
+               VALUES ('cwfp-missing', 's1', 'preflight', 'pending', 1, 1, 1, 1)`,
             )
-            .run()
+            .run(),
         ).toThrow(/FOREIGN KEY/i);
       } finally {
         db.close();
@@ -1059,10 +1076,12 @@ describe("applyQueueMigrations", () => {
             created_at INTEGER NOT NULL
           ) STRICT;
         `);
-        pre.prepare(
-          `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run("g-pre-m7", "pre-m7 goal", "main", "/tmp/pre-m7", 1, 2);
+        pre
+          .prepare(
+            `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run("g-pre-m7", "pre-m7 goal", "main", "/tmp/pre-m7", 1, 2);
       } finally {
         pre.close();
       }
@@ -1100,20 +1119,22 @@ describe("applyQueueMigrations", () => {
           "headers",
           "discord_payload",
           "discord_message",
-          "chat_body"
+          "chat_body",
         ];
         for (const table of [
           "workflow_runs",
           "workflow_steps",
           "workflow_approvals",
-          "workflow_leases"
+          "workflow_leases",
         ]) {
-          const cols = getColumns(db, table).map((row) => row.name.toLowerCase());
+          const cols = getColumns(db, table).map((row) =>
+            row.name.toLowerCase(),
+          );
           for (const col of cols) {
             for (const banned of forbidden) {
               expect(
                 col,
-                `${table} should not include credential/header/chat column "${col}"`
+                `${table} should not include credential/header/chat column "${col}"`,
               ).not.toContain(banned);
             }
           }
@@ -1135,10 +1156,10 @@ describe("applyQueueMigrations", () => {
           "issue_scope_json",
           "route_json",
           "approval_boundary",
-          "skill_revision"
+          "skill_revision",
         ]) {
           expect(byName.has(col), `missing workflow_runs column: ${col}`).toBe(
-            true
+            true,
           );
         }
         expect(byName.get("issue_scope_json")?.notnull).toBe(1);
@@ -1151,7 +1172,7 @@ describe("applyQueueMigrations", () => {
         const indexes = (
           db
             .prepare(
-              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
             )
             .all() as Array<{ name: string }>
         ).map((row) => row.name);
@@ -1169,7 +1190,7 @@ describe("applyQueueMigrations", () => {
           `INSERT INTO workflow_runs
              (id, state, source, plan_json, needs_manual_recovery,
               created_at, updated_at)
-           VALUES ('cwfp-defaults', 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+           VALUES ('cwfp-defaults', 'pending', 'agent-workflows', '{}', 0, 1, 1)`,
         ).run();
         const row = db
           .prepare(
@@ -1178,7 +1199,7 @@ describe("applyQueueMigrations", () => {
                     monitor_last_seen_state, monitor_terminal, monitor_step,
                     monitor_last_seen_digest, monitor_last_emitted_digest,
                     monitor_last_seen_at, monitor_last_emitted_at
-               FROM workflow_runs WHERE id = 'cwfp-defaults'`
+               FROM workflow_runs WHERE id = 'cwfp-defaults'`,
           )
           .get() as Record<string, unknown>;
         expect(row["repo_path"]).toBeNull();
@@ -1232,13 +1253,15 @@ describe("applyQueueMigrations", () => {
             updated_at INTEGER NOT NULL
           ) STRICT;
         `);
-        pre.prepare(
-          `INSERT INTO workflow_runs
+        pre
+          .prepare(
+            `INSERT INTO workflow_runs
              (id, state, source, plan_json, needs_manual_recovery,
               created_at, updated_at)
            VALUES ('cwfp-legacy', 'pending', 'agent-workflows', '{"legacy":true}',
-                   0, 7, 8)`
-        ).run();
+                   0, 7, 8)`,
+          )
+          .run();
       } finally {
         pre.close();
       }
@@ -1246,7 +1269,7 @@ describe("applyQueueMigrations", () => {
       const upgraded = openDb(dataDir);
       try {
         const cols = getColumns(upgraded, "workflow_runs").map(
-          (row) => row.name
+          (row) => row.name,
         );
         for (const col of [
           "repo_path",
@@ -1261,7 +1284,7 @@ describe("applyQueueMigrations", () => {
           "monitor_last_seen_digest",
           "monitor_last_emitted_digest",
           "monitor_last_seen_at",
-          "monitor_last_emitted_at"
+          "monitor_last_emitted_at",
         ]) {
           expect(cols).toContain(col);
         }
@@ -1269,7 +1292,7 @@ describe("applyQueueMigrations", () => {
           .prepare(
             `SELECT id, state, plan_json, issue_scope_json, route_json,
                     repo_path, approval_boundary
-               FROM workflow_runs WHERE id = 'cwfp-legacy'`
+               FROM workflow_runs WHERE id = 'cwfp-legacy'`,
           )
           .get() as Record<string, unknown>;
         expect(preserved["id"]).toBe("cwfp-legacy");
@@ -1306,31 +1329,30 @@ describe("applyQueueMigrations", () => {
       try {
         expect(tableNames(db)).toContain("workflow_definitions");
         const cols = getColumns(db, "workflow_definitions").map(
-          (row) => row.name
+          (row) => row.name,
         );
         for (const col of [
           "key",
           "version",
           "title",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
-          expect(
-            cols,
-            `missing workflow_definitions column: ${col}`
-          ).toContain(col);
+          expect(cols, `missing workflow_definitions column: ${col}`).toContain(
+            col,
+          );
         }
 
         const insert = db.prepare(
           `INSERT INTO workflow_definitions
              (key, version, title, created_at, updated_at)
-           VALUES (?, ?, ?, 1, 1)`
+           VALUES (?, ?, ?, 1, 1)`,
         );
         insert.run("coding-workflow", 1, "OpenClaw Coding Workflow");
         // composite primary key rejects duplicates on (key, version)
-        expect(() =>
-          insert.run("coding-workflow", 1, "duplicate")
-        ).toThrow(/UNIQUE|PRIMARY KEY/i);
+        expect(() => insert.run("coding-workflow", 1, "duplicate")).toThrow(
+          /UNIQUE|PRIMARY KEY/i,
+        );
         // a distinct version of the same key is allowed
         insert.run("coding-workflow", 2, "OpenClaw Coding Workflow v2");
       } finally {
@@ -1350,26 +1372,27 @@ describe("applyQueueMigrations", () => {
           "step_key",
           "kind",
           "executor",
+          "config_json",
           "step_order",
           "required",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(cols, `missing step_definitions column: ${col}`).toContain(
-            col
+            col,
           );
         }
 
         db.prepare(
           `INSERT INTO workflow_definitions
              (key, version, title, created_at, updated_at)
-           VALUES ('coding-workflow', 1, 'OpenClaw Coding Workflow', 1, 1)`
+           VALUES ('coding-workflow', 1, 'OpenClaw Coding Workflow', 1, 1)`,
         ).run();
         const insert = db.prepare(
           `INSERT INTO step_definitions
              (definition_key, definition_version, step_key, kind, executor,
               step_order, required, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1)`
+           VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1)`,
         );
         insert.run(
           "coding-workflow",
@@ -1377,7 +1400,7 @@ describe("applyQueueMigrations", () => {
           "preflight",
           "preflight",
           "one-shot",
-          0
+          0,
         );
         // composite primary key rejects duplicate step_key within a version
         expect(() =>
@@ -1387,8 +1410,8 @@ describe("applyQueueMigrations", () => {
             "preflight",
             "preflight",
             "goal-loop",
-            9
-          )
+            9,
+          ),
         ).toThrow(/UNIQUE|PRIMARY KEY/i);
         // distinct step_key under the same definition version is fine
         insert.run(
@@ -1397,10 +1420,66 @@ describe("applyQueueMigrations", () => {
           "implementation",
           "implementation",
           "goal-loop",
-          1
+          1,
         );
       } finally {
         db.close();
+      }
+    });
+
+    it("adds step definition config in place without dropping legacy rows", () => {
+      const dataDir = makeTempDir();
+      const dbPath = path.join(dataDir, "momentum.db");
+      const legacy = new DatabaseSync(dbPath);
+      try {
+        legacy.exec(`
+          CREATE TABLE workflow_definitions (
+            key TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (key, version)
+          ) STRICT;
+          CREATE TABLE step_definitions (
+            definition_key TEXT NOT NULL,
+            definition_version INTEGER NOT NULL,
+            step_key TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            executor TEXT NOT NULL,
+            step_order INTEGER NOT NULL,
+            required INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (definition_key, definition_version, step_key)
+          ) STRICT;
+          INSERT INTO workflow_definitions VALUES
+            ('coding-workflow', 1, 'Legacy', 1, 1);
+          INSERT INTO step_definitions VALUES
+            ('coding-workflow', 1, 'implementation', 'implementation',
+             'goal-loop', 1, 1, 1, 1);
+        `);
+      } finally {
+        legacy.close();
+      }
+
+      const upgraded = openDb(dataDir);
+      try {
+        expect(
+          getColumns(upgraded, "step_definitions").map((row) => row.name),
+        ).toContain("config_json");
+        expect(
+          upgraded
+            .prepare(
+              `SELECT executor, config_json FROM step_definitions
+                WHERE definition_key = 'coding-workflow'
+                  AND definition_version = 1
+                  AND step_key = 'implementation'`,
+            )
+            .get(),
+        ).toEqual({ executor: "goal-loop", config_json: null });
+      } finally {
+        upgraded.close();
       }
     });
 
@@ -1416,9 +1495,9 @@ describe("applyQueueMigrations", () => {
                  (definition_key, definition_version, step_key, kind, executor,
                   step_order, required, created_at, updated_at)
                VALUES ('missing-workflow', 1, 'preflight', 'preflight',
-                       'one-shot', 0, 1, 1, 1)`
+                       'one-shot', 0, 1, 1, 1)`,
             )
-            .run()
+            .run(),
         ).toThrow(/FOREIGN KEY/i);
       } finally {
         db.close();
@@ -1432,7 +1511,7 @@ describe("applyQueueMigrations", () => {
         const indexes = (
           db
             .prepare(
-              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
             )
             .all() as Array<{ name: string }>
         ).map((row) => row.name);
@@ -1473,10 +1552,12 @@ describe("applyQueueMigrations", () => {
             updated_at INTEGER NOT NULL
           ) STRICT;
         `);
-        pre.prepare(
-          `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run("g-pre-m10", "pre-m10 goal", "main", "/tmp/pre-m10", 1, 2);
+        pre
+          .prepare(
+            `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run("g-pre-m10", "pre-m10 goal", "main", "/tmp/pre-m10", 1, 2);
       } finally {
         pre.close();
       }
@@ -1509,17 +1590,17 @@ describe("applyQueueMigrations", () => {
           "auth_header",
           "request_headers",
           "headers",
-          "chat_body"
+          "chat_body",
         ];
         for (const table of ["workflow_definitions", "step_definitions"]) {
           const cols = getColumns(db, table).map((row) =>
-            row.name.toLowerCase()
+            row.name.toLowerCase(),
           );
           for (const col of cols) {
             for (const banned of forbidden) {
               expect(
                 col,
-                `${table} should not include credential/chat column "${col}"`
+                `${table} should not include credential/chat column "${col}"`,
               ).not.toContain(banned);
             }
           }
@@ -1538,7 +1619,7 @@ describe("applyQueueMigrations", () => {
       "executor_artifacts",
       "executor_checkpoints",
       "executor_findings",
-      "executor_decisions"
+      "executor_decisions",
     ];
 
     // Seed the minimal workflow_runs / workflow_steps parents the executor
@@ -1546,19 +1627,19 @@ describe("applyQueueMigrations", () => {
     function seedRunAndStep(
       db: DatabaseSync,
       runId = "run-x",
-      stepId = "step-x"
+      stepId = "step-x",
     ): void {
       db.prepare(
         `INSERT INTO workflow_runs
            (id, state, source, plan_json, needs_manual_recovery,
             created_at, updated_at)
-         VALUES (?, 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+         VALUES (?, 'pending', 'agent-workflows', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, required,
             created_at, updated_at)
-         VALUES (?, ?, 'implementation', 'pending', 0, 1, 1, 1)`
+         VALUES (?, ?, 'implementation', 'pending', 0, 1, 1, 1)`,
       ).run(runId, stepId);
     }
 
@@ -1569,7 +1650,7 @@ describe("applyQueueMigrations", () => {
            (invocation_id, workflow_run_id, step_run_id, step_key,
             executor_family, state, attempt, created_at, updated_at)
          VALUES ('inv-x', 'run-x', 'step-x', 'implementation',
-                 'goal-loop', 'pending', 1, 1, 1)`
+                 'goal-loop', 'pending', 1, 1, 1)`,
       ).run();
     }
 
@@ -1582,7 +1663,7 @@ describe("applyQueueMigrations", () => {
         }
 
         const roundCols = getColumns(db, "executor_rounds").map(
-          (row) => row.name
+          (row) => row.name,
         );
         // The full contract "Round Schema" identity / execution / result fields.
         for (const col of [
@@ -1615,15 +1696,15 @@ describe("applyQueueMigrations", () => {
           "recovery_code",
           "human_gate",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(roundCols, `missing executor_rounds column: ${col}`).toContain(
-            col
+            col,
           );
         }
 
         const invocationCols = getColumns(db, "executor_invocations").map(
-          (row) => row.name
+          (row) => row.name,
         );
         for (const col of [
           "invocation_id",
@@ -1637,16 +1718,16 @@ describe("applyQueueMigrations", () => {
           "heartbeat_at",
           "finished_at",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(
             invocationCols,
-            `missing executor_invocations column: ${col}`
+            `missing executor_invocations column: ${col}`,
           ).toContain(col);
         }
 
         const definitionCols = getColumns(db, "executor_definitions").map(
-          (row) => row.name
+          (row) => row.name,
         );
         for (const col of [
           "executor_key",
@@ -1658,16 +1739,16 @@ describe("applyQueueMigrations", () => {
           "max_rounds",
           "policy_envelope",
           "created_at",
-          "updated_at"
+          "updated_at",
         ]) {
           expect(
             definitionCols,
-            `missing executor_definitions column: ${col}`
+            `missing executor_definitions column: ${col}`,
           ).toContain(col);
         }
 
         const decisionCols = getColumns(db, "executor_decisions").map(
-          (row) => row.name
+          (row) => row.name,
         );
         expect(decisionCols).toContain("external_ref");
       } finally {
@@ -1682,7 +1763,7 @@ describe("applyQueueMigrations", () => {
         const indexes = (
           db
             .prepare(
-              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name",
             )
             .all() as Array<{ name: string }>
         ).map((row) => row.name);
@@ -1698,7 +1779,7 @@ describe("applyQueueMigrations", () => {
           "idx_executor_checkpoints_round",
           "idx_executor_checkpoints_round_sequence",
           "idx_executor_findings_round",
-          "idx_executor_decisions_round"
+          "idx_executor_decisions_round",
         ]) {
           expect(indexes, `missing index: ${idx}`).toContain(idx);
         }
@@ -1719,7 +1800,7 @@ describe("applyQueueMigrations", () => {
               executor_family, attempt, round_index, state,
               created_at, updated_at)
            VALUES (?, 'inv-x', 'run-x', 'step-x', 'implementation',
-                   'goal-loop', 1, ?, 'pending', 1, 1)`
+                   'goal-loop', 1, ?, 'pending', 1, 1)`,
         );
         insertRound.run("round-a", 0);
         // the same round_index under one invocation collides
@@ -1743,12 +1824,12 @@ describe("applyQueueMigrations", () => {
               executor_family, attempt, round_index, state,
               created_at, updated_at)
            VALUES ('round-x', 'inv-x', 'run-x', 'step-x', 'implementation',
-                   'goal-loop', 1, 0, 'pending', 1, 1)`
+                   'goal-loop', 1, 0, 'pending', 1, 1)`,
         ).run();
         const insertCheckpoint = db.prepare(
           `INSERT INTO executor_checkpoints
              (checkpoint_id, round_id, sequence, stage, created_at)
-           VALUES (?, 'round-x', ?, 'prepare', 1)`
+           VALUES (?, 'round-x', ?, 'prepare', 1)`,
         );
         insertCheckpoint.run("c-a", 0);
         expect(() => insertCheckpoint.run("c-b", 0)).toThrow(/UNIQUE/i);
@@ -1770,9 +1851,9 @@ describe("applyQueueMigrations", () => {
                  (invocation_id, workflow_run_id, step_run_id, step_key,
                   executor_family, state, attempt, created_at, updated_at)
                VALUES ('inv-orphan', 'run-missing', 'step-missing',
-                       'implementation', 'goal-loop', 'pending', 1, 1, 1)`
+                       'implementation', 'goal-loop', 'pending', 1, 1, 1)`,
             )
-            .run()
+            .run(),
         ).toThrow(/FOREIGN KEY/i);
       } finally {
         db.close();
@@ -1793,9 +1874,9 @@ describe("applyQueueMigrations", () => {
                   step_key, executor_family, attempt, round_index, state,
                   created_at, updated_at)
                VALUES ('round-orphan', 'inv-missing', 'run-x', 'step-x',
-                       'implementation', 'goal-loop', 1, 0, 'pending', 1, 1)`
+                       'implementation', 'goal-loop', 1, 0, 'pending', 1, 1)`,
             )
-            .run()
+            .run(),
         ).toThrow(/FOREIGN KEY/i);
       } finally {
         db.close();
@@ -1813,9 +1894,9 @@ describe("applyQueueMigrations", () => {
               `INSERT INTO executor_artifacts
                  (artifact_id, round_id, artifact_class, path, created_at)
                VALUES ('a-orphan', 'round-missing', 'result_document',
-                       '/runs/x/result.json', 1)`
+                       '/runs/x/result.json', 1)`,
             )
-            .run()
+            .run(),
         ).toThrow(/FOREIGN KEY/i);
       } finally {
         db.close();
@@ -1826,7 +1907,7 @@ describe("applyQueueMigrations", () => {
       const dataDir = makeTempDir();
       const a = openDb(dataDir);
       const before = new Map(
-        EXECUTOR_TABLES.map((table) => [table, getColumns(a, table).length])
+        EXECUTOR_TABLES.map((table) => [table, getColumns(a, table).length]),
       );
       a.close();
 
@@ -1835,7 +1916,7 @@ describe("applyQueueMigrations", () => {
         for (const table of EXECUTOR_TABLES) {
           expect(
             getColumns(b, table),
-            `column count drifted for ${table}`
+            `column count drifted for ${table}`,
           ).toHaveLength(before.get(table) ?? -1);
         }
       } finally {
@@ -1858,17 +1939,19 @@ describe("applyQueueMigrations", () => {
             updated_at INTEGER NOT NULL
           ) STRICT;
         `);
-        pre.prepare(
-          `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(
-          "g-pre-executor",
-          "pre-executor goal",
-          "main",
-          "/tmp/pre-exec",
-          1,
-          2
-        );
+        pre
+          .prepare(
+            `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            "g-pre-executor",
+            "pre-executor goal",
+            "main",
+            "/tmp/pre-exec",
+            1,
+            2,
+          );
       } finally {
         pre.close();
       }
@@ -1877,7 +1960,7 @@ describe("applyQueueMigrations", () => {
       try {
         for (const table of EXECUTOR_TABLES) {
           expect(tableNames(upgraded), `missing table: ${table}`).toContain(
-            table
+            table,
           );
         }
         const goal = upgraded
@@ -1904,17 +1987,17 @@ describe("applyQueueMigrations", () => {
           "auth_header",
           "request_headers",
           "headers",
-          "chat_body"
+          "chat_body",
         ];
         for (const table of EXECUTOR_TABLES) {
           const cols = getColumns(db, table).map((row) =>
-            row.name.toLowerCase()
+            row.name.toLowerCase(),
           );
           for (const col of cols) {
             for (const banned of forbidden) {
               expect(
                 col,
-                `${table} should not include credential/header/chat column "${col}"`
+                `${table} should not include credential/header/chat column "${col}"`,
               ).not.toContain(banned);
             }
           }

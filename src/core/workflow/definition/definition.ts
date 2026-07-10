@@ -15,10 +15,9 @@
  * Scope decisions pinned here, grounded in the compact runtime anchors in
  * SPEC.md and the long-form planning contracts externalized to the personal wiki:
  *
- *   - `StepDefinition.executor` names an executor *family* only. The rich
- *     per-step executor configuration (agent / model / effort / policy) is the
- *     `ExecutorDefinition` record owned by the executor-loop spine; naming the family
- *     keeps a step "configured" without pulling that schema forward.
+ *   - `StepDefinition.executor` names an executor *family* only. Portable
+ *     executor intent belongs in the optional step `config`; machine-local
+ *     command resolution stays below the definition contract.
  *   - `StepDefinition.kind` reuses the canonical workflow-run `WorkflowStepKind`
  *     vocabulary so the built-in coding workflow stays wire-compatible with the
  *     existing `workflow_steps.kind` column and workflow-run/operator-recovery operator controls.
@@ -33,10 +32,7 @@
  *     run.
  */
 
-import {
-  WORKFLOW_STEP_KINDS,
-  type WorkflowStepKind
-} from "../run/reducer.js";
+import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 
 /**
  * Executor families pinned by SPEC.md's Runtime Model and Native Goal-Loop
@@ -48,19 +44,20 @@ export const WORKFLOW_EXECUTOR_FAMILIES = [
   "goal-loop",
   "one-shot",
   "no-mistakes",
+  "delegate-supervisor",
   "script",
   "external-apply",
-  "subworkflow"
+  "subworkflow",
 ] as const;
 export type WorkflowExecutorFamily =
   (typeof WORKFLOW_EXECUTOR_FAMILIES)[number];
 
 const EXECUTOR_FAMILY_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_EXECUTOR_FAMILIES
+  WORKFLOW_EXECUTOR_FAMILIES,
 );
 
 export function isWorkflowExecutorFamily(
-  value: string
+  value: string,
 ): value is WorkflowExecutorFamily {
   return EXECUTOR_FAMILY_SET.has(value);
 }
@@ -83,6 +80,7 @@ export type StepDefinition = {
   key: string;
   kind: WorkflowStepKind;
   executor: WorkflowExecutorFamily;
+  config?: Record<string, unknown>;
   order: number;
   required: boolean;
 };
@@ -109,9 +107,10 @@ export const WORKFLOW_DEFINITION_VALIDATION_ERROR_CODES = [
   "step_key_duplicate",
   "step_kind_invalid",
   "step_executor_invalid",
+  "step_config_invalid",
   "step_order_invalid",
   "step_order_duplicate",
-  "step_required_invalid"
+  "step_required_invalid",
 ] as const;
 export type WorkflowDefinitionValidationErrorCode =
   (typeof WORKFLOW_DEFINITION_VALIDATION_ERROR_CODES)[number];
@@ -144,7 +143,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * can surface a complete diagnostic rather than one error at a time.
  */
 export function validateWorkflowDefinition(
-  value: unknown
+  value: unknown,
 ): WorkflowDefinitionValidationResult {
   const errors: WorkflowDefinitionValidationError[] = [];
 
@@ -154,9 +153,9 @@ export function validateWorkflowDefinition(
       errors: [
         {
           code: "definition_not_object",
-          message: "Workflow definition must be a plain object."
-        }
-      ]
+          message: "Workflow definition must be a plain object.",
+        },
+      ],
     };
   }
 
@@ -164,15 +163,18 @@ export function validateWorkflowDefinition(
     errors.push({
       code: "definition_key_invalid",
       message: "Workflow definition key must be a non-empty slug.",
-      path: "key"
+      path: "key",
     });
   }
 
-  if (typeof value["title"] !== "string" || value["title"].trim().length === 0) {
+  if (
+    typeof value["title"] !== "string" ||
+    value["title"].trim().length === 0
+  ) {
     errors.push({
       code: "definition_title_invalid",
       message: "Workflow definition title must be a non-empty string.",
-      path: "title"
+      path: "title",
     });
   }
 
@@ -180,7 +182,7 @@ export function validateWorkflowDefinition(
     errors.push({
       code: "definition_version_invalid",
       message: "Workflow definition version must be a positive integer.",
-      path: "version"
+      path: "version",
     });
   }
 
@@ -189,7 +191,7 @@ export function validateWorkflowDefinition(
     errors.push({
       code: "definition_steps_empty",
       message: "Workflow definition must declare at least one step.",
-      path: "steps"
+      path: "steps",
     });
   } else {
     validateSteps(rawSteps, errors);
@@ -203,7 +205,7 @@ export function validateWorkflowDefinition(
 
 function validateSteps(
   rawSteps: readonly unknown[],
-  errors: WorkflowDefinitionValidationError[]
+  errors: WorkflowDefinitionValidationError[],
 ): void {
   const seenKeys = new Set<string>();
   const seenOrders = new Set<number>();
@@ -214,7 +216,7 @@ function validateSteps(
       errors.push({
         code: "step_not_object",
         message: `Step ${index} must be a plain object.`,
-        path: at
+        path: at,
       });
       return;
     }
@@ -224,13 +226,13 @@ function validateSteps(
       errors.push({
         code: "step_key_invalid",
         message: `Step ${index} key must be a non-empty slug.`,
-        path: `${at}.key`
+        path: `${at}.key`,
       });
     } else if (seenKeys.has(key)) {
       errors.push({
         code: "step_key_duplicate",
         message: `Duplicate step key "${key}".`,
-        path: `${at}.key`
+        path: `${at}.key`,
       });
     } else {
       seenKeys.add(key);
@@ -243,7 +245,7 @@ function validateSteps(
       errors.push({
         code: "step_kind_invalid",
         message: `Step ${index} kind must be one of: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
-        path: `${at}.kind`
+        path: `${at}.kind`,
       });
     }
 
@@ -254,7 +256,19 @@ function validateSteps(
       errors.push({
         code: "step_executor_invalid",
         message: `Step ${index} executor must be one of: ${WORKFLOW_EXECUTOR_FAMILIES.join(", ")}.`,
-        path: `${at}.executor`
+        path: `${at}.executor`,
+      });
+    }
+
+    if (
+      rawStep["config"] !== undefined &&
+      (!isPlainObject(rawStep["config"]) ||
+        !isJsonCompatible(rawStep["config"], new Set()))
+    ) {
+      errors.push({
+        code: "step_config_invalid",
+        message: `Step ${index} config must be a JSON-compatible object.`,
+        path: `${at}.config`,
       });
     }
 
@@ -263,13 +277,13 @@ function validateSteps(
       errors.push({
         code: "step_order_invalid",
         message: `Step ${index} order must be a non-negative integer.`,
-        path: `${at}.order`
+        path: `${at}.order`,
       });
     } else if (seenOrders.has(order)) {
       errors.push({
         code: "step_order_duplicate",
         message: `Duplicate step order ${order}.`,
-        path: `${at}.order`
+        path: `${at}.order`,
       });
     } else {
       seenOrders.add(order);
@@ -279,7 +293,7 @@ function validateSteps(
       errors.push({
         code: "step_required_invalid",
         message: `Step ${index} required must be a boolean.`,
-        path: `${at}.required`
+        path: `${at}.required`,
       });
     }
   });
@@ -293,6 +307,27 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+function isJsonCompatible(value: unknown, ancestors: Set<object>): boolean {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object") return false;
+  if (ancestors.has(value)) return false;
+
+  ancestors.add(value);
+  const valid = Array.isArray(value)
+    ? value.every((item) => isJsonCompatible(item, ancestors))
+    : isPlainObject(value) &&
+      Object.values(value).every((item) => isJsonCompatible(item, ancestors));
+  ancestors.delete(value);
+  return valid;
+}
+
 export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
 
 /**
@@ -303,21 +338,20 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  * contract offers a pair:
  *
  *   - preflight      -> one-shot      (a single bounded prep invocation)
- *   - implementation -> goal-loop     (bounded autonomous implementation rounds)
+ *   - implementation -> delegate-supervisor (GNHF owns the implementation loop)
  *   - postflight     -> one-shot      (a single bounded review pass)
- *   - no-mistakes    -> no-mistakes   (specialist review-gate mirror)
+ *   - no-mistakes    -> delegate-supervisor (no-mistakes owns validation)
  *   - merge-cleanup  -> script        (deterministic local cleanup; remote git
  *                                       stays out of executor-loop scope)
  *   - linear-refresh -> external-apply (operator-mediated external write;
  *                                       daemon-dispatchable through the
  *                                       external-apply safety-gated adapter)
  *
- * These families can evolve through explicit workflow-runtime design, but
- * compatibility runners such as GNHF must report through the native `goal-loop`
- * invocation / round contract rather than becoming first-class executor
- * families merely to reuse behavior.
+ * The delegated tool is portable step config, never an executor-family value.
+ * Version 1 remains registered exactly as shipped so existing runs keep
+ * resolving their recorded definition.
  */
-export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
+export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,
   title: "OpenClaw Coding Workflow",
   version: 1,
@@ -327,63 +361,87 @@ export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
       kind: "preflight",
       executor: "one-shot",
       order: 0,
-      required: true
+      required: true,
     },
     {
       key: "implementation",
       kind: "implementation",
       executor: "goal-loop",
       order: 1,
-      required: true
+      required: true,
     },
     {
       key: "postflight",
       kind: "postflight",
       executor: "one-shot",
       order: 2,
-      required: true
+      required: true,
     },
     {
       key: "no-mistakes",
       kind: "no-mistakes",
       executor: "no-mistakes",
       order: 3,
-      required: true
+      required: true,
     },
     {
       key: "merge-cleanup",
       kind: "merge-cleanup",
       executor: "script",
       order: 4,
-      required: true
+      required: true,
     },
     {
       key: "linear-refresh",
       kind: "linear-refresh",
       executor: "external-apply",
       order: 5,
-      required: true
+      required: true,
+    },
+  ],
+};
+
+export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
+  key: CODING_WORKFLOW_DEFINITION_KEY,
+  title: "OpenClaw Coding Workflow",
+  version: 2,
+  steps: CODING_WORKFLOW_DEFINITION_V1.steps.map((step) => {
+    if (step.key === "implementation") {
+      return {
+        ...step,
+        executor: "delegate-supervisor",
+        config: { tool: "gnhf" },
+      };
     }
-  ]
+    if (step.key === "no-mistakes") {
+      return {
+        ...step,
+        executor: "delegate-supervisor",
+        config: { tool: "no-mistakes" },
+      };
+    }
+    return { ...step };
+  }),
 };
 
 export const BUILT_IN_WORKFLOW_DEFINITIONS: readonly WorkflowDefinition[] = [
-  CODING_WORKFLOW_DEFINITION
+  CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION,
 ];
 
 const BUILT_IN_BY_KEY_AND_VERSION: ReadonlyMap<string, WorkflowDefinition> =
   new Map(
     BUILT_IN_WORKFLOW_DEFINITIONS.map((def) => [
       builtInDefinitionIdentity(def.key, def.version),
-      def
-    ])
+      def,
+    ]),
   );
 
 const BUILT_IN_LATEST_BY_KEY: ReadonlyMap<string, WorkflowDefinition> = new Map(
   uniqueBuiltInDefinitionKeys(BUILT_IN_WORKFLOW_DEFINITIONS).map((key) => [
     key,
-    latestBuiltInWorkflowDefinitionForKey(key)
-  ])
+    latestBuiltInWorkflowDefinitionForKey(key),
+  ]),
 );
 
 /**
@@ -396,11 +454,11 @@ const BUILT_IN_LATEST_BY_KEY: ReadonlyMap<string, WorkflowDefinition> = new Map(
  */
 export function getBuiltInWorkflowDefinition(
   key: string,
-  version?: number
+  version?: number,
 ): WorkflowDefinition | undefined {
   if (version !== undefined) {
     return BUILT_IN_BY_KEY_AND_VERSION.get(
-      builtInDefinitionIdentity(key, version)
+      builtInDefinitionIdentity(key, version),
     );
   }
   return BUILT_IN_LATEST_BY_KEY.get(key);
@@ -423,18 +481,20 @@ export function listBuiltInWorkflowDefinitionKeys(): readonly string[] {
 export function selectBuiltInWorkflowDefinition(
   definitions: readonly WorkflowDefinition[],
   key: string,
-  version?: number
+  version?: number,
 ): WorkflowDefinition | undefined {
   if (version !== undefined) {
-    return definitions.find((def) => def.key === key && def.version === version);
+    return definitions.find(
+      (def) => def.key === key && def.version === version,
+    );
   }
   return selectLatestBuiltInWorkflowDefinition(
-    definitions.filter((def) => def.key === key)
+    definitions.filter((def) => def.key === key),
   );
 }
 
 function selectLatestBuiltInWorkflowDefinition(
-  definitions: readonly WorkflowDefinition[]
+  definitions: readonly WorkflowDefinition[],
 ): WorkflowDefinition | undefined {
   return definitions.reduce<WorkflowDefinition | undefined>((latest, def) => {
     if (latest === undefined || def.version > latest.version) {
@@ -444,9 +504,11 @@ function selectLatestBuiltInWorkflowDefinition(
   }, undefined);
 }
 
-function latestBuiltInWorkflowDefinitionForKey(key: string): WorkflowDefinition {
+function latestBuiltInWorkflowDefinitionForKey(
+  key: string,
+): WorkflowDefinition {
   const latest = selectLatestBuiltInWorkflowDefinition(
-    BUILT_IN_WORKFLOW_DEFINITIONS.filter((def) => def.key === key)
+    BUILT_IN_WORKFLOW_DEFINITIONS.filter((def) => def.key === key),
   );
   if (latest === undefined) {
     throw new Error(`Missing built-in workflow definition for key: ${key}`);
@@ -455,7 +517,7 @@ function latestBuiltInWorkflowDefinitionForKey(key: string): WorkflowDefinition 
 }
 
 function uniqueBuiltInDefinitionKeys(
-  definitions: readonly WorkflowDefinition[]
+  definitions: readonly WorkflowDefinition[],
 ): readonly string[] {
   return [...new Set(definitions.map((def) => def.key))];
 }

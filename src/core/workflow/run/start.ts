@@ -39,13 +39,11 @@
  */
 
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
-import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY
-} from "../route/coding.js";
+import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
   validateWorkflowDefinition,
   type WorkflowDefinition,
-  type WorkflowExecutorFamily
+  type WorkflowExecutorFamily,
 } from "../definition/definition.js";
 import {
   deriveWorkflowRunState,
@@ -55,7 +53,7 @@ import {
   type WorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepRecord,
-  type WorkflowStepState
+  type WorkflowStepState,
 } from "./reducer.js";
 
 /**
@@ -84,7 +82,7 @@ export const WORKFLOW_RUN_START_ERROR_CODES = [
   "objective_invalid",
   "approval_boundary_invalid",
   "issue_scope_invalid",
-  "route_invalid"
+  "route_invalid",
 ] as const;
 export type WorkflowRunStartErrorCode =
   (typeof WORKFLOW_RUN_START_ERROR_CODES)[number];
@@ -160,7 +158,7 @@ function isNonBlankString(value: unknown): value is string {
  * {@link validateWorkflowDefinition}.
  */
 export function materializeWorkflowRunStart(
-  input: WorkflowRunStartInput
+  input: WorkflowRunStartInput,
 ): WorkflowRunStartResult {
   const errors: WorkflowRunStartError[] = [];
 
@@ -171,7 +169,7 @@ export function materializeWorkflowRunStart(
       message: `Workflow definition is invalid: ${validation.errors
         .map((e) => e.code)
         .join(", ")}.`,
-      path: "definition"
+      path: "definition",
     });
   }
 
@@ -179,7 +177,7 @@ export function materializeWorkflowRunStart(
     errors.push({
       code: "run_id_invalid",
       message: "Run id must be a non-empty, path-safe segment.",
-      path: "runId"
+      path: "runId",
     });
   }
 
@@ -187,7 +185,7 @@ export function materializeWorkflowRunStart(
     errors.push({
       code: "repo_path_invalid",
       message: "Repo path must be a non-empty string.",
-      path: "repoPath"
+      path: "repoPath",
     });
   }
 
@@ -195,16 +193,19 @@ export function materializeWorkflowRunStart(
     errors.push({
       code: "objective_invalid",
       message: "Objective must be a non-empty string.",
-      path: "objective"
+      path: "objective",
     });
   }
 
   const approvalBoundary = input.approvalBoundary ?? null;
-  if (approvalBoundary !== null && !isWorkflowApprovalBoundary(approvalBoundary)) {
+  if (
+    approvalBoundary !== null &&
+    !isWorkflowApprovalBoundary(approvalBoundary)
+  ) {
     errors.push({
       code: "approval_boundary_invalid",
       message: "Approval boundary is not a known workflow approval boundary.",
-      path: "approvalBoundary"
+      path: "approvalBoundary",
     });
   }
 
@@ -212,7 +213,7 @@ export function materializeWorkflowRunStart(
     errors.push({
       code: "issue_scope_invalid",
       message: "Issue scope must be a plain object.",
-      path: "issueScope"
+      path: "issueScope",
     });
   }
 
@@ -220,7 +221,7 @@ export function materializeWorkflowRunStart(
     errors.push({
       code: "route_invalid",
       message: "Route must be a plain object.",
-      path: "route"
+      path: "route",
     });
   }
 
@@ -244,7 +245,7 @@ export function materializeWorkflowRunStart(
       kind: step.kind,
       state: approvedKinds.has(step.kind) ? "approved" : "pending",
       order: step.order,
-      required: step.required
+      required: step.required,
     }));
   const derivedRunState = deriveWorkflowRunState(steps);
 
@@ -265,7 +266,7 @@ export function materializeWorkflowRunStart(
     definitionVersion: definition.version,
     createdAt: input.now,
     updatedAt: input.now,
-    startedAt: null
+    startedAt: null,
   };
 
   return { ok: true, plan: { run, steps } };
@@ -281,6 +282,7 @@ export type WorkflowCodingPlanStep = {
   stepId: string;
   kind: WorkflowStepKind;
   executor: WorkflowExecutorFamily;
+  config?: Record<string, unknown>;
   order: number;
   required: boolean;
   state: WorkflowStepState;
@@ -317,7 +319,9 @@ export type WorkflowCodingPlanPreviewResult =
   | { ok: true; preview: WorkflowCodingPlanPreview }
   | { ok: false; errors: WorkflowRunStartError[] };
 
-function readImplementationEngine(route: Record<string, unknown>): string | null {
+function readImplementationEngine(
+  route: Record<string, unknown>,
+): string | null {
   const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
   if (typeof value === "string" && value.trim().length > 0) {
     return value;
@@ -334,7 +338,7 @@ function readImplementationEngine(route: Record<string, unknown>): string | null
  * inputs surface the same refusal taxonomy as a start.
  */
 export function materializeWorkflowCodingPlanPreview(
-  input: WorkflowRunStartInput
+  input: WorkflowRunStartInput,
 ): WorkflowCodingPlanPreviewResult {
   const result = materializeWorkflowRunStart(input);
   if (!result.ok) {
@@ -344,19 +348,25 @@ export function materializeWorkflowCodingPlanPreview(
   // `materializeWorkflowRunStart` succeeded, so `input.definition` is a valid
   // `WorkflowDefinition`; build the executor lookup from it by stable step key.
   const definition = input.definition as WorkflowDefinition;
-  const executorByStepKey = new Map<string, WorkflowExecutorFamily>(
-    definition.steps.map((step) => [step.key, step.executor])
+  const definitionByStepKey = new Map(
+    definition.steps.map((step) => [step.key, step]),
   );
 
   const { run } = result.plan;
-  const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => ({
-    stepId: step.stepId,
-    kind: step.kind,
-    executor: executorByStepKey.get(step.stepId) as WorkflowExecutorFamily,
-    order: step.order,
-    required: step.required,
-    state: step.state
-  }));
+  const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => {
+    const definitionStep = definitionByStepKey.get(step.stepId);
+    return {
+      stepId: step.stepId,
+      kind: step.kind,
+      executor: definitionStep?.executor as WorkflowExecutorFamily,
+      ...(definitionStep?.config === undefined
+        ? {}
+        : { config: { ...definitionStep.config } }),
+      order: step.order,
+      required: step.required,
+      state: step.state,
+    };
+  });
 
   return {
     ok: true,
@@ -373,7 +383,7 @@ export function materializeWorkflowCodingPlanPreview(
       skillRevision: run.skillRevision,
       definitionKey: run.definitionKey,
       definitionVersion: run.definitionVersion,
-      steps
-    }
+      steps,
+    },
   };
 }

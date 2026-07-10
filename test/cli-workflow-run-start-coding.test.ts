@@ -9,7 +9,10 @@ import { openDb } from "../src/adapters/db.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function readDoc(relative: string): string {
   return fs.readFileSync(path.join(repoRoot, relative), "utf8");
@@ -46,15 +49,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -86,8 +89,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: "ngx-508-native-1",
-        objective: "Dogfood the explicit door"
-      })
+        objective: "Dogfood the explicit door",
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -99,9 +102,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 1,
+      definitionVersion: 2,
       repoPath: repoDir,
-      objective: "Dogfood the explicit door"
+      objective: "Dogfood the explicit door",
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(6);
 
@@ -110,7 +113,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       const runRow = db
         .prepare(
           `SELECT id, state, source, workflow_definition_key, workflow_definition_version
-             FROM workflow_runs WHERE id = ?`
+             FROM workflow_runs WHERE id = ?`,
         )
         .get("ngx-508-native-1") as Record<string, unknown> | undefined;
       expect(runRow).toMatchObject({
@@ -118,11 +121,11 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         state: "pending",
         source: "momentum-native-coding",
         workflow_definition_key: "coding-workflow",
-        workflow_definition_version: 1
+        workflow_definition_version: 2,
       });
       const steps = db
         .prepare(
-          `SELECT step_id FROM workflow_steps WHERE run_id = ? ORDER BY step_order`
+          `SELECT step_id FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
         )
         .all("ngx-508-native-1") as Array<{ step_id: string }>;
       expect(steps.map((s) => s.step_id)).toEqual([
@@ -131,7 +134,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         "postflight",
         "no-mistakes",
         "merge-cleanup",
-        "linear-refresh"
+        "linear-refresh",
       ]);
     } finally {
       db.close();
@@ -147,8 +150,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-568-current-engine",
         objective: "Start the current fallback route",
-        extra: ["--implementation-engine", "current-gnhf-cwfp"]
-      })
+        extra: ["--implementation-engine", "current-gnhf-cwfp"],
+      }),
     );
 
     expect(result.code).toBe(0);
@@ -159,8 +162,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       runId: "ngx-568-current-engine",
       implementationEngine: "current-gnhf-cwfp",
       route: {
-        implementationEngine: "current-gnhf-cwfp"
-      }
+        implementationEngine: "current-gnhf-cwfp",
+      },
     });
 
     const db = openDb(dataDir);
@@ -169,11 +172,32 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-568-current-engine") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
-        implementationEngine: "current-gnhf-cwfp"
+        implementationEngine: "current-gnhf-cwfp",
       });
     } finally {
       db.close();
     }
+  });
+
+  it("keeps the legacy native-goal-loop route label accepted", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-610-legacy-engine",
+        objective: "Resume a legacy route selection",
+        extra: ["--implementation-engine", "native-goal-loop"],
+      }),
+    );
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      definitionVersion: 2,
+      implementationEngine: "native-goal-loop",
+      route: { implementationEngine: "native-goal-loop" },
+    });
   });
 
   it("renders the selected implementation engine in text success output", async () => {
@@ -192,13 +216,11 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "--data-dir",
       dataDir,
       "--implementation-engine",
-      "current-gnhf-cwfp"
+      "current-gnhf-cwfp",
     ]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(
-      "Implementation engine: current-gnhf-cwfp"
-    );
+    expect(result.stdout).toContain("Implementation engine: current-gnhf-cwfp");
     expect(result.stderr).toBe("");
   });
 
@@ -215,21 +237,21 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
           kind: "preflight",
           executor: "one-shot",
           order: 0,
-          required: true
+          required: true,
         },
         {
           key: "implementation",
           kind: "implementation",
           executor: "goal-loop",
           order: 1,
-          required: false
-        }
-      ]
+          required: false,
+        },
+      ],
     };
     const db = openDb(dataDir);
     try {
       persistWorkflowDefinition(db, overrideDefinition, {
-        now: 1_730_000_000_000
+        now: 1_730_000_000_000,
       });
     } finally {
       db.close();
@@ -240,8 +262,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: "ngx-508-persisted-override",
-        objective: "Bypass persisted definition overrides"
-      })
+        objective: "Bypass persisted definition overrides",
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -249,7 +271,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: true,
       command: "workflow run start-coding",
       definitionKey: "coding-workflow",
-      definitionVersion: 1
+      definitionVersion: 2,
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(6);
 
@@ -258,7 +280,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       const steps = verifyDb
         .prepare(
           `SELECT step_id, required FROM workflow_steps
-             WHERE run_id = ? ORDER BY step_order`
+             WHERE run_id = ? ORDER BY step_order`,
         )
         .all("ngx-508-persisted-override") as Array<{
         step_id: string;
@@ -270,7 +292,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         { step_id: "postflight", required: 1 },
         { step_id: "no-mistakes", required: 1 },
         { step_id: "merge-cleanup", required: 1 },
-        { step_id: "linear-refresh", required: 1 }
+        { step_id: "linear-refresh", required: 1 },
       ]);
     } finally {
       verifyDb.close();
@@ -290,21 +312,21 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
           kind: "preflight",
           executor: "one-shot",
           order: 0,
-          required: true
+          required: true,
         },
         {
           key: "implementation",
           kind: "implementation",
           executor: "goal-loop",
           order: 1,
-          required: false
-        }
-      ]
+          required: false,
+        },
+      ],
     };
     const db = openDb(dataDir);
     try {
       persistWorkflowDefinition(db, overrideDefinition, {
-        now: 1_730_000_000_000
+        now: 1_730_000_000_000,
       });
     } finally {
       db.close();
@@ -315,8 +337,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: "ngx-508-native-before-generic",
-        objective: "Use the built-in definition"
-      })
+        objective: "Use the built-in definition",
+      }),
     );
     expect(nativeResult.code).toBe(0);
     const nativePayload = JSON.parse(nativeResult.stdout) as Record<
@@ -337,7 +359,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "Use the persisted definition",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(genericResult.code).toBe(0);
     const genericPayload = JSON.parse(genericResult.stdout) as Record<
@@ -348,7 +370,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: true,
       command: "workflow run start",
       definitionKey: "coding-workflow",
-      definitionVersion: 1
+      definitionVersion: 1,
     });
     expect((genericPayload["counts"] as { steps: number }).steps).toBe(2);
   });
@@ -362,8 +384,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-approved",
         objective: "Approve through implementation",
-        extra: ["--approval-boundary", "through-implementation"]
-      })
+        extra: ["--approval-boundary", "through-implementation"],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -371,7 +393,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: true,
       command: "workflow run start-coding",
       state: "approved",
-      approvalBoundary: "through-implementation"
+      approvalBoundary: "through-implementation",
     });
 
     const db = openDb(dataDir);
@@ -379,17 +401,15 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       const approved = db
         .prepare(
           `SELECT step_id FROM workflow_steps
-             WHERE run_id = ? AND state = 'approved' ORDER BY step_order`
+             WHERE run_id = ? AND state = 'approved' ORDER BY step_order`,
         )
         .all("ngx-508-approved") as Array<{ step_id: string }>;
       expect(approved.map((s) => s.step_id)).toEqual([
         "preflight",
-        "implementation"
+        "implementation",
       ]);
       const approval = db
-        .prepare(
-          `SELECT boundary FROM workflow_approvals WHERE run_id = ?`
-        )
+        .prepare(`SELECT boundary FROM workflow_approvals WHERE run_id = ?`)
         .get("ngx-508-approved") as { boundary: string } | undefined;
       expect(approval?.boundary).toBe("through-implementation");
     } finally {
@@ -406,8 +426,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-scope",
         objective: "Capture inputs",
-        extra: ["--issue-scope", "NGX-508", "--skill-revision", "rev-42"]
-      })
+        extra: ["--issue-scope", "NGX-508", "--skill-revision", "rev-42"],
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -415,14 +435,14 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     try {
       const runRow = db
         .prepare(
-          `SELECT issue_scope_json, skill_revision FROM workflow_runs WHERE id = ?`
+          `SELECT issue_scope_json, skill_revision FROM workflow_runs WHERE id = ?`,
         )
         .get("ngx-508-scope") as {
         issue_scope_json: string;
         skill_revision: string | null;
       };
       expect(JSON.parse(runRow.issue_scope_json)).toMatchObject({
-        identifier: "NGX-508"
+        identifier: "NGX-508",
       });
       expect(runRow.skill_revision).toBe("rev-42");
     } finally {
@@ -439,8 +459,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-profile",
         objective: "Capture the selected runtime profile",
-        extra: ["--profile", "ngx-499-coding-workflow-live-wrapper"]
-      })
+        extra: ["--profile", "ngx-499-coding-workflow-live-wrapper"],
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -450,7 +470,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-508-profile") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toMatchObject({
-        profile: "ngx-499-coding-workflow-live-wrapper"
+        profile: "ngx-499-coding-workflow-live-wrapper",
       });
     } finally {
       db.close();
@@ -463,16 +483,16 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "ngx-508-profile",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
     expect(JSON.stringify(statusPayload)).toContain(
-      "ngx-499-coding-workflow-live-wrapper"
+      "ngx-499-coding-workflow-live-wrapper",
     );
   });
 
-  it("records the native implementation engine even when no runtime profile is selected", async () => {
+  it("records the honest GNHF implementation engine when no runtime profile is selected", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -480,8 +500,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: "ngx-508-no-profile",
-        objective: "No profile selected"
-      })
+        objective: "No profile selected",
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -491,7 +511,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-508-no-profile") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
-        implementationEngine: "native-goal-loop"
+        implementationEngine: "gnhf",
       });
     } finally {
       db.close();
@@ -507,8 +527,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
           dataDir,
           repoDir,
           runId,
-          objective: "Should be rejected"
-        })
+          objective: "Should be rejected",
+        }),
       );
       expect(result.code).toBe(1);
       const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -516,7 +536,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         ok: false,
         command: "workflow run start-coding",
         code: "reserved_run_id",
-        runId
+        runId,
       });
       const db = openDb(dataDir);
       try {
@@ -539,15 +559,15 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-bad-def",
         objective: "Wrong definition",
-        extra: ["--definition", "custom-flow"]
-      })
+        extra: ["--definition", "custom-flow"],
+      }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start-coding",
-      code: "definition_not_allowed"
+      code: "definition_not_allowed",
     });
   });
 
@@ -560,8 +580,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-563-missing-definition-version",
         objective: "Block missing built-in definition version",
-        extra: ["--definition-version", "99"]
-      })
+        extra: ["--definition-version", "99"],
+      }),
     );
 
     expect(result.code).toBe(1);
@@ -571,7 +591,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: false,
       command: "workflow run start-coding",
       code: "definition_not_found",
-      runId: "ngx-563-missing-definition-version"
+      runId: "ngx-563-missing-definition-version",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -582,8 +602,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         key: "definitionVersion",
         message: "Built-in coding workflow definition version was not found.",
         recommendedAction:
-          "Use the supported built-in coding workflow definition key and version."
-      }
+          "Use the supported built-in coding workflow definition key and version.",
+      },
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
   });
@@ -597,14 +617,14 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-explicit-def",
         objective: "Explicit coding definition",
-        extra: ["--definition", "coding-workflow"]
-      })
+        extra: ["--definition", "coding-workflow"],
+      }),
     );
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
-      definitionKey: "coding-workflow"
+      definitionKey: "coding-workflow",
     });
   });
 
@@ -612,14 +632,14 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
-      startCodingArgs({ dataDir, repoDir, objective: "no run id" })
+      startCodingArgs({ dataDir, repoDir, objective: "no run id" }),
     );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start-coding",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -636,7 +656,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       repoDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -645,7 +665,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: false,
       command: "workflow run start-coding",
       code: "objective_required",
-      runId: "ngx-563-no-objective"
+      runId: "ngx-563-no-objective",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -656,8 +676,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         key: "objective",
         message: "Objective must be a non-empty string.",
         recommendedAction:
-          "Set objective to a non-empty objective before starting the run."
-      }
+          "Set objective to a non-empty objective before starting the run.",
+      },
     ]);
   });
 
@@ -675,7 +695,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "Reject blank repo",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -684,7 +704,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: false,
       command: "workflow run start-coding",
       code: "repo_required",
-      runId: "ngx-563-blank-repo"
+      runId: "ngx-563-blank-repo",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -695,8 +715,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         key: "repoPath",
         message: "Repo path must be a non-empty string.",
         recommendedAction:
-          "Set repoPath to a non-empty repository path before starting the run."
-      }
+          "Set repoPath to a non-empty repository path before starting the run.",
+      },
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
   });
@@ -710,8 +730,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-563-invalid-approval-before-db",
         objective: "Reject invalid approval boundary",
-        extra: ["--approval-boundary", "through-linear-refresh"]
-      })
+        extra: ["--approval-boundary", "through-linear-refresh"],
+      }),
     );
 
     expect(result.code).toBe(1);
@@ -720,7 +740,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: false,
       command: "workflow run start-coding",
       code: "invalid_run_start",
-      runId: "ngx-563-invalid-approval-before-db"
+      runId: "ngx-563-invalid-approval-before-db",
     });
     expect(payload["preflightEvidence"]).toEqual([
       {
@@ -731,8 +751,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         key: "approvalBoundary",
         message: "Approval boundary is not a known workflow approval boundary.",
         recommendedAction:
-          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
-      }
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.",
+      },
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
   });
@@ -745,8 +765,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: "ngx-508-readable",
-        objective: "Explain from state"
-      })
+        objective: "Explain from state",
+      }),
     );
     expect(started.code).toBe(0);
 
@@ -756,7 +776,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "ngx-508-readable",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
@@ -769,11 +789,11 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "ngx-508-readable",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(handoff.code).toBe(0);
     expect(JSON.stringify(JSON.parse(handoff.stdout))).toContain(
-      "ngx-508-readable"
+      "ngx-508-readable",
     );
 
     const monitor = await run([
@@ -783,7 +803,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "ngx-508-readable",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitor.code).toBe(0);
   });
@@ -797,8 +817,8 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         dataDir,
         repoDir,
         runId: awaitingApprovalRunId,
-        objective: "Exercise native workflow readiness readback"
-      })
+        objective: "Exercise native workflow readiness readback",
+      }),
     );
     expect(started.code).toBe(0);
 
@@ -808,7 +828,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       awaitingApprovalRunId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as {
@@ -829,7 +849,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       leaseKind: "managed-step",
       detail: 'Step "preflight" is pending approval before it can advance.',
       actionClass: "approve_next_gate",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
 
     const monitor = await run([
@@ -839,7 +859,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       awaitingApprovalRunId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitor.code).toBe(0);
     const monitorPayload = JSON.parse(monitor.stdout) as {
@@ -853,7 +873,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       awaitingApprovalRunId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(handoff.code).toBe(0);
     const handoffPayload = JSON.parse(handoff.stdout) as {
@@ -869,7 +889,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "--once",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(watch.code).toBe(0);
     const watchPayload = JSON.parse(watch.stdout) as {
@@ -881,7 +901,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     expect(watchPayload.recommendedAction).toBe("approve");
     expect(watchPayload.humanAction).toMatchObject({
       code: "approve",
-      command: `momentum workflow run approve ${awaitingApprovalRunId} --approval-boundary through-implementation --phrase "approve plan ${awaitingApprovalRunId} through-implementation"`
+      command: `momentum workflow run approve ${awaitingApprovalRunId} --approval-boundary through-implementation --phrase "approve plan ${awaitingApprovalRunId} through-implementation"`,
     });
 
     const approvedRunId = "ngx-575-readiness-approval-evidence";
@@ -895,9 +915,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
           "--approval-boundary",
           "through-implementation",
           "--issue-scope",
-          "NGX-575"
-        ]
-      })
+          "NGX-575",
+        ],
+      }),
     );
     expect(approved.code).toBe(0);
 
@@ -908,7 +928,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       approvedRunId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(events.code).toBe(0);
     const eventsPayload = JSON.parse(events.stdout) as {
@@ -925,10 +945,10 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
           type: "approval_resolved",
           payload: expect.objectContaining({
             boundary: "through-implementation",
-            actor: "momentum-native-coding"
-          })
-        })
-      ])
+            actor: "momentum-native-coding",
+          }),
+        }),
+      ]),
     );
   });
 });
@@ -947,10 +967,10 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
           "--steps-json",
           JSON.stringify({
             "no-mistakes": { effort: "high" },
-            implementation: { model: "  claude-opus-4-8  ", harness: "gnhf" }
-          })
-        ]
-      })
+            implementation: { model: "  claude-opus-4-8  ", harness: "gnhf" },
+          }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -961,14 +981,14 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .get("ngx-510-steps") as { route_json: string };
       // Trimmed, and normalized to canonical step + field order (byte-stable).
       expect(JSON.parse(runRow.route_json)).toEqual({
-        implementationEngine: "native-goal-loop",
+        implementationEngine: "gnhf",
         steps: {
           implementation: { harness: "gnhf", model: "claude-opus-4-8" },
-          "no-mistakes": { effort: "high" }
-        }
+          "no-mistakes": { effort: "high" },
+        },
       });
       expect(runRow.route_json).toContain(
-        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"no-mistakes":{"effort":"high"}}'
+        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"no-mistakes":{"effort":"high"}}',
       );
     } finally {
       db.close();
@@ -981,11 +1001,11 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
       "ngx-510-steps",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     expect(JSON.stringify(JSON.parse(status.stdout))).toContain(
-      '"harness":"gnhf"'
+      '"harness":"gnhf"',
     );
   });
 
@@ -1002,9 +1022,9 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
           "--profile",
           "ngx-499-coding-workflow-live-wrapper",
           "--steps-json",
-          JSON.stringify({ postflight: { harness: "claude" } })
-        ]
-      })
+          JSON.stringify({ postflight: { harness: "claude" } }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -1014,9 +1034,9 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-profile-steps") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
-        implementationEngine: "native-goal-loop",
+        implementationEngine: "gnhf",
         profile: "ngx-499-coding-workflow-live-wrapper",
-        steps: { postflight: { harness: "claude" } }
+        steps: { postflight: { harness: "claude" } },
       });
     } finally {
       db.close();
@@ -1038,20 +1058,20 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
             implementation: {
               harness: "claude",
               model: "sonnet",
-              effort: "high"
+              effort: "high",
             },
             postflight: {
               harness: "opencode",
-              model: "gpt-5.5"
+              model: "gpt-5.5",
             },
             "no-mistakes": {
               harness: "codex",
               model: "openai/gpt-5.5",
-              effort: "high"
-            }
-          })
-        ]
-      })
+              effort: "high",
+            },
+          }),
+        ],
+      }),
     );
     expect(result.code).toBe(0);
 
@@ -1061,23 +1081,23 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-model-alias") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
-        implementationEngine: "native-goal-loop",
+        implementationEngine: "gnhf",
         steps: {
           implementation: {
             harness: "claude",
             model: "claude-sonnet-4-6",
-            effort: "high"
+            effort: "high",
           },
           postflight: {
             harness: "opencode",
-            model: "openai/gpt-5.5"
+            model: "openai/gpt-5.5",
           },
           "no-mistakes": {
             harness: "codex",
             model: "gpt-5.5",
-            effort: "high"
-          }
-        }
+            effort: "high",
+          },
+        },
       });
     } finally {
       db.close();
@@ -1088,21 +1108,21 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
     const cases = [
       {
         label: "unsupported step",
-        json: JSON.stringify({ preflight: { model: "opus" } })
+        json: JSON.stringify({ preflight: { model: "opus" } }),
       },
       {
         label: "unknown field",
-        json: JSON.stringify({ implementation: { temperature: "hot" } })
+        json: JSON.stringify({ implementation: { temperature: "hot" } }),
       },
       {
         label: "blank value",
-        json: JSON.stringify({ implementation: { model: "   " } })
+        json: JSON.stringify({ implementation: { model: "   " } }),
       },
       {
         label: "non-object step",
-        json: JSON.stringify({ implementation: "opus" })
+        json: JSON.stringify({ implementation: "opus" }),
       },
-      { label: "malformed json", json: "{ not json" }
+      { label: "malformed json", json: "{ not json" },
     ];
     for (const [index, testCase] of cases.entries()) {
       const dataDir = makeTempDir();
@@ -1114,8 +1134,8 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
           repoDir,
           runId,
           objective: testCase.label,
-          extra: ["--steps-json", testCase.json]
-        })
+          extra: ["--steps-json", testCase.json],
+        }),
       );
       expect(result.code, testCase.label).toBe(1);
       const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1123,7 +1143,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         ok: false,
         command: "workflow run start-coding",
         code: "route_config_invalid",
-        runId
+        runId,
       });
 
       const db = openDb(dataDir);
@@ -1155,14 +1175,14 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
       dataDir,
       "--json",
       "--steps-json",
-      JSON.stringify({ implementation: { model: "opus" } })
+      JSON.stringify({ implementation: { model: "opus" } }),
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run start",
-      code: "route_config_not_allowed"
+      code: "route_config_not_allowed",
     });
 
     const db = openDb(dataDir);
@@ -1193,14 +1213,14 @@ describe("default workflow run start is unchanged by the explicit door (NGX-508)
       "Generic start path",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       command: "workflow run start",
-      source: "workflow-definition"
+      source: "workflow-definition",
     });
   });
 
@@ -1219,7 +1239,7 @@ describe("default workflow run start is unchanged by the explicit door (NGX-508)
       "Generic path is unguarded",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -1242,7 +1262,7 @@ describe("workflow run start-coding public docs (NGX-508)", () => {
     for (const code of ["reserved_run_id", "definition_not_allowed"]) {
       expect(
         doc,
-        `docs/workflow-commands.md is missing refusal code ${code}`
+        `docs/workflow-commands.md is missing refusal code ${code}`,
       ).toContain(code);
     }
   });

@@ -359,6 +359,7 @@ function isWorkflowExecutorFamily(
     value === "one-shot" ||
     value === "script" ||
     value === "no-mistakes" ||
+    value === "delegate-supervisor" ||
     value === "external-apply" ||
     value === "subworkflow"
   );

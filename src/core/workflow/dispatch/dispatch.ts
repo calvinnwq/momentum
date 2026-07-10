@@ -22,7 +22,9 @@
  *
  *   - The phase-1 dispatchable set is exactly the executor families that have a
  *     landed production adapter in the base allowlist (`goal-loop` executor-loop,
- *     `one-shot` / `script` executor-loop, `no-mistakes` executor-loop, `external-apply` the external-apply seam,
+ *     `one-shot` / `script` executor-loop, legacy `no-mistakes`,
+ *     `delegate-supervisor` through today's kind-keyed live wrapper,
+ *     `external-apply` the external-apply seam,
  *     and `subworkflow` once its configured production lane was
  *     proven). A family with no landed adapter still fails closed rather than
  *     silently no-op or strand a lease.
@@ -63,8 +65,9 @@ export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
   "one-shot",
   "script",
   "no-mistakes",
+  "delegate-supervisor",
   "external-apply",
-  "subworkflow"
+  "subworkflow",
 ] as const;
 export type Phase1DispatchableExecutorFamily =
   (typeof PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES)[number];
@@ -78,7 +81,7 @@ const PHASE1_DISPATCHABLE_FAMILY_SET: ReadonlySet<WorkflowExecutorFamily> =
  * membership carries a compile-time guarantee the family has a landed adapter.
  */
 export function isPhase1DispatchableExecutorFamily(
-  family: WorkflowExecutorFamily
+  family: WorkflowExecutorFamily,
 ): family is Phase1DispatchableExecutorFamily {
   return PHASE1_DISPATCHABLE_FAMILY_SET.has(family);
 }
@@ -101,7 +104,7 @@ export const WORKFLOW_STEP_RESOLUTION_FAILURES = [
   "run_not_found",
   "definition_unlinked",
   "step_definition_not_found",
-  "unknown_executor_family"
+  "unknown_executor_family",
 ] as const;
 export type WorkflowStepResolutionFailure =
   (typeof WORKFLOW_STEP_RESOLUTION_FAILURES)[number];
@@ -128,7 +131,7 @@ export const WORKFLOW_DISPATCH_FAIL_CLOSED_CODES = [
   "step_definition_not_found",
   "unknown_executor_family",
   "unsupported_executor_family",
-  "route_config_invalid"
+  "route_config_invalid",
 ] as const;
 export type WorkflowDispatchFailClosedCode =
   (typeof WORKFLOW_DISPATCH_FAIL_CLOSED_CODES)[number];
@@ -163,23 +166,23 @@ const RESOLUTION_FAILURE_PLANS: Record<
   run_not_found: {
     code: "workflow_run_not_found",
     reason: () =>
-      "Claimed workflow run no longer exists; routing the dispatch to manual recovery."
+      "Claimed workflow run no longer exists; routing the dispatch to manual recovery.",
   },
   definition_unlinked: {
     code: "workflow_definition_unlinked",
     reason: () =>
-      "Claimed workflow run has no workflow definition link, so its step cannot be resolved to an executor family; routing to manual recovery."
+      "Claimed workflow run has no workflow definition link, so its step cannot be resolved to an executor family; routing to manual recovery.",
   },
   step_definition_not_found: {
     code: "step_definition_not_found",
     reason: (detail) =>
-      `No step definition matches the claimed step${detail ? ` (${detail})` : ""}; routing the dispatch to manual recovery.`
+      `No step definition matches the claimed step${detail ? ` (${detail})` : ""}; routing the dispatch to manual recovery.`,
   },
   unknown_executor_family: {
     code: "unknown_executor_family",
     reason: (detail) =>
-      `Claimed step resolves to an unknown executor family${detail ? `: ${detail}` : ""}; routing the dispatch to manual recovery.`
-  }
+      `Claimed step resolves to an unknown executor family${detail ? `: ${detail}` : ""}; routing the dispatch to manual recovery.`,
+  },
 };
 
 /**
@@ -192,7 +195,7 @@ const RESOLUTION_FAILURE_PLANS: Record<
  * claimed step.
  */
 export function planWorkflowStepDispatch(
-  resolution: WorkflowStepDispatchResolution
+  resolution: WorkflowStepDispatchResolution,
 ): WorkflowStepDispatchPlan {
   if (!resolution.ok) {
     const mapped = RESOLUTION_FAILURE_PLANS[resolution.failure];
@@ -200,7 +203,7 @@ export function planWorkflowStepDispatch(
       action: "fail_closed",
       code: mapped.code,
       gateType: FAIL_CLOSED_GATE_TYPE,
-      reason: mapped.reason(resolution.detail)
+      reason: mapped.reason(resolution.detail),
     };
   }
 
@@ -213,6 +216,6 @@ export function planWorkflowStepDispatch(
     action: "fail_closed",
     code: "unsupported_executor_family",
     gateType: FAIL_CLOSED_GATE_TYPE,
-    reason: `Executor family '${family}' has no landed daemon-dispatchable adapter this phase; routing the dispatch to manual recovery.`
+    reason: `Executor family '${family}' has no landed daemon-dispatchable adapter this phase; routing the dispatch to manual recovery.`,
   };
 }
