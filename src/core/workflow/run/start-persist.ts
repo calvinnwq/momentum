@@ -7,10 +7,11 @@
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
- * is owned separately by `dispatch/scheduler.ts`; the landed goal-loop and
- * one-shot / script / no-mistakes mirror adapters attach through executor-loop
- * persistence rather than this start persistence layer. The retired goal-first
- * lane no longer starts work; durable Goal rows remain readable state.
+ * is owned separately by `dispatch/scheduler.ts`; the landed goal-loop,
+ * one-shot / script, legacy no-mistakes mirror, and delegate-supervisor
+ * live-wrapper paths attach through executor-loop persistence rather than this
+ * start persistence layer. The retired goal-first lane no longer starts work;
+ * durable Goal rows remain readable state.
  *
  * Stable contracts this slice locks in:
  *   - A run's durable identity is its `id` (= `runId`); a step's is

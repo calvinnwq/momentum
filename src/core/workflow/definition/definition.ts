@@ -8,9 +8,10 @@
  * / `step_definitions`) is layered on top of these primitives in
  * `definition/persist.ts`; first-class workflow run start, executor
  * records, the opt-in daemon scheduler lane, the landed goal-loop / one-shot /
- * script / no-mistakes mirror adapters, gates, and production dispatch scaffolds
- * are layered on later modules. Closeout dogfood and deferred executor-family
- * adapters stay outside this primitive module.
+ * script / legacy no-mistakes mirror / delegate-supervisor live-wrapper paths,
+ * gates, and production dispatch scaffolds are layered on later modules.
+ * Closeout dogfood and deferred executor-family adapters stay outside this
+ * primitive module.
  *
  * Scope decisions pinned here, grounded in the compact runtime anchors in
  * SPEC.md and the long-form planning contracts externalized to the personal wiki:
@@ -36,9 +37,9 @@ import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 
 /**
  * Executor families pinned by SPEC.md's Runtime Model and Native Goal-Loop
- * Contract anchors. A `StepDefinition` selects one family; runner
- * compatibility shims such as GNHF belong below `goal-loop` rather than in this
- * family list.
+ * Contract anchors. A `StepDefinition` selects one family; delegated tools such
+ * as GNHF belong in portable step config below `delegate-supervisor`, never in
+ * this family list.
  */
 export const WORKFLOW_EXECUTOR_FAMILIES = [
   "goal-loop",
@@ -71,6 +72,8 @@ export function isWorkflowExecutorFamily(
  *     of the same `kind` (e.g. multiple postflight passes) without colliding.
  *   - `kind` is the canonical routing classification (`WorkflowStepKind`).
  *   - `executor` is the executor family that powers the step.
+ *   - `config` is optional JSON-compatible portable executor intent; host-local
+ *     command resolution does not belong here.
  *   - `order` is the step's position; orders must be unique within a
  *     definition.
  *   - `required` marks whether the step must reach terminal success for the run

@@ -34,7 +34,8 @@ The native `goal-loop` family renders deterministic per-round prompts through `g
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete goal-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
-Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not become workflow executor families or make `.gnhf/runs` authoritative state.
+The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while legacy definitions may still run it beneath `goal-loop`.
+In both cases it must report through Momentum invocation and round evidence rather than become an executor family or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization
 

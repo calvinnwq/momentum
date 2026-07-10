@@ -21,11 +21,10 @@
  * per-step agent/model/effort selection for execution or fails closed when the
  * namespace is corrupt.
  *
- * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} carries
- * only an executor *family*, never the selected implementation path or per-step config, so - exactly as
- * `route/subworkflow.ts` reasoned for child config - the only in-scope durable
- * home without a schema change is the run's free-form `route` JSON. The
- * implementation path lives under
+ * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
+ * portable recipe-level executor config, but the selected implementation path
+ * and operator harness/model/effort overrides are run-specific. Their durable
+ * home is therefore the run's free-form `route` JSON. The implementation path lives under
  * {@link CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY} (`route.implementationEngine`).
  * Per-step overrides live under the single {@link CODING_ROUTE_STEPS_KEY}
  * (`route.steps`) namespace, parallel to `route.subworkflow` and the run-level

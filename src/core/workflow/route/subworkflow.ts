@@ -7,10 +7,10 @@
  * but left two connective decisions to "the wiring slice":
  *
  *   1. *Where* a production `subworkflow` step's child config is sourced from. A
- *      {@link StepDefinition} carries only an executor *family*, never per-step
- *      config (rich per-step config is deliberately out of this module's
- *      scope), so the only in-scope home without a schema change is the run's
- *      existing free-form `route` JSON.
+ *      {@link StepDefinition} may carry portable recipe-level executor config,
+ *      but child launch identity is run-specific and deliberately outside this
+ *      module's definition-config scope, so it lives in the run's existing
+ *      free-form `route` JSON.
  *   2. *How* the parent run's recursion lineage is encoded durably. There is no
  *      first-class depth / lineage column on `workflow_runs`, so lineage rides in
  *      the same `route` JSON and is propagated one level down each time a parent

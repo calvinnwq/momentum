@@ -87,12 +87,12 @@ The loop must preserve no duplicate completed rounds and no duplicate commits by
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
 If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
 
-GNHF is source material, a compatibility reference, or an optional runner below `goal-loop`.
-GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may inform the native runner mechanism.
+GNHF is source material, a compatibility reference, or an optional runner below `goal-loop` for legacy definitions; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
+GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native goal-loop runner mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
 Momentum's durable source of truth is the workflow run, step, executor invocation, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
 `gnhf` must not become a first-class executor family merely to reuse behavior.
-A future GNHF-backed runner must report into native `goal-loop` invocation and round records instead of making `.gnhf/runs` authoritative.
+Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum invocation and round records instead of making `.gnhf/runs` authoritative.
 
 ## Workflow Safety
 

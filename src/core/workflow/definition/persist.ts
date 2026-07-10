@@ -18,6 +18,8 @@
  *     bad definition can never leave partial state behind.
  *   - `created_at` is preserved across re-persists; `updated_at` is bumped on
  *     every upsert so callers can detect re-ingest.
+ *   - Optional portable step config round-trips through nullable `config_json`;
+ *     an omitted config remains absent when loaded.
  *   - The persisted step set exactly mirrors the definition: re-persisting a
  *     `(key, version)` with a step removed deletes the orphaned step row, so a
  *     loaded definition always round-trips to what was last persisted.

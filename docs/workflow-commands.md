@@ -7,7 +7,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
-  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, implementation engine, and per-step route selections, definition key/version, repo policy, and every step with its executor family.
+  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, implementation engine, and per-step route selections, definition key/version, repo policy, and every step with its executor family and optional portable config.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -2359,7 +2359,8 @@ When the native goal-loop mechanism receives a usable absolute verification log 
 For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
 For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
-A GNHF-backed mechanism may run beneath `goal-loop`, but `gnhf` is not a workflow executor family and cannot replace the native invocation/round contract.
+The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while legacy definitions may still run it beneath `goal-loop`.
+In both cases `gnhf` is not a workflow executor family, and its work must remain represented by Momentum invocation and round evidence.
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
 

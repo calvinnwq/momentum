@@ -13,8 +13,9 @@
  * lane, and executor adapter dispatch are layered separately; this pure
  * materializer does not run the landed goal-loop / one-shot / script /
  * no-mistakes mirror adapters. The coding plan preview in this module enriches
- * the projected steps with definition executor families for operator inspection,
- * but it still does not invoke any executor or write durable state.
+ * the projected steps with definition executor families and optional portable
+ * config for operator inspection, but it still does not invoke any executor or
+ * write durable state.
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model and
  * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
@@ -34,8 +35,9 @@
  *     unapproved run opens `pending`.
  *   - Durable run-start materialization carries only the canonical
  *     `WorkflowStepRecord` fields the substrate persists; the coding preview
- *     separately joins the executor family from the validated definition so the
- *     no-write plan can show how each step would dispatch.
+ *     separately joins the executor family and optional portable config from the
+ *     validated definition so the no-write plan can show how each step would
+ *     dispatch.
  */
 
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
@@ -275,8 +277,8 @@ export function materializeWorkflowRunStart(
 /**
  * One step of a frozen coding-workflow plan preview. It carries the canonical
  * {@link WorkflowStepRecord} fields plus the step's {@link WorkflowExecutorFamily}
- * joined from the definition, so an operator can read which executor family will
- * power each step before the run is approved or executed.
+ * and optional portable config joined from the definition, so an operator can
+ * read how each step will dispatch before the run is approved or executed.
  */
 export type WorkflowCodingPlanStep = {
   stepId: string;
@@ -334,8 +336,9 @@ function readImplementationEngine(
  * {@link WorkflowRunStartInput} a native coding start would use, without touching
  * any durable state. It reuses {@link materializeWorkflowRunStart} for the run /
  * step shape (so the preview matches exactly what a start would persist) and
- * enriches each step with the executor family declared on the definition. Invalid
- * inputs surface the same refusal taxonomy as a start.
+ * enriches each step with the executor family and optional portable config
+ * declared on the definition. Invalid inputs surface the same refusal taxonomy
+ * as a start.
  */
 export function materializeWorkflowCodingPlanPreview(
   input: WorkflowRunStartInput,

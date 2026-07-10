@@ -7,9 +7,10 @@
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * scheduler lane is owned separately by `src/core/workflow/dispatch/scheduler.ts`; the
- * landed goal-loop, one-shot / script, and no-mistakes mirror adapters layer on
- * top of this persistence spine, exactly as `src/core/workflow/definition/persist.ts` is
- * the storage twin of `src/core/workflow/definition/definition.ts`.
+ * landed goal-loop, one-shot / script, legacy no-mistakes mirror, and
+ * delegate-supervisor live-wrapper paths layer on top of this persistence spine,
+ * exactly as `src/core/workflow/definition/persist.ts` is the storage twin of
+ * `src/core/workflow/definition/definition.ts`.
  *
  * Stable contracts this slice locks in:
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
