@@ -1,6 +1,7 @@
 node_modules/
 dist/
 docs/
+CHANGELOG.md
 pnpm-lock.yaml
 .agent-runs/
 .agent-workflows/
