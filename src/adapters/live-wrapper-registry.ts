@@ -2,8 +2,9 @@ import path from "node:path";
 
 import {
   WORKFLOW_STEP_KINDS,
-  type WorkflowStepKind
+  type WorkflowStepKind,
 } from "../core/workflow/run/reducer.js";
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
 
 /**
  * Live workflow-step wrapper configuration and registry.
@@ -68,22 +69,20 @@ export const LIVE_WRAPPER_REFUSAL_CODES = [
   "live_wrapper_profile_missing",
   "live_wrapper_profile_invalid",
   "live_wrapper_unsupported_kind",
-  "live_wrapper_not_configured"
+  "live_wrapper_not_configured",
 ] as const;
 
-export type LiveWrapperRefusalCode = (typeof LIVE_WRAPPER_REFUSAL_CODES)[number];
+export type LiveWrapperRefusalCode =
+  (typeof LIVE_WRAPPER_REFUSAL_CODES)[number];
 
 export type LiveWrapperConfigErrorCode =
-  | "live_wrapper_config_missing"
-  | "live_wrapper_config_invalid";
+  "live_wrapper_config_missing" | "live_wrapper_config_invalid";
 
 export type LiveWrapperProfileErrorCode =
-  | "live_wrapper_profile_missing"
-  | "live_wrapper_profile_invalid";
+  "live_wrapper_profile_missing" | "live_wrapper_profile_invalid";
 
 export type LiveWrapperResolveErrorCode =
-  | "live_wrapper_unsupported_kind"
-  | "live_wrapper_not_configured";
+  "live_wrapper_unsupported_kind" | "live_wrapper_not_configured";
 
 export type LiveWrapperConfigError = {
   ok: false;
@@ -97,8 +96,7 @@ export type LiveWrapperConfigSuccess = {
 };
 
 export type LiveWrapperConfigParse =
-  | LiveWrapperConfigSuccess
-  | LiveWrapperConfigError;
+  LiveWrapperConfigSuccess | LiveWrapperConfigError;
 
 export type LiveWrapperProfileError = {
   ok: false;
@@ -112,8 +110,7 @@ export type LiveWrapperProfileSuccess = {
 };
 
 export type LiveWrapperProfileParse =
-  | LiveWrapperProfileSuccess
-  | LiveWrapperProfileError;
+  LiveWrapperProfileSuccess | LiveWrapperProfileError;
 
 export type LiveWrapperResolveError = {
   ok: false;
@@ -128,12 +125,13 @@ export type LiveWrapperResolveSuccess = {
 };
 
 export type LiveWrapperResolveResult =
-  | LiveWrapperResolveSuccess
-  | LiveWrapperResolveError;
+  LiveWrapperResolveSuccess | LiveWrapperResolveError;
 
 export const DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC = 30;
 
-const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
+const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_STEP_KINDS,
+);
 
 function isWorkflowStepKind(value: string): value is WorkflowStepKind {
   return WORKFLOW_STEP_KIND_SET.has(value);
@@ -145,12 +143,12 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
       ok: false,
       code: "live_wrapper_config_missing",
       error:
-        "Live wrapper config is missing; a wrapper requires at least an absolute `command`."
+        "Live wrapper config is missing; a wrapper requires at least an absolute `command`.",
     };
   }
   if (!isRecord(value)) {
     return configInvalid(
-      "Live wrapper config must be a mapping with at least a `command` field."
+      "Live wrapper config must be a mapping with at least a `command` field.",
     );
   }
 
@@ -168,19 +166,19 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
 
   const timeoutResult = parseRequiredTimeoutSec(
     readAlias(value, "timeout_sec", "timeoutSec"),
-    "timeout_sec"
+    "timeout_sec",
   );
   if (!timeoutResult.ok) return timeoutResult;
   const timeoutSec = timeoutResult.value;
 
   const envAllowResult = parseEnvAllow(
-    readAlias(value, "env_allow", "envAllow")
+    readAlias(value, "env_allow", "envAllow"),
   );
   if (!envAllowResult.ok) return envAllowResult;
   const envAllow = envAllowResult.value;
 
   const resultFileResult = parseResultFile(
-    readAlias(value, "result_file", "resultFile")
+    readAlias(value, "result_file", "resultFile"),
   );
   if (!resultFileResult.ok) return resultFileResult;
   const resultFile = resultFileResult.value;
@@ -191,31 +189,31 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
 
   return {
     ok: true,
-    config: { command, args, cwd, timeoutSec, envAllow, resultFile, probe }
+    config: { command, args, cwd, timeoutSec, envAllow, resultFile, probe },
   };
 }
 
 export function parseLiveWrapperProfile(
-  value: unknown
+  value: unknown,
 ): LiveWrapperProfileParse {
   if (value === undefined || value === null) {
     return {
       ok: false,
       code: "live_wrapper_profile_missing",
       error:
-        "Live wrapper profile is missing; configure a `name` and at least one wrapper keyed by workflow step kind."
+        "Live wrapper profile is missing; configure a `name` and at least one wrapper keyed by workflow step kind.",
     };
   }
   if (!isRecord(value)) {
     return profileInvalid(
-      "Live wrapper profile must be a mapping with `name` and `wrappers` fields."
+      "Live wrapper profile must be a mapping with `name` and `wrappers` fields.",
     );
   }
 
   const rawName = value["name"];
   if (typeof rawName !== "string" || rawName.trim().length === 0) {
     return profileInvalid(
-      "Live wrapper profile `name` is required and must be a non-empty string."
+      "Live wrapper profile `name` is required and must be a non-empty string.",
     );
   }
   const name = rawName.trim();
@@ -223,19 +221,19 @@ export function parseLiveWrapperProfile(
   const rawWrappers = value["wrappers"];
   if (rawWrappers === undefined || rawWrappers === null) {
     return profileInvalid(
-      "Live wrapper profile `wrappers` is required and must map workflow step kinds to wrapper configs."
+      "Live wrapper profile `wrappers` is required and must map workflow step kinds to wrapper configs.",
     );
   }
   if (!isRecord(rawWrappers)) {
     return profileInvalid(
-      "Live wrapper profile `wrappers` must be a mapping keyed by workflow step kind."
+      "Live wrapper profile `wrappers` must be a mapping keyed by workflow step kind.",
     );
   }
 
   const entries = Object.entries(rawWrappers);
   if (entries.length === 0) {
     return profileInvalid(
-      `Live wrapper profile "${name}" must configure at least one wrapper.`
+      `Live wrapper profile "${name}" must configure at least one wrapper.`,
     );
   }
 
@@ -243,13 +241,13 @@ export function parseLiveWrapperProfile(
   for (const [kind, rawConfig] of entries) {
     if (!isWorkflowStepKind(kind)) {
       return profileInvalid(
-        `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`
+        `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
       );
     }
     const parsed = parseLiveWrapperConfig(rawConfig);
     if (!parsed.ok) {
       return profileInvalid(
-        `Live wrapper profile "${name}" wrapper "${kind}" is invalid: ${parsed.error}`
+        `Live wrapper profile "${name}" wrapper "${kind}" is invalid: ${parsed.error}`,
       );
     }
     wrappers.set(kind, parsed.config);
@@ -260,13 +258,13 @@ export function parseLiveWrapperProfile(
 
 export function resolveLiveWrapper(
   profile: LiveWrapperProfile,
-  kind: string
+  kind: string,
 ): LiveWrapperResolveResult {
   if (!isWorkflowStepKind(kind)) {
     return {
       ok: false,
       code: "live_wrapper_unsupported_kind",
-      error: `Live wrapper kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`
+      error: `Live wrapper kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
   const config = profile.wrappers.get(kind);
@@ -274,31 +272,31 @@ export function resolveLiveWrapper(
     return {
       ok: false,
       code: "live_wrapper_not_configured",
-      error: `Live wrapper profile "${profile.name}" has no wrapper configured for step kind "${kind}".`
+      error: `Live wrapper profile "${profile.name}" has no wrapper configured for step kind "${kind}".`,
     };
   }
   return { ok: true, kind, config };
 }
 
 export function listConfiguredLiveWrapperKinds(
-  profile: LiveWrapperProfile
+  profile: LiveWrapperProfile,
 ): readonly WorkflowStepKind[] {
   return WORKFLOW_STEP_KINDS.filter((kind) => profile.wrappers.has(kind));
 }
 
 function parseAbsoluteCommand(
   raw: unknown,
-  field: "command" | "probe.command"
+  field: "command" | "probe.command",
 ): { ok: true; value: string } | LiveWrapperConfigError {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be a non-empty string.`
+      `Live wrapper \`${field}\` is required and must be a non-empty string.`,
     );
   }
   const value = raw.trim();
   if (!path.isAbsolute(value)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be an absolute executable path.`
+      `Live wrapper \`${field}\` must be an absolute executable path.`,
     );
   }
   return { ok: true, value };
@@ -306,14 +304,14 @@ function parseAbsoluteCommand(
 
 function parseStringArray(
   raw: unknown,
-  field: "args" | "probe.args"
+  field: "args" | "probe.args",
 ): { ok: true; value: string[] } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: [] };
   }
   if (!Array.isArray(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be an array of strings or numbers.`
+      `Live wrapper \`${field}\` must be an array of strings or numbers.`,
     );
   }
   const out: string[] = [];
@@ -325,7 +323,7 @@ function parseStringArray(
       out.push(String(entry));
     } else {
       return configInvalid(
-        `Live wrapper \`${field}[${i}]\` must be a string or number.`
+        `Live wrapper \`${field}[${i}]\` must be a string or number.`,
       );
     }
   }
@@ -334,11 +332,11 @@ function parseStringArray(
 
 function parseRequiredStringArray(
   raw: unknown,
-  field: "args"
+  field: "args",
 ): { ok: true; value: string[] } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be an array of strings or numbers.`
+      `Live wrapper \`${field}\` is required and must be an array of strings or numbers.`,
     );
   }
   return parseStringArray(raw, field);
@@ -347,22 +345,22 @@ function parseRequiredStringArray(
 function readAlias(
   record: Record<string, unknown>,
   canonicalKey: string,
-  aliasKey: string
+  aliasKey: string,
 ): unknown {
   return record[canonicalKey] ?? record[aliasKey];
 }
 
 function parseEnvAllow(
-  raw: unknown
+  raw: unknown,
 ): { ok: true; value: string[] } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      "Live wrapper `env_allow` is required and must be an array of environment variable names."
+      "Live wrapper `env_allow` is required and must be an array of environment variable names.",
     );
   }
   if (!Array.isArray(raw)) {
     return configInvalid(
-      "Live wrapper `env_allow` must be an array of environment variable names."
+      "Live wrapper `env_allow` must be an array of environment variable names.",
     );
   }
   const out: string[] = [];
@@ -370,7 +368,7 @@ function parseEnvAllow(
     const entry = raw[i];
     if (typeof entry !== "string" || !isValidEnvName(entry)) {
       return configInvalid(
-        `Live wrapper \`env_allow[${i}]\` must be a valid environment variable name.`
+        `Live wrapper \`env_allow[${i}]\` must be a valid environment variable name.`,
       );
     }
     out.push(entry);
@@ -379,11 +377,11 @@ function parseEnvAllow(
 }
 
 function parseCwd(
-  raw: unknown
+  raw: unknown,
 ): { ok: true; value: LiveWrapperCwd } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      'Live wrapper `cwd` is required and must be "repo" or "iteration".'
+      'Live wrapper `cwd` is required and must be "repo" or "iteration".',
     );
   }
   if (raw !== "repo" && raw !== "iteration") {
@@ -394,16 +392,21 @@ function parseCwd(
 
 function parseRequiredTimeoutSec(
   raw: unknown,
-  field: "timeout_sec" | "probe.timeout_sec"
+  field: "timeout_sec" | "probe.timeout_sec",
 ): { ok: true; value: number } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be a positive integer (seconds).`
+      `Live wrapper \`${field}\` is required and must be a positive integer (seconds).`,
     );
   }
   if (!isPositiveInteger(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be a positive integer (seconds).`
+      `Live wrapper \`${field}\` must be a positive integer (seconds).`,
+    );
+  }
+  if (raw > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+    return configInvalid(
+      `Live wrapper \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
     );
   }
   return { ok: true, value: raw };
@@ -411,30 +414,35 @@ function parseRequiredTimeoutSec(
 
 function parseOptionalTimeoutSec(
   raw: unknown,
-  field: "probe.timeout_sec"
+  field: "probe.timeout_sec",
 ): { ok: true; value: number | undefined } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
   }
   if (!isPositiveInteger(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be a positive integer (seconds).`
+      `Live wrapper \`${field}\` must be a positive integer (seconds).`,
+    );
+  }
+  if (raw > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+    return configInvalid(
+      `Live wrapper \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
     );
   }
   return { ok: true, value: raw };
 }
 
 function parseResultFile(
-  raw: unknown
+  raw: unknown,
 ): { ok: true; value: string } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      "Live wrapper `result_file` is required and must be a relative path inside the iteration artifact directory."
+      "Live wrapper `result_file` is required and must be a relative path inside the iteration artifact directory.",
     );
   }
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return configInvalid(
-      "Live wrapper `result_file` must be a non-empty string."
+      "Live wrapper `result_file` must be a non-empty string.",
     );
   }
   const value = raw.trim();
@@ -447,21 +455,23 @@ function parseResultFile(
     normalized === "./"
   ) {
     return configInvalid(
-      "Live wrapper `result_file` must be a relative path inside the iteration artifact directory."
+      "Live wrapper `result_file` must be a relative path inside the iteration artifact directory.",
     );
   }
   return { ok: true, value };
 }
 
 function parseProbe(
-  raw: unknown
-): { ok: true; value: LiveWrapperProbeConfig | undefined } | LiveWrapperConfigError {
+  raw: unknown,
+):
+  | { ok: true; value: LiveWrapperProbeConfig | undefined }
+  | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
   }
   if (!isRecord(raw)) {
     return configInvalid(
-      "Live wrapper `probe` must be a mapping with at least a `command` field, or omitted entirely."
+      "Live wrapper `probe` must be a mapping with at least a `command` field, or omitted entirely.",
     );
   }
 
@@ -473,7 +483,7 @@ function parseProbe(
 
   const timeoutResult = parseOptionalTimeoutSec(
     readAlias(raw, "timeout_sec", "timeoutSec"),
-    "probe.timeout_sec"
+    "probe.timeout_sec",
   );
   if (!timeoutResult.ok) return timeoutResult;
 
@@ -482,8 +492,8 @@ function parseProbe(
     value: {
       command: commandResult.value,
       args: argsResult.value,
-      timeoutSec: timeoutResult.value ?? DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC
-    }
+      timeoutSec: timeoutResult.value ?? DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC,
+    },
   };
 }
 

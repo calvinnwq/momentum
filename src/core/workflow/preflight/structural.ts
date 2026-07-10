@@ -12,26 +12,28 @@
  */
 import path from "node:path";
 
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
+
 import {
   getBuiltInWorkflowDefinition,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../definition/definition.js";
 import {
   CONFIGURABLE_CODING_STEP_KEYS,
   CODING_ROUTE_STEPS_KEY,
   validateCodingStepRouteOverrides,
   type CodingRouteConfigRefusal,
-  type CodingStepRouteOverrides
+  type CodingStepRouteOverrides,
 } from "../route/coding.js";
 import {
   parseCodingWorkflowWrapperConfig,
-  type CodingWorkflowWrapperConfig
+  type CodingWorkflowWrapperConfig,
 } from "../live-wrapper/coding-workflow.js";
 import {
   materializeWorkflowRunStart,
   type WorkflowRunStartInput,
   type WorkflowRunStartPlan,
-  type WorkflowRunStartError
+  type WorkflowRunStartError,
 } from "../run/start.js";
 import { WORKFLOW_STEP_KINDS } from "../run/reducer.js";
 
@@ -42,7 +44,7 @@ export const STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS = [
   "path",
   "key",
   "message",
-  "recommendedAction"
+  "recommendedAction",
 ] as const;
 
 export type StructuralPreflightStatus = "passed" | "failed";
@@ -126,31 +128,31 @@ const ROUTE_PROFILE_CHECK_ID = "route.profile";
 const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
 const WRAPPER_CONFIG_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["steps"]);
 const WRAPPER_CONFIG_STEP_KIND_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_KINDS
+  WORKFLOW_STEP_KINDS,
 );
 const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   envAllow: "env_allow",
   resultFile: "result_file",
   timeoutSec: "timeout_sec",
-  runnerProfile: "runner_profile"
+  runnerProfile: "runner_profile",
 };
 const NO_MISTAKES_RUNNER_PROFILE_KEYS: ReadonlySet<string> = new Set([
   "interface",
   "stdin",
   "agent",
   "required_env",
-  "agent_path"
+  "agent_path",
 ]);
 const NO_MISTAKES_RUNNER_AGENTS = new Set([
   "claude",
   "codex",
   "opencode",
-  "rovodev"
+  "rovodev",
 ]);
 
 export function preflightCodingWorkflowBuiltInDefinition(
   key: string,
-  version: number | undefined
+  version: number | undefined,
 ): CodingWorkflowBuiltInDefinitionPreflightResult {
   const definition = getBuiltInWorkflowDefinition(key, version);
   if (definition !== undefined) {
@@ -165,9 +167,9 @@ export function preflightCodingWorkflowBuiltInDefinition(
           path: "workflow.definition",
           key: "definition",
           message: "Built-in coding workflow definition resolved.",
-          recommendedAction: "No action required."
-        })
-      ]
+          recommendedAction: "No action required.",
+        }),
+      ],
     };
   }
 
@@ -187,14 +189,14 @@ export function preflightCodingWorkflowBuiltInDefinition(
           ? "Built-in coding workflow definition version was not found."
           : "Built-in coding workflow definition key was not found.",
         recommendedAction:
-          "Use the supported built-in coding workflow definition key and version."
-      })
-    ]
+          "Use the supported built-in coding workflow definition key and version.",
+      }),
+    ],
   };
 }
 
 export function preflightCodingWorkflowRunStartInput(
-  input: WorkflowRunStartInput
+  input: WorkflowRunStartInput,
 ): CodingWorkflowRunStartInputPreflightResult {
   const materialized = materializeWorkflowRunStart(input);
   const issueScopeIdentifierError =
@@ -211,15 +213,13 @@ export function preflightCodingWorkflowRunStartInput(
           path: "workflow.run",
           key: "run",
           message: "Coding workflow run shape is structurally valid.",
-          recommendedAction: "No action required."
-        })
-      ]
+          recommendedAction: "No action required.",
+        }),
+      ],
     };
   }
 
-  const errors = materialized.ok
-    ? []
-    : [...materialized.errors];
+  const errors = materialized.ok ? [] : [...materialized.errors];
   if (issueScopeIdentifierError !== undefined) {
     errors.push(issueScopeIdentifierError);
   }
@@ -235,14 +235,14 @@ export function preflightCodingWorkflowRunStartInput(
         path: error.path ?? "workflow.run",
         key: error.path ?? "run",
         message: error.message,
-        recommendedAction: recommendedActionForRunStartError(error)
-      })
-    )
+        recommendedAction: recommendedActionForRunStartError(error),
+      }),
+    ),
   };
 }
 
 function validateCodingWorkflowIssueScopeIdentifier(
-  input: WorkflowRunStartInput
+  input: WorkflowRunStartInput,
 ): WorkflowRunStartError | undefined {
   const issueScope = input.issueScope;
   if (!isRecord(issueScope)) return undefined;
@@ -253,12 +253,12 @@ function validateCodingWorkflowIssueScopeIdentifier(
   return {
     code: "issue_scope_invalid",
     message: "Issue scope identifier must be a non-empty string when provided.",
-    path: "issueScope.identifier"
+    path: "issueScope.identifier",
   };
 }
 
 export function preflightCodingWorkflowRouteSteps(
-  value: unknown
+  value: unknown,
 ): CodingWorkflowRouteStepsPreflightResult {
   const validated = validateCodingStepRouteOverrides(value);
   if (validated.ok) {
@@ -273,9 +273,9 @@ export function preflightCodingWorkflowRouteSteps(
           path: "route.steps",
           key: CODING_ROUTE_STEPS_KEY,
           message: "Coding route steps are structurally valid.",
-          recommendedAction: "No action required."
-        })
-      ]
+          recommendedAction: "No action required.",
+        }),
+      ],
     };
   }
 
@@ -289,14 +289,16 @@ export function preflightCodingWorkflowRouteSteps(
         path: normalizeRouteStepsPath(validated.path),
         key: routeStepsEvidenceKey(validated.path),
         message: validated.reason,
-        recommendedAction: recommendedActionForRouteStepsRefusal(validated.refusal)
-      })
-    ]
+        recommendedAction: recommendedActionForRouteStepsRefusal(
+          validated.refusal,
+        ),
+      }),
+    ],
   };
 }
 
 export function preflightCodingWorkflowRouteStepsJson(
-  value: string
+  value: string,
 ): CodingWorkflowRouteStepsJsonPreflightResult {
   let parsed: unknown;
   try {
@@ -313,9 +315,9 @@ export function preflightCodingWorkflowRouteStepsJson(
           key: CODING_ROUTE_STEPS_KEY,
           message: "Coding route steps must be valid JSON.",
           recommendedAction:
-            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route."
-        })
-      ]
+            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route.",
+        }),
+      ],
     };
   }
 
@@ -323,7 +325,7 @@ export function preflightCodingWorkflowRouteStepsJson(
 }
 
 export function preflightCodingWorkflowRouteProfile(
-  value: unknown
+  value: unknown,
 ): CodingWorkflowRouteProfilePreflightResult {
   if (typeof value === "string" && value.trim().length > 0) {
     return {
@@ -337,9 +339,9 @@ export function preflightCodingWorkflowRouteProfile(
           path: "route.profile",
           key: "profile",
           message: "Coding route profile is structurally valid.",
-          recommendedAction: "No action required."
-        })
-      ]
+          recommendedAction: "No action required.",
+        }),
+      ],
     };
   }
 
@@ -352,24 +354,25 @@ export function preflightCodingWorkflowRouteProfile(
         severity: "error",
         path: "route.profile",
         key: "profile",
-        message: "Coding route profile must be a non-empty string when provided.",
+        message:
+          "Coding route profile must be a non-empty string when provided.",
         recommendedAction:
-          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
-      })
-    ]
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route.",
+      }),
+    ],
   };
 }
 
 export function preflightCodingWorkflowWrapperConfig(
   value: unknown,
   source?: string,
-  options: CodingWorkflowWrapperConfigPreflightOptions = {}
+  options: CodingWorkflowWrapperConfigPreflightOptions = {},
 ): CodingWorkflowWrapperConfigPreflightResult {
   const parsed = parseCodingWorkflowWrapperConfig(value, source);
   if (parsed.ok) {
     const resultFileMismatch = locateWrapperConfigExpectedResultFileMismatch(
       parsed.config,
-      options.expectedResultFile
+      options.expectedResultFile,
     );
     if (resultFileMismatch !== undefined) {
       return {
@@ -382,9 +385,9 @@ export function preflightCodingWorkflowWrapperConfig(
             path: resultFileMismatch.path,
             key: resultFileMismatch.key,
             message: resultFileMismatch.message,
-            recommendedAction: resultFileMismatch.recommendedAction
-          })
-        ]
+            recommendedAction: resultFileMismatch.recommendedAction,
+          }),
+        ],
       };
     }
     const runnerEnvAllowMismatch =
@@ -400,9 +403,9 @@ export function preflightCodingWorkflowWrapperConfig(
             path: runnerEnvAllowMismatch.path,
             key: runnerEnvAllowMismatch.key,
             message: runnerEnvAllowMismatch.message,
-            recommendedAction: runnerEnvAllowMismatch.recommendedAction
-          })
-        ]
+            recommendedAction: runnerEnvAllowMismatch.recommendedAction,
+          }),
+        ],
       };
     }
 
@@ -417,9 +420,9 @@ export function preflightCodingWorkflowWrapperConfig(
           path: "wrapper.config",
           key: "steps",
           message: "Coding workflow wrapper config is structurally valid.",
-          recommendedAction: "No action required."
-        })
-      ]
+          recommendedAction: "No action required.",
+        }),
+      ],
     };
   }
 
@@ -434,14 +437,14 @@ export function preflightCodingWorkflowWrapperConfig(
         path: location.path,
         key: location.key,
         message: parsed.error,
-        recommendedAction: location.recommendedAction
-      })
-    ]
+        recommendedAction: location.recommendedAction,
+      }),
+    ],
   };
 }
 
 function recommendedActionForRunStartError(
-  error: WorkflowRunStartError
+  error: WorkflowRunStartError,
 ): string {
   switch (error.code) {
     case "definition_invalid":
@@ -465,7 +468,7 @@ function recommendedActionForRunStartError(
 }
 
 function buildStructuralPreflightEvidence(
-  evidence: StructuralPreflightEvidence
+  evidence: StructuralPreflightEvidence,
 ): StructuralPreflightEvidence {
   return {
     checkId: evidence.checkId,
@@ -474,7 +477,7 @@ function buildStructuralPreflightEvidence(
     path: evidence.path,
     key: evidence.key,
     message: evidence.message,
-    recommendedAction: evidence.recommendedAction
+    recommendedAction: evidence.recommendedAction,
   };
 }
 
@@ -484,7 +487,9 @@ type WrapperConfigFailureLocation = {
   recommendedAction: string;
 };
 
-function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocation {
+function locateWrapperConfigFailure(
+  value: unknown,
+): WrapperConfigFailureLocation {
   const topLevelFailure = locateWrapperConfigTopLevelFailure(value);
   if (topLevelFailure !== undefined) return topLevelFailure;
   const stepKeyFailure = locateWrapperConfigStepKeyFailure(value);
@@ -497,13 +502,13 @@ function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocatio
     path: "wrapper.config",
     key: "config",
     recommendedAction:
-      "Update the coding workflow wrapper config to match the supported structural schema."
+      "Update the coding workflow wrapper config to match the supported structural schema.",
   };
 }
 
 function locateWrapperConfigExpectedResultFileMismatch(
   config: CodingWorkflowWrapperConfig,
-  expectedResultFile: string | undefined
+  expectedResultFile: string | undefined,
 ): (WrapperConfigFailureLocation & { message: string }) | undefined {
   if (expectedResultFile === undefined) return undefined;
   const expected = expectedResultFile.trim();
@@ -517,7 +522,7 @@ function locateWrapperConfigExpectedResultFileMismatch(
       path: `${basePath}.result_file`,
       key: "result_file",
       message: `Wrapper config \`result_file\` must match the expected live-wrapper result file "${expected}".`,
-      recommendedAction: `Set ${basePath}.result_file to "${expected}", or remove the override.`
+      recommendedAction: `Set ${basePath}.result_file to "${expected}", or remove the override.`,
     };
   }
 
@@ -525,7 +530,7 @@ function locateWrapperConfigExpectedResultFileMismatch(
 }
 
 function locateWrapperConfigRunnerProfileEnvAllowMismatch(
-  config: CodingWorkflowWrapperConfig
+  config: CodingWorkflowWrapperConfig,
 ): (WrapperConfigFailureLocation & { message: string }) | undefined {
   for (const [stepKind, stepConfig] of Object.entries(config.steps)) {
     const profile = stepConfig?.noMistakesRunnerProfile;
@@ -540,7 +545,7 @@ function locateWrapperConfigRunnerProfileEnvAllowMismatch(
       path: `${basePath}.env_allow`,
       key: "env_allow",
       message: `Wrapper config \`env_allow\` must include runner_profile.required_env entries: ${formattedMissing}.`,
-      recommendedAction: `Add ${quotedMissing} to ${basePath}.env_allow so the runner profile environment can reach no-mistakes.`
+      recommendedAction: `Add ${quotedMissing} to ${basePath}.env_allow so the runner profile environment can reach no-mistakes.`,
     };
   }
 
@@ -548,7 +553,7 @@ function locateWrapperConfigRunnerProfileEnvAllowMismatch(
 }
 
 function locateWrapperConfigTopLevelFailure(
-  value: unknown
+  value: unknown,
 ): WrapperConfigFailureLocation | undefined {
   if (!isRecord(value)) return undefined;
 
@@ -557,14 +562,14 @@ function locateWrapperConfigTopLevelFailure(
     return {
       path: `wrapper.config.${key}`,
       key,
-      recommendedAction: `Remove wrapper.config.${key} or replace it with supported key "steps".`
+      recommendedAction: `Remove wrapper.config.${key} or replace it with supported key "steps".`,
     };
   }
   return undefined;
 }
 
 function locateWrapperConfigStepKeyFailure(
-  value: unknown
+  value: unknown,
 ): WrapperConfigFailureLocation | undefined {
   if (!isRecord(value)) return undefined;
   const steps = value["steps"];
@@ -575,14 +580,14 @@ function locateWrapperConfigStepKeyFailure(
     return {
       path: `wrapper.config.steps.${stepKind}`,
       key: stepKind,
-      recommendedAction: `Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.${stepKind}.`
+      recommendedAction: `Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.${stepKind}.`,
     };
   }
   return undefined;
 }
 
 function locateWrapperConfigCasingDrift(
-  value: unknown
+  value: unknown,
 ): WrapperConfigFailureLocation | undefined {
   if (!isRecord(value)) return undefined;
   const steps = value["steps"];
@@ -590,12 +595,14 @@ function locateWrapperConfigCasingDrift(
 
   for (const [stepKind, rawStep] of Object.entries(steps)) {
     if (!isRecord(rawStep)) continue;
-    for (const [actual, expected] of Object.entries(WRAPPER_CONFIG_CAMEL_CASE_KEYS)) {
+    for (const [actual, expected] of Object.entries(
+      WRAPPER_CONFIG_CAMEL_CASE_KEYS,
+    )) {
       if (Object.prototype.hasOwnProperty.call(rawStep, actual)) {
         return {
           path: `wrapper.config.steps.${stepKind}.${actual}`,
           key: actual,
-          recommendedAction: `Replace "${actual}" with "${expected}".`
+          recommendedAction: `Replace "${actual}" with "${expected}".`,
         };
       }
     }
@@ -604,7 +611,7 @@ function locateWrapperConfigCasingDrift(
 }
 
 function locateWrapperConfigFieldFailure(
-  value: unknown
+  value: unknown,
 ): WrapperConfigFailureLocation | undefined {
   if (!isRecord(value)) return undefined;
   const steps = value["steps"];
@@ -621,7 +628,7 @@ function locateWrapperConfigFieldFailure(
       return {
         path: `${basePath}.env_allow`,
         key: "env_allow",
-        recommendedAction: `Set ${basePath}.env_allow to an array of environment variable names.`
+        recommendedAction: `Set ${basePath}.env_allow to an array of environment variable names.`,
       };
     }
 
@@ -632,7 +639,7 @@ function locateWrapperConfigFieldFailure(
       return {
         path: `${basePath}.result_file`,
         key: "result_file",
-        recommendedAction: `Set ${basePath}.result_file to a safe relative path inside the iteration artifact directory.`
+        recommendedAction: `Set ${basePath}.result_file to a safe relative path inside the iteration artifact directory.`,
       };
     }
 
@@ -643,7 +650,17 @@ function locateWrapperConfigFieldFailure(
       return {
         path: `${basePath}.timeout_sec`,
         key: "timeout_sec",
-        recommendedAction: `Set ${basePath}.timeout_sec to a positive integer number of seconds.`
+        recommendedAction: `Set ${basePath}.timeout_sec to a positive integer number of seconds.`,
+      };
+    }
+    if (
+      typeof rawStep["timeout_sec"] === "number" &&
+      rawStep["timeout_sec"] > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC
+    ) {
+      return {
+        path: `${basePath}.timeout_sec`,
+        key: "timeout_sec",
+        recommendedAction: `Set ${basePath}.timeout_sec to an integer between 1 and ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
       };
     }
 
@@ -654,14 +671,14 @@ function locateWrapperConfigFieldFailure(
           path: `${basePath}.runner_profile`,
           key: "runner_profile",
           recommendedAction:
-            "Add a no-mistakes runner_profile with interface=\"axi\", stdin=\"closed\", agent, required_env, and agent_path."
+            'Add a no-mistakes runner_profile with interface="axi", stdin="closed", agent, required_env, and agent_path.',
         };
       }
       if (!isRecord(rawProfile)) {
         return {
           path: `${basePath}.runner_profile`,
           key: "runner_profile",
-          recommendedAction: `Set ${basePath}.runner_profile to an object.`
+          recommendedAction: `Set ${basePath}.runner_profile to an object.`,
         };
       }
       for (const key of Object.keys(rawProfile)) {
@@ -670,22 +687,22 @@ function locateWrapperConfigFieldFailure(
           path: `${basePath}.runner_profile.${key}`,
           key,
           recommendedAction: `Remove ${basePath}.runner_profile.${key} or replace it with one of: ${[
-            ...NO_MISTAKES_RUNNER_PROFILE_KEYS
-          ].join(", ")}.`
+            ...NO_MISTAKES_RUNNER_PROFILE_KEYS,
+          ].join(", ")}.`,
         };
       }
       if (rawProfile["interface"] !== "axi") {
         return {
           path: `${basePath}.runner_profile.interface`,
           key: "interface",
-          recommendedAction: `Set ${basePath}.runner_profile.interface to "axi".`
+          recommendedAction: `Set ${basePath}.runner_profile.interface to "axi".`,
         };
       }
       if (rawProfile["stdin"] !== "closed") {
         return {
           path: `${basePath}.runner_profile.stdin`,
           key: "stdin",
-          recommendedAction: `Set ${basePath}.runner_profile.stdin to "closed".`
+          recommendedAction: `Set ${basePath}.runner_profile.stdin to "closed".`,
         };
       }
       if (
@@ -695,14 +712,14 @@ function locateWrapperConfigFieldFailure(
         return {
           path: `${basePath}.runner_profile.agent`,
           key: "agent",
-          recommendedAction: `Set ${basePath}.runner_profile.agent to one of claude, codex, opencode, or rovodev.`
+          recommendedAction: `Set ${basePath}.runner_profile.agent to one of claude, codex, opencode, or rovodev.`,
         };
       }
       if (!isStringArray(rawProfile["required_env"])) {
         return {
           path: `${basePath}.runner_profile.required_env`,
           key: "required_env",
-          recommendedAction: `Set ${basePath}.runner_profile.required_env to an array including HOME and PATH, plus selected-agent environment such as CODEX_HOME for Codex.`
+          recommendedAction: `Set ${basePath}.runner_profile.required_env to an array including HOME and PATH, plus selected-agent environment such as CODEX_HOME for Codex.`,
         };
       }
       const requiredEnv = rawProfile["required_env"];
@@ -715,21 +732,21 @@ function locateWrapperConfigFieldFailure(
         return {
           path: `${basePath}.runner_profile.required_env`,
           key: "required_env",
-          recommendedAction: `Add "${required}" to ${basePath}.runner_profile.required_env.`
+          recommendedAction: `Add "${required}" to ${basePath}.runner_profile.required_env.`,
         };
       }
       if (!isNonBlankString(rawProfile["agent_path"])) {
         return {
           path: `${basePath}.runner_profile.agent_path`,
           key: "agent_path",
-          recommendedAction: `Set ${basePath}.runner_profile.agent_path to the configured absolute agent executable path.`
+          recommendedAction: `Set ${basePath}.runner_profile.agent_path to the configured absolute agent executable path.`,
         };
       }
       if (!path.isAbsolute(rawProfile["agent_path"])) {
         return {
           path: `${basePath}.runner_profile.agent_path`,
           key: "agent_path",
-          recommendedAction: `Set ${basePath}.runner_profile.agent_path to an absolute executable path.`
+          recommendedAction: `Set ${basePath}.runner_profile.agent_path to an absolute executable path.`,
         };
       }
     }
@@ -739,7 +756,9 @@ function locateWrapperConfigFieldFailure(
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  return (
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  );
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -780,7 +799,7 @@ function routeStepsEvidenceKey(path: string | undefined): string {
 }
 
 function recommendedActionForRouteStepsRefusal(
-  refusal: CodingRouteConfigRefusal
+  refusal: CodingRouteConfigRefusal,
 ): string {
   switch (refusal) {
     case "step_unsupported":

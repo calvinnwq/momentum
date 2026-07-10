@@ -454,6 +454,33 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
+  it("refuses timeout fields above the built-in supervisor limit", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        preflight: {
+          command: "/bin/sh",
+          timeout_sec: 2_147_454,
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.preflight.timeout_sec",
+        key: "timeout_sec",
+        message:
+          "Wrapper config `timeout_sec` must not exceed 2147453 seconds.",
+        recommendedAction:
+          "Set wrapper.config.steps.preflight.timeout_sec to an integer between 1 and 2147453 seconds.",
+      },
+    ]);
+  });
+
   it("refuses no-mistakes wrapper config without an explicit runner profile", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {

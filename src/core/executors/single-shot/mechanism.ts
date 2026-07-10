@@ -860,6 +860,7 @@ function readGit(
       ok: true,
       value: execFileSync("git", ["-C", repoPath, ...args], {
         encoding: "utf-8",
+        maxBuffer: Number.MAX_SAFE_INTEGER,
         stdio: ["ignore", "pipe", "pipe"],
       }),
     };
@@ -872,9 +873,10 @@ function ignoredPathExclusions(
   repoPath: string,
   hostOwnedPaths: readonly (string | null)[],
 ): string[] {
+  const repoRoot = path.resolve(repoPath);
   return hostOwnedPaths
     .filter((filePath): filePath is string => filePath !== null)
-    .map((filePath) => path.relative(repoPath, path.resolve(filePath)))
+    .map((filePath) => path.relative(repoRoot, path.resolve(filePath)))
     .filter(
       (relativePath) =>
         relativePath !== "" &&
@@ -890,50 +892,114 @@ function ignoredWorktreeDigest(
   repoPath: string,
   exclusions: readonly string[] = [],
 ): string | null {
-  const ignored = readGit(repoPath, [
+  const repoRoot = path.resolve(repoPath);
+  const ignored = readGit(repoRoot, [
     "status",
     "--ignored",
     "--porcelain=v1",
-    "--untracked-files=all",
     "-z",
   ]);
   if (!ignored.ok) return null;
-  const paths = ignored.value
-    .split("\0")
-    .filter((entry) => entry.startsWith("!! "))
-    .map((entry) => entry.slice(3))
-    .filter(
-      (relativePath) =>
-        !exclusions.some(
-          (excluded) =>
-            relativePath === excluded ||
-            relativePath.startsWith(`${excluded}/`),
-        ),
-    )
-    .sort();
+  const roots = collapseIgnoredRoots(
+    ignored.value
+      .split("\0")
+      .filter((entry) => entry.startsWith("!! "))
+      .map((entry) => entry.slice(3).replace(/\/$/, ""))
+      .filter(
+        (relativePath) =>
+          !exclusions.some(
+            (excluded) =>
+              relativePath === excluded ||
+              relativePath.startsWith(`${excluded}/`),
+          ),
+      ),
+  );
   const digest = crypto.createHash("sha256");
   try {
-    for (const relativePath of paths) {
-      const absolutePath = path.resolve(repoPath, relativePath);
-      if (
-        absolutePath !== repoPath &&
-        !absolutePath.startsWith(`${repoPath}${path.sep}`)
-      ) {
+    for (const relativePath of roots) {
+      if (!digestIgnoredPath(repoRoot, relativePath, exclusions, digest)) {
         return null;
       }
-      const stat = fs.lstatSync(absolutePath, { bigint: true });
-      digest.update(relativePath);
-      digest.update("\0");
-      digest.update(
-        [stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs, stat.ino].join(":"),
-      );
-      if (stat.isSymbolicLink()) digest.update(fs.readlinkSync(absolutePath));
-      digest.update("\0");
     }
   } catch {
     return null;
   }
   return `sha256:${digest.digest("hex")}`;
+}
+
+function collapseIgnoredRoots(paths: readonly string[]): string[] {
+  const roots: string[] = [];
+  const rootSet = new Set<string>();
+  for (const relativePath of [...paths].sort()) {
+    let slash = relativePath.indexOf("/");
+    let nested = false;
+    while (slash >= 0) {
+      if (rootSet.has(relativePath.slice(0, slash))) {
+        nested = true;
+        break;
+      }
+      slash = relativePath.indexOf("/", slash + 1);
+    }
+    if (nested) continue;
+    roots.push(relativePath);
+    rootSet.add(relativePath);
+  }
+  return roots;
+}
+
+function digestIgnoredPath(
+  repoRoot: string,
+  relativePath: string,
+  exclusions: readonly string[],
+  digest: crypto.Hash,
+): boolean {
+  if (
+    exclusions.some(
+      (excluded) =>
+        relativePath === excluded || relativePath.startsWith(`${excluded}/`),
+    )
+  ) {
+    return true;
+  }
+  const absolutePath = path.resolve(
+    repoRoot,
+    relativePath.split("/").join(path.sep),
+  );
+  const containedPath = path.relative(repoRoot, absolutePath);
+  if (
+    containedPath === ".." ||
+    containedPath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(containedPath)
+  ) {
+    return false;
+  }
+  const stat = fs.lstatSync(absolutePath, { bigint: true });
+  if (stat.isDirectory()) {
+    const entries = fs.readdirSync(absolutePath).sort();
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        if (
+          !digestIgnoredPath(
+            repoRoot,
+            `${relativePath}/${entry}`,
+            exclusions,
+            digest,
+          )
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  digest.update(relativePath);
+  digest.update("\0");
+  digest.update(
+    [stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs, stat.ino].join(":"),
+  );
+  if (stat.isSymbolicLink()) digest.update(fs.readlinkSync(absolutePath));
+  digest.update("\0");
+  return true;
 }
 
 function projectFinalizeResult(input: {

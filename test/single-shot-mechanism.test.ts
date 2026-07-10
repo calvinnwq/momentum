@@ -55,6 +55,12 @@ function initRepo(): { repoPath: string; baseHead: string } {
   return { repoPath, baseHead: runGit(repoPath, ["rev-parse", "HEAD"]).trim() };
 }
 
+function ignorePath(repoPath: string, ignoredPath: string): void {
+  fs.writeFileSync(path.join(repoPath, ".gitignore"), `${ignoredPath}\n`);
+  runGit(repoPath, ["add", ".gitignore"]);
+  runGit(repoPath, ["commit", "-m", "ignore fixture", "--quiet"]);
+}
+
 async function waitUntil(
   predicate: () => boolean,
   description: string,
@@ -894,6 +900,69 @@ describe("single-shot concrete mechanisms", () => {
       verificationLogPath,
     );
     expect(fs.readFileSync(logPath, "utf-8")).toContain("script ok");
+  });
+
+  it("handles ignored worktrees whose full status exceeds the child process buffer", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    const ignoredRoot = path.join(
+      repoPath,
+      "ignored",
+      "x".repeat(190),
+      "y".repeat(190),
+    );
+    fs.mkdirSync(ignoredRoot, { recursive: true });
+    for (let index = 0; index < 2_700; index += 1) {
+      fs.writeFileSync(
+        path.join(ignoredRoot, `${String(index).padStart(4, "0")}-fixture`),
+        "",
+      );
+    }
+    const fullIgnoredStatus = execFileSync(
+      "git",
+      [
+        "-C",
+        repoPath,
+        "status",
+        "--ignored",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "-z",
+      ],
+      { encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 },
+    );
+    expect(Buffer.byteLength(fullIgnoredStatus)).toBeGreaterThan(1024 * 1024);
+
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("normalizes trailing separators before checking ignored path containment", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    fs.mkdirSync(path.join(repoPath, "ignored"));
+    fs.writeFileSync(path.join(repoPath, "ignored", "fixture.txt"), "ignored");
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: `${repoPath}${path.sep}`,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({ ok: true });
   });
 
   it("rejects a portable script command that does not match its host resolution", async () => {
