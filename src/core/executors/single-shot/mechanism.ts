@@ -5,6 +5,8 @@
  * normalized `RunnerResult` document on success. `script` runs an absolute
  * deterministic command with explicit argv/env/cwd, bounded stdout/stderr, and
  * succeeds from exit code plus log evidence without writing a result document.
+ * Abort-aware runs preserve output captured through cancellation and decode
+ * streaming UTF-8 safely before propagating the cancellation reason.
  *
  * Both mechanisms enforce repo-safety at the boundary. `read-only` snapshots
  * require a clean repo before and after the command. `finalize` requires the
@@ -125,7 +127,7 @@ export type ScriptCommandRoundRunnerConfig = {
   args?: readonly string[];
   /** Absolute working directory and repo root for safety/finalization checks. */
   cwd: string;
-  /** Positive command timeout in seconds. */
+  /** Positive command timeout in seconds within the built-in supervisor limit. */
   timeoutSec: number;
   /** Host-resolved policy identity checked against portable policy intent. */
   policyEnvelopeIdentity?: string;

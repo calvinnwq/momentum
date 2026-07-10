@@ -55,8 +55,10 @@ The tick may be synchronous or asynchronous. It returns a recommendation, sugges
 The host reads its durable clock after awaited runner work when recording observations and terminal settlement; an asynchronous round cannot be stamped as finished before its bounded work completes.
 
 Cancellation is cooperative and cleanup-bearing: a runner that observes `signal` must stop and clean up before propagating the signal's reason. If a runner returns normally, completion wins even when the signal flips immediately afterward; the host does not manufacture a cancellation that the runner did not acknowledge.
+The built-in asynchronous process adapters preserve stdout and stderr captured before and during cancellation in the executor log, and decode streaming UTF-8 without corrupting characters split across pipe chunks.
 
 The shipped agent-once and script process adapters supervise their spawned process trees asynchronously. A separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash. Every launched process inherits a cryptographically random per-run ownership token; POSIX cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process. Windows cleanup discovers descendants from the still-live anchor even after the command leader exits. Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint. Cleanup verifies tracked/untracked status and the captured ignored-path metadata baseline. Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation. Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
+Repo-local log and result paths owned by the host are excluded from the ignored-path baseline so writing durable evidence does not look like runner residue.
 
 Portable POSIX supervision is userland containment, not a sandbox.
 It can prove cleanup for the anchored process group and for descendants observed through ancestry sampling that retain the ownership token.
@@ -75,9 +77,11 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 - `recordArtifact()`, `recordCheckpoint()`, `recordFinding()`, and `recordDecision()` for append-only evidence.
 
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
+Executor writes are available only while the invocation is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the invocation again.
 
 If `mechanism_completed` evidence is durable but daemon classification is not, the single-shot daemon entrypoint reattaches the matching non-terminal deterministic invocation, reconstructs the outcome from that checkpoint, and returns the same recommendation without rerunning the mechanism.
 Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
+For a new single-shot dispatch, the invocation and its initial running round are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its durable round binding.
 Reattach requires a durable round plus unchanged invocation identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
 An invocation without that round binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
 
@@ -127,6 +131,7 @@ Looping lifecycle schemas may add an opt-in round cap when they ship.
 Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings.
 Generic executors receive their resolved bindings through `ExecutorTickContext.hostBindings`.
 The shipped single-shot lifecycle keeps round-start identity in that field and captures its resolved live-wrapper or script runtime when the runner adapter is constructed.
+Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
 The shipped adapters cross-check script command/argv/timeout/policy and agent-once agent/timeout/policy identity before launching a process.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.

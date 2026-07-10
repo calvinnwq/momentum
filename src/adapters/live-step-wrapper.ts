@@ -27,9 +27,9 @@
  *     missing file to `result_missing` and an unreadable/invalid document to
  *     `result_invalid`.
  *
- * The execution model is synchronous (`spawnSync`), mirroring the
- * `trusted-shell` / `acp` runners and the synchronous `WorkflowStepExecutor`
- * boundary. Real-time heartbeating is therefore a caller-side concern.
+ * `runLiveStepWrapper` retains the synchronous compatibility path.
+ * `runLiveStepWrapperAsync` is the abort-aware SDK runner path and uses the
+ * asynchronous process-group supervisor below.
  *
  * This module stays scoped to process execution and recovery classification.
  * Caller layers resolve registry entries, adapt from `WorkflowStepExecutorInput`,
@@ -1100,7 +1100,8 @@ export function runProcessGroupSync(
  * Asynchronously run a bounded process below a detached anchor. Timeout, output
  * overflow, normal leader exit, and caller cancellation all trigger cleanup of
  * the anchored group and every discovered token-owned descendant before the
- * promise settles.
+ * promise settles. Captured stdout/stderr remain available through cleanup, and
+ * streaming decoders preserve UTF-8 characters split across pipe chunks.
  *
  * POSIX cleanup is portable userland containment, not a sandbox. A hostile
  * descendant that escapes between ancestry samples and strips its ownership

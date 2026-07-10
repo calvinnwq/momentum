@@ -195,6 +195,7 @@ export type ExecutorRoundProgressResult = {
 /**
  * The only durable-state API passed to executor code. Implementations are bound
  * to one invocation and automatically bind child evidence to the named round.
+ * Write methods are available only while the invocation state is `running`.
  */
 export interface ExecutorEnvelope {
   snapshot(): ExecutorEnvelopeSnapshot;

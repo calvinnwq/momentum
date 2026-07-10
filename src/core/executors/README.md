@@ -36,6 +36,8 @@ a declared portable config schema, a durable snapshot, and an envelope facade
 that can record observations/evidence but cannot classify terminal state.
 `sdk/envelope.ts` is Momentum's SQLite-backed host implementation; its
 daemon-only controller owns a separate frozen facade passed to executor code.
+Facade writes are available only while the invocation is `running`; an operator
+wait or any other non-running state revokes executor write access.
 Classification, its checkpoint, and invocation settlement commit atomically on
 the controller after a tick returns.
 `single-shot/sdk.ts` is the first built-in proof: the current `one-shot` and
@@ -48,11 +50,16 @@ repo-ownership proof before resetting mutations, and
 only then let the host atomically persist the cancelled classification. Missing
 ownership proof or cleanup failure preserves the durable in-flight state for
 recovery rather than claiming terminal cancellation.
+Captured stdout and stderr remain in the executor log through cancellation, and
+streaming UTF-8 decoding preserves characters split across pipe chunks.
 POSIX supervision is portable userland containment, not a sandbox: it proves
 cleanup for the anchored group and sampled descendants that retain the ownership
 token, but a hostile descendant that escapes between ancestry samples and strips
 the token requires kernel-backed containment outside this implementation.
 Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
+New single-shot dispatches insert their invocation and initial running round in
+one transaction after resolving runtime inputs, so reattach never inherits a
+new invocation without its round binding.
 Registration/discovery and structural-preflight schema validation remain separate
 wiring.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.

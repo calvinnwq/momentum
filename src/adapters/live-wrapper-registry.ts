@@ -18,7 +18,7 @@ import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
  * This module owns only the typed-config + registry-resolution layer:
  *
  *   - `parseLiveWrapperConfig` validates a single wrapper spec (explicit
- *     absolute `command`, argv `args`, `cwd`, raw `timeout_sec`,
+ *     absolute `command`, argv `args`, `cwd`, bounded `timeout_sec`,
  *     `env_allow`, `result_file`, and an optional pre-flight `probe`).
  *     Durable snake_case keys are canonical; camelCase aliases are accepted
  *     as transitional input while wrappers settle.

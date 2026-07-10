@@ -11,8 +11,8 @@
  * goal-loop projections — but simpler, because a single shot owns exactly one
  * round and never loops:
  *
- *   insert the invocation row     (running, deterministic reattachable id)
- *   -> insert the round-start row (running, agent/model/input frozen in)
+ *   atomically insert invocation + round-start rows
+ *      (running, deterministic identity and agent/model/input frozen in)
  *   -> run the bounded mechanism  (the one-shot agent pass / the script command)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
  *   -> run capture/result transition  (running -> capturing_result)
@@ -51,9 +51,10 @@
  * cleanup failures throw and preserve the durable in-flight state. Two ordering
  * invariants tie the lifecycle to the contract:
  *
- *   - The durable invocation and round-start rows are inserted *before* the
- *     mechanism runs (contract Round Lifecycle step 4), so a lost process leaves a
- *     durable `running` invocation/round for recovery rather than no evidence.
+ *   - The durable invocation and round-start rows are inserted atomically
+ *     *before* the mechanism runs (contract Round Lifecycle step 4), so a lost
+ *     process leaves a complete durable `running` dispatch binding for recovery
+ *     rather than an invocation-only owner.
  *   - A *successful* outcome captures (running -> capturing_result) before
  *     terminalizing — even a `script` success with no result document emits a bare
  *     capture, because the round transition graph forbids `running -> succeeded`

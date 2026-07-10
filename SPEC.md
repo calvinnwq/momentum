@@ -56,6 +56,9 @@ Cancellation terminalizes only when it happens before bounded work starts or the
 runner propagates the signal reason after verified cleanup. A normal runner
 return wins a simultaneous post-run abort rather than creating an unverified
 cancelled classification.
+Built-in asynchronous process adapters preserve captured stdout and stderr in
+the executor log during cancellation and decode streaming UTF-8 across split
+pipe chunks without replacement-character corruption.
 
 `ExecutorEnvelope` is bound to one durable invocation. It can start the next
 round, record non-terminal round observations, heartbeat, and append artifacts,
@@ -69,11 +72,17 @@ Daemon-allocated classification checkpoint identity is chosen inside the same
 write transaction as terminal settlement. Its snapshots include all durable child
 evidence so a later tick can resume without terminal scrollback or
 executor-private state.
+Executor facade writes are allowed only while the invocation is `running`;
+`waiting_operator` and every other non-running invocation state revoke all
+executor writes, including heartbeat.
 Result-capture observations and their completion checkpoints commit atomically.
 When `mechanism_completed` is durable but daemon classification is not, the
 single-shot daemon entrypoint reattaches the matching non-terminal invocation,
 reconstructs the outcome from that checkpoint, and resumes only classification;
 it never reruns the completed mechanism.
+New single-shot dispatches materialize the invocation and initial running round
+in one transaction after resolving runtime inputs, so the first durable owner
+always has its reattach binding.
 
 Every executor declares a strict object config schema. The schema describes only
 portable workflow intent: agent harness/model/effort, tool or command identity,
@@ -101,7 +110,9 @@ failed process-tree cleanup, reset residue, or other failed cleanup leaves the
 durable in-flight state for recovery instead of recording a false terminal
 cancellation. Read-only runners require a clean
 captured baseline before launch, so cancellation cleanup never erases
-pre-existing worktree changes. Agent-loop will repeat bounded runner rounds, and
+pre-existing worktree changes. Host-owned repo-local log and result paths are
+excluded from the ignored-path baseline so durable evidence is not mistaken for
+runner residue. Agent-loop will repeat bounded runner rounds, and
 delegate-supervisor will poll a tool adapter across ticks when those lifecycle
 classes land. The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable

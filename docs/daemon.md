@@ -175,7 +175,9 @@ live-wrapper command. Each wrapper requires:
   include `PATH` explicitly if the wrapper or its child processes need it.
 - `result_file` — relative path inside the workflow run directory where the
   wrapper writes the normalized runner result JSON.
-- `probe` — optional `{ "command", "args", "timeout_sec" }` pre-flight check.
+- `probe` — optional pre-flight check with an absolute `command`, optional
+  string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
+  seconds and uses the same 2,147,453-second maximum.
 
 Example:
 
@@ -246,6 +248,7 @@ The config file must use canonical snake_case keys.
 The top-level object may only contain `steps`, and each step only accepts `command`, `args`, `cwd`, `timeout_sec`, `env_allow`, `result_file`, `success_summary`, `failure_summary`, `key_changes_made`, `key_learnings`, `remaining_work`, `commit`, the no-mistakes-only `runner_profile` block, and the merge-cleanup-only `merge_cleanup` target block.
 Unknown top-level or step keys are setup failures before any child command is spawned.
 `env_allow`, `timeout_sec`, and `result_file` use those names when present.
+When present, `timeout_sec` must be an integer between 1 and 2,147,453 seconds.
 When present, `result_file` must be a safe relative path that resolves to the same file as the live-wrapper profile's `result_file` injected through `MOMENTUM_RESULT_PATH`.
 `envAllow`, `timeoutSec`, `resultFile`, or `runnerProfile` are rejected with setup guidance that
 points to the config path and key to fix.
