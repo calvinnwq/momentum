@@ -110,4 +110,46 @@ describe("package verification scripts", () => {
       fs.rmSync(tmp, { force: true, recursive: true });
     }
   });
+
+  it("checks tracked worktree changes when a base is available", () => {
+    const tmp = fs.mkdtempSync(
+      path.join(os.tmpdir(), "momentum-prettier-changed-"),
+    );
+
+    try {
+      run("git", ["init", "--initial-branch=main"], tmp);
+      run("git", ["config", "user.email", "test@example.com"], tmp);
+      run("git", ["config", "user.name", "Test User"], tmp);
+      fs.writeFileSync(path.join(tmp, "branch.ts"), "const value = 1;\n");
+      fs.writeFileSync(path.join(tmp, "local.ts"), "const value = 1;\n");
+      run("git", ["add", "branch.ts", "local.ts"], tmp);
+      run("git", ["commit", "-m", "initial"], tmp);
+      run("git", ["checkout", "-b", "feature"], tmp);
+      fs.writeFileSync(path.join(tmp, "branch.ts"), "const value={a:1}\n");
+      run("git", ["add", "branch.ts"], tmp);
+      run("git", ["commit", "-m", "change branch format"], tmp);
+      fs.writeFileSync(path.join(tmp, "branch.ts"), "const value = 1;\n");
+      run("git", ["add", "branch.ts"], tmp);
+      run("git", ["commit", "-m", "fix branch format"], tmp);
+      fs.writeFileSync(path.join(tmp, "local.ts"), "const value={b:2}\n");
+
+      const result = spawnSync(
+        process.execPath,
+        [prettierChangedScriptPath, "--check"],
+        {
+          cwd: tmp,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${path.join(repoRoot, "node_modules/.bin")}${path.delimiter}${process.env.PATH ?? ""}`,
+          },
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain("local.ts");
+    } finally {
+      fs.rmSync(tmp, { force: true, recursive: true });
+    }
+  });
 });

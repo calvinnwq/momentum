@@ -73,25 +73,22 @@ function changedFiles() {
       ? configuredBase
       : defaultBase();
 
+  const addDiffFiles = (range) => {
+    for (const file of git([
+      "diff",
+      "--name-only",
+      "--diff-filter=ACMRTUXB",
+      range,
+    ]).split("\n")) {
+      if (file) files.add(file);
+    }
+  };
+
   if (base) {
-    for (const file of git([
-      "diff",
-      "--name-only",
-      "--diff-filter=ACMRTUXB",
-      `${base}...HEAD`,
-    ]).split("\n")) {
-      if (file) files.add(file);
-    }
-  } else {
-    for (const file of git([
-      "diff",
-      "--name-only",
-      "--diff-filter=ACMRTUXB",
-      "HEAD",
-    ]).split("\n")) {
-      if (file) files.add(file);
-    }
+    addDiffFiles(`${base}...HEAD`);
   }
+
+  addDiffFiles("HEAD");
 
   for (const file of git(["ls-files", "--others", "--exclude-standard"]).split(
     "\n",
