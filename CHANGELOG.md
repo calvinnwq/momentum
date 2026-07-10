@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.18.0](https://github.com/calvinnwq/momentum/compare/v0.17.0...v0.18.0) (2026-07-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** delete the goal-iteration mechanism and runner-adapter substrate
+* **daemon:** retire the goal-iteration drain lane from the daemon loop
+* **cli:** remove the goal-first goal/status/logs/handoff/worker commands
+
+### Features
+
+* add public momentum operator skill ([6586828](https://github.com/calvinnwq/momentum/commit/6586828cee1fbf527d2d925b449893697fe2b139))
+* add public Momentum operator skill ([7ffc919](https://github.com/calvinnwq/momentum/commit/7ffc919e4cb328d1cbebf63b6e01a330117efdd2))
+* **cli:** remove the goal-first goal/status/logs/handoff/worker commands ([635dc19](https://github.com/calvinnwq/momentum/commit/635dc19312d01ca46aa7d1ed155802d0b6b9a624))
+* **cli:** retire legacy goal-first command lane ([ecdd2dc](https://github.com/calvinnwq/momentum/commit/ecdd2dc93f248c4fb9bcb90ac82bdaf1c5abeebf))
+* **daemon:** retire the goal-iteration drain lane from the daemon loop ([6d95c73](https://github.com/calvinnwq/momentum/commit/6d95c7318f31f7e00c8cb5ecd8e552807cdbe9d7))
+* **doctor:** replace milestone marker with capability scope marker ([ee316a5](https://github.com/calvinnwq/momentum/commit/ee316a570ac6bacdc3e2ceef8409b3a67110a9df))
+* **goal-loop:** add prompted round result files ([4034d09](https://github.com/calvinnwq/momentum/commit/4034d092f923e003cec8283f92c00eabeb32a1b5))
+* **goal-loop:** Added a native goal-loop prompted result-file mechanism that writes the deterministic prompt, invokes a runner callback, and reuses the existing result-file finalization path. ([b5d08de](https://github.com/calvinnwq/momentum/commit/b5d08de916b1abe20d838bdf22c3095914d3d9a4))
+* **goal-loop:** Added goal-loop finalization evidence artifacts that record stable commit/reset metadata for each round and verified the change with focused and repo gates. ([a2540e2](https://github.com/calvinnwq/momentum/commit/a2540e2b1e6ae50714038c94bad9bbf55dc1c73f))
+* **goal-loop:** Added the initial native goal-loop round prompt renderer with a focused prompt test and verified it with focused and repo gates. ([1d01043](https://github.com/calvinnwq/momentum/commit/1d01043d435e0d4bb6eec86a7f54aadbaa0a0c14))
+* **goal-loop:** record durable round finalization evidence ([0edcfe3](https://github.com/calvinnwq/momentum/commit/0edcfe389ba79e8cf1267bfef92b187b105a2055))
+* **workflow:** expose native round state in workflow logs ([819da1a](https://github.com/calvinnwq/momentum/commit/819da1a9d6e3f053290ce1beff8efbb74edfe103))
+* **workflow:** run live wrappers through native dispatch ([#216](https://github.com/calvinnwq/momentum/issues/216)) ([69961c6](https://github.com/calvinnwq/momentum/commit/69961c62d4c8489fd5f87ac05e4b30dee3017dd2))
+
+
+### Bug Fixes
+
+* **adapters:** detect no-mistakes semantic stalls ([#221](https://github.com/calvinnwq/momentum/issues/221)) ([bbeaafa](https://github.com/calvinnwq/momentum/commit/bbeaafa0d7acc072e47600c3f92d536a1c60ea0c))
+* **daemon:** recover stale workflow dispatch daemon runs ([#223](https://github.com/calvinnwq/momentum/issues/223)) ([0efc06a](https://github.com/calvinnwq/momentum/commit/0efc06aaae61997f415f542053fb04d182ed5ce5))
+* **goal-loop:** bound untrusted prompt context ([6ddd257](https://github.com/calvinnwq/momentum/commit/6ddd25715b1005ca7ce480b0fe0a21e8cef0478a))
+* **goal-loop:** Tightened goal-loop manual-recovery finalization so durable recovery codes preserve underlying commit/reset failure causes, with focused and full repo gates passing. ([2d0d8ad](https://github.com/calvinnwq/momentum/commit/2d0d8ad1c5cc4f1a1d4572e5b059f626ee536e0a))
+* replace milestone markers with capability contracts ([66bb18a](https://github.com/calvinnwq/momentum/commit/66bb18a280e0efe0ef53f7a5d1a88525ca49e977))
+* **workflow:** require wrapper profile for watch preflight ([a9fdea0](https://github.com/calvinnwq/momentum/commit/a9fdea00ffaed9b548c2922ff7f275150f52b550))
+* **workflow:** require wrapper profile for watch preflight ([b67647d](https://github.com/calvinnwq/momentum/commit/b67647d9a179c9ee433f013b89c4d003db9216bd))
+
+
+### Code Refactoring
+
+* **core:** delete the goal-iteration mechanism and runner-adapter substrate ([5dbe890](https://github.com/calvinnwq/momentum/commit/5dbe8903f7bc6041bf868769ea32e208e91f391b))
+
 ## [0.17.0](https://github.com/calvinnwq/momentum/compare/v0.16.3...v0.17.0) (2026-07-06)
 
 
