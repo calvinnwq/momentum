@@ -59,7 +59,10 @@ import {
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
   DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
 } from "./core/daemon/loop.js";
-import { runStartupRecovery } from "./core/daemon/stale-recovery.js";
+import {
+  runStartupRecovery,
+  type StartupRecoveryResult
+} from "./core/daemon/stale-recovery.js";
 import {
   clearGoalManualRecoveryGuarded,
   type ClearGoalManualRecoveryGuardedResult
@@ -450,8 +453,9 @@ async function daemonStart(
   const db = openDb(dataDir);
   try {
     let existing = getActiveDaemonRun(db);
+    let preLoopStartupRecovery: StartupRecoveryResult | null = null;
     if (existing && loopRequested && isExistingDaemonRunStale(existing, now)) {
-      runStartupRecovery(db, {
+      preLoopStartupRecovery = runStartupRecovery(db, {
         now,
         graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
         dataDir
@@ -542,7 +546,8 @@ async function daemonStart(
         ...(workflowDispatchResolution.leaseDurationMs !== undefined
           ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }
           : {})
-      }
+      },
+      ...(preLoopStartupRecovery !== null ? { preLoopStartupRecovery } : {})
     });
 
     return emitDaemonStartLoopResult(parsed, io, {

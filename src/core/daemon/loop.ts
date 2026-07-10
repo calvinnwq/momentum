@@ -78,6 +78,12 @@ export type DaemonLoopInput = {
    */
   startupRecoveryGraceMs?: number;
   /**
+   * Startup recovery completed before this daemon run was registered. Managed
+   * CLI starts may need that early pass to clear a stale active row before the
+   * loop can exist, but the loop result remains the operator-facing envelope.
+   */
+  preLoopStartupRecovery?: StartupRecoveryResult;
+  /**
    * Enables the workflow-first scheduler lane. Omit to leave the lane inert.
    * See {@link DaemonWorkflowLaneConfig}.
    */
@@ -206,15 +212,20 @@ export async function runDaemonLoop(
     try {
       const recoveryGraceMs =
         input.startupRecoveryGraceMs ?? DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
-      startupRecovery = runStartupRecovery(input.db, {
-        now: now(),
-        graceMs: recoveryGraceMs,
-        dataDir: input.dataDir,
-        daemonRuns: { excludeRunId: input.runId }
-      });
+      startupRecovery = mergeStartupRecoveryResults(
+        input.preLoopStartupRecovery ?? null,
+        runStartupRecovery(input.db, {
+          now: now(),
+          graceMs: recoveryGraceMs,
+          dataDir: input.dataDir,
+          daemonRuns: { excludeRunId: input.runId }
+        })
+      );
     } catch (error) {
       markInternalError(error);
     }
+  } else {
+    startupRecovery = input.preLoopStartupRecovery ?? null;
   }
 
   const completeCycle = (
@@ -418,6 +429,45 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function mergeStartupRecoveryResults(
+  first: StartupRecoveryResult | null,
+  second: StartupRecoveryResult | null
+): StartupRecoveryResult | null {
+  if (first === null) return second;
+  if (second === null) return first;
+  return {
+    observedAt: second.observedAt,
+    graceMs: second.graceMs,
+    repoLocks: {
+      recovered: [
+        ...first.repoLocks.recovered,
+        ...second.repoLocks.recovered
+      ],
+      skipped: [...first.repoLocks.skipped, ...second.repoLocks.skipped]
+    },
+    claimedJobs: {
+      recovered: [
+        ...first.claimedJobs.recovered,
+        ...second.claimedJobs.recovered
+      ],
+      skipped: [
+        ...first.claimedJobs.skipped,
+        ...second.claimedJobs.skipped
+      ]
+    },
+    daemonRuns: {
+      recovered: [
+        ...first.daemonRuns.recovered,
+        ...second.daemonRuns.recovered
+      ],
+      skipped: [
+        ...first.daemonRuns.skipped,
+        ...second.daemonRuns.skipped
+      ]
+    }
+  };
 }
 
 function normalizePositive(value: number, name: string): number {

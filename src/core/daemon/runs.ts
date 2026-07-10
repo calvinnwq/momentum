@@ -73,6 +73,15 @@ export type DaemonRunRow = {
 export const DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS =
   "auto_recovered_idle_stale";
 
+/**
+ * `recovery_status` stamped when startup recovery finalizes a stale daemon row
+ * whose only active owner pointer is the workflow-dispatch synthetic
+ * `active_job_id`. The workflow lease remains the source of truth for the
+ * dispatched step; this clears only the legacy daemon singleton blocker.
+ */
+export const DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS =
+  "auto_recovered_stale_workflow_dispatch";
+
 export type StartDaemonRunInput = {
   pid?: number | null;
   host?: string | null;
@@ -574,6 +583,128 @@ export function recoverStaleDaemonRun(
     return { ok: false };
   }
   return { ok: true, run };
+}
+
+export type RecoverStaleDaemonRunWithWorkflowDispatchInput = {
+  runId: string;
+  activeJobId: string;
+  staleHeartbeatBefore: number;
+  workflowDispatchLeaseGuard: {
+    now: number;
+    graceMs: number;
+  };
+  now?: number;
+  recoveryStatus?: string;
+  errorMessage?: string;
+};
+
+/**
+ * Auto-finalize a stale daemon record whose active job pointer is the synthetic
+ * workflow-dispatch marker (`workflow:<run-id>:<step-id>`). This is narrower
+ * than `recoverStaleDaemonRun`: it requires the same active job id observed by
+ * the caller, no active lock, and a heartbeat still older than the stale cutoff
+ * at update time, so a live daemon that refreshed after enumeration is left
+ * untouched.
+ */
+export function recoverStaleDaemonRunWithWorkflowDispatch(
+  db: MomentumDb,
+  input: RecoverStaleDaemonRunWithWorkflowDispatchInput
+): RecoverStaleDaemonRunResult {
+  validateRunId(input.runId, "recoverStaleDaemonRunWithWorkflowDispatch");
+  if (!isWorkflowDispatchActiveJobId(input.activeJobId)) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: activeJobId must be a workflow dispatch marker"
+    );
+  }
+  if (!Number.isFinite(input.staleHeartbeatBefore)) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: staleHeartbeatBefore must be finite"
+    );
+  }
+  if (!Number.isFinite(input.workflowDispatchLeaseGuard.now)) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: workflowDispatchLeaseGuard.now must be finite"
+    );
+  }
+  if (
+    !Number.isFinite(input.workflowDispatchLeaseGuard.graceMs) ||
+    input.workflowDispatchLeaseGuard.graceMs < 0
+  ) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: workflowDispatchLeaseGuard.graceMs must be a non-negative finite number"
+    );
+  }
+  const now = input.now ?? Date.now();
+  const recoveryStatus =
+    input.recoveryStatus ?? DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS;
+  const errorMessage =
+    input.errorMessage ?? DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS;
+
+  const result = db
+    .prepare(
+      `WITH matched_steps AS (
+         SELECT run_id
+           FROM workflow_steps
+          WHERE ? = 'workflow:' || run_id || ':' || step_id
+       ),
+       fresh_dispatch_leases AS (
+         SELECT 1
+           FROM matched_steps
+           JOIN workflow_leases
+             ON workflow_leases.run_id = matched_steps.run_id
+          WHERE workflow_leases.lease_kind = 'dispatch'
+            AND workflow_leases.released_at IS NULL
+            AND ? <= workflow_leases.expires_at + ?
+          LIMIT 1
+       )
+      UPDATE daemon_runs
+         SET state = 'error',
+             finished_at = ?,
+             last_state_change_at = ?,
+             active_job_id = NULL,
+             active_lock_id = NULL,
+             error = COALESCE(error, ?),
+             error_at = COALESCE(error_at, ?),
+             recovery_status = ?,
+             updated_at = ?
+       WHERE id = ?
+         AND state IN ('starting', 'running', 'stop_requested')
+         AND active_job_id = ?
+         AND active_lock_id IS NULL
+         AND heartbeat_at < ?
+         AND (SELECT COUNT(*) FROM matched_steps) = 1
+         AND NOT EXISTS (SELECT 1 FROM fresh_dispatch_leases)`
+    )
+    .run(
+      input.activeJobId,
+      input.workflowDispatchLeaseGuard.now,
+      input.workflowDispatchLeaseGuard.graceMs,
+      now,
+      now,
+      errorMessage,
+      now,
+      recoveryStatus,
+      now,
+      input.runId,
+      input.activeJobId,
+      input.staleHeartbeatBefore
+    );
+  if (Number(result.changes) === 0) {
+    return { ok: false };
+  }
+  const run = getDaemonRun(db, input.runId);
+  if (!run) {
+    return { ok: false };
+  }
+  return { ok: true, run };
+}
+
+export function isWorkflowDispatchActiveJobId(jobId: string): boolean {
+  const prefix = "workflow:";
+  if (!jobId.startsWith(prefix)) return false;
+  const remainder = jobId.slice(prefix.length);
+  const separator = remainder.indexOf(":");
+  return separator > 0 && separator < remainder.length - 1;
 }
 
 function validateRunId(runId: unknown, label: string): void {

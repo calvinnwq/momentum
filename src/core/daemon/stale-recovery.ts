@@ -5,11 +5,16 @@ import { resolveGoalArtifactPaths } from "../evidence/artifacts.js";
 import type { MomentumDb } from "../../adapters/db.js";
 import {
   DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
+  DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS,
   getActiveDaemonRunForJob,
+  isWorkflowDispatchActiveJobId,
   listStaleDaemonRuns,
   recoverStaleDaemonRun,
+  recoverStaleDaemonRunWithWorkflowDispatch,
   type DaemonRunRow
 } from "./runs.js";
+import { getWorkflowLease } from "../workflow/leases.js";
+import { classifyWorkflowLease } from "../workflow/run/reducer.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../shared/events.js";
 import { getGoal, type GoalRow } from "../goal/init.js";
 import { markGoalNeedsManualRecovery } from "../goal/recovery.js";
@@ -357,9 +362,9 @@ export function recoverStaleClaimedGoalIterationJobs(
 }
 
 /**
- * `recovery_status` stamped on daemon_runs when this slice auto-finalizes an
- * idle stale daemon record. Re-exported from daemon-runs.ts so callers that
- * already import from stale-recovery have a single recognized status taxonomy.
+ * Legacy idle-daemon `recovery_status` re-exported from daemon-runs.ts for
+ * callers that already import from stale-recovery. Workflow-dispatch daemon
+ * recovery uses `DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS`.
  */
 export const DAEMON_RUN_AUTO_RECOVERED_STATUS =
   DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
@@ -373,7 +378,9 @@ export type StaleDaemonRunSkipReason =
 export type StaleDaemonRunRecoveryRecovered = {
   runBefore: DaemonRunRow;
   runAfter: DaemonRunRow;
-  recoveryStatus: typeof DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
+  recoveryStatus:
+    | typeof DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+    | typeof DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS;
 };
 
 export type StaleDaemonRunRecoverySkipped = {
@@ -385,6 +392,7 @@ export type StaleDaemonRunRecoverySkipped = {
 
 export type RecoverStaleDaemonRunsInput = {
   now?: number;
+  graceMs?: number;
   staleAfterMs: number;
   activeJobStaleAfterMs?: number;
   excludeRunId?: string;
@@ -396,23 +404,26 @@ export type RecoverStaleDaemonRunsResult = {
 };
 
 /**
- * Auto-finalize idle stale daemon records to the `error` terminal state when
- * their heartbeat has crossed the stale cutoff AND they hold no live owner
- * pointer (`active_job_id` / `active_lock_id` both NULL). These records are
- * definitionally orphaned: a daemon process that exited without finalizing
- * leaves the row in `running` / `stop_requested` forever, which blocks fresh
- * `daemon start` invocations via the single-active partial index. Rows with
- * an `active_job_id` or `active_lock_id` are NOT touched here — those are
- * routed through the stale-claim and stale-lock primitives instead, or to
- * manual recovery via the `skipped` taxonomy.
+ * Auto-finalize stale daemon records to the `error` terminal state when their
+ * heartbeat has crossed the stale cutoff and they are safe to orphan-recover.
+ * Idle stale rows (`active_job_id` / `active_lock_id` both NULL) are
+ * definitionally orphaned. Rows whose only active owner pointer is the daemon
+ * workflow-dispatch synthetic job id (`workflow:<run-id>:<step-id>`) are also
+ * recoverable: workflow dispatch liveness is owned by the workflow lease, so
+ * a crashed daemon row must not permanently block the singleton active-daemon
+ * index. All other active job / lock pointers are left untouched and reported
+ * through the `skipped` taxonomy.
  *
  * Safety guards:
  *   - `excludeRunId` filters out the caller's own active daemon so a startup
  *     pass run from inside a freshly registered daemon does not finalize
  *     itself before the loop starts.
- *   - `active_job_id` and `active_lock_id` must both be NULL on the daemon row
- *     at update time — concurrent writes from `setDaemonRunActiveJob` race-
- *     guard the helper at the SQL level.
+ *   - Generic `active_job_id` and all `active_lock_id` rows are skipped so
+ *     legacy job / lock live-owner protection stays fail-closed.
+ *   - Workflow-dispatch active rows are recovered only when the same synthetic
+ *     job id is still present, `active_lock_id` is still NULL, and the
+ *     heartbeat is still stale at update time — concurrent heartbeats or owner
+ *     changes race-guard the helper at the SQL level.
  *   - Idempotent: a recovered run transitions to a terminal state and is no
  *     longer returned by `listStaleDaemonRuns`, so a second invocation finds
  *     nothing to recover.
@@ -435,6 +446,12 @@ export function recoverStaleDaemonRuns(
     );
   }
   const now = input.now ?? Date.now();
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "recoverStaleDaemonRuns: graceMs must be a non-negative finite number"
+    );
+  }
   const activeJobStaleAfterMs =
     input.activeJobStaleAfterMs ?? input.staleAfterMs;
   const stale = listStaleDaemonRuns(db, {
@@ -452,6 +469,30 @@ export function recoverStaleDaemonRuns(
       continue;
     }
     if (run.active_job_id !== null) {
+      if (
+        run.active_lock_id === null &&
+        isWorkflowDispatchActiveJobId(run.active_job_id) &&
+        !hasLiveWorkflowDispatchLease(db, run.active_job_id, now, graceMs)
+      ) {
+        const result = recoverStaleDaemonRunWithWorkflowDispatch(db, {
+          runId: run.id,
+          activeJobId: run.active_job_id,
+          staleHeartbeatBefore: now - activeJobStaleAfterMs,
+          workflowDispatchLeaseGuard: { now, graceMs },
+          now,
+          recoveryStatus: DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS
+        });
+        if (!result.ok) {
+          skipped.push({ run, reason: "run_state_changed" });
+          continue;
+        }
+        recovered.push({
+          runBefore: run,
+          runAfter: result.run,
+          recoveryStatus: DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS
+        });
+        continue;
+      }
       skipped.push({
         run,
         reason: "active_job_present",
@@ -488,6 +529,37 @@ export function recoverStaleDaemonRuns(
   }
 
   return { recovered, skipped };
+}
+
+function hasLiveWorkflowDispatchLease(
+  db: MomentumDb,
+  activeJobId: string,
+  now: number,
+  graceMs: number
+): boolean {
+  const step = findWorkflowStepForActiveJobId(db, activeJobId);
+  if (step === undefined) return true;
+  const lease = getWorkflowLease(db, step.runId, "dispatch");
+  return (
+    lease !== undefined &&
+    classifyWorkflowLease(lease, { now, graceMs }) === "fresh"
+  );
+}
+
+function findWorkflowStepForActiveJobId(
+  db: MomentumDb,
+  activeJobId: string
+): { runId: string; stepId: string } | undefined {
+  const row = db
+    .prepare(
+      `SELECT run_id AS runId, step_id AS stepId
+         FROM workflow_steps
+        WHERE ? = 'workflow:' || run_id || ':' || step_id
+        ORDER BY run_id ASC, step_id ASC
+        LIMIT 2`
+    )
+    .all(activeJobId) as Array<{ runId: string; stepId: string }>;
+  return row.length === 1 ? row[0] : undefined;
 }
 
 /**
@@ -577,6 +649,7 @@ export function runStartupRecovery(
     activeJobStaleAfterMs:
       daemonInput.activeJobStaleAfterMs ??
       DEFAULT_STARTUP_RECOVERY_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
+    graceMs,
     ...(daemonInput.excludeRunId !== undefined
       ? { excludeRunId: daemonInput.excludeRunId }
       : {})
