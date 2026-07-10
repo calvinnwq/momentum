@@ -501,6 +501,13 @@ async function executeScriptCommandAsync(
       },
     );
     if (signal.aborted) {
+      writeLog(logHandle, "stdout", result.stdout);
+      writeLog(logHandle, "stderr", result.stderr);
+      writeLine(
+        logHandle,
+        `[single-shot-script] duration_ms: ${Date.now() - start}`,
+      );
+      writeLine(logHandle, "[single-shot-script] result: cancelled");
       cancellationHandled = true;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
       signal.throwIfAborted();

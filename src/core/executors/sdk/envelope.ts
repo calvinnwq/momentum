@@ -138,10 +138,7 @@ export class DurableExecutorEnvelope {
       const invocation = this.#loadInvocation();
       assertObservationPhase(record.state, `start round ${record.roundId}`);
       this.#assertRoundIdentity(record, invocation);
-      this.#assertInvocationWritable(
-        invocation,
-        `start round ${record.roundId}`,
-      );
+      this.#assertExecutorWritable(invocation, `start round ${record.roundId}`);
       const rounds = listExecutorRoundsForInvocation(
         this.#db,
         this.#invocationId,
@@ -176,7 +173,7 @@ export class DurableExecutorEnvelope {
   ): ExecutorRoundView {
     return withSqliteTransaction(this.#db, "write", () => {
       const invocation = this.#loadInvocation();
-      this.#assertInvocationWritable(invocation, `observe round ${roundId}`);
+      this.#assertExecutorWritable(invocation, `observe round ${roundId}`);
       const current = this.#loadOwnedRound(roundId);
       if (isTerminalExecutorRoundState(current.state)) {
         throw new ExecutorEnvelopeAccessError(
@@ -211,28 +208,27 @@ export class DurableExecutorEnvelope {
     return withSqliteTransaction(this.#db, "write", () => {
       const now = this.#now();
       const invocation = this.#loadInvocation();
-      if (!isTerminalExecutorInvocationState(invocation.state)) {
-        updateExecutorInvocationState(
+      this.#assertExecutorWritable(invocation, "heartbeat invocation");
+      updateExecutorInvocationState(
+        this.#db,
+        this.#invocationId,
+        invocation.state,
+        { heartbeatAt: now, now },
+      );
+      const current = listExecutorRoundsForInvocation(
+        this.#db,
+        this.#invocationId,
+      ).at(-1);
+      if (
+        current !== undefined &&
+        !isTerminalExecutorRoundState(current.state)
+      ) {
+        updateExecutorRound(
           this.#db,
-          this.#invocationId,
-          invocation.state,
-          { heartbeatAt: now, now },
+          current.roundId,
+          { toState: current.state, heartbeatAt: now },
+          { now },
         );
-        const current = listExecutorRoundsForInvocation(
-          this.#db,
-          this.#invocationId,
-        ).at(-1);
-        if (
-          current !== undefined &&
-          !isTerminalExecutorRoundState(current.state)
-        ) {
-          updateExecutorRound(
-            this.#db,
-            current.roundId,
-            { toState: current.state, heartbeatAt: now },
-            { now },
-          );
-        }
       }
       return this.#snapshotUnlocked();
     });
@@ -309,7 +305,7 @@ export class DurableExecutorEnvelope {
   ): AppliedExecutorDaemonDecision {
     return withSqliteTransaction(this.#db, "write", () => {
       const currentInvocation = this.#loadInvocation();
-      this.#assertInvocationWritable(
+      this.#assertInvocationUnsettled(
         currentInvocation,
         `classify round ${decision.roundId}`,
       );
@@ -404,7 +400,7 @@ export class DurableExecutorEnvelope {
 
   #assertEvidenceWritable(roundId: string): void {
     const invocation = this.#loadInvocation();
-    this.#assertInvocationWritable(
+    this.#assertExecutorWritable(
       invocation,
       `append evidence to round ${roundId}`,
     );
@@ -416,7 +412,23 @@ export class DurableExecutorEnvelope {
     }
   }
 
-  #assertInvocationWritable(
+  #assertExecutorWritable(
+    invocation: ExecutorInvocationRecord,
+    operation: string,
+  ): void {
+    if (isTerminalExecutorInvocationState(invocation.state)) {
+      throw new ExecutorEnvelopeAccessError(
+        `Cannot ${operation}: invocation ${this.#invocationId} is terminal (${invocation.state}).`,
+      );
+    }
+    if (invocation.state !== "running") {
+      throw new ExecutorEnvelopeAccessError(
+        `Cannot ${operation}: invocation ${this.#invocationId} is not executor-writable (${invocation.state}).`,
+      );
+    }
+  }
+
+  #assertInvocationUnsettled(
     invocation: ExecutorInvocationRecord,
     operation: string,
   ): void {

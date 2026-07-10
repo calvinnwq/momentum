@@ -924,6 +924,11 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         config: { agent: 1 },
         message: "config.agent must be an object",
       },
+      {
+        family: "one-shot",
+        config: { timeoutMs: 1_500 },
+        message: "timeoutMs must be a whole number of seconds",
+      },
     ] as const;
 
     for (const testCase of cases) {
@@ -972,6 +977,29 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
       .get() as { count: number };
     expect(count.count).toBe(0);
+
+    await expect(
+      runSingleShotStep({
+        db,
+        family: "one-shot",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        stepKey: "implementation",
+        attempt: 2,
+        selection: resolveSingleShotRoundSelection({
+          stepConfig: { timeoutMs: 1_500 },
+        }),
+        resolveRoundInputs: roundInputs,
+        runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
+      }),
+    ).rejects.toThrow("timeoutMs must be a whole number of seconds");
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
   });
 
   it("inserts the materialized invocation before the round runs", async () => {
@@ -982,7 +1010,8 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       "one-shot",
       1,
     );
-    let stateDuringRound: string | undefined;
+    let durableStateDuringRound:
+      { invocation: string | undefined; round: string | undefined } | undefined;
     await runSingleShotStep({
       db,
       family: "one-shot",
@@ -994,11 +1023,57 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
       runRound: () => {
-        stateDuringRound = loadExecutorInvocation(db, invocationId)?.state;
+        durableStateDuringRound = {
+          invocation: loadExecutorInvocation(db, invocationId)?.state,
+          round: listExecutorRoundsForInvocation(db, invocationId)[0]?.state,
+        };
         return { outcome: { ok: true }, result: runnerResult() };
       },
     });
-    expect(stateDuringRound).toBe("running");
+    expect(durableStateDuringRound).toEqual({
+      invocation: "running",
+      round: "running",
+    });
+  });
+
+  it("rolls back the invocation when initial round materialization fails", async () => {
+    const db = openStepDb();
+    db.exec(`
+      CREATE TRIGGER reject_initial_single_shot_round
+      BEFORE INSERT ON executor_rounds
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated initial round insertion failure');
+      END
+    `);
+
+    await expect(
+      runSingleShotStep({
+        db,
+        family: "one-shot",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        stepKey: "implementation",
+        attempt: 1,
+        selection: resolveSingleShotRoundSelection({}),
+        resolveRoundInputs: roundInputs,
+        runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
+      }),
+    ).rejects.toThrow("simulated initial round insertion failure");
+
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM executor_rounds").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(0);
   });
 
   it("routes a failing round to a terminal failed invocation", async () => {

@@ -45,6 +45,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 
 import type {
   LiveWrapperConfig,
@@ -479,7 +480,11 @@ export async function runLiveStepWrapperAsync(
         signal,
       },
     );
-    signal.throwIfAborted();
+    if (signal.aborted) {
+      writeLog(logHandle, "stdout", processResult.stdout);
+      writeLog(logHandle, "stderr", processResult.stderr);
+      signal.throwIfAborted();
+    }
     return finishLiveStepWrapperProcess({
       input,
       config,
@@ -753,7 +758,11 @@ async function runProbeAsync(
     maxBuffer: outputMaxBytes,
     signal,
   });
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    writeLog(logHandle, "probe stdout", result.stdout);
+    writeLog(logHandle, "probe stderr", result.stderr);
+    signal.throwIfAborted();
+  }
   return finishProbe(logHandle, probe, result, outputMaxBytes);
 }
 
@@ -1099,6 +1108,9 @@ export function runProcessGroup(
 
     let stdout = "";
     let stderr = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    let outputFlushed = false;
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let terminalError: Error | undefined;
@@ -1175,6 +1187,11 @@ export function runProcessGroup(
     ): void => {
       if (settled) return;
       settled = true;
+      if (!outputFlushed) {
+        outputFlushed = true;
+        stdout += stdoutDecoder.end();
+        stderr += stderrDecoder.end();
+      }
       if (executionTimeout !== undefined) clearTimeout(executionTimeout);
       if (closeDeadline !== undefined) clearTimeout(closeDeadline);
       options.signal?.removeEventListener("abort", abort);
@@ -1300,7 +1317,7 @@ export function runProcessGroup(
           requestTermination();
           return;
         }
-        stdout += chunk.toString("utf-8");
+        stdout += stdoutDecoder.write(chunk);
         return;
       }
       stderrBytes += chunk.length;
@@ -1309,7 +1326,7 @@ export function runProcessGroup(
         requestTermination();
         return;
       }
-      stderr += chunk.toString("utf-8");
+      stderr += stderrDecoder.write(chunk);
     };
 
     child.stdout?.on("data", (chunk: Buffer) => capture("stdout", chunk));

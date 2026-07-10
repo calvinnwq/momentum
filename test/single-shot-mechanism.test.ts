@@ -179,7 +179,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: [
         "-c",
-        'printf dirty > "$MOMENTUM_REPO_PATH/cancelled-one-shot.txt"; sleep 5; printf \'{"success":true}\' > "$MOMENTUM_RESULT_PATH"',
+        'printf one-shot-before-cancel; printf one-shot-stderr-before-cancel >&2; printf dirty > "$MOMENTUM_REPO_PATH/cancelled-one-shot.txt"; sleep 5; printf \'{"success":true}\' > "$MOMENTUM_RESULT_PATH"',
       ],
       cwd: "iteration",
       timeoutSec: 10,
@@ -205,13 +205,14 @@ describe("single-shot concrete mechanisms", () => {
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
+    const logPath = path.join(artifactRoot, "one-shot.log");
     setTimeout(() => abort.abort(abortReason), 50);
 
     await expect(
       mechanism(
         round({
           artifactRoot,
-          logPaths: [path.join(artifactRoot, "one-shot.log")],
+          logPaths: [logPath],
         }),
         context,
       ),
@@ -222,6 +223,12 @@ describe("single-shot concrete mechanisms", () => {
       false,
     );
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "one-shot-before-cancel",
+    );
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "one-shot-stderr-before-cancel",
+    );
   });
 
   it("preserves cancelled read-only mutations without repo ownership proof", async () => {
@@ -351,7 +358,10 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const verificationLogPath = path.join(artifactRoot, "verify.log");
-    const args = ["-c", "printf dirty > cancelled.txt; sleep 5"];
+    const args = [
+      "-c",
+      "printf script-before-cancel; printf script-stderr-before-cancel >&2; printf dirty > cancelled.txt; sleep 5",
+    ];
     const mechanism = createScriptCommandRoundRunner({
       command: "/bin/sh",
       args,
@@ -379,6 +389,7 @@ describe("single-shot concrete mechanisms", () => {
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
+    const logPath = path.join(artifactRoot, "script.log");
     setTimeout(() => abort.abort(), 50);
 
     await expect(
@@ -386,13 +397,17 @@ describe("single-shot concrete mechanisms", () => {
         round({
           artifactRoot,
           executorFamily: "script",
-          logPaths: [path.join(artifactRoot, "script.log")],
+          logPaths: [logPath],
         }),
         context,
       ),
     ).rejects.toThrow(/aborted/i);
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+    expect(fs.readFileSync(logPath, "utf-8")).toContain("script-before-cancel");
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "script-stderr-before-cancel",
+    );
   });
 
   it("re-checks cancellation triggered by the finalization ownership hook", async () => {

@@ -115,12 +115,12 @@ The shipped schemas accept these shapes:
 
 Every shown field is optional for the `one-shot` family.
 The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command` and `args`.
-Agent and policy strings must be non-empty, `timeoutMs` is a positive integer in milliseconds, and every `args` item is a string.
+Agent and policy strings must be non-empty, `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000), and every `args` item is a string.
 A script command is a portable identity, not a path or shell fragment: it starts with an alphanumeric character or `@`, then uses only alphanumerics plus `.`, `_`, `:`, `@`, `+`, and `-`; `.` and `..` and Windows drive prefixes are rejected.
 Both top-level schemas and the nested `agent` object reject unknown properties.
 
 `ExecutorConfigSchema` is a JSON-Schema-shaped declaration subset rather than a general JSON Schema dialect.
-It supports string schemas with `enum`, `minLength`, and `pattern`; integer or number schemas with `minimum` and `maximum`; boolean schemas; array schemas with `items` and `minItems`; and strict nested object schemas with `properties`, `required`, and `additionalProperties: false`.
+It supports string schemas with `enum`, `minLength`, and `pattern`; integer or number schemas with `minimum`, `maximum`, and `multipleOf`; boolean schemas; array schemas with `items` and `minItems`; and strict nested object schemas with `properties`, `required`, and `additionalProperties: false`.
 Module registration and structural preflight are responsible for applying the declaration before a tick.
 
 Looping lifecycle schemas may add an opt-in round cap when they ship.

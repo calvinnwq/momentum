@@ -599,6 +599,29 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     );
   });
 
+  it("preserves multibyte UTF-8 split across async pipe chunks", async () => {
+    const root = makeTempDir("momentum-live-step-utf8-");
+    const program = [
+      "process.stdout.write(Buffer.from([0xe2]))",
+      "process.stderr.write(Buffer.from([0xf0]))",
+      "setTimeout(() => {",
+      "  process.stdout.write(Buffer.from([0x82, 0xac]))",
+      "  process.stderr.write(Buffer.from([0x9f, 0x98, 0x80]))",
+      "}, 40)",
+    ].join(";");
+
+    const out = await runProcessGroup(process.execPath, ["-e", program], {
+      cwd: root,
+      env: process.env,
+      timeoutMs: 2_000,
+      maxBuffer: 1024,
+    });
+
+    expect(out.status).toBe(0);
+    expect(out.stdout).toBe("€");
+    expect(out.stderr).toBe("😀");
+  });
+
   it.skipIf(process.platform === "win32")(
     "samples POSIX ancestry without continuously scanning ownership",
     async () => {

@@ -68,6 +68,7 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   insertExecutorInvocation,
+  insertExecutorRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../loop/persist.js";
@@ -82,6 +83,7 @@ import {
 import { createDurableExecutorEnvelope } from "../sdk/envelope.js";
 import {
   planSingleShotInvocation,
+  planSingleShotRoundStart,
   planSingleShotRoundStartForInvocation,
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
@@ -123,6 +125,8 @@ export type RunSingleShotRoundInput = {
   now?: () => number;
   /** Fixed compatibility clock for direct callers and deterministic tests. */
   finishedAt?: number;
+  /** Host proof that this call atomically materialized the new round with its invocation. */
+  roundAlreadyMaterialized?: boolean;
 };
 
 /**
@@ -194,7 +198,12 @@ export async function runSingleShotRound(
     tick = await executor.tick({
       state: envelope.snapshot(),
       config,
-      hostBindings: { start: sdkStart },
+      hostBindings: {
+        start: sdkStart,
+        ...(input.roundAlreadyMaterialized === true
+          ? { roundAlreadyMaterialized: true }
+          : {}),
+      },
       envelope: envelope.facade,
       signal,
     });
@@ -399,8 +408,10 @@ export async function runSingleShotStep(
   const runtime = input.resolveRoundInputs();
   input.signal?.throwIfAborted();
 
-  // 1. Materialize + insert the durable invocation (running) before bounded work,
-  //    so a lost process leaves a durable invocation for recovery.
+  // 1. Plan the durable invocation and its sole round before any external work.
+  //    A new dispatch inserts both rows in one transaction, so a crash can leave
+  //    either no owner or a complete recovery binding, never an invocation-only
+  //    owner that deterministic reattach cannot classify.
   const plannedInvocation = planSingleShotInvocation({
     family: input.family,
     workflowRunId: input.workflowRunId,
@@ -414,15 +425,26 @@ export async function runSingleShotStep(
     plannedInvocation.invocationId,
   );
   let invocation = plannedInvocation;
+  let start = planSingleShotRoundStartForInvocation({
+    invocation: plannedInvocation,
+    selection: input.selection,
+    runtime,
+    startedAt: roundStartedAt,
+  });
+  let roundAlreadyMaterialized = false;
   if (
     existingInvocation === undefined ||
     isTerminalExecutorInvocationState(existingInvocation.state)
   ) {
-    // A terminal duplicate remains a conflict and a fresh owner is still
-    // inserted atomically. Only a non-terminal durable owner is reattached.
-    insertExecutorInvocation(db, plannedInvocation, {
-      now: invocationStartedAt,
-    });
+    // A terminal duplicate still conflicts on invocation identity. The
+    // transaction rolls back the invocation if round insertion fails.
+    materializeSingleShotDispatch(
+      db,
+      plannedInvocation,
+      planSingleShotRoundStart(start),
+      invocationStartedAt,
+    );
+    roundAlreadyMaterialized = true;
   } else {
     assertMatchingSingleShotInvocation(existingInvocation, plannedInvocation);
     if (
@@ -434,26 +456,64 @@ export async function runSingleShotStep(
       );
     }
     invocation = existingInvocation;
+    start = planSingleShotRoundStartForInvocation({
+      invocation,
+      selection: input.selection,
+      runtime,
+      startedAt: roundStartedAt,
+    });
   }
 
-  // 2. Materialize the single round's start projection (inheriting the
-  //    invocation's identity + family) and drive it through its durable lifecycle.
-  const start = planSingleShotRoundStartForInvocation({
-    invocation,
-    selection: input.selection,
-    runtime,
-    startedAt: roundStartedAt,
-  });
+  // 2. Drive the atomically materialized new round, or reattach the existing
+  //    durable round, through its lifecycle.
   const round = await runSingleShotRound({
     db,
     start,
     runRound: input.runRound,
     ...(input.config !== undefined ? { config: input.config } : {}),
     ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    ...(roundAlreadyMaterialized ? { roundAlreadyMaterialized: true } : {}),
     now,
   });
 
   return { invocation: round.invocation, round };
+}
+
+let materializationTransactionSequence = 0;
+
+function materializeSingleShotDispatch(
+  db: MomentumDb,
+  invocation: ExecutorInvocationRecord,
+  round: ExecutorRoundRecord,
+  now: number,
+): void {
+  const nested = db.isTransaction;
+  const savepoint = `single_shot_materialize_${(materializationTransactionSequence += 1)}`;
+  db.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
+  try {
+    insertExecutorInvocation(db, invocation, { now });
+    insertExecutorRound(db, round, { now });
+    db.exec(nested ? `RELEASE SAVEPOINT ${savepoint}` : "COMMIT");
+  } catch (error) {
+    rollbackMaterialization(db, nested ? savepoint : null);
+    throw error;
+  }
+}
+
+function rollbackMaterialization(
+  db: MomentumDb,
+  savepoint: string | null,
+): void {
+  try {
+    if (savepoint === null) {
+      db.exec("ROLLBACK");
+      return;
+    }
+    db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+  } catch {
+    // Preserve the original insertion failure if SQLite closed the transaction.
+  }
 }
 
 function assertMatchingSingleShotInvocation(

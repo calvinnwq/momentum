@@ -43,6 +43,7 @@ export type ExecutorConfigNumberSchema = {
   readonly description?: string;
   readonly minimum?: number;
   readonly maximum?: number;
+  readonly multipleOf?: number;
 };
 
 export type ExecutorConfigBooleanSchema = {

@@ -107,6 +107,12 @@ export function singleShotExecutorConfigError(
     return `${family} config.timeoutMs must be a positive integer.`;
   }
   if (
+    value["timeoutMs"] !== undefined &&
+    (value["timeoutMs"] as number) % 1_000 !== 0
+  ) {
+    return `${family} config.timeoutMs must be a whole number of seconds (a multiple of 1000).`;
+  }
+  if (
     value["policyEnvelope"] !== undefined &&
     (typeof value["policyEnvelope"] !== "string" ||
       value["policyEnvelope"].length === 0)
@@ -151,6 +157,8 @@ export function singleShotExecutorConfigError(
 /** Host-owned round identity/runtime context. No database handle crosses here. */
 export type SingleShotExecutorHostBindings = {
   start: Omit<PlanSingleShotRoundStartInput, "selection">;
+  /** True only for the host call that atomically inserted this new round. */
+  roundAlreadyMaterialized?: boolean;
 };
 
 /** Normalized output of one bounded runner-adapter call. */
@@ -206,7 +214,7 @@ export const AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA = {
   description: "Portable configuration for one bounded agent turn.",
   properties: {
     agent: AGENT_CONFIG_SCHEMA,
-    timeoutMs: { type: "integer", minimum: 1 },
+    timeoutMs: { type: "integer", minimum: 1_000, multipleOf: 1_000 },
     policyEnvelope: { type: "string", minLength: 1 },
   },
   additionalProperties: false,
@@ -224,7 +232,7 @@ export const SCRIPT_EXECUTOR_CONFIG_SCHEMA = {
         "Portable command identity; the host resolves the executable path.",
     },
     args: { type: "array", items: { type: "string" } },
-    timeoutMs: { type: "integer", minimum: 1 },
+    timeoutMs: { type: "integer", minimum: 1_000, multipleOf: 1_000 },
     policyEnvelope: { type: "string", minLength: 1 },
   },
   required: ["command"],
@@ -282,7 +290,10 @@ export class SingleShotExecutor implements Executor<
       context.config,
     );
     if (configError !== null) throw new Error(configError);
-    if (context.state.rounds.length > 0) {
+    if (
+      context.state.rounds.length > 0 &&
+      context.hostBindings.roundAlreadyMaterialized !== true
+    ) {
       return resumeCompletedSingleShotRound(this.name, context);
     }
 
@@ -293,7 +304,10 @@ export class SingleShotExecutor implements Executor<
       selection,
     });
     const frozenLogPaths = [...start.logPaths];
-    const durableStart = context.envelope.startRound(roundStartForSdk(start));
+    const durableStart =
+      context.hostBindings.roundAlreadyMaterialized === true
+        ? loadMaterializedSingleShotRound(this.name, context)
+        : context.envelope.startRound(roundStartForSdk(start));
     context.signal.throwIfAborted();
 
     const mechanism = await this.#runRound(cloneRoundForRunner(durableStart), {
@@ -383,6 +397,44 @@ export class SingleShotExecutor implements Executor<
   }
 }
 
+function loadMaterializedSingleShotRound(
+  family: SingleShotExecutorFamily,
+  context: ExecutorTickContext<
+    SingleShotExecutorConfig,
+    SingleShotExecutorHostBindings
+  >,
+): ExecutorRoundView {
+  if (context.state.rounds.length !== 1) {
+    throw new Error(
+      `SingleShotExecutor ${family} expected exactly one atomically materialized round.`,
+    );
+  }
+  const snapshot = context.state.rounds[0];
+  if (snapshot === undefined) {
+    throw new Error("Single-shot materialized round snapshot is missing.");
+  }
+  if (
+    snapshot.artifacts.length > 0 ||
+    snapshot.checkpoints.length > 0 ||
+    snapshot.findings.length > 0 ||
+    snapshot.decisions.length > 0
+  ) {
+    throw new Error(
+      `Single-shot round ${snapshot.round.roundId} already has durable evidence and cannot be treated as newly materialized.`,
+    );
+  }
+  if (
+    snapshot.round.state !== "running" ||
+    snapshot.round.classification !== null
+  ) {
+    throw new Error(
+      `Single-shot round ${snapshot.round.roundId} is not a fresh running round.`,
+    );
+  }
+  assertSingleShotRoundMatchesHost(family, context, snapshot.round);
+  return snapshot.round;
+}
+
 const SINGLE_SHOT_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
   SINGLE_SHOT_RECOVERY_CODES,
 );
@@ -409,7 +461,8 @@ function resumeCompletedSingleShotRound(
       `Single-shot resumable round ${round.roundId} does not match host round ${context.hostBindings.start.roundId}.`,
     );
   }
-  assertResumableDispatchMatches(family, context, round, snapshot.checkpoints);
+  assertSingleShotRoundMatchesHost(family, context, round);
+  assertResumableDispatchBinding(family, context, round, snapshot.checkpoints);
   if (round.classification !== null || isTerminalRoundState(round.state)) {
     throw new Error(
       `Single-shot round ${round.roundId} is already terminal and cannot resume classification.`,
@@ -456,14 +509,13 @@ function resumeCompletedSingleShotRound(
   };
 }
 
-function assertResumableDispatchMatches(
+function assertSingleShotRoundMatchesHost(
   family: SingleShotExecutorFamily,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
     SingleShotExecutorHostBindings
   >,
   round: ExecutorRoundView,
-  checkpoints: readonly Readonly<ExecutorCheckpointRecord>[],
 ): void {
   const host = context.hostBindings.start;
   const mismatches: string[] = [];
@@ -493,7 +545,18 @@ function assertResumableDispatchMatches(
       `Single-shot round ${round.roundId} cannot reattach with changed dispatch inputs: ${mismatches.join(", ")}.`,
     );
   }
+}
 
+function assertResumableDispatchBinding(
+  family: SingleShotExecutorFamily,
+  context: ExecutorTickContext<
+    SingleShotExecutorConfig,
+    SingleShotExecutorHostBindings
+  >,
+  round: ExecutorRoundView,
+  checkpoints: readonly Readonly<ExecutorCheckpointRecord>[],
+): void {
+  const host = context.hostBindings.start;
   const bindingCheckpoint = checkpoints.find(
     (checkpoint) => checkpoint.stage === "round_started",
   );

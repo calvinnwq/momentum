@@ -269,6 +269,59 @@ describe("executor SDK core contract", () => {
     ).toBeUndefined();
   });
 
+  it("revokes every executor write while the invocation waits for an operator", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 25,
+    });
+    const round = emptyRound(invocation, "running");
+    envelope.facade.startRound(roundStartForSdk(round));
+    envelope.applyDaemonDecision(
+      {
+        roundId: round.roundId,
+        classification: "operator_decision_required",
+        executorRecommendation: "operator_decision_required",
+        roundState: "waiting_operator",
+        invocationState: "waiting_operator",
+        recoveryCode: null,
+        humanGate: "operator_decision_required",
+      },
+      { classificationCheckpoint: daemonCheckpoint(round.roundId, 0) },
+    );
+
+    const writes = [
+      () => envelope.facade.heartbeat(),
+      () => envelope.facade.observeRound(round.roundId, { phase: "running" }),
+      () =>
+        envelope.facade.recordArtifact(round.roundId, {
+          artifactId: "paused-artifact",
+          artifactClass: "logs",
+          path: "/paused.log",
+          digest: null,
+          description: null,
+        }),
+      () =>
+        envelope.facade.recordCheckpoint(round.roundId, {
+          checkpointId: "paused-checkpoint",
+          sequence: 1,
+          stage: "paused",
+          detail: null,
+        }),
+    ];
+
+    for (const write of writes) {
+      expect(write).toThrow("not executor-writable (waiting_operator)");
+    }
+    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+      "waiting_operator",
+    );
+    expect(loadExecutorRound(db, round.roundId)?.state).toBe(
+      "waiting_operator",
+    );
+  });
+
   it("enforces observation-only state authority at runtime", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
@@ -878,6 +931,12 @@ describe("single-shot built-in SDK proof", () => {
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.additionalProperties).toBe(false);
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties).toHaveProperty("command");
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.required).toEqual(["command"]);
+    expect(AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA.properties.timeoutMs).toEqual(
+      expect.objectContaining({ minimum: 1_000, multipleOf: 1_000 }),
+    );
+    expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties.timeoutMs).toEqual(
+      expect.objectContaining({ minimum: 1_000, multipleOf: 1_000 }),
+    );
     const commandPattern = new RegExp(
       SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties.command.pattern,
     );
