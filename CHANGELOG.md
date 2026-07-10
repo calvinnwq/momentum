@@ -4,27 +4,28 @@
 
 ### ⚠ BREAKING CHANGES
 
-- **CLI:** removes the legacy goal-first `goal`, `status`, `logs`, `handoff`, and `worker` commands in favor of the workflow-first surface.
-- **Runtime:** removes the legacy goal-iteration and runner-adapter execution substrate; durable compatibility data and operational recovery surfaces remain supported.
-- **Daemon:** retires the legacy goal-iteration drain lane while preserving the stable daemon, recovery, and doctor contracts. ([#218](https://github.com/calvinnwq/momentum/pull/218))
+- **CLI:** removes the legacy goal-first `goal`, `status`, `logs`, `handoff`, and `worker` commands in favor of the workflow-first surface. ([635dc19](https://github.com/calvinnwq/momentum/commit/635dc19312d01ca46aa7d1ed155802d0b6b9a624), [#218](https://github.com/calvinnwq/momentum/pull/218))
+- **Runtime:** removes the legacy goal-iteration and runner-adapter execution substrate; durable compatibility data and operational recovery surfaces remain supported. ([5dbe890](https://github.com/calvinnwq/momentum/commit/5dbe8903f7bc6041bf868769ea32e208e91f391b), [#218](https://github.com/calvinnwq/momentum/pull/218))
+- **Daemon:** retires the legacy goal-iteration drain lane while preserving the stable daemon, recovery, and doctor contracts. ([6d95c73](https://github.com/calvinnwq/momentum/commit/6d95c7318f31f7e00c8cb5ecd8e552807cdbe9d7), [#218](https://github.com/calvinnwq/momentum/pull/218))
 
 ### Features
 
-- **Operator experience:** adds a public, installable Momentum skill with CLI discovery, workflow, evidence, gate, and recovery guidance. ([#217](https://github.com/calvinnwq/momentum/pull/217))
-- **Goal loop:** adds deterministic round prompts and result files, durable commit-or-reset evidence, and native round state in workflow logs. ([#211](https://github.com/calvinnwq/momentum/pull/211), [#213](https://github.com/calvinnwq/momentum/pull/213))
-- **Workflow:** routes live wrappers through native workflow dispatch so execution shares the durable workflow envelope. ([#216](https://github.com/calvinnwq/momentum/pull/216))
-- **Doctor:** reports capability scope instead of milestone-era markers. ([#215](https://github.com/calvinnwq/momentum/pull/215))
+- **Operator experience:** adds a public, installable Momentum skill with CLI discovery, workflow, evidence, gate, and recovery guidance. ([6586828](https://github.com/calvinnwq/momentum/commit/6586828cee1fbf527d2d925b449893697fe2b139), [#217](https://github.com/calvinnwq/momentum/pull/217))
+- **Goal loop:** adds deterministic round prompts and result files, durable commit-or-reset evidence, and native round state in workflow logs. ([1d01043](https://github.com/calvinnwq/momentum/commit/1d01043d435e0d4bb6eec86a7f54aadbaa0a0c14) prompt rendering, [b5d08de](https://github.com/calvinnwq/momentum/commit/b5d08de916b1abe20d838bdf22c3095914d3d9a4) result files, [a2540e2](https://github.com/calvinnwq/momentum/commit/a2540e2b1e6ae50714038c94bad9bbf55dc1c73f) finalization evidence, [819da1a](https://github.com/calvinnwq/momentum/commit/819da1a9d6e3f053290ce1beff8efbb74edfe103) log projection; [#211](https://github.com/calvinnwq/momentum/pull/211), [#213](https://github.com/calvinnwq/momentum/pull/213))
+- **Workflow:** routes live wrappers through native workflow dispatch so execution shares the durable workflow envelope. ([69961c6](https://github.com/calvinnwq/momentum/commit/69961c62d4c8489fd5f87ac05e4b30dee3017dd2), [#216](https://github.com/calvinnwq/momentum/pull/216))
+- **Doctor:** reports capability scope instead of milestone-era markers. ([ee316a5](https://github.com/calvinnwq/momentum/commit/ee316a570ac6bacdc3e2ceef8409b3a67110a9df), [#215](https://github.com/calvinnwq/momentum/pull/215))
 
 ### Bug Fixes
 
-- **Adapters:** detects semantic stalls in supervised no-mistakes runs. ([#221](https://github.com/calvinnwq/momentum/pull/221))
-- **Daemon:** recovers stale workflow-dispatch runs instead of leaving them wedged. ([#223](https://github.com/calvinnwq/momentum/pull/223))
-- **Goal loop:** bounds untrusted prompt context and preserves underlying commit/reset failures in manual-recovery evidence. ([#211](https://github.com/calvinnwq/momentum/pull/211), [#213](https://github.com/calvinnwq/momentum/pull/213))
-- **Workflow:** fails watch preflight when its required live-wrapper profile is missing. ([#210](https://github.com/calvinnwq/momentum/pull/210))
+- **Adapters:** detects semantic stalls in supervised no-mistakes runs. ([bbeaafa](https://github.com/calvinnwq/momentum/commit/bbeaafa0d7acc072e47600c3f92d536a1c60ea0c), [#221](https://github.com/calvinnwq/momentum/pull/221))
+- **Daemon:** recovers stale workflow-dispatch runs instead of leaving them wedged. ([0efc06a](https://github.com/calvinnwq/momentum/commit/0efc06aaae61997f415f542053fb04d182ed5ce5), [#223](https://github.com/calvinnwq/momentum/pull/223))
+- **Goal loop:** bounds untrusted prompt context and preserves underlying commit/reset failures in manual-recovery evidence. ([6ddd257](https://github.com/calvinnwq/momentum/commit/6ddd25715b1005ca7ce480b0fe0a21e8cef0478a) prompt bounds, [2d0d8ad](https://github.com/calvinnwq/momentum/commit/2d0d8ad1c5cc4f1a1d4572e5b059f626ee536e0a) recovery evidence; [#211](https://github.com/calvinnwq/momentum/pull/211), [#213](https://github.com/calvinnwq/momentum/pull/213))
+- **Workflow:** fails watch preflight when its required live-wrapper profile is missing. ([b67647d](https://github.com/calvinnwq/momentum/commit/b67647d9a179c9ee433f013b89c4d003db9216bd), [#210](https://github.com/calvinnwq/momentum/pull/210))
 
 ### Quality
 
-- Enforces real lint and formatting gates in local scripts and CI. ([#222](https://github.com/calvinnwq/momentum/pull/222))
+- Enforces real lint and formatting gates in local scripts and CI. ([9982bfd](https://github.com/calvinnwq/momentum/commit/9982bfd9fd82ae1bdfe77c93d74862afc62c4b11), [#222](https://github.com/calvinnwq/momentum/pull/222))
+- Keeps breaking pre-1.0 releases on minor version increments instead of jumping to `1.0.0`. ([41902cb](https://github.com/calvinnwq/momentum/commit/41902cb6d0529294ea19f8806b17430e2645e0e4), [#220](https://github.com/calvinnwq/momentum/pull/220))
 
 ## [0.17.0](https://github.com/calvinnwq/momentum/compare/v0.16.3...v0.17.0) (2026-07-06)
 
