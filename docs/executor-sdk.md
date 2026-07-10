@@ -58,6 +58,11 @@ Cancellation is cooperative and cleanup-bearing: a runner that observes `signal`
 
 The shipped agent-once and script process adapters supervise their spawned process trees asynchronously. A separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash. Every launched process inherits a cryptographically random per-run ownership token; POSIX cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process. Windows cleanup discovers descendants from the still-live anchor even after the command leader exits. Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint. Cleanup verifies tracked/untracked status and the captured ignored-path metadata baseline. Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation. Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
 
+Portable POSIX supervision is userland containment, not a sandbox.
+It can prove cleanup for the anchored process group and for descendants observed through ancestry sampling that retain the ownership token.
+A hostile descendant that changes session and strips the token between samples can require cgroups or another OS-backed containment primitive; that case is outside this portable implementation.
+When Momentum observes an unowned escaped descendant, loses ownership visibility, or cannot prove the owned tree is gone, the supervisor fails with `SUPERVISOR_FAILED` and the durable invocation remains in flight for recovery.
+
 ## Envelope facade
 
 `ExecutorEnvelope` is bound to one invocation. It supports:
@@ -71,13 +76,60 @@ The shipped agent-once and script process adapters supervise their spawned proce
 
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
 
-If `mechanism_completed` evidence is durable but daemon classification is not, the single-shot daemon entrypoint reattaches the matching non-terminal deterministic invocation, reconstructs the outcome from that checkpoint, and returns the same recommendation without rerunning the mechanism. Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof. Incomplete rounds without a durable mechanism outcome remain recovery work rather than being replayed blindly.
+If `mechanism_completed` evidence is durable but daemon classification is not, the single-shot daemon entrypoint reattaches the matching non-terminal deterministic invocation, reconstructs the outcome from that checkpoint, and returns the same recommendation without rerunning the mechanism.
+Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
+Reattach requires a durable round plus unchanged invocation identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
+An invocation without that round binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
 
 ## Config and host bindings
 
 Apply the portability test: a workflow definition should move to another machine verbatim.
 
-Portable step config is lifecycle-specific. Agent-once accepts agent `harness` / `model` / `effort`, timeout, and policy. Script requires a command identity and may add argv, timeout, and policy. Looping lifecycle schemas may add an opt-in round cap when they ship. Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings. Runner adapters receive both the portable config and resolved host bindings, and must reject a mismatched host resolution. The shipped single-shot adapters cross-check script command/argv/timeout/policy and agent-once agent/timeout/policy identity before launching a process.
+Portable step config is lifecycle-specific.
+The shipped schemas accept these shapes:
+
+`one-shot`:
+
+```json
+{
+  "agent": {
+    "harness": "codex",
+    "model": "gpt-5",
+    "effort": "high"
+  },
+  "timeoutMs": 900000,
+  "policyEnvelope": "repo-write"
+}
+```
+
+`script`:
+
+```json
+{
+  "command": "repo-cleanup",
+  "args": ["--prune"],
+  "timeoutMs": 60000,
+  "policyEnvelope": "cleanup-only"
+}
+```
+
+Every shown field is optional for the `one-shot` family.
+The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command` and `args`.
+Agent and policy strings must be non-empty, `timeoutMs` is a positive integer in milliseconds, and every `args` item is a string.
+A script command is a portable identity, not a path or shell fragment: it starts with an alphanumeric character or `@`, then uses only alphanumerics plus `.`, `_`, `:`, `@`, `+`, and `-`; `.` and `..` and Windows drive prefixes are rejected.
+Both top-level schemas and the nested `agent` object reject unknown properties.
+
+`ExecutorConfigSchema` is a JSON-Schema-shaped declaration subset rather than a general JSON Schema dialect.
+It supports string schemas with `enum`, `minLength`, and `pattern`; integer or number schemas with `minimum` and `maximum`; boolean schemas; array schemas with `items` and `minItems`; and strict nested object schemas with `properties`, `required`, and `additionalProperties: false`.
+Module registration and structural preflight are responsible for applying the declaration before a tick.
+
+Looping lifecycle schemas may add an opt-in round cap when they ship.
+Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings.
+Generic executors receive their resolved bindings through `ExecutorTickContext.hostBindings`.
+The shipped single-shot lifecycle keeps round-start identity in that field and captures its resolved live-wrapper or script runtime when the runner adapter is constructed.
+The runner still receives portable config and must reject any mismatch with the captured host resolution.
+The shipped adapters cross-check script command/argv/timeout/policy and agent-once agent/timeout/policy identity before launching a process.
+For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 

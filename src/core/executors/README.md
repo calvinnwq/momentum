@@ -48,6 +48,11 @@ repo-ownership proof before resetting mutations, and
 only then let the host atomically persist the cancelled classification. Missing
 ownership proof or cleanup failure preserves the durable in-flight state for
 recovery rather than claiming terminal cancellation.
+POSIX supervision is portable userland containment, not a sandbox: it proves
+cleanup for the anchored group and sampled descendants that retain the ownership
+token, but a hostile descendant that escapes between ancestry samples and strips
+the token requires kernel-backed containment outside this implementation.
+Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
 Registration/discovery and structural-preflight schema validation remain separate
 wiring.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.

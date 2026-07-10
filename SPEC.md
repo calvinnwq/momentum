@@ -109,6 +109,15 @@ envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 
+Portable POSIX process supervision is userland containment.
+It can prove cleanup for the anchored group and sampled descendants that retain
+the ownership token, but a hostile descendant that escapes between ancestry
+samples and strips the token requires kernel-backed containment outside this
+implementation.
+Detected escaped descendants, lost ownership visibility, or any other inability
+to prove cleanup fails closed with `SUPERVISOR_FAILED` and preserves the durable
+in-flight state for recovery.
+
 The dependency-free `RunnerResult` shapes in
 `src/core/executors/runner/types.ts` and parser/normalizers in
 `src/core/executors/runner/result.ts` are official SDK contract surface. Runner

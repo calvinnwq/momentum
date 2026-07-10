@@ -27,10 +27,11 @@
  * and settles the invocation. There is no invocation loop and no
  * `invocationStateForRoundClassification` indirection: the single-shot decision
  * already carries the invocation state (one round *is* the invocation), and every
- * single-shot invocation state — `succeeded` / `blocked` / `failed` /
- * `manual_recovery_required` — is terminal, so the invocation always settles with
- * a stamped `finished_at`. A re-run is a fresh `attempt` minting a fresh
- * invocation, never a `continue`.
+ * accepted single-shot invocation state — `succeeded` / `blocked` / `failed` /
+ * `manual_recovery_required` — is terminal and receives a stamped `finished_at`.
+ * A thrown runner or cleanup boundary can deliberately leave the invocation in
+ * flight for recovery instead of manufacturing a terminal classification.
+ * A re-run is a fresh `attempt` minting a fresh invocation, never a `continue`.
  *
  * The bounded mechanism is injected as a {@link SingleShotRoundRunner} so the real
  * one-shot mechanism (an agent/review pass producing a normalized result
@@ -43,14 +44,16 @@
  * decision so the verification-authority and repo-safety boundaries hold end to
  * end.
  *
- * The mechanism is *total*: it encodes every failure as a recovery code in its
- * {@link SingleShotInvocationOutcome} (and a `null` / absent result) rather than
- * throwing, mirroring `decideSingleShotInvocation`. Two ordering invariants tie
- * the lifecycle to the contract:
+ * Ordinary mechanism outcomes encode failures as recovery codes in
+ * {@link SingleShotInvocationOutcome} (and a `null` / absent result), mirroring
+ * `decideSingleShotInvocation`. Cooperative cancellation propagates the signal
+ * reason only after verified process and repository cleanup. Supervisor or
+ * cleanup failures throw and preserve the durable in-flight state. Two ordering
+ * invariants tie the lifecycle to the contract:
  *
  *   - The durable invocation and round-start rows are inserted *before* the
  *     mechanism runs (contract Round Lifecycle step 4), so a lost process leaves a
- *     durable `running` invocation/round to reattach to rather than no evidence.
+ *     durable `running` invocation/round for recovery rather than no evidence.
  *   - A *successful* outcome captures (running -> capturing_result) before
  *     terminalizing — even a `script` success with no result document emits a bare
  *     capture, because the round transition graph forbids `running -> succeeded`
@@ -103,18 +106,14 @@ export type {
 } from "./sdk.js";
 
 /**
- * The output of one bounded single-shot mechanism run, normalized for the driver.
- * The {@link outcome} is what {@link planSingleShotRoundPersistence} and
- * {@link planSingleShotRoundCheckpoints} consume, so the mechanism stays decoupled
- * from the durable schema and from how each family produced the outcome (the
- * one-shot family maps a finalize result, the script family maps an exit
- * code).
+ * Inputs for driving or resuming one single-shot round through the durable SDK
+ * envelope.
  */
 export type RunSingleShotRoundInput = {
   db: MomentumDb;
   /** The round-start projection inputs (identity, resolved selection, input evidence, start clock). */
   start: PlanSingleShotRoundStartInput;
-  /** The bounded mechanism to run for the round. */
+  /** The bounded mechanism for a new round; completed reattach skips it. */
   runRound: SingleShotRoundRunner;
   /** Portable SDK config. Required for script command identity. */
   config?: SingleShotExecutorConfig;
@@ -142,12 +141,18 @@ export type RunSingleShotRoundResult = {
 };
 
 /**
- * Drive one bounded single-shot round end to end through its durable round-record
- * lifecycle. See the module doc for the ordered contract.
+ * Drive a new bounded single-shot round, or resume classification for completed
+ * durable work, through its round-record lifecycle.
+ * See the module doc for the ordered contract.
  *
- * @throws {ExecutorRoundConflictError} if the round id / `(invocation, index)`
- * already exists (a durable round is the proof a bounded unit started, not an
- * idempotent re-ingest).
+ * Reattaches a matching non-terminal round only when its durable
+ * `mechanism_completed` checkpoint proves the bounded mechanism already
+ * finished; it resumes classification without running the mechanism again.
+ *
+ * @throws {ExecutorRoundConflictError} if first materialization collides with a
+ * different durable round id / `(invocation, index)` owner.
+ * @throws {Error} if an existing round is terminal, incomplete, or does not
+ * match the current dispatch binding.
  * @throws {Error} if the outcome carries an unknown recovery code (via
  * {@link planSingleShotRoundPersistence}).
  */
@@ -290,7 +295,7 @@ type RunSingleShotStepBase = {
   attempt: number;
   /** The deterministic selection (from `resolveSingleShotRoundSelection`) frozen into the round. */
   selection: SingleShotRoundSelection;
-  /** The bounded mechanism the round runs (the real one-shot / script mechanism plugs in here). */
+  /** The bounded mechanism for a new round; completed reattach skips it. */
   runRound: SingleShotRoundRunner;
   /** Caller-owned cancellation for the bounded turn. */
   signal?: AbortSignal;
@@ -349,13 +354,20 @@ export type RunSingleShotStepResult = {
  * checkpoint, and invocation settlement commit in one transaction.
  *
  * Clocks: the invocation start, round start, durable observations, and terminal
- * settlement are stamped from the injected `now`. The terminal read happens
- * after awaited mechanism work, so asynchronous rounds preserve lifecycle order.
+ * settlement are stamped from the injected `now`. Any terminal read after new
+ * work happens after the awaited mechanism, so asynchronous rounds preserve
+ * lifecycle order.
  *
- * @throws {ExecutorInvocationConflictError} if the invocation id already exists
- * (a re-run must use a fresh `attempt`).
- * @throws {ExecutorRoundConflictError} if the round id already exists (via
- * {@link runSingleShotRound}).
+ * A matching non-terminal invocation reattaches only through its durable round
+ * dispatch binding; a terminal duplicate remains a conflict, and a genuine
+ * re-run must use a fresh `attempt`.
+ *
+ * @throws {ExecutorInvocationConflictError} if the deterministic invocation id
+ * already belongs to a terminal attempt.
+ * @throws {ExecutorRoundConflictError} if first round materialization collides
+ * with a different durable owner (via {@link runSingleShotRound}).
+ * @throws {Error} if a non-terminal invocation has no durable round binding or
+ * its existing round does not match the current dispatch inputs.
  */
 export async function runSingleShotStep(
   input: RunSingleShotStepInput,
@@ -388,7 +400,7 @@ export async function runSingleShotStep(
   input.signal?.throwIfAborted();
 
   // 1. Materialize + insert the durable invocation (running) before bounded work,
-  //    so a lost process leaves a durable invocation to reattach to.
+  //    so a lost process leaves a durable invocation for recovery.
   const plannedInvocation = planSingleShotInvocation({
     family: input.family,
     workflowRunId: input.workflowRunId,

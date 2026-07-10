@@ -944,7 +944,7 @@ export type ProcessGroupOptions = {
 };
 
 export type AsyncProcessGroupOptions = ProcessGroupOptions & {
-  /** Cooperative cancellation that kills the entire detached process group. */
+  /** Cooperative cancellation that requests verified owned-tree cleanup. */
   signal?: AbortSignal;
 };
 
@@ -1068,8 +1068,15 @@ export function runProcessGroupSync(
 }
 
 /**
- * Asynchronously run a bounded detached process group. Timeout, output overflow,
- * and caller cancellation all kill the complete group before the promise settles.
+ * Asynchronously run a bounded process below a detached anchor. Timeout, output
+ * overflow, normal leader exit, and caller cancellation all trigger cleanup of
+ * the anchored group and every discovered token-owned descendant before the
+ * promise settles.
+ *
+ * POSIX cleanup is portable userland containment, not a sandbox. A hostile
+ * descendant that escapes between ancestry samples and strips its ownership
+ * token requires kernel-backed containment; detected escapes or any lost cleanup
+ * proof reject with `SUPERVISOR_FAILED` rather than claiming success.
  */
 export function runProcessGroup(
   command: string,
