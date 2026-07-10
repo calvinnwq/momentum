@@ -3,14 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import {
-  sigtermImmuneSleep,
-  waitMs
-} from "./helpers/process-kill-harness.js";
+import { sigtermImmuneSleep, waitMs } from "./helpers/process-kill-harness.js";
 import {
   LIVE_STEP_WRAPPER_RESULT_MAX_BYTES,
+  runProcessGroup,
   runLiveStepWrapper,
-  type LiveStepWrapperInput
+  type LiveStepWrapperInput,
 } from "../src/adapters/live-step-wrapper.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 
@@ -40,7 +38,7 @@ const VALID_RESULT_JSON = JSON.stringify({
   key_learnings: [],
   remaining_work: [],
   goal_complete: false,
-  commit: { type: "chore", subject: "do the thing", body: "", breaking: false }
+  commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 
 // Shell fragment that writes the valid result document to the injected
@@ -48,7 +46,9 @@ const VALID_RESULT_JSON = JSON.stringify({
 // in the shell command is safe.
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
-function makeConfig(overrides: Partial<LiveWrapperConfig> = {}): LiveWrapperConfig {
+function makeConfig(
+  overrides: Partial<LiveWrapperConfig> = {},
+): LiveWrapperConfig {
   return {
     command: "/bin/sh",
     args: [],
@@ -57,7 +57,7 @@ function makeConfig(overrides: Partial<LiveWrapperConfig> = {}): LiveWrapperConf
     envAllow: [],
     resultFile: "result.json",
     probe: undefined,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -72,7 +72,8 @@ type SetupOverrides = {
 };
 
 function setup(overrides: SetupOverrides = {}): LiveStepWrapperInput {
-  const repoPath = overrides.repoPath ?? makeTempDir("momentum-live-step-repo-");
+  const repoPath =
+    overrides.repoPath ?? makeTempDir("momentum-live-step-repo-");
   const iterationDir =
     overrides.iterationDir ?? makeTempDir("momentum-live-step-iter-");
   const runDir = makeTempDir("momentum-live-step-run-");
@@ -92,7 +93,7 @@ function setup(overrides: SetupOverrides = {}): LiveStepWrapperInput {
       : {}),
     ...(overrides.promptPath !== undefined
       ? { promptPath: overrides.promptPath }
-      : {})
+      : {}),
   };
 }
 
@@ -109,10 +110,10 @@ describe("runLiveStepWrapper — success path", () => {
           [
             "echo live-step-stdout",
             "echo live-step-stderr >&2",
-            WRITE_VALID_RESULT
-          ].join("\n")
-        ]
-      }
+            WRITE_VALID_RESULT,
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -121,7 +122,7 @@ describe("runLiveStepWrapper — success path", () => {
     expect(out.result.success).toBe(true);
     expect(out.result.summary).toBe("live implementation step succeeded");
     expect(out.resultJsonPath).toBe(
-      path.join(input.iterationDir, "result.json")
+      path.join(input.iterationDir, "result.json"),
     );
 
     const log = readLog(input);
@@ -142,10 +143,10 @@ describe("runLiveStepWrapper — success path", () => {
           "-c",
           [
             'echo "RUN=$MOMENTUM_RUN_ID|STEP=$MOMENTUM_STEP_ID|KIND=$MOMENTUM_STEP_KIND|ATTEMPT=$MOMENTUM_ATTEMPT"',
-            WRITE_VALID_RESULT
-          ].join("\n")
-        ]
-      }
+            WRITE_VALID_RESULT,
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -153,7 +154,7 @@ describe("runLiveStepWrapper — success path", () => {
 
     const log = readLog(input);
     expect(log).toContain(
-      "RUN=wfrun-deadbeef|STEP=implementation-step|KIND=implementation|ATTEMPT=1"
+      "RUN=wfrun-deadbeef|STEP=implementation-step|KIND=implementation|ATTEMPT=1",
     );
   });
 
@@ -166,8 +167,8 @@ describe("runLiveStepWrapper — success path", () => {
         command: "/usr/bin/env",
         args: ["node", "dist/adapters/missing-wrapper.js"],
         cwd: "repo",
-        envAllow: ["PATH"]
-      }
+        envAllow: ["PATH"],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -185,7 +186,11 @@ describe("runLiveStepWrapper — success path", () => {
     const repoPath = makeTempDir("momentum-live-step-repo-");
     const scriptPath = path.join(repoPath, "dist", "adapters", "wrapper.js");
     fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
-    fs.writeFileSync(scriptPath, "require('missing-project-dependency');\n", "utf8");
+    fs.writeFileSync(
+      scriptPath,
+      "require('missing-project-dependency');\n",
+      "utf8",
+    );
     const input = setup({
       repoPath,
       env: { PATH: process.env.PATH },
@@ -193,8 +198,8 @@ describe("runLiveStepWrapper — success path", () => {
         command: "/usr/bin/env",
         args: ["node", "dist/adapters/wrapper.js"],
         cwd: "repo",
-        envAllow: ["PATH"]
-      }
+        envAllow: ["PATH"],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -215,7 +220,7 @@ describe("runLiveStepWrapper — env allowlist", () => {
       env: {
         PATH: process.env.PATH,
         ALLOWED_VAR: "allowed-value",
-        BLOCKED_VAR: "blocked-value"
+        BLOCKED_VAR: "blocked-value",
       },
       config: {
         envAllow: ["ALLOWED_VAR"],
@@ -223,10 +228,10 @@ describe("runLiveStepWrapper — env allowlist", () => {
           "-c",
           [
             'echo "ALLOWED=$ALLOWED_VAR|BLOCKED=$BLOCKED_VAR"',
-            WRITE_VALID_RESULT
-          ].join("\n")
-        ]
-      }
+            WRITE_VALID_RESULT,
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -242,7 +247,7 @@ describe("runLiveStepWrapper — env allowlist", () => {
       env: {
         PATH: "/tmp/untrusted-path",
         ALLOWED_VAR: "allowed-value",
-        BLOCKED_VAR: "blocked-value"
+        BLOCKED_VAR: "blocked-value",
       },
       config: {
         command: process.execPath,
@@ -253,10 +258,10 @@ describe("runLiveStepWrapper — env allowlist", () => {
             'const fs = require("node:fs");',
             `const result = ${VALID_RESULT_JSON};`,
             'result.summary = `PATH=${process.env.PATH ?? ""}|ALLOWED=${process.env.ALLOWED_VAR ?? ""}|BLOCKED=${process.env.BLOCKED_VAR ?? ""}`;',
-            'fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, JSON.stringify(result));'
-          ].join("\n")
-        ]
-      }
+            "fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, JSON.stringify(result));",
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -268,7 +273,7 @@ describe("runLiveStepWrapper — env allowlist", () => {
   it("inherits PATH when PATH is allowlisted", () => {
     const input = setup({
       env: {
-        PATH: "/tmp/allowed-path"
+        PATH: "/tmp/allowed-path",
       },
       config: {
         command: process.execPath,
@@ -279,10 +284,10 @@ describe("runLiveStepWrapper — env allowlist", () => {
             'const fs = require("node:fs");',
             `const result = ${VALID_RESULT_JSON};`,
             'result.summary = `PATH=${process.env.PATH ?? ""}`;',
-            'fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, JSON.stringify(result));'
-          ].join("\n")
-        ]
-      }
+            "fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, JSON.stringify(result));",
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -297,8 +302,8 @@ describe("runLiveStepWrapper — cwd resolution", () => {
     const input = setup({
       config: {
         cwd: "iteration",
-        args: ["-c", ["pwd", WRITE_VALID_RESULT].join("\n")]
-      }
+        args: ["-c", ["pwd", WRITE_VALID_RESULT].join("\n")],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -312,8 +317,8 @@ describe("runLiveStepWrapper — cwd resolution", () => {
     const input = setup({
       config: {
         cwd: "repo",
-        args: ["-c", ["pwd", WRITE_VALID_RESULT].join("\n")]
-      }
+        args: ["-c", ["pwd", WRITE_VALID_RESULT].join("\n")],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -326,20 +331,22 @@ describe("runLiveStepWrapper — cwd resolution", () => {
   it("rejects a direct-caller relative iterationDir before spawning", () => {
     const relativeIterationDir = path.relative(
       process.cwd(),
-      makeTempDir("momentum-live-step-relative-iter-")
+      makeTempDir("momentum-live-step-relative-iter-"),
     );
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "spawned"
+      "spawned",
     );
     const input = setup({
       iterationDir: relativeIterationDir,
       config: {
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -355,11 +362,11 @@ describe("runLiveStepWrapper — cwd resolution", () => {
   it("rejects a direct-caller relative repoPath before spawning", () => {
     const relativeRepoPath = path.relative(
       process.cwd(),
-      makeTempDir("momentum-live-step-relative-repo-")
+      makeTempDir("momentum-live-step-relative-repo-"),
     );
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "spawned"
+      "spawned",
     );
     const input = setup({
       repoPath: relativeRepoPath,
@@ -367,9 +374,11 @@ describe("runLiveStepWrapper — cwd resolution", () => {
         cwd: "repo",
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -386,20 +395,22 @@ describe("runLiveStepWrapper — cwd resolution", () => {
     const logDir = makeTempDir("momentum-live-step-relative-log-");
     const relativeLogPath = path.relative(
       process.cwd(),
-      path.join(logDir, "executor.log")
+      path.join(logDir, "executor.log"),
     );
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "spawned"
+      "spawned",
     );
     const input = setup({
       executorLogPath: relativeLogPath,
       config: {
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -434,11 +445,11 @@ describe("runLiveStepWrapper — command failure mapping", () => {
           [
             "printf '%s\\n' 'MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable' >&2",
             "printf '%s\\n' 'no-mistakes could not start for this branch' >&2",
-            "exit 1"
+            "exit 1",
           ].join("\n"),
-          "coding-workflow-live-wrapper-cli.ts"
-        ]
-      }
+          "coding-workflow-live-wrapper-cli.ts",
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -458,10 +469,10 @@ describe("runLiveStepWrapper — command failure mapping", () => {
           "-c",
           [
             "printf '%s\\n' 'MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable' >&2",
-            "exit 1"
-          ].join("\n")
-        ]
-      }
+            "exit 1",
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -475,7 +486,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
 
   it("returns command_timed_out when the command exceeds timeout_sec", () => {
     const input = setup({
-      config: { timeoutSec: 1, args: ["-c", "sleep 5"] }
+      config: { timeoutSec: 1, args: ["-c", "sleep 5"] },
     });
 
     const out = runLiveStepWrapper(input);
@@ -485,14 +496,12 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(out.error).toContain("1s");
     const log = readLog(input);
     expect(log).toContain("[live-step] result: timed_out");
-    expect(log).toContain(
-      "[live-step] summary: command timed out after 1s"
-    );
+    expect(log).toContain("[live-step] summary: command timed out after 1s");
   });
 
   it("enforces command timeout even when the process ignores SIGTERM", () => {
     const input = setup({
-      config: { timeoutSec: 1, args: ["-c", sigtermImmuneSleep(3)] }
+      config: { timeoutSec: 1, args: ["-c", sigtermImmuneSleep(3)] },
     });
 
     const start = Date.now();
@@ -509,16 +518,16 @@ describe("runLiveStepWrapper — command failure mapping", () => {
   it("kills descendant processes when a command times out", () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "descendant-survived"
+      "descendant-survived",
     );
     const input = setup({
       config: {
         timeoutSec: 1,
         args: [
           "-c",
-          `(sleep 2; printf survived > ${JSON.stringify(markerPath)}) & sleep 5`
-        ]
-      }
+          `(sleep 2; printf survived > ${JSON.stringify(markerPath)}) & sleep 5`,
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -533,7 +542,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
   it("kills background descendants when a command exits normally", () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "descendant-survived"
+      "descendant-survived",
     );
     const input = setup({
       config: {
@@ -541,10 +550,10 @@ describe("runLiveStepWrapper — command failure mapping", () => {
           "-c",
           [
             `(sleep 1; printf survived > ${JSON.stringify(markerPath)}) >/dev/null 2>&1 &`,
-            WRITE_VALID_RESULT
-          ].join("\n")
-        ]
-      }
+            WRITE_VALID_RESULT,
+          ].join("\n"),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -554,19 +563,107 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 
+  it("kills background descendants when an async process leader exits normally", async () => {
+    const markerPath = path.join(
+      makeTempDir("momentum-live-step-marker-"),
+      "async-descendant-survived",
+    );
+    const out = await runProcessGroup(
+      "/bin/sh",
+      ["-c", `(sleep 5; printf survived > ${JSON.stringify(markerPath)}) &`],
+      {
+        cwd: path.dirname(markerPath),
+        env: {},
+        timeoutMs: 500,
+        maxBuffer: 1024,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5_500));
+
+    expect(out.status).toBe(0);
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it("tracks and kills a descendant that creates a new POSIX session", async () => {
+    const markerPath = path.join(
+      makeTempDir("momentum-live-step-marker-"),
+      "setsid-descendant-survived",
+    );
+    const descendant = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "survived"), 1500)`;
+    const parent = [
+      'const { spawn } = require("node:child_process")',
+      `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { detached: true, stdio: "ignore" }).unref()`,
+      "setTimeout(() => {}, 5000)",
+    ].join(";");
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+
+    const out = await runProcessGroup(process.execPath, ["-e", parent], {
+      cwd: path.dirname(markerPath),
+      env: process.env,
+      timeoutMs: 5_000,
+      maxBuffer: 1024,
+      signal: abort.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    expect((out.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+      "ABORT_ERR",
+    );
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it("fails closed when a detached descendant discards its ownership token", async () => {
+    const root = makeTempDir("momentum-live-step-unowned-");
+    const pidPath = path.join(root, "descendant.pid");
+    const descendant = "setTimeout(() => {}, 5000)";
+    const parent = [
+      'const { spawn } = require("node:child_process")',
+      'const fs = require("node:fs")',
+      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { detached: true, stdio: "ignore", env: {} })`,
+      `fs.writeFileSync(${JSON.stringify(pidPath)}, String(child.pid))`,
+      "child.unref()",
+      "setTimeout(() => {}, 5000)",
+    ].join(";");
+    const abort = new AbortController();
+    const running = runProcessGroup(process.execPath, ["-e", parent], {
+      cwd: root,
+      env: process.env,
+      timeoutMs: 5_000,
+      maxBuffer: 1024,
+      signal: abort.signal,
+    });
+    const deadline = Date.now() + 3_000;
+    while (!fs.existsSync(pidPath) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(fs.existsSync(pidPath)).toBe(true);
+    const descendantPid = Number(fs.readFileSync(pidPath, "utf-8"));
+    abort.abort();
+
+    await expect(running).rejects.toMatchObject({ code: "SUPERVISOR_FAILED" });
+    try {
+      process.kill(-descendantPid, "SIGKILL");
+    } catch {
+      // The fail-closed descendant may already have exited.
+    }
+  });
+
   it("rejects a direct-caller non-positive command timeout before spawning", () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "spawned"
+      "spawned",
     );
     const input = setup({
       config: {
         timeoutSec: 0,
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -585,9 +682,9 @@ describe("runLiveStepWrapper — command failure mapping", () => {
       config: {
         args: [
           "-c",
-          'i=0; while [ "$i" -lt 200 ]; do echo 0123456789; i=$((i + 1)); done'
-        ]
-      }
+          'i=0; while [ "$i" -lt 200 ]; do echo 0123456789; i=$((i + 1)); done',
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -602,16 +699,16 @@ describe("runLiveStepWrapper — runtime availability", () => {
   it("rejects a direct-caller relative command without resolving it through PATH", () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "spawned"
+      "spawned",
     );
     const input = setup({
       config: {
         command: "sh",
         args: [
           "-c",
-          `touch ${JSON.stringify(markerPath)}; ${WRITE_VALID_RESULT}`
-        ]
-      }
+          `touch ${JSON.stringify(markerPath)}; ${WRITE_VALID_RESULT}`,
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -627,8 +724,8 @@ describe("runLiveStepWrapper — runtime availability", () => {
       config: {
         command: "/does/not/exist/live-step-binary",
         args: [],
-        resultFile: "result.json"
-      }
+        resultFile: "result.json",
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -637,7 +734,7 @@ describe("runLiveStepWrapper — runtime availability", () => {
     expect(out.code).toBe("runtime_unavailable");
     // Missing runtime must never run the step or produce a result file.
     expect(fs.existsSync(path.join(input.iterationDir, "result.json"))).toBe(
-      false
+      false,
     );
     expect(readLog(input)).toContain("[live-step] runtime_unavailable");
   });
@@ -650,7 +747,7 @@ describe("runLiveStepWrapper — runtime availability", () => {
     fs.chmodSync(commandPath, 0o644);
     const input = setup({
       iterationDir,
-      config: { command: commandPath, args: [] }
+      config: { command: commandPath, args: [] },
     });
 
     const out = runLiveStepWrapper(input);
@@ -666,15 +763,15 @@ describe("runLiveStepWrapper — result file capture", () => {
     const input = setup({
       config: {
         resultFile: "..result.json",
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.resultJsonPath).toBe(
-      path.join(input.iterationDir, "..result.json")
+      path.join(input.iterationDir, "..result.json"),
     );
   });
 
@@ -691,9 +788,11 @@ describe("runLiveStepWrapper — result file capture", () => {
         resultFile: "../escape.json",
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -722,9 +821,11 @@ describe("runLiveStepWrapper — result file capture", () => {
         resultFile: "linked/result.json",
         args: [
           "-c",
-          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join("\n")
-        ]
-      }
+          [`touch ${JSON.stringify(markerPath)}`, WRITE_VALID_RESULT].join(
+            "\n",
+          ),
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -761,7 +862,7 @@ describe("runLiveStepWrapper — result file capture", () => {
 
   it("returns result_invalid when the result file is not valid JSON", () => {
     const input = setup({
-      config: { args: ["-c", `printf 'not json' > "$MOMENTUM_RESULT_PATH"`] }
+      config: { args: ["-c", `printf 'not json' > "$MOMENTUM_RESULT_PATH"`] },
     });
 
     const out = runLiveStepWrapper(input);
@@ -773,8 +874,8 @@ describe("runLiveStepWrapper — result file capture", () => {
   it("returns result_invalid when the result JSON does not match the runner result shape", () => {
     const input = setup({
       config: {
-        args: ["-c", `printf '%s' '{"foo":1}' > "$MOMENTUM_RESULT_PATH"`]
-      }
+        args: ["-c", `printf '%s' '{"foo":1}' > "$MOMENTUM_RESULT_PATH"`],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -788,9 +889,9 @@ describe("runLiveStepWrapper — result file capture", () => {
       config: {
         args: [
           "-c",
-          `dd if=/dev/zero bs=${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1} count=1 of="$MOMENTUM_RESULT_PATH" 2>/dev/null`
-        ]
-      }
+          `dd if=/dev/zero bs=${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1} count=1 of="$MOMENTUM_RESULT_PATH" 2>/dev/null`,
+        ],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -807,8 +908,8 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     const input = setup({
       config: {
         probe: { command: "sh", args: ["-c", "exit 0"], timeoutSec: 5 },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -817,7 +918,7 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     expect(out.code).toBe("runtime_unavailable");
     expect(out.error).toContain("absolute");
     expect(fs.existsSync(path.join(input.iterationDir, "result.json"))).toBe(
-      false
+      false,
     );
     expect(readLog(input)).not.toContain("[live-step] command:");
   });
@@ -826,8 +927,8 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     const input = setup({
       config: {
         probe: { command: "/bin/sh", args: ["-c", "exit 0"], timeoutSec: 5 },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -845,10 +946,10 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
         probe: {
           command: "/does/not/exist/probe-binary",
           args: [],
-          timeoutSec: 5
+          timeoutSec: 5,
         },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -856,7 +957,7 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     if (out.ok) return;
     expect(out.code).toBe("runtime_unavailable");
     expect(fs.existsSync(path.join(input.iterationDir, "result.json"))).toBe(
-      false
+      false,
     );
     // The main command must not run after a failed probe.
     expect(readLog(input)).not.toContain("[live-step] command:");
@@ -866,8 +967,8 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     const input = setup({
       config: {
         probe: { command: "/bin/sh", args: ["-c", "exit 7"], timeoutSec: 5 },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -875,7 +976,7 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     if (out.ok) return;
     expect(out.code).toBe("auth_unavailable");
     expect(fs.existsSync(path.join(input.iterationDir, "result.json"))).toBe(
-      false
+      false,
     );
     expect(readLog(input)).not.toContain("[live-step] command:");
   });
@@ -888,12 +989,12 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
           command: "/bin/sh",
           args: [
             "-c",
-            'i=0; while [ "$i" -lt 200 ]; do echo 0123456789; i=$((i + 1)); done'
+            'i=0; while [ "$i" -lt 200 ]; do echo 0123456789; i=$((i + 1)); done',
           ],
-          timeoutSec: 5
+          timeoutSec: 5,
         },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -901,7 +1002,7 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     if (out.ok) return;
     expect(out.code).toBe("output_overflow");
     expect(fs.existsSync(path.join(input.iterationDir, "result.json"))).toBe(
-      false
+      false,
     );
     const log = readLog(input);
     expect(log).toContain("[live-step] probe output_overflow");
@@ -912,8 +1013,8 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     const input = setup({
       config: {
         probe: { command: "/bin/sh", args: ["-c", "sleep 5"], timeoutSec: 1 },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -925,17 +1026,17 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
   it("rejects a direct-caller non-positive probe timeout before probing", () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),
-      "probed"
+      "probed",
     );
     const input = setup({
       config: {
         probe: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(markerPath)}`],
-          timeoutSec: 0
+          timeoutSec: 0,
         },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const out = runLiveStepWrapper(input);
@@ -956,10 +1057,10 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
         probe: {
           command: "/bin/sh",
           args: ["-c", sigtermImmuneSleep(3)],
-          timeoutSec: 1
+          timeoutSec: 1,
         },
-        args: ["-c", WRITE_VALID_RESULT]
-      }
+        args: ["-c", WRITE_VALID_RESULT],
+      },
     });
 
     const start = Date.now();

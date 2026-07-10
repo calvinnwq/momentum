@@ -38,6 +38,83 @@ bounded progress. Executors own bounded work and may recommend `continue`,
 `blocked`, `failed`, `cancelled`, or `complete`. The daemon decides state
 transitions from durable evidence.
 
+## Executor SDK Contract
+
+The executor-loop layer is the executor SDK boundary. `Executor.tick` receives a
+read-only durable invocation/round snapshot, machine-portable step config,
+machine-local host bindings, a cancellation signal, and an `ExecutorEnvelope`.
+One tick performs at most one bounded turn and returns an
+`ExecutorTickResult` recommendation. Recommended round/invocation states,
+classification, recovery code, and gate remain advisory; only the daemon-side
+envelope controller can apply terminal classification and state transitions.
+The controller and executor facade are different runtime objects, so an executor
+cannot recover daemon authority with a type cast.
+Durable observations and terminal settlement read the daemon clock after awaited
+runner work, so asynchronous rounds cannot finish before their bounded work in
+the persisted timeline.
+Cancellation terminalizes only when it happens before bounded work starts or the
+runner propagates the signal reason after verified cleanup. A normal runner
+return wins a simultaneous post-run abort rather than creating an unverified
+cancelled classification.
+
+`ExecutorEnvelope` is bound to one durable invocation. It can start the next
+round, record non-terminal round observations, heartbeat, and append artifacts,
+checkpoints, findings, and decisions. It exposes no SQLite handle and rejects
+cross-invocation evidence, overlapping or non-sequential rounds, and evidence
+mutation after either the round or invocation becomes terminal. State-dependent
+writes and coherent snapshots use SQLite transactions so concurrent ticks cannot
+cross those guards. Runtime phase validation and an explicit observation-field
+whitelist prevent JavaScript or casted inputs from restoring terminal authority.
+Daemon-allocated classification checkpoint identity is chosen inside the same
+write transaction as terminal settlement. Its snapshots include all durable child
+evidence so a later tick can resume without terminal scrollback or
+executor-private state.
+Result-capture observations and their completion checkpoints commit atomically.
+When `mechanism_completed` is durable but daemon classification is not, the
+single-shot daemon entrypoint reattaches the matching non-terminal invocation,
+reconstructs the outcome from that checkpoint, and resumes only classification;
+it never reruns the completed mechanism.
+
+Every executor declares a strict object config schema. The schema describes only
+portable workflow intent: agent harness/model/effort, tool or command identity,
+timeouts, opt-in `maxRounds`, and policy. Executable paths, cwd, environment,
+credentials, stdin policy, and other machine-local values are host bindings.
+Structural preflight validation and module registration are separate runtime
+wiring; the SDK contract does not make either a private executor hook. The
+single-shot compatibility host also enforces its declared family-specific schema
+at runtime before it creates a durable round.
+
+Lifecycle classes layer narrower adapter extension points over the same core
+contract. The shipped agent-once and script lifecycle uses an asynchronous runner
+adapter. Its built-in process adapters run work below a separate process-group
+anchor and watchdog. The anchor's parent-liveness pipe provides crash cleanup,
+and every process inherits a cryptographically random ownership token that
+POSIX cleanup freshly verifies before signalling an individual PID. Windows
+cleanup uses the live anchor as its retained ownership root. They terminate the
+owned tree when the tick's cancellation
+signal aborts, the command times out, its leader exits, or the daemon disappears.
+The runner then resets
+owned repository mutations to the captured base only after a host-provided
+repo-ownership proof succeeds, before the host records the cancelled round,
+invocation, and classification checkpoint atomically. Missing ownership proof or
+failed process-tree cleanup, reset residue, or other failed cleanup leaves the
+durable in-flight state for recovery instead of recording a false terminal
+cancellation. Read-only runners require a clean
+captured baseline before launch, so cancellation cleanup never erases
+pre-existing worktree changes. Agent-loop will repeat bounded runner rounds, and
+delegate-supervisor will poll a tool adapter across ticks when those lifecycle
+classes land. The single-shot lifecycle (`one-shot` and `script` in the current
+schema) implements `Executor` directly and is driven through the durable
+envelope before its host accepts or refines the recommendation. Looping
+executors have no default iteration cap: requirements are the stop condition;
+only an explicitly configured cap may raise the durable `quota_exhausted` gate.
+
+The dependency-free `RunnerResult` shapes in
+`src/core/executors/runner/types.ts` and parser/normalizers in
+`src/core/executors/runner/result.ts` are official SDK contract surface. Runner
+and process adapters may import them at runtime without acquiring persistence or
+daemon ownership.
+
 ## Native Goal-Loop Contract
 
 The native `goal-loop` is Momentum's autonomous implementation flywheel below a workflow step.
