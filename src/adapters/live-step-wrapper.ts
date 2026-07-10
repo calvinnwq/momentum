@@ -1710,6 +1710,7 @@ let input = "";
 let executionTimer;
 let fallbackTimer;
 let ancestryTracker;
+let commandStartedAtMs = 0;
 let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
@@ -1812,26 +1813,62 @@ function killOwnedTree() {
   if (fallbackTimer) clearTimeout(fallbackTimer);
   if (ancestryTracker) clearInterval(ancestryTracker);
   if (process.platform === "win32") {
+    const commandPid = command && command.pid;
+    if (!Number.isInteger(commandPid) || commandPid <= 0 || commandStartedAtMs <= 0) {
+      process.exit(1);
+    }
+    const commandExited = command.exitCode !== null || command.signalCode !== null;
     const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "$selfPid = $PID",
       "$rootPid = " + process.pid,
-      "$known = [System.Collections.Generic.HashSet[int]]::new()",
-      "$null = $known.Add($rootPid)",
+      "$commandPid = " + commandPid,
+      "$commandExited = $" + commandExited,
+      "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
+      "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+      "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
+      "if ($null -eq $root) { exit 1 }",
+      "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+      "$identities[$commandPid] = -[long]$commandStartedAtTicks",
       "$stablePasses = 0",
       "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
-      "while ($watch.ElapsedMilliseconds -lt 3000 -and $stablePasses -lt 2) {",
-      "  $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)",
+      "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
+      "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+      "  $byPid = @{}",
+      "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+      "  foreach ($knownPid in @($identities.Keys)) {",
+      "    $current = $byPid[$knownPid]",
+      "    if ($null -eq $current) { continue }",
+      "    $expected = [long]$identities[$knownPid]",
+      "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
+      "    if ($expected -lt 0) {",
+      "      if ($knownPid -eq $commandPid -and $commandExited) { exit 1 }",
+      "      if ($current.CreationTicks -lt -$expected) { exit 1 }",
+      "      $identities[$knownPid] = $current.CreationTicks",
+      "    }",
+      "  }",
       "  $added = $false",
       "  do {",
       "    $passAdded = $false",
       "    foreach ($item in $processes) {",
-      "      if ($known.Contains([int]$item.ParentProcessId) -and $known.Add([int]$item.ProcessId)) { $passAdded = $true; $added = $true }",
+      "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+      "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
+      "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
+      "      if ($identities.ContainsKey($item.ProcessId)) {",
+      "        $expected = [long]$identities[$item.ProcessId]",
+      "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
+      "      } else {",
+      "        $identities[$item.ProcessId] = $item.CreationTicks",
+      "        $passAdded = $true",
+      "        $added = $true",
+      "      }",
       "    }",
       "  } while ($passAdded)",
-      "  $targets = @($known | Where-Object { $_ -ne $rootPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+      "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
       "  [array]::Reverse($targets)",
       "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
       "  Start-Sleep -Milliseconds 50",
-      "  $alive = @($known | Where-Object { $_ -ne $rootPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+      "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
       "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
       "  }",
       "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
@@ -1893,6 +1930,7 @@ function reportThenAwaitCleanup(meta) {
 
 function launch(request) {
   try {
+    commandStartedAtMs = Date.now();
     command = spawn(request.command, request.args, {
       cwd: request.cwd,
       env: request.env,
