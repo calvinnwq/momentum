@@ -62,7 +62,7 @@ export const EXECUTOR_INVOCATION_STATES = [
   "blocked",
   "failed",
   "succeeded",
-  "cancelled"
+  "cancelled",
 ] as const;
 export type ExecutorInvocationState =
   (typeof EXECUTOR_INVOCATION_STATES)[number];
@@ -72,7 +72,7 @@ export const EXECUTOR_INVOCATION_TERMINAL_STATES = [
   "blocked",
   "failed",
   "succeeded",
-  "cancelled"
+  "cancelled",
 ] as const satisfies readonly ExecutorInvocationState[];
 export type ExecutorInvocationTerminalState =
   (typeof EXECUTOR_INVOCATION_TERMINAL_STATES)[number];
@@ -93,7 +93,7 @@ export const EXECUTOR_ROUND_STATES = [
   "blocked",
   "failed",
   "succeeded",
-  "cancelled"
+  "cancelled",
 ] as const;
 export type ExecutorRoundState = (typeof EXECUTOR_ROUND_STATES)[number];
 
@@ -102,7 +102,7 @@ export const EXECUTOR_ROUND_TERMINAL_STATES = [
   "blocked",
   "failed",
   "succeeded",
-  "cancelled"
+  "cancelled",
 ] as const satisfies readonly ExecutorRoundState[];
 export type ExecutorRoundTerminalState =
   (typeof EXECUTOR_ROUND_TERMINAL_STATES)[number];
@@ -120,7 +120,7 @@ export const EXECUTOR_COMPLETION_CLASSIFICATIONS = [
   "manual_recovery_required",
   "blocked",
   "failed",
-  "cancelled"
+  "cancelled",
 ] as const;
 export type ExecutorCompletionClassification =
   (typeof EXECUTOR_COMPLETION_CLASSIFICATIONS)[number];
@@ -138,10 +138,9 @@ export const EXECUTOR_HUMAN_GATE_TYPES = [
   "scope_boundary_exceeded",
   "credential_required",
   "external_state_required",
-  "destructive_action_requested"
+  "destructive_action_requested",
 ] as const;
-export type ExecutorHumanGateType =
-  (typeof EXECUTOR_HUMAN_GATE_TYPES)[number];
+export type ExecutorHumanGateType = (typeof EXECUTOR_HUMAN_GATE_TYPES)[number];
 
 /**
  * Artifact classes a round can write or mirror (contract "Required Artifacts").
@@ -158,22 +157,21 @@ export const EXECUTOR_ARTIFACT_CLASSES = [
   "checkpoint_stream",
   "verification_output",
   "commit_or_reset_evidence",
-  "recovery_note"
+  "recovery_note",
 ] as const;
-export type ExecutorArtifactClass =
-  (typeof EXECUTOR_ARTIFACT_CLASSES)[number];
+export type ExecutorArtifactClass = (typeof EXECUTOR_ARTIFACT_CLASSES)[number];
 
 const INVOCATION_STATE_SET: ReadonlySet<ExecutorInvocationState> = new Set(
-  EXECUTOR_INVOCATION_STATES
+  EXECUTOR_INVOCATION_STATES,
 );
 const INVOCATION_TERMINAL_SET: ReadonlySet<ExecutorInvocationState> = new Set(
-  EXECUTOR_INVOCATION_TERMINAL_STATES
+  EXECUTOR_INVOCATION_TERMINAL_STATES,
 );
 const ROUND_STATE_SET: ReadonlySet<ExecutorRoundState> = new Set(
-  EXECUTOR_ROUND_STATES
+  EXECUTOR_ROUND_STATES,
 );
 const ROUND_TERMINAL_SET: ReadonlySet<ExecutorRoundState> = new Set(
-  EXECUTOR_ROUND_TERMINAL_STATES
+  EXECUTOR_ROUND_TERMINAL_STATES,
 );
 
 // Failure-ish terminals reachable from any active (non-terminal) state. A round
@@ -183,13 +181,13 @@ const INVOCATION_ABORTS: readonly ExecutorInvocationState[] = [
   "blocked",
   "failed",
   "manual_recovery_required",
-  "cancelled"
+  "cancelled",
 ];
 const ROUND_ABORTS: readonly ExecutorRoundState[] = [
   "blocked",
   "failed",
   "manual_recovery_required",
-  "cancelled"
+  "cancelled",
 ];
 
 const INVOCATION_ALLOWED: Readonly<
@@ -206,13 +204,18 @@ const INVOCATION_ALLOWED: Readonly<
   blocked: [],
   failed: [],
   succeeded: [],
-  cancelled: []
+  cancelled: [],
 };
 
 const ROUND_ALLOWED: Readonly<
   Record<ExecutorRoundState, readonly ExecutorRoundState[]>
 > = {
-  pending: ["running", "mirroring_external_state", "waiting_operator", ...ROUND_ABORTS],
+  pending: [
+    "running",
+    "mirroring_external_state",
+    "waiting_operator",
+    ...ROUND_ABORTS,
+  ],
   // No direct `succeeded`: result-bearing families must capture a result or
   // mirror external state first. The script family still passes through the
   // capture state, but as a bare exit-code/log capture with no result document.
@@ -220,29 +223,34 @@ const ROUND_ALLOWED: Readonly<
     "capturing_result",
     "mirroring_external_state",
     "waiting_operator",
-    ...ROUND_ABORTS
+    ...ROUND_ABORTS,
   ],
   mirroring_external_state: [
     "capturing_result",
     "finalizing",
     "succeeded",
     "waiting_operator",
-    ...ROUND_ABORTS
+    ...ROUND_ABORTS,
   ],
-  capturing_result: ["finalizing", "succeeded", "waiting_operator", ...ROUND_ABORTS],
+  capturing_result: [
+    "finalizing",
+    "succeeded",
+    "waiting_operator",
+    ...ROUND_ABORTS,
+  ],
   finalizing: ["succeeded", "waiting_operator", ...ROUND_ABORTS],
   waiting_operator: [
     "running",
     "capturing_result",
     "finalizing",
     "mirroring_external_state",
-    ...ROUND_ABORTS
+    ...ROUND_ABORTS,
   ],
   manual_recovery_required: [],
   blocked: [],
   failed: [],
   succeeded: [],
-  cancelled: []
+  cancelled: [],
 };
 
 export type ExecutorInvocationTransitionErrorCode =
@@ -256,13 +264,13 @@ export type ExecutorRoundTransitionErrorCode =
   | "executor_round_invalid_transition";
 
 export function isTerminalExecutorInvocationState(
-  state: ExecutorInvocationState
+  state: ExecutorInvocationState,
 ): boolean {
   return INVOCATION_TERMINAL_SET.has(state);
 }
 
 export function isTerminalExecutorRoundState(
-  state: ExecutorRoundState
+  state: ExecutorRoundState,
 ): boolean {
   return ROUND_TERMINAL_SET.has(state);
 }
@@ -274,7 +282,7 @@ export function isTerminalExecutorRoundState(
  */
 export function transitionExecutorInvocation(
   from: ExecutorInvocationState,
-  to: ExecutorInvocationState
+  to: ExecutorInvocationState,
 ): TransitionResult<
   ExecutorInvocationState,
   ExecutorInvocationTransitionErrorCode
@@ -283,7 +291,7 @@ export function transitionExecutorInvocation(
     return {
       ok: false,
       errorCode: "executor_invocation_unknown_state",
-      errorMessage: `unknown executor invocation state: from=${String(from)} to=${String(to)}`
+      errorMessage: `unknown executor invocation state: from=${String(from)} to=${String(to)}`,
     };
   }
   if (from === to) {
@@ -293,14 +301,14 @@ export function transitionExecutorInvocation(
     return {
       ok: false,
       errorCode: "executor_invocation_terminal",
-      errorMessage: `executor invocation is in terminal state ${from}; cannot transition to ${to}`
+      errorMessage: `executor invocation is in terminal state ${from}; cannot transition to ${to}`,
     };
   }
   if (!INVOCATION_ALLOWED[from].includes(to)) {
     return {
       ok: false,
       errorCode: "executor_invocation_invalid_transition",
-      errorMessage: `executor invocation cannot transition from ${from} to ${to}`
+      errorMessage: `executor invocation cannot transition from ${from} to ${to}`,
     };
   }
   return { ok: true, state: to };
@@ -314,13 +322,13 @@ export function transitionExecutorInvocation(
  */
 export function transitionExecutorRound(
   from: ExecutorRoundState,
-  to: ExecutorRoundState
+  to: ExecutorRoundState,
 ): TransitionResult<ExecutorRoundState, ExecutorRoundTransitionErrorCode> {
   if (!ROUND_STATE_SET.has(from) || !ROUND_STATE_SET.has(to)) {
     return {
       ok: false,
       errorCode: "executor_round_unknown_state",
-      errorMessage: `unknown executor round state: from=${String(from)} to=${String(to)}`
+      errorMessage: `unknown executor round state: from=${String(from)} to=${String(to)}`,
     };
   }
   if (from === to) {
@@ -330,14 +338,14 @@ export function transitionExecutorRound(
     return {
       ok: false,
       errorCode: "executor_round_terminal",
-      errorMessage: `executor round is in terminal state ${from}; cannot transition to ${to}`
+      errorMessage: `executor round is in terminal state ${from}; cannot transition to ${to}`,
     };
   }
   if (!ROUND_ALLOWED[from].includes(to)) {
     return {
       ok: false,
       errorCode: "executor_round_invalid_transition",
-      errorMessage: `executor round cannot transition from ${from} to ${to}`
+      errorMessage: `executor round cannot transition from ${from} to ${to}`,
     };
   }
   return { ok: true, state: to };

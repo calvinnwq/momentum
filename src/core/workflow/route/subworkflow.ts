@@ -50,7 +50,7 @@ import {
   validateSubworkflowChildConfig,
   type SubworkflowChildConfigRefusal,
   type SubworkflowChildLaunchRefusal,
-  type SubworkflowParentLineage
+  type SubworkflowParentLineage,
 } from "./subworkflow-child-config.js";
 
 /** The run-`route` namespace that carries all subworkflow config + lineage. */
@@ -133,7 +133,7 @@ function isNonBlankString(value: unknown): value is string {
 
 /** The `route.subworkflow` namespace object, or `undefined` when not a plain object. */
 function subworkflowNamespace(
-  route: Record<string, unknown>
+  route: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const namespace = route[SUBWORKFLOW_ROUTE_KEY];
   return isPlainObject(namespace) ? namespace : undefined;
@@ -149,7 +149,7 @@ function subworkflowNamespace(
  */
 export function readSubworkflowParentLineage(
   parentRoute: Record<string, unknown>,
-  parentDefinitionKey: string
+  parentDefinitionKey: string,
 ): SubworkflowParentLineageResolution {
   const namespace = subworkflowNamespace(parentRoute);
   const rawLineage = namespace?.["lineage"];
@@ -158,26 +158,37 @@ export function readSubworkflowParentLineage(
     // No lineage: a legitimate top-level (non-subworkflow-launched) run.
     return {
       ok: true,
-      lineage: { definitionKey: parentDefinitionKey, ancestorDefinitionKeys: [] }
+      lineage: {
+        definitionKey: parentDefinitionKey,
+        ancestorDefinitionKeys: [],
+      },
     };
   }
 
   if (!isPlainObject(rawLineage)) {
-    return lineageInvalid("subworkflow lineage is present but is not an object");
+    return lineageInvalid(
+      "subworkflow lineage is present but is not an object",
+    );
   }
   if (!isNonBlankString(rawLineage["parentRunId"])) {
-    return lineageInvalid("subworkflow lineage parentRunId must be a non-empty string");
+    return lineageInvalid(
+      "subworkflow lineage parentRunId must be a non-empty string",
+    );
   }
   if (!isNonBlankString(rawLineage["parentStepId"])) {
-    return lineageInvalid("subworkflow lineage parentStepId must be a non-empty string");
+    return lineageInvalid(
+      "subworkflow lineage parentStepId must be a non-empty string",
+    );
   }
   const rawAncestors = rawLineage["ancestorDefinitionKeys"];
   if (!Array.isArray(rawAncestors)) {
-    return lineageInvalid("subworkflow lineage ancestorDefinitionKeys must be an array");
+    return lineageInvalid(
+      "subworkflow lineage ancestorDefinitionKeys must be an array",
+    );
   }
   if (!rawAncestors.every((key) => isNonBlankString(key))) {
     return lineageInvalid(
-      "subworkflow lineage ancestorDefinitionKeys must be non-empty strings"
+      "subworkflow lineage ancestorDefinitionKeys must be non-empty strings",
     );
   }
 
@@ -185,8 +196,8 @@ export function readSubworkflowParentLineage(
     ok: true,
     lineage: {
       definitionKey: parentDefinitionKey,
-      ancestorDefinitionKeys: rawAncestors as string[]
-    }
+      ancestorDefinitionKeys: rawAncestors as string[],
+    },
   };
 }
 
@@ -194,7 +205,7 @@ function lineageInvalid(detail: string): SubworkflowParentLineageResolution {
   return {
     ok: false,
     refusal: "lineage_invalid",
-    reason: `${detail}; routing to manual recovery.`
+    reason: `${detail}; routing to manual recovery.`,
   };
 }
 
@@ -206,7 +217,7 @@ function lineageInvalid(detail: string): SubworkflowParentLineageResolution {
  */
 export function deriveChildSubworkflowRunId(
   parentRunId: string,
-  parentStepId: string
+  parentStepId: string,
 ): string {
   return `${parentRunId}::${parentStepId}::child`;
 }
@@ -227,7 +238,7 @@ export type DeriveChildSubworkflowRouteInput = {
  * propagated lineage — any authored child-of-child config is set separately.
  */
 export function deriveChildSubworkflowRoute(
-  input: DeriveChildSubworkflowRouteInput
+  input: DeriveChildSubworkflowRouteInput,
 ): Record<string, unknown> {
   const lineage: SubworkflowRouteLineage = {
     parentRunId: input.parentRunId,
@@ -235,8 +246,8 @@ export function deriveChildSubworkflowRoute(
     depth: input.childDepth,
     ancestorDefinitionKeys: [
       ...input.parentLineage.ancestorDefinitionKeys,
-      input.parentDefinitionKey
-    ]
+      input.parentDefinitionKey,
+    ],
   };
   return { [SUBWORKFLOW_ROUTE_KEY]: { lineage } };
 }
@@ -250,7 +261,7 @@ export function deriveChildSubworkflowRoute(
  * deterministic child run id, resolved depth bound, and the propagated child route.
  */
 export function planSubworkflowChildLaunchFromRoute(
-  input: PlanSubworkflowChildLaunchFromRouteInput
+  input: PlanSubworkflowChildLaunchFromRouteInput,
 ): SubworkflowRouteChildLaunchPlan {
   const namespace = subworkflowNamespace(input.parentRoute);
 
@@ -259,35 +270,42 @@ export function planSubworkflowChildLaunchFromRoute(
     return {
       ok: false,
       refusal: configValidation.refusal,
-      reason: configValidation.reason
+      reason: configValidation.reason,
     };
   }
 
   const lineageResolution = readSubworkflowParentLineage(
     input.parentRoute,
-    input.parentDefinitionKey
+    input.parentDefinitionKey,
   );
   if (!lineageResolution.ok) {
     return {
       ok: false,
       refusal: lineageResolution.refusal,
-      reason: lineageResolution.reason
+      reason: lineageResolution.reason,
     };
   }
 
   const launchPlan = planSubworkflowChildLaunch(
     configValidation.config,
-    lineageResolution.lineage
+    lineageResolution.lineage,
   );
   if (!launchPlan.ok) {
-    return { ok: false, refusal: launchPlan.refusal, reason: launchPlan.reason };
+    return {
+      ok: false,
+      refusal: launchPlan.refusal,
+      reason: launchPlan.reason,
+    };
   }
 
   return {
     ok: true,
     childDefinitionKey: launchPlan.childDefinitionKey,
     childDefinitionVersion: launchPlan.childDefinitionVersion,
-    childRunId: deriveChildSubworkflowRunId(input.parentRunId, input.parentStepId),
+    childRunId: deriveChildSubworkflowRunId(
+      input.parentRunId,
+      input.parentStepId,
+    ),
     childDepth: launchPlan.childDepth,
     maxDepth: launchPlan.maxDepth,
     childRoute: deriveChildSubworkflowRoute({
@@ -295,7 +313,7 @@ export function planSubworkflowChildLaunchFromRoute(
       parentStepId: input.parentStepId,
       parentDefinitionKey: input.parentDefinitionKey,
       parentLineage: lineageResolution.lineage,
-      childDepth: launchPlan.childDepth
-    })
+      childDepth: launchPlan.childDepth,
+    }),
   };
 }
