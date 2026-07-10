@@ -709,10 +709,12 @@ export type RunNoMistakesMirrorRoundResult = {
  * routes through {@link decideNoMistakesUnreadable} to the same
  * `manual_recovery_required` settle as a semantically broken snapshot, never
  * crashing the poll. A successful read additionally re-fingerprints the round's
- * `inputDigest` with the exact external bytes it mirrored this poll, so the durable
- * round reflects the evidence behind its current state (contract "Heartbeat And
- * Reattach"). Findings / decisions are projected only from a readable snapshot — a
- * reader failure invents none and preserves any already mirrored.
+ * `inputDigest` with the exact external bytes it mirrored this poll and
+ * `resultDigest` with the semantic progress fingerprint used for heartbeat / stall
+ * decisions, so the durable round reflects both the raw evidence and the progress
+ * signal behind its current state (contract "Heartbeat And Reattach"). Findings /
+ * decisions are projected only from a readable snapshot — a reader failure invents
+ * none and preserves any already mirrored.
  *
  * @throws {ExecutorRoundNotFoundError} if no round has `roundId` — the mirror round
  * must already exist (born at {@link runNoMistakesMirrorStep}); a poll reconciles a
