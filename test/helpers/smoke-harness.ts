@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 export const REPO_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
-  ".."
+  "..",
 );
 export const CLI_BIN = path.join(REPO_ROOT, "dist", "index.js");
 
@@ -34,7 +34,7 @@ const BUILD_LOCK_DIR = path.join(
   `momentum-smoke-build-${createHash("sha1")
     .update(REPO_ROOT)
     .digest("hex")
-    .slice(0, 12)}.lock`
+    .slice(0, 12)}.lock`,
 );
 const BUILD_LOCK_PID_FILE = path.join(BUILD_LOCK_DIR, "pid");
 const BUILD_LOCK_POLL_MS = 100;
@@ -69,7 +69,7 @@ export function buildCli(): void {
     if (!cliArtifactIsFresh()) {
       execFileSync("pnpm", ["build"], {
         cwd: REPO_ROOT,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe"],
       });
     }
   });
@@ -94,7 +94,7 @@ function withBuildLock(run: () => void): void {
       }
       if (Date.now() >= deadline) {
         throw new Error(
-          `smoke: timed out waiting for build lock at ${BUILD_LOCK_DIR}`
+          `smoke: timed out waiting for build lock at ${BUILD_LOCK_DIR}`,
         );
       }
       sleepSync(BUILD_LOCK_POLL_MS);
@@ -228,7 +228,7 @@ export function makeTempDir(prefix: string): string {
 export function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -248,7 +248,7 @@ export function stripNodeWarnings(text: string): string {
   const lines = text.split("\n");
   const filtered = lines.filter((line) => {
     if (/^\(node:\d+\) ExperimentalWarning:/u.test(line)) return false;
-    if (/^\(Use `node --trace-warnings/.test(line)) return false;
+    if (line.startsWith("(Use `node --trace-warnings")) return false;
     return true;
   });
   const result = filtered.join("\n").trim();
@@ -257,36 +257,32 @@ export function stripNodeWarnings(text: string): string {
 
 export function runCliBinary(
   args: string[],
-  options: { env?: NodeJS.ProcessEnv } = {}
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): CliResult {
-  const env = options.env
-    ? { ...process.env, ...options.env }
-    : process.env;
+  const env = options.env ? { ...process.env, ...options.env } : process.env;
   const result = spawnSync(process.execPath, [CLI_BIN, ...args], {
     cwd: REPO_ROOT,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
-    env
+    env,
   });
   return {
     code: result.status ?? -1,
     stdout: result.stdout ?? "",
-    stderr: stripNodeWarnings(result.stderr ?? "")
+    stderr: stripNodeWarnings(result.stderr ?? ""),
   };
 }
 
 export async function runCliBinaryAsync(
   args: string[],
-  options: { env?: NodeJS.ProcessEnv } = {}
+  options: { env?: NodeJS.ProcessEnv } = {},
 ): Promise<CliResult> {
-  const env = options.env
-    ? { ...process.env, ...options.env }
-    : process.env;
+  const env = options.env ? { ...process.env, ...options.env } : process.env;
   return await new Promise<CliResult>((resolve, reject) => {
     const child = spawn(process.execPath, [CLI_BIN, ...args], {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
-      env
+      env,
     });
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
@@ -297,7 +293,9 @@ export async function runCliBinaryAsync(
       resolve({
         code: code ?? -1,
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-        stderr: stripNodeWarnings(Buffer.concat(stderrChunks).toString("utf-8"))
+        stderr: stripNodeWarnings(
+          Buffer.concat(stderrChunks).toString("utf-8"),
+        ),
       });
     });
   });

@@ -27,8 +27,9 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:full": "pnpm test:fast && pnpm test:integration",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
-    "lint": "tsc -p tsconfig.test.json --noEmit",
-    "format:check": "git diff --check HEAD"
+    "lint": "oxlint src test --deny-warnings",
+    "format": "node scripts/prettier-changed.mjs --write",
+    "format:check": "node scripts/prettier-changed.mjs --check"
   },
   "engines": {
     "node": ">=24"
@@ -36,6 +37,8 @@
   "packageManager": "pnpm@10.33.3",
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "oxlint": "^1.73.0",
+    "prettier": "^3.9.5",
     "typescript": "^5.9.3",
     "vitest": "^4.0.14"
   },

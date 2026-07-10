@@ -2,19 +2,14 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import { insertExecutorRound } from "../../executors/loop/persist.js";
 import type {
   ExecutorRoundRecord,
-  WorkflowExecutorFamily
+  WorkflowExecutorFamily,
 } from "../../executors/loop/reducer.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import type { WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 
-const RETRYABLE_DISPATCH_STEP_KINDS: ReadonlySet<WorkflowStepKind> = new Set([
-  "no-mistakes",
-  "merge-cleanup"
-]);
-
 const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
-  "runtime_unavailable"
+  "runtime_unavailable",
 ]);
 
 type RetryableStepState = "approved" | "running";
@@ -28,7 +23,7 @@ type RetryRoundSelection = {
 const DEFAULT_RETRY_ROUND_SELECTION: RetryRoundSelection = {
   agentProvider: null,
   model: null,
-  effort: null
+  effort: null,
 };
 
 export type RetryableDispatchedStepRecovery = {
@@ -64,14 +59,14 @@ type RetryableDispatchRow = {
 
 export function findRetryableDispatchedStepRecovery(
   db: MomentumDb,
-  input: { runId: string; stepState: RetryableStepState }
+  input: { runId: string; stepState: RetryableStepState },
 ): RetryableDispatchedStepRecovery | undefined {
   const rows = db
     .prepare(
       `SELECT step_id, kind, state
          FROM workflow_steps
         WHERE run_id = ? AND state = ?
-        ORDER BY step_order, step_id`
+        ORDER BY step_order, step_id`,
     )
     .all(input.runId, input.stepState) as Array<{
     step_id: string;
@@ -83,7 +78,7 @@ export function findRetryableDispatchedStepRecovery(
     if (!isRetryableDispatchStepKind(step.kind)) continue;
     const invocationId = deriveDispatchRetryInvocationId(
       input.runId,
-      step.step_id
+      step.step_id,
     );
     const row = db
       .prepare(
@@ -114,14 +109,10 @@ export function findRetryableDispatchedStepRecovery(
             )
           WHERE s.run_id = ?
             AND s.step_id = ?
-            AND s.state = ?`
+            AND s.state = ?`,
       )
-      .get(
-        invocationId,
-        input.runId,
-        step.step_id,
-        input.stepState
-      ) as RetryableDispatchRow | undefined;
+      .get(invocationId, input.runId, step.step_id, input.stepState) as
+      RetryableDispatchRow | undefined;
     const parsed = parseRetryableDispatchRow(row);
     if (parsed !== undefined) return parsed;
   }
@@ -140,11 +131,11 @@ export type PrepareRetryableDispatchedStepForClearResult =
 
 export function prepareRetryableDispatchedStepForRecoveryClear(
   db: MomentumDb,
-  input: { runId: string; now: number }
+  input: { runId: string; now: number },
 ): PrepareRetryableDispatchedStepForClearResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
     runId: input.runId,
-    stepState: "running"
+    stepState: "running",
   });
   if (retryable === undefined) return { prepared: false };
 
@@ -162,7 +153,7 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
               updated_at = ?
         WHERE run_id = ?
           AND step_id = ?
-          AND state = 'running'`
+          AND state = 'running'`,
     )
     .run(input.now, input.runId, retryable.stepId);
   if (Number(changed.changes) === 0) return { prepared: false };
@@ -171,7 +162,7 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
     prepared: true,
     runId: input.runId,
     stepId: retryable.stepId,
-    recoveryCode: retryable.recoveryCode
+    recoveryCode: retryable.recoveryCode,
   };
 }
 
@@ -192,11 +183,11 @@ export function reopenRetryableDispatchInvocationForAttempt(
     now: number;
     stepState?: RetryableStepState;
     selection?: RetryRoundSelection;
-  }
+  },
 ): ReopenRetryableDispatchInvocationResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
     runId: input.runId,
-    stepState: input.stepState ?? "approved"
+    stepState: input.stepState ?? "approved",
   });
   if (retryable === undefined || retryable.stepId !== input.stepId) {
     return { reopened: false };
@@ -216,14 +207,14 @@ export function reopenRetryableDispatchInvocationForAttempt(
               updated_at = ?
         WHERE invocation_id = ?
           AND state = 'manual_recovery_required'
-          AND attempt = ?`
+          AND attempt = ?`,
     )
     .run(
       nextAttempt,
       input.now,
       input.now,
       retryable.invocationId,
-      retryable.attempt
+      retryable.attempt,
     );
   if (Number(updated.changes) === 0) return { reopened: false };
 
@@ -233,28 +224,28 @@ export function reopenRetryableDispatchInvocationForAttempt(
       retryable,
       nextAttempt,
       nextRoundIndex,
-      input.selection ?? DEFAULT_RETRY_ROUND_SELECTION
+      input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
     ),
-    { now: input.now }
+    { now: input.now },
   );
 
   return {
     reopened: true,
     invocationId: retryable.invocationId,
     attempt: nextAttempt,
-    roundIndex: nextRoundIndex
+    roundIndex: nextRoundIndex,
   };
 }
 
 export function deriveDispatchRetryInvocationId(
   runId: string,
-  stepId: string
+  stepId: string,
 ): string {
   return `${runId}::${stepId}::dispatch`;
 }
 
 function parseRetryableDispatchRow(
-  row: RetryableDispatchRow | undefined
+  row: RetryableDispatchRow | undefined,
 ): RetryableDispatchedStepRecovery | undefined {
   if (row === undefined) return undefined;
   if (!isRetryableDispatchStepKind(row.kind)) return undefined;
@@ -286,19 +277,19 @@ function parseRetryableDispatchRow(
     recoveryCode: row.recovery_code,
     stepOrder: row.step_order,
     required: row.required === 1,
-    startedAt: row.started_at
+    startedAt: row.started_at,
   };
 }
 
 function appendRetryableStepStartedEventBeforeClear(
   db: MomentumDb,
-  retryable: RetryableDispatchedStepRecovery
+  retryable: RetryableDispatchedStepRecovery,
 ): void {
   if (retryable.startedAt === null) return;
   const payload = {
     kind: retryable.kind,
     order: retryable.stepOrder,
-    required: retryable.required
+    required: retryable.required,
   };
   appendWorkflowEvent(db, {
     runId: retryable.runId,
@@ -312,8 +303,8 @@ function appendRetryableStepStartedEventBeforeClear(
       timestamp: retryable.startedAt,
       stepId: retryable.stepId,
       payload,
-      source: "step"
-    })
+      source: "step",
+    }),
   });
 }
 
@@ -321,7 +312,7 @@ function buildRetryRound(
   retryable: RetryableDispatchedStepRecovery,
   attempt: number,
   roundIndex: number,
-  selection: RetryRoundSelection
+  selection: RetryRoundSelection,
 ): ExecutorRoundRecord {
   return {
     roundId: `${retryable.invocationId}::round-${roundIndex}`,
@@ -352,17 +343,17 @@ function buildRetryRound(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
 function isRetryableDispatchStepKind(value: string): value is WorkflowStepKind {
-  return (
-    value === "no-mistakes" || value === "merge-cleanup"
-  );
+  return value === "no-mistakes" || value === "merge-cleanup";
 }
 
-function isWorkflowExecutorFamily(value: string): value is WorkflowExecutorFamily {
+function isWorkflowExecutorFamily(
+  value: string,
+): value is WorkflowExecutorFamily {
   return (
     value === "goal-loop" ||
     value === "one-shot" ||
