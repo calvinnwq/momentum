@@ -2050,6 +2050,9 @@ describe("momentum CLI scaffold", () => {
       state: "stopped"
     });
     expect(payload["runId"]).not.toBe(staleRunId);
+    const loop = payload["loop"] as Record<string, unknown>;
+    const startupRecovery = loop["startupRecovery"] as Record<string, unknown>;
+    expect(startupRecovery["recoveredDaemonRunCount"]).toBe(1);
 
     const verifyDb = openDb(dataDir);
     try {
@@ -2109,6 +2112,9 @@ describe("momentum CLI scaffold", () => {
       state: "stopped"
     });
     expect(payload["runId"]).not.toBe(staleRunId);
+    const loop = payload["loop"] as Record<string, unknown>;
+    const startupRecovery = loop["startupRecovery"] as Record<string, unknown>;
+    expect(startupRecovery["recoveredDaemonRunCount"]).toBe(1);
 
     const verifyDb = openDb(dataDir);
     try {
