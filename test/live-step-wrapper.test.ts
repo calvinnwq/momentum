@@ -584,6 +584,67 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 
+  it("returns the command spawn error when no process tree was launched", async () => {
+    const root = makeTempDir("momentum-live-step-missing-command-");
+
+    const out = await runProcessGroup(path.join(root, "missing-command"), [], {
+      cwd: root,
+      env: process.env,
+      timeoutMs: 1_000,
+      maxBuffer: 1024,
+    });
+
+    expect((out.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+      "ENOENT",
+    );
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "samples POSIX ancestry without continuously scanning ownership",
+    async () => {
+      const root = makeTempDir("momentum-live-step-ps-count-");
+      const countPath = path.join(root, "count");
+      const shimDir = path.join(root, "bin");
+      const shimPath = path.join(shimDir, "ps");
+      const realPs = fs.existsSync("/bin/ps") ? "/bin/ps" : "/usr/bin/ps";
+      fs.mkdirSync(shimDir);
+      fs.writeFileSync(
+        shimPath,
+        [
+          "#!/bin/sh",
+          `printf x >> ${JSON.stringify(countPath)}`,
+          `exec ${JSON.stringify(realPs)} "$@"`,
+        ].join("\n"),
+      );
+      fs.chmodSync(shimPath, 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${shimDir}${path.delimiter}${originalPath ?? ""}`;
+
+      try {
+        const out = await runProcessGroup(
+          process.execPath,
+          ["-e", "setTimeout(() => {}, 650)"],
+          {
+            cwd: root,
+            env: process.env,
+            timeoutMs: 2_000,
+            maxBuffer: 1024,
+          },
+        );
+        expect(out.status).toBe(0);
+      } finally {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+      }
+
+      const scanCount = fs.existsSync(countPath)
+        ? fs.readFileSync(countPath, "utf-8").length
+        : 0;
+      expect(scanCount).toBeGreaterThan(0);
+      expect(scanCount).toBeLessThan(10);
+    },
+  );
+
   it.skipIf(process.platform !== "win32")(
     "retains the Windows command identity after its leader exits",
     async () => {

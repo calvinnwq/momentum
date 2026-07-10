@@ -1124,7 +1124,7 @@ export function runProcessGroup(
             fallbackStarted = true;
             const fallback =
               process.platform === "win32"
-                ? killWindowsProcessTree(groupLeaderPid)
+                ? killWindowsProcessTree(groupLeaderPid, processTreeToken)
                 : terminateOwnedPosixTree(
                     groupLeaderPid,
                     child,
@@ -1248,12 +1248,16 @@ export function runProcessGroup(
     }
 
     try {
-      child = spawn(process.execPath, ["-e", LIVE_STEP_ASYNC_GROUP_ANCHOR], {
-        cwd: options.cwd,
-        env: processAnchorEnvironment(processTreeToken),
-        detached: process.platform !== "win32",
-        stdio: ["pipe", "pipe", "pipe", "pipe"],
-      });
+      child = spawn(
+        process.execPath,
+        ["-e", LIVE_STEP_ASYNC_GROUP_ANCHOR, processTreeToken],
+        {
+          cwd: options.cwd,
+          env: processAnchorEnvironment(processTreeToken),
+          detached: process.platform !== "win32",
+          stdio: ["pipe", "pipe", "pipe", "pipe"],
+        },
+      );
     } catch (error) {
       resolve(
         spawnReturn({
@@ -1585,43 +1589,61 @@ function signalPosixTarget(target: number, signal: NodeJS.Signals): boolean {
  * Discover descendants from retained ParentProcessId values, so cleanup does
  * not depend on the leader still being alive when its `exit` event fires.
  */
-function killWindowsProcessTree(rootPid: number): Promise<boolean> {
+function killWindowsProcessTree(
+  rootPid: number,
+  ownershipToken: string,
+): Promise<boolean> {
   const script = [
     "$ErrorActionPreference = 'Stop'",
+    "$selfPid = $PID",
     `$rootPid = ${rootPid}`,
-    "$known = [System.Collections.Generic.HashSet[int]]::new()",
-    "$null = $known.Add($rootPid)",
+    `$ownershipToken = ${JSON.stringify(ownershipToken)}`,
+    '$root = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $rootPid)',
+    "if ($null -eq $root -or $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
+    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+    "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
     "$stablePasses = 0",
     "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
     "while ($watch.ElapsedMilliseconds -lt 3500) {",
-    "  $processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)",
+    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+    "  $byPid = @{}",
+    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+    "  foreach ($knownPid in @($identities.Keys)) {",
+    "    $current = $byPid[$knownPid]",
+    "    if ($null -ne $current -and $current.CreationTicks -ne [long]$identities[$knownPid]) { exit 1 }",
+    "  }",
     "  $added = $false",
     "  do {",
     "    $passAdded = $false",
-    "    foreach ($process in $processes) {",
-    "      if ($known.Contains([int]$process.ParentProcessId) -and $known.Add([int]$process.ProcessId)) { $passAdded = $true; $added = $true }",
+    "    foreach ($item in $processes) {",
+    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    "      if ($item.CreationTicks -lt [long]$identities[$item.ParentProcessId]) { continue }",
+    "      if ($identities.ContainsKey($item.ProcessId)) {",
+    "        if ([long]$identities[$item.ProcessId] -ne $item.CreationTicks) { exit 1 }",
+    "      } else {",
+    "        $identities[$item.ProcessId] = $item.CreationTicks",
+    "        $passAdded = $true",
+    "        $added = $true",
+    "      }",
     "    }",
     "  } while ($passAdded)",
-    "  $targets = @($known | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })",
+    "  $targets = @($identities.Keys | Where-Object { $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
     "  [array]::Reverse($targets)",
     "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
     "  Start-Sleep -Milliseconds 50",
-    "  $alive = @($known | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })",
+    "  $alive = @($identities.Keys | Where-Object { $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
     "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
     "  if ($stablePasses -ge 2) { exit 0 }",
     "}",
     "exit 1",
   ].join("\n");
-  return Promise.all([
-    launchWindowsTreeKiller("powershell.exe", [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      script,
-    ]),
-    launchWindowsTreeKiller("taskkill", ["/pid", String(rootPid), "/t", "/f"]),
-  ]).then(([powerShellVerified]) => powerShellVerified);
+  return launchWindowsTreeKiller("powershell.exe", [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    script,
+  ]);
 }
 
 function launchWindowsTreeKiller(
@@ -1711,6 +1733,7 @@ let executionTimer;
 let fallbackTimer;
 let ancestryTracker;
 let commandStartedAtMs = 0;
+let commandLaunchFailed = false;
 let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
@@ -1774,20 +1797,26 @@ function refreshDetachedDescendants() {
       }
     }
   } while (added);
-  const owned = new Set(ownedPosixPids() || []);
   const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
   for (const pid of retainedEscapedPids) {
     if (!byPid.has(pid)) {
       retainedEscapedPids.delete(pid);
-    } else if (!owned.has(pid)) {
-      unsafeDetachedDescendant = true;
     }
   }
   for (const entry of processes) {
     if (known.has(entry.pid) && entry.processGroupId !== process.pid) {
       retainedEscapedPids.add(entry.pid);
-      if (!owned.has(entry.pid)) unsafeDetachedDescendant = true;
     }
+  }
+  if (retainedEscapedPids.size === 0) return;
+  const ownedPids = ownedPosixPids();
+  if (!ownedPids) {
+    unsafeDetachedDescendant = true;
+    return;
+  }
+  const owned = new Set(ownedPids);
+  for (const pid of retainedEscapedPids) {
+    if (!owned.has(pid)) unsafeDetachedDescendant = true;
   }
 }
 
@@ -1814,6 +1843,17 @@ function killOwnedTree() {
   if (ancestryTracker) clearInterval(ancestryTracker);
   if (process.platform === "win32") {
     const commandPid = command && command.pid;
+    if (commandLaunchFailed && !Number.isInteger(commandPid)) {
+      if (!unsafeDetachedDescendant) {
+        emitMeta({
+          status: null,
+          signal: null,
+          cleanupOnly: true,
+          cleanupSucceeded: true
+        });
+      }
+      process.exit(unsafeDetachedDescendant ? 1 : 0);
+    }
     if (!Number.isInteger(commandPid) || commandPid <= 0 || commandStartedAtMs <= 0) {
       process.exit(1);
     }
@@ -1938,6 +1978,7 @@ function launch(request) {
       stdio: ["ignore", "inherit", "inherit"]
     });
   } catch (error) {
+    commandLaunchFailed = true;
     reportThenAwaitCleanup({
       status: null,
       signal: null,
@@ -1956,6 +1997,7 @@ function launch(request) {
     });
   }, request.timeoutMs);
   command.once("error", (error) => {
+    if (!Number.isInteger(command.pid)) commandLaunchFailed = true;
     reportThenAwaitCleanup({
       pid: command.pid,
       status: null,
@@ -1970,7 +2012,7 @@ function launch(request) {
   });
   if (process.platform !== "win32") {
     refreshDetachedDescendants();
-    ancestryTracker = setInterval(refreshDetachedDescendants, 25);
+    ancestryTracker = setInterval(refreshDetachedDescendants, 250);
   }
 }
 
