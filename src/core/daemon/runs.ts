@@ -589,6 +589,10 @@ export type RecoverStaleDaemonRunWithWorkflowDispatchInput = {
   runId: string;
   activeJobId: string;
   staleHeartbeatBefore: number;
+  workflowDispatchLeaseGuard: {
+    now: number;
+    graceMs: number;
+  };
   now?: number;
   recoveryStatus?: string;
   errorMessage?: string;
@@ -617,6 +621,19 @@ export function recoverStaleDaemonRunWithWorkflowDispatch(
       "recoverStaleDaemonRunWithWorkflowDispatch: staleHeartbeatBefore must be finite"
     );
   }
+  if (!Number.isFinite(input.workflowDispatchLeaseGuard.now)) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: workflowDispatchLeaseGuard.now must be finite"
+    );
+  }
+  if (
+    !Number.isFinite(input.workflowDispatchLeaseGuard.graceMs) ||
+    input.workflowDispatchLeaseGuard.graceMs < 0
+  ) {
+    throw new Error(
+      "recoverStaleDaemonRunWithWorkflowDispatch: workflowDispatchLeaseGuard.graceMs must be a non-negative finite number"
+    );
+  }
   const now = input.now ?? Date.now();
   const recoveryStatus =
     input.recoveryStatus ?? DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS;
@@ -625,7 +642,22 @@ export function recoverStaleDaemonRunWithWorkflowDispatch(
 
   const result = db
     .prepare(
-      `UPDATE daemon_runs
+      `WITH matched_steps AS (
+         SELECT run_id
+           FROM workflow_steps
+          WHERE ? = 'workflow:' || run_id || ':' || step_id
+       ),
+       fresh_dispatch_leases AS (
+         SELECT 1
+           FROM matched_steps
+           JOIN workflow_leases
+             ON workflow_leases.run_id = matched_steps.run_id
+          WHERE workflow_leases.lease_kind = 'dispatch'
+            AND workflow_leases.released_at IS NULL
+            AND ? <= workflow_leases.expires_at + ?
+          LIMIT 1
+       )
+      UPDATE daemon_runs
          SET state = 'error',
              finished_at = ?,
              last_state_change_at = ?,
@@ -639,9 +671,14 @@ export function recoverStaleDaemonRunWithWorkflowDispatch(
          AND state IN ('starting', 'running', 'stop_requested')
          AND active_job_id = ?
          AND active_lock_id IS NULL
-         AND heartbeat_at < ?`
+         AND heartbeat_at < ?
+         AND (SELECT COUNT(*) FROM matched_steps) = 1
+         AND NOT EXISTS (SELECT 1 FROM fresh_dispatch_leases)`
     )
     .run(
+      input.activeJobId,
+      input.workflowDispatchLeaseGuard.now,
+      input.workflowDispatchLeaseGuard.graceMs,
       now,
       now,
       errorMessage,

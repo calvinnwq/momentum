@@ -14,6 +14,7 @@ import {
   type DaemonRunRow
 } from "./runs.js";
 import { getWorkflowLease } from "../workflow/leases.js";
+import { classifyWorkflowLease } from "../workflow/run/reducer.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../shared/events.js";
 import { getGoal, type GoalRow } from "../goal/init.js";
 import { markGoalNeedsManualRecovery } from "../goal/recovery.js";
@@ -391,6 +392,7 @@ export type StaleDaemonRunRecoverySkipped = {
 
 export type RecoverStaleDaemonRunsInput = {
   now?: number;
+  graceMs?: number;
   staleAfterMs: number;
   activeJobStaleAfterMs?: number;
   excludeRunId?: string;
@@ -444,6 +446,12 @@ export function recoverStaleDaemonRuns(
     );
   }
   const now = input.now ?? Date.now();
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "recoverStaleDaemonRuns: graceMs must be a non-negative finite number"
+    );
+  }
   const activeJobStaleAfterMs =
     input.activeJobStaleAfterMs ?? input.staleAfterMs;
   const stale = listStaleDaemonRuns(db, {
@@ -464,12 +472,13 @@ export function recoverStaleDaemonRuns(
       if (
         run.active_lock_id === null &&
         isWorkflowDispatchActiveJobId(run.active_job_id) &&
-        !hasLiveWorkflowDispatchLease(db, run.active_job_id, now)
+        !hasLiveWorkflowDispatchLease(db, run.active_job_id, now, graceMs)
       ) {
         const result = recoverStaleDaemonRunWithWorkflowDispatch(db, {
           runId: run.id,
           activeJobId: run.active_job_id,
           staleHeartbeatBefore: now - activeJobStaleAfterMs,
+          workflowDispatchLeaseGuard: { now, graceMs },
           now,
           recoveryStatus: DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS
         });
@@ -525,13 +534,15 @@ export function recoverStaleDaemonRuns(
 function hasLiveWorkflowDispatchLease(
   db: MomentumDb,
   activeJobId: string,
-  now: number
+  now: number,
+  graceMs: number
 ): boolean {
   const step = findWorkflowStepForActiveJobId(db, activeJobId);
   if (step === undefined) return true;
   const lease = getWorkflowLease(db, step.runId, "dispatch");
   return (
-    lease !== undefined && lease.releasedAt === null && lease.expiresAt >= now
+    lease !== undefined &&
+    classifyWorkflowLease(lease, { now, graceMs }) === "fresh"
   );
 }
 
@@ -638,6 +649,7 @@ export function runStartupRecovery(
     activeJobStaleAfterMs:
       daemonInput.activeJobStaleAfterMs ??
       DEFAULT_STARTUP_RECOVERY_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
+    graceMs,
     ...(daemonInput.excludeRunId !== undefined
       ? { excludeRunId: daemonInput.excludeRunId }
       : {})

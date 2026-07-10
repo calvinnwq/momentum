@@ -10,6 +10,7 @@ import {
   finishDaemonRun,
   getDaemonRun,
   heartbeatDaemonRun,
+  recoverStaleDaemonRunWithWorkflowDispatch,
   setDaemonRunActiveJob,
   startDaemonRun
 } from "../src/core/daemon/runs.js";
@@ -2009,6 +2010,87 @@ describe("recoverStaleDaemonRuns", () => {
       expect(out.skipped[0]!.blockingJobId).toBe(
         "workflow:run-1:implementation"
       );
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.active_job_id).toBe("workflow:run-1:implementation");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses startup recovery grace when checking workflow dispatch leases", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedWorkflowRunAndStep(db, {
+        runId: "run-1",
+        stepId: "implementation"
+      });
+      seedWorkflowDispatchLease(db, {
+        runId: "run-1",
+        expiresAt: 939_950
+      });
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "workflow:run-1:implementation",
+        lockId: null,
+        now: 1_000
+      });
+
+      const out = runStartupRecovery(db, {
+        now: 940_000,
+        graceMs: 100
+      });
+      expect(out.daemonRuns.recovered).toEqual([]);
+      expect(out.daemonRuns.skipped).toHaveLength(1);
+      expect(out.daemonRuns.skipped[0]!.reason).toBe("active_job_present");
+      expect(out.daemonRuns.skipped[0]!.blockingJobId).toBe(
+        "workflow:run-1:implementation"
+      );
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.active_job_id).toBe("workflow:run-1:implementation");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses workflow dispatch recovery when the guarded write sees a fresh lease", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedWorkflowRunAndStep(db, {
+        runId: "run-1",
+        stepId: "implementation"
+      });
+      seedWorkflowDispatchLease(db, {
+        runId: "run-1",
+        expiresAt: 100_100
+      });
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "workflow:run-1:implementation",
+        lockId: null,
+        now: 1_000
+      });
+
+      const result = recoverStaleDaemonRunWithWorkflowDispatch(db, {
+        runId,
+        activeJobId: "workflow:run-1:implementation",
+        staleHeartbeatBefore: 95_000,
+        workflowDispatchLeaseGuard: {
+          now: 100_000,
+          graceMs: 0
+        },
+        now: 100_000
+      });
+      expect(result.ok).toBe(false);
 
       const stored = getDaemonRun(db, runId);
       expect(stored?.state).toBe("running");
