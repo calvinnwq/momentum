@@ -161,18 +161,18 @@ describe("single-shot concrete mechanisms", () => {
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
-    setTimeout(() => abort.abort(), 50);
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(() => fs.existsSync(marker), "script cancellation marker");
+    abort.abort();
 
-    await expect(
-      mechanism(
-        round({
-          artifactRoot,
-          executorFamily: "script",
-          logPaths: [path.join(artifactRoot, "script.log")],
-        }),
-        context,
-      ),
-    ).rejects.toThrow(/aborted/i);
+    await expect(running).rejects.toThrow(/aborted/i);
     await waitMs(100);
     expect(fs.existsSync(marker)).toBe(false);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -212,28 +212,32 @@ describe("single-shot concrete mechanisms", () => {
       signal: abort.signal,
     };
     const logPath = path.join(artifactRoot, "one-shot.log");
-    setTimeout(() => abort.abort(abortReason), 50);
+    const running = mechanism(
+      round({
+        artifactRoot,
+        logPaths: [logPath],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt")),
+      "one-shot cancellation marker",
+    );
+    abort.abort(abortReason);
 
-    await expect(
-      mechanism(
-        round({
-          artifactRoot,
-          logPaths: [logPath],
-        }),
-        context,
-      ),
-    ).rejects.toThrow("caller requested cancellation");
+    await expect(running).rejects.toThrow("caller requested cancellation");
     await waitMs(100);
     expect(fs.existsSync(path.join(artifactRoot, "result.json"))).toBe(false);
     expect(fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt"))).toBe(
       false,
     );
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
-    expect(fs.readFileSync(logPath, "utf-8")).toContain(
-      "one-shot-before-cancel",
+    const cancellationLog = fs.readFileSync(logPath, "utf-8");
+    expect(cancellationLog).toContain(
+      "[live-step] stdout:\none-shot-before-cancel",
     );
-    expect(fs.readFileSync(logPath, "utf-8")).toContain(
-      "one-shot-stderr-before-cancel",
+    expect(cancellationLog).toContain(
+      "[live-step] stderr:\none-shot-stderr-before-cancel",
     );
   });
 
@@ -396,23 +400,29 @@ describe("single-shot concrete mechanisms", () => {
       signal: abort.signal,
     };
     const logPath = path.join(artifactRoot, "script.log");
-    setTimeout(() => abort.abort(), 50);
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [logPath],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.existsSync(path.join(repoPath, "cancelled.txt")),
+      "finalizing script cancellation marker",
+    );
+    abort.abort();
 
-    await expect(
-      mechanism(
-        round({
-          artifactRoot,
-          executorFamily: "script",
-          logPaths: [logPath],
-        }),
-        context,
-      ),
-    ).rejects.toThrow(/aborted/i);
+    await expect(running).rejects.toThrow(/aborted/i);
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
-    expect(fs.readFileSync(logPath, "utf-8")).toContain("script-before-cancel");
-    expect(fs.readFileSync(logPath, "utf-8")).toContain(
-      "script-stderr-before-cancel",
+    const cancellationLog = fs.readFileSync(logPath, "utf-8");
+    expect(cancellationLog).toContain(
+      "[single-shot-script] stdout:\nscript-before-cancel",
+    );
+    expect(cancellationLog).toContain(
+      "[single-shot-script] stderr:\nscript-stderr-before-cancel",
     );
   });
 

@@ -1341,7 +1341,6 @@ export function runProcessGroup(
     }, options.timeoutMs + 4_000);
 
     const capture = (stream: "stdout" | "stderr", chunk: Buffer): void => {
-      if (terminalError !== undefined) return;
       if (stream === "stdout") {
         stdoutBytes += chunk.length;
         if (stdoutBytes > options.maxBuffer) {
