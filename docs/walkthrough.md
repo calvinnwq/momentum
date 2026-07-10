@@ -41,7 +41,7 @@ The success envelope reports `"state": "pending"`, `"definitionKey": "coding-wor
 ## Run one bounded daemon cycle
 
 The managed daemon loop is the scheduler for approved workflow steps.
-Each cycle runs a startup-recovery pre-pass and one workflow scheduler tick that recovers stale workflow leases and claims one runnable approved step:
+It runs a startup-recovery pre-pass before cycling, then each cycle runs one workflow scheduler tick that recovers stale workflow leases and claims one runnable approved step:
 
 ```bash
 # 3. Run the workflow scheduler lane for one bounded idle cycle.
