@@ -987,6 +987,7 @@ export type AsyncProcessGroupOptions = ProcessGroupOptions & {
 
 type ProcessGroupMeta = {
   pid?: number;
+  commandCreationTicks?: string;
   commandStartedAtMs?: number;
   commandExitedAtMs?: number;
   commandExited?: boolean;
@@ -1027,6 +1028,7 @@ export function runProcessGroupSync(
   const metaPath = path.join(tempDir, "meta.json");
   const stdoutPath = path.join(tempDir, "stdout.txt");
   const stderrPath = path.join(tempDir, "stderr.txt");
+  const processTreeToken = crypto.randomUUID();
 
   try {
     fs.writeFileSync(stdoutPath, "");
@@ -1037,7 +1039,7 @@ export function runProcessGroupSync(
         command,
         args,
         cwd: options.cwd,
-        env: options.env,
+        env: { ...options.env, [PROCESS_TREE_TOKEN_ENV]: processTreeToken },
         timeoutMs: options.timeoutMs,
         maxBuffer: options.maxBuffer,
       }),
@@ -1175,6 +1177,7 @@ export function runProcessGroup(
     let stderrBytes = 0;
     let terminalError: Error | undefined;
     let commandPid: number | undefined;
+    let commandCreationTicks: string | undefined;
     let commandStartedAtMs: number | undefined;
     let commandExitedAtMs: number | undefined;
     let commandExited = false;
@@ -1229,6 +1232,9 @@ export function runProcessGroup(
                     ? Promise.resolve(false)
                     : killWindowsProcessTree(groupLeaderPid, processTreeToken, {
                         pid: commandPid,
+                        ...(commandCreationTicks !== undefined
+                          ? { creationTicks: commandCreationTicks }
+                          : {}),
                         startedAtMs: commandStartedAtMs,
                         ...(commandExitedAtMs !== undefined
                           ? { exitedAtMs: commandExitedAtMs }
@@ -1470,6 +1476,12 @@ export function runProcessGroup(
           commandPid =
             Number.isInteger(meta.pid) && (meta.pid ?? 0) > 0
               ? meta.pid
+              : undefined;
+          commandCreationTicks =
+            commandPid !== undefined &&
+            typeof meta.commandCreationTicks === "string" &&
+            /^\d+$/.test(meta.commandCreationTicks)
+              ? meta.commandCreationTicks
               : undefined;
           commandStartedAtMs =
             commandPid !== undefined &&
@@ -1784,6 +1796,7 @@ function killWindowsProcessTree(
   ownershipToken: string,
   commandIdentity?: {
     pid: number;
+    creationTicks?: string;
     startedAtMs: number;
     exitedAtMs?: number;
     exited: boolean;
@@ -1793,6 +1806,8 @@ function killWindowsProcessTree(
     commandIdentity !== undefined &&
     Number.isInteger(commandIdentity.pid) &&
     commandIdentity.pid > 0 &&
+    typeof commandIdentity.creationTicks === "string" &&
+    /^\d+$/.test(commandIdentity.creationTicks) &&
     Number.isInteger(commandIdentity.startedAtMs) &&
     commandIdentity.startedAtMs > 0 &&
     (!commandIdentity.exited ||
@@ -1820,6 +1835,7 @@ function killWindowsProcessTree(
     ...(hasCommandIdentity
       ? [
           `$commandPid = ${commandIdentity.pid}`,
+          `$commandCreationTicks = [long]${commandIdentity.creationTicks}`,
           `$commandExited = $${commandIdentity.exited}`,
           `$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.startedAtMs}).UtcDateTime.Ticks`,
           "$commandExitedAtTicks = 0",
@@ -1828,7 +1844,7 @@ function killWindowsProcessTree(
                 `$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.exitedAtMs}).UtcDateTime.Ticks`,
               ]
             : []),
-          "$identities[$commandPid] = -[long]$commandStartedAtTicks",
+          "$identities[$commandPid] = $commandCreationTicks",
         ]
       : []),
     "$stablePasses = 0",
@@ -1848,15 +1864,6 @@ function killWindowsProcessTree(
     "    if ($null -eq $current) { continue }",
     "    $expected = [long]$identities[$knownPid]",
     "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-    ...(hasCommandIdentity
-      ? [
-          "    if ($expected -lt 0) {",
-          "      if ($knownPid -eq $commandPid -and $commandExited -and $current.CreationTicks -gt $commandExitedAtTicks) { exit 1 }",
-          "      if ($current.CreationTicks -lt -$expected) { exit 1 }",
-          "      $identities[$knownPid] = $current.CreationTicks",
-          "    }",
-        ]
-      : []),
     "  }",
     "  $added = $false",
     "  do {",
@@ -1866,11 +1873,6 @@ function killWindowsProcessTree(
     "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
     "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
     "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-    ...(hasCommandIdentity && commandIdentity?.exited === true
-      ? [
-          "      if ($item.ParentProcessId -eq $commandPid -and [long]$identities[$commandPid] -lt 0 -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
-        ]
-      : []),
     "      if ($identities.ContainsKey($item.ProcessId)) {",
     "        if ([long]$identities[$item.ProcessId] -ne $item.CreationTicks) { exit 1 }",
     "      } else {",
@@ -1998,10 +2000,23 @@ let fallbackTimer;
 let ancestryTracker;
 let commandStartedAtMs = 0;
 let commandExitedAtMs = 0;
+let commandCreationTicks;
 let commandLaunchFailed = false;
 let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
+
+function readWindowsCreationTicks(pid) {
+  if (process.platform !== "win32" || !Number.isInteger(pid)) return undefined;
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf-8",
+    timeout: 1000,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  const value = result.stdout && result.stdout.trim();
+  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
+}
 
 function ownedPosixPids() {
   if (process.platform === "linux") {
@@ -2120,7 +2135,7 @@ function killOwnedTree() {
       process.exit(unsafeDetachedDescendant ? 1 : 0);
     }
     const commandExited = command.exitCode !== null || command.signalCode !== null;
-    if (!Number.isInteger(commandPid) || commandPid <= 0 || commandStartedAtMs <= 0 || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
+    if (!Number.isInteger(commandPid) || commandPid <= 0 || !/^\d+$/.test(commandCreationTicks || "") || commandStartedAtMs <= 0 || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
       process.exit(1);
     }
     const script = [
@@ -2128,6 +2143,7 @@ function killOwnedTree() {
       "$selfPid = $PID",
       "$rootPid = " + process.pid,
       "$commandPid = " + commandPid,
+      "$commandCreationTicks = [long]" + commandCreationTicks,
       "$commandExited = $" + commandExited,
       "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
       "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
@@ -2135,7 +2151,7 @@ function killOwnedTree() {
       "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
       "if ($null -eq $root) { exit 1 }",
       "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
-      "$identities[$commandPid] = -[long]$commandStartedAtTicks",
+      "$identities[$commandPid] = $commandCreationTicks",
       "$stablePasses = 0",
       "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
       "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
@@ -2148,11 +2164,6 @@ function killOwnedTree() {
       "    if ($null -eq $current) { continue }",
       "    $expected = [long]$identities[$knownPid]",
       "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-      "    if ($expected -lt 0) {",
-      "      if ($knownPid -eq $commandPid -and $commandExited -and $current.CreationTicks -gt $commandExitedAtTicks) { exit 1 }",
-      "      if ($current.CreationTicks -lt -$expected) { exit 1 }",
-      "      $identities[$knownPid] = $current.CreationTicks",
-      "    }",
       "  }",
       "  $added = $false",
       "  do {",
@@ -2161,7 +2172,6 @@ function killOwnedTree() {
       "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
       "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
       "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-      "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and [long]$identities[$commandPid] -lt 0 -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
       "      if ($identities.ContainsKey($item.ProcessId)) {",
       "        $expected = [long]$identities[$item.ProcessId]",
       "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
@@ -2235,6 +2245,7 @@ function reportThenAwaitCleanup(meta) {
   emitMeta({
     ...meta,
     commandStartedAtMs,
+    commandCreationTicks,
     commandExitedAtMs: commandExitedAtMs > 0 ? commandExitedAtMs : undefined,
     commandExited:
       meta.commandExited === true ||
@@ -2253,6 +2264,7 @@ function launch(request) {
       detached: false,
       stdio: ["ignore", "inherit", "inherit"]
     });
+    commandCreationTicks = readWindowsCreationTicks(command.pid);
   } catch (error) {
     commandLaunchFailed = true;
     reportThenAwaitCleanup({
@@ -2337,12 +2349,54 @@ let finished = false;
 let cleanupResult;
 let commandStartedAtMs = 0;
 let commandExitedAtMs = 0;
+let commandCreationTicks;
 const state = {
   stdoutBytes: 0,
   stderrBytes: 0,
   errorCode: undefined,
   errorMessage: undefined
 };
+const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + request.env.MOMENTUM_PROCESS_TREE_TOKEN;
+function ownedPosixPids() {
+  if (process.platform === "linux") {
+    try {
+      return fs.readdirSync("/proc")
+        .filter((entry) => /^\d+$/.test(entry))
+        .map(Number)
+        .filter((pid) => {
+          try {
+            const state = fs.readFileSync("/proc/" + pid + "/stat", "utf-8").split(" ")[2];
+            if (state === "Z") return false;
+            return fs.readFileSync("/proc/" + pid + "/environ", "utf-8").split("\0").includes(ownershipMarker);
+          } catch { return false; }
+        });
+    } catch { return undefined; }
+  }
+  const result = spawnSync("ps", ["eww", "-axo", "pid=,state=,command="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.split("\n")
+    .filter((line) => line.includes(ownershipMarker))
+    .map((line) => /^\s*(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && !match[2]?.startsWith("Z"))
+    .map((match) => Number(match[1]))
+    .filter((pid) => Number.isInteger(pid));
+}
+function readWindowsCreationTicks(pid) {
+  if (process.platform !== "win32" || !Number.isInteger(pid)) return undefined;
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf-8",
+    timeout: 1000,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  const value = result.stdout && result.stdout.trim();
+  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
+}
 function writeMeta(status, signal) {
   fs.writeFileSync(metaPath, JSON.stringify({
     pid: child && child.pid,
@@ -2359,12 +2413,28 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     return cleanupResult;
   }
   if (process.platform !== "win32") {
+    let stablePasses = 0;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && stablePasses < 2) {
+      const owned = ownedPosixPids();
+      if (!owned) break;
+      for (const pid of owned) {
+        try { process.kill(pid, "SIGKILL"); } catch {}
+      }
+      stablePasses = owned.length === 0 ? stablePasses + 1 : 0;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
     try { process.kill(-child.pid, "SIGKILL"); } catch {}
     try { child.kill("SIGKILL"); } catch {}
-    cleanupResult = true;
+    cleanupResult = stablePasses >= 2;
+    if (!cleanupResult) {
+      state.errorCode = "SUPERVISOR_FAILED";
+      state.errorMessage = "ownership-checked POSIX process-tree cleanup failed";
+      writeMeta(commandStatus, commandSignal);
+    }
     return cleanupResult;
   }
-  if (commandExited && commandExitedAtMs < commandStartedAtMs) {
+  if (!/^\d+$/.test(commandCreationTicks || "") || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
     cleanupResult = false;
     state.errorCode = "SUPERVISOR_FAILED";
     state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
@@ -2376,6 +2446,7 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     "$selfPid = $PID",
     "$rootPid = " + process.pid,
     "$commandPid = " + child.pid,
+    "$commandCreationTicks = [long]" + commandCreationTicks,
     "$commandExited = $" + commandExited,
     "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
     "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
@@ -2383,7 +2454,7 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
     "if ($null -eq $root) { exit 1 }",
     "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
-    "$identities[$commandPid] = -[long]$commandStartedAtTicks",
+    "$identities[$commandPid] = $commandCreationTicks",
     "$stablePasses = 0",
     "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
     "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
@@ -2396,11 +2467,6 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     "    if ($null -eq $current) { continue }",
     "    $expected = [long]$identities[$knownPid]",
     "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-    "    if ($expected -lt 0) {",
-    "      if ($knownPid -eq $commandPid -and $commandExited -and $current.CreationTicks -gt $commandExitedAtTicks) { exit 1 }",
-    "      if ($current.CreationTicks -lt -$expected) { exit 1 }",
-    "      $identities[$knownPid] = $current.CreationTicks",
-    "    }",
     "  }",
     "  $added = $false",
     "  do {",
@@ -2409,7 +2475,6 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
     "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
     "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-    "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and [long]$identities[$commandPid] -lt 0 -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
     "      if ($identities.ContainsKey($item.ProcessId)) {",
     "        $expected = [long]$identities[$item.ProcessId]",
     "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
@@ -2466,6 +2531,7 @@ try {
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"]
   });
+  commandCreationTicks = readWindowsCreationTicks(child.pid);
 } catch (error) {
   state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
   state.errorMessage = error && error.message ? error.message : String(error);

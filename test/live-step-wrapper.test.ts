@@ -565,6 +565,34 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "kills token-owned descendants that create a new process group synchronously",
+    () => {
+      const markerPath = path.join(
+        makeTempDir("momentum-live-step-marker-"),
+        "sync-detached-descendant-survived",
+      );
+      const descendant = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "survived"), 1000)`;
+      const parent = [
+        'const { spawn } = require("node:child_process")',
+        `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { detached: true, stdio: "ignore" }).unref()`,
+      ].join(";");
+
+      const out = runProcessGroupSync(process.execPath, ["-e", parent], {
+        cwd: path.dirname(markerPath),
+        env: process.env,
+        timeoutMs: 5_000,
+        maxBuffer: 1_024,
+      });
+      waitMs(1_200);
+
+      expect(out.status).toBe(0);
+      expect(out.error).toBeUndefined();
+      expect(fs.existsSync(markerPath)).toBe(false);
+    },
+    10_000,
+  );
+
   it("kills background descendants when an async process leader exits normally", async () => {
     const markerPath = path.join(
       makeTempDir("momentum-live-step-marker-"),

@@ -896,6 +896,88 @@ describe("single-shot built-in SDK proof", () => {
     ]);
   });
 
+  it.each([
+    [
+      "non-boolean outcomes",
+      { outcome: { ok: "false" } },
+      "outcome.ok must be a boolean",
+    ],
+    [
+      "unknown recovery codes",
+      { outcome: { ok: false, recoveryCode: "unknown" } },
+      "failed outcomes require a known recoveryCode",
+    ],
+    [
+      "recovery codes on success",
+      { outcome: { ok: true, recoveryCode: "command_failed" } },
+      "successful outcomes must not carry recoveryCode",
+    ],
+    [
+      "malformed failed results",
+      {
+        outcome: { ok: false, recoveryCode: "command_failed" },
+        result: { success: false },
+      },
+      "Runner result `summary` must be a non-empty string",
+    ],
+    [
+      "malformed artifact pointers",
+      {
+        outcome: { ok: false, recoveryCode: "command_failed" },
+        artifacts: { recoveryNote: { path: 42 } },
+      },
+      "artifacts.recoveryNote.path must be a non-empty string",
+    ],
+    [
+      "malformed evidence",
+      {
+        outcome: { ok: false, recoveryCode: "command_failed" },
+        evidence: { changedFiles: "src/unsafe.ts" },
+      },
+      "evidence.changedFiles must be an array of strings",
+    ],
+  ])("rejects %s before persistence", async (_name, mechanism, message) => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 30,
+    });
+    const roundId = `${invocation.invocationId}::round::0`;
+    const executor = new SingleShotExecutor(
+      "one-shot",
+      () => mechanism as never,
+    );
+
+    await expect(
+      executor.tick({
+        state: envelope.snapshot(),
+        config: {},
+        hostBindings: {
+          start: {
+            roundId,
+            invocationId: invocation.invocationId,
+            workflowRunId: invocation.workflowRunId,
+            stepRunId: invocation.stepRunId,
+            stepKey: invocation.stepKey,
+            family: "one-shot",
+            attempt: invocation.attempt,
+            inputDigest: "sha256:input",
+            artifactRoot: "/artifacts/round-0",
+            logPaths: ["/artifacts/round-0/executor.log"],
+            startedAt: 10,
+          },
+        },
+        envelope: envelope.facade,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(message);
+
+    expect(loadExecutorRound(db, roundId)?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, roundId)).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, roundId)).toHaveLength(1);
+  });
+
   it("routes portable config, host bindings, and caller cancellation to an async runner", async () => {
     const { db, invocation } = openExecutorDb("script");
     const envelope = createDurableExecutorEnvelope({

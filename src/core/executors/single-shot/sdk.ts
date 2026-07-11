@@ -771,42 +771,209 @@ export function singleShotSelectionFromSdkConfig(
 
 function normalizeSingleShotMechanismResult(
   family: SingleShotExecutorFamily,
-  mechanism: SingleShotRoundMechanismResult,
+  mechanism: unknown,
 ): SingleShotRoundMechanismResult {
+  if (!isRecord(mechanism)) {
+    throw new Error(`Invalid ${family} mechanism output: expected an object.`);
+  }
+  const outcome = mechanism["outcome"];
+  if (!isRecord(outcome) || typeof outcome["ok"] !== "boolean") {
+    throw new Error(
+      `Invalid ${family} mechanism output: outcome.ok must be a boolean.`,
+    );
+  }
+  if (
+    outcome["ok"] === false &&
+    (typeof outcome["recoveryCode"] !== "string" ||
+      !SINGLE_SHOT_RECOVERY_CODE_SET.has(outcome["recoveryCode"]))
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: failed outcomes require a known recoveryCode.`,
+    );
+  }
+  if (outcome["ok"] === true && outcome["recoveryCode"] !== undefined) {
+    throw new Error(
+      `Invalid ${family} mechanism output: successful outcomes must not carry recoveryCode.`,
+    );
+  }
+  const normalizedOutcome: SingleShotInvocationOutcome =
+    outcome["ok"] === true
+      ? { ok: true }
+      : {
+          ok: false,
+          recoveryCode: outcome["recoveryCode"] as SingleShotRecoveryCode,
+        };
+  const result = mechanism["result"];
+  const resultDigest = mechanism["resultDigest"];
+  if (
+    resultDigest !== undefined &&
+    resultDigest !== null &&
+    (typeof resultDigest !== "string" || resultDigest.length === 0)
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: resultDigest must be a non-empty string or null.`,
+    );
+  }
+  const artifacts = normalizeSingleShotArtifacts(
+    family,
+    mechanism["artifacts"],
+  );
+  const evidence = normalizeSingleShotEvidence(family, mechanism["evidence"]);
   if (mechanism.resultDigest != null && mechanism.result == null) {
     throw new Error(
       `Invalid ${family} mechanism output: resultDigest requires a result document.`,
     );
   }
-  if (family === "script" && mechanism.result != null) {
+  if (family === "script" && result != null) {
     throw new Error(
       "Invalid script mechanism output: script rounds must not capture a result document.",
     );
   }
-  if (family === "script" && mechanism.artifacts?.resultDocument != null) {
+  if (family === "script" && artifacts?.resultDocument != null) {
     throw new Error(
       "Invalid script mechanism output: script rounds must not report a result document artifact.",
     );
   }
-  if (!mechanism.outcome.ok) return mechanism;
+  let normalizedResult: RunnerResult | null | undefined;
+  if (result === null) normalizedResult = null;
+  if (family === "one-shot" && result !== undefined && result !== null) {
+    const normalized = normalizeRunnerResult(result);
+    if (!normalized.ok) {
+      throw new Error(`Invalid one-shot mechanism output: ${normalized.error}`);
+    }
+    normalizedResult = normalized.value;
+  }
+  const normalizedMechanism: SingleShotRoundMechanismResult = {
+    outcome: normalizedOutcome,
+    ...(normalizedResult !== undefined ? { result: normalizedResult } : {}),
+    ...(resultDigest !== undefined
+      ? { resultDigest: resultDigest as string | null }
+      : {}),
+    ...(artifacts !== undefined ? { artifacts } : {}),
+    ...(evidence !== undefined ? { evidence } : {}),
+  };
+  if (!normalizedOutcome.ok) return normalizedMechanism;
   if (family === "one-shot") {
-    if (mechanism.result == null) {
+    if (result == null) {
       throw new Error(
         "Invalid one-shot mechanism output: successful rounds require a result document.",
       );
     }
-    const normalized = normalizeRunnerResult(mechanism.result);
-    if (!normalized.ok) {
-      throw new Error(`Invalid one-shot mechanism output: ${normalized.error}`);
-    }
-    if (normalized.value.success !== true) {
+    if (normalizedResult?.success !== true) {
       throw new Error(
         "Invalid one-shot mechanism output: successful one-shot rounds require a successful result document.",
       );
     }
-    return { ...mechanism, result: normalized.value };
+    return normalizedMechanism;
   }
-  return mechanism;
+  return normalizedMechanism;
+}
+
+function normalizeSingleShotArtifacts(
+  family: SingleShotExecutorFamily,
+  value: unknown,
+): SingleShotRoundArtifacts | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error(
+      `Invalid ${family} mechanism output: artifacts must be an object.`,
+    );
+  }
+  const normalized: SingleShotRoundArtifacts = {};
+  for (const field of [
+    "resultDocument",
+    "checkpointStream",
+    "verificationOutput",
+    "commitOrResetEvidence",
+    "recoveryNote",
+  ] as const) {
+    const pointer = value[field];
+    if (pointer === undefined || pointer === null) continue;
+    if (
+      !isRecord(pointer) ||
+      typeof pointer["path"] !== "string" ||
+      pointer["path"].trim().length === 0
+    ) {
+      throw new Error(
+        `Invalid ${family} mechanism output: artifacts.${field}.path must be a non-empty string.`,
+      );
+    }
+    for (const optional of ["digest", "description"] as const) {
+      if (
+        pointer[optional] !== undefined &&
+        pointer[optional] !== null &&
+        typeof pointer[optional] !== "string"
+      ) {
+        throw new Error(
+          `Invalid ${family} mechanism output: artifacts.${field}.${optional} must be a string or null.`,
+        );
+      }
+    }
+    normalized[field] = {
+      path: pointer["path"],
+      ...(pointer["digest"] !== undefined
+        ? { digest: pointer["digest"] as string | null }
+        : {}),
+      ...(pointer["description"] !== undefined
+        ? { description: pointer["description"] as string | null }
+        : {}),
+    };
+  }
+  return normalized;
+}
+
+function normalizeSingleShotEvidence(
+  family: SingleShotExecutorFamily,
+  value: unknown,
+): SingleShotRoundEvidence | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error(
+      `Invalid ${family} mechanism output: evidence must be an object.`,
+    );
+  }
+  const verificationStatus = value["verificationStatus"];
+  if (
+    verificationStatus !== undefined &&
+    verificationStatus !== null &&
+    !["passed", "failed", "skipped"].includes(verificationStatus as string)
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: evidence.verificationStatus is invalid.`,
+    );
+  }
+  const commitSha = value["commitSha"];
+  if (
+    commitSha !== undefined &&
+    commitSha !== null &&
+    typeof commitSha !== "string"
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: evidence.commitSha must be a string or null.`,
+    );
+  }
+  const changedFiles = value["changedFiles"];
+  if (
+    changedFiles !== undefined &&
+    (!Array.isArray(changedFiles) ||
+      changedFiles.some((entry) => typeof entry !== "string"))
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: evidence.changedFiles must be an array of strings.`,
+    );
+  }
+  return {
+    ...(verificationStatus !== undefined
+      ? {
+          verificationStatus: verificationStatus as
+            "passed" | "failed" | "skipped" | null,
+        }
+      : {}),
+    ...(commitSha !== undefined
+      ? { commitSha: commitSha as string | null }
+      : {}),
+    ...(changedFiles !== undefined ? { changedFiles: [...changedFiles] } : {}),
+  };
 }
 
 function observationFromPersistencePlan(
