@@ -9,6 +9,7 @@ import {
   runProcessGroup,
   runProcessGroupSync,
   runLiveStepWrapper,
+  runLiveStepWrapperAsync,
   type LiveStepWrapperInput,
 } from "../src/adapters/live-step-wrapper.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
@@ -584,6 +585,73 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(out.status).toBe(0);
     expect(fs.existsSync(markerPath)).toBe(false);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "kills token-owned commands when the process anchor exits unexpectedly",
+    async () => {
+      const root = makeTempDir("momentum-live-step-dead-anchor-");
+      const markerPath = path.join(root, "command-survived");
+      const program = [
+        'process.stdout.write("before-anchor-exit\\n")',
+        'process.stderr.write("anchor-exit-diagnostic\\n")',
+        'process.kill(process.ppid, "SIGKILL")',
+        `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "survived"), 1_000)`,
+      ].join(";");
+      let failure: unknown;
+
+      try {
+        await runProcessGroup(process.execPath, ["-e", program], {
+          cwd: root,
+          env: process.env,
+          timeoutMs: 5_000,
+          maxBuffer: 1_024,
+        });
+      } catch (error) {
+        failure = error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+      expect(fs.existsSync(markerPath)).toBe(false);
+      expect(failure).toMatchObject({
+        code: "SUPERVISOR_FAILED",
+        stdout: "before-anchor-exit\n",
+        stderr: "anchor-exit-diagnostic\n",
+      });
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "persists captured output when async wrapper supervision fails",
+    async () => {
+      const input = setup({
+        config: {
+          command: process.execPath,
+          args: [
+            "-e",
+            [
+              'process.stdout.write("supervisor-stdout\\n")',
+              'process.stderr.write("supervisor-stderr\\n")',
+              'process.kill(process.ppid, "SIGKILL")',
+              "setTimeout(() => {}, 5_000)",
+            ].join(";"),
+          ],
+        },
+      });
+
+      await expect(
+        runLiveStepWrapperAsync(input, new AbortController().signal),
+      ).rejects.toMatchObject({ code: "SUPERVISOR_FAILED" });
+
+      expect(readLog(input)).toContain(
+        "[live-step] stdout:\nsupervisor-stdout",
+      );
+      expect(readLog(input)).toContain(
+        "[live-step] stderr:\nsupervisor-stderr",
+      );
+    },
+    10_000,
+  );
 
   it("returns the command spawn error when no process tree was launched", async () => {
     const root = makeTempDir("momentum-live-step-missing-command-");

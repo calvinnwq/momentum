@@ -537,7 +537,10 @@ async function executeScriptCommandAsync(
       signal.throwIfAborted();
       throw error;
     }
-    if (isProcessSupervisorFailure(error)) throw error;
+    if (isProcessSupervisorFailure(error)) {
+      writeProcessSupervisorOutput(logHandle, error);
+      throw error;
+    }
     if (signal.aborted) {
       if (cancellationHandled) throw error;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
@@ -979,15 +982,36 @@ function digestIgnoredPath(
     return false;
   }
   const stat = fs.lstatSync(absolutePath, { bigint: true });
+  const containsExcludedDescendant =
+    stat.isDirectory() &&
+    exclusions.some((excluded) => excluded.startsWith(`${relativePath}/`));
+  const entries = stat.isDirectory()
+    ? fs.readdirSync(absolutePath).sort()
+    : undefined;
+  if (
+    containsExcludedDescendant &&
+    entries?.every(
+      (entry) =>
+        !ignoredPathHasIncludedContent(
+          repoRoot,
+          `${relativePath}/${entry}`,
+          exclusions,
+        ),
+    )
+  ) {
+    return true;
+  }
   digest.update(relativePath);
   digest.update("\0");
   digest.update(
-    [stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs, stat.ino].join(":"),
+    (containsExcludedDescendant
+      ? [stat.mode, stat.ino]
+      : [stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs, stat.ino]
+    ).join(":"),
   );
   if (stat.isSymbolicLink()) digest.update(fs.readlinkSync(absolutePath));
   digest.update("\0");
-  if (stat.isDirectory()) {
-    const entries = fs.readdirSync(absolutePath).sort();
+  if (entries !== undefined) {
     for (const entry of entries) {
       if (
         !digestIgnoredPath(
@@ -1002,6 +1026,40 @@ function digestIgnoredPath(
     }
   }
   return true;
+}
+
+function ignoredPathHasIncludedContent(
+  repoRoot: string,
+  relativePath: string,
+  exclusions: readonly string[],
+): boolean {
+  if (
+    exclusions.some(
+      (excluded) =>
+        relativePath === excluded || relativePath.startsWith(`${excluded}/`),
+    )
+  ) {
+    return false;
+  }
+  const containsExcludedDescendant = exclusions.some((excluded) =>
+    excluded.startsWith(`${relativePath}/`),
+  );
+  if (!containsExcludedDescendant) return true;
+  const absolutePath = path.resolve(
+    repoRoot,
+    relativePath.split("/").join(path.sep),
+  );
+  const stat = fs.lstatSync(absolutePath);
+  if (!stat.isDirectory()) return true;
+  return fs
+    .readdirSync(absolutePath)
+    .some((entry) =>
+      ignoredPathHasIncludedContent(
+        repoRoot,
+        `${relativePath}/${entry}`,
+        exclusions,
+      ),
+    );
 }
 
 function projectFinalizeResult(input: {
@@ -1555,6 +1613,13 @@ function writeLog(
   if (!chunk.endsWith("\n")) {
     fs.writeSync(handle, "\n");
   }
+}
+
+function writeProcessSupervisorOutput(handle: number, error: unknown): void {
+  if (typeof error !== "object" || error === null) return;
+  const output = error as { stdout?: unknown; stderr?: unknown };
+  writeLog(handle, "stdout", output.stdout);
+  writeLog(handle, "stderr", output.stderr);
 }
 
 function writeLine(handle: number, line: string): void {

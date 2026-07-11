@@ -137,6 +137,65 @@ function resultJson(value: RunnerResult): string {
 }
 
 describe("single-shot concrete mechanisms", () => {
+  it("persists script output when async process supervision fails", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const logPath = path.join(artifactRoot, "script.log");
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runProcessGroup: async () => {
+            const error = Object.assign(new Error("supervisor failed"), {
+              code: "SUPERVISOR_FAILED",
+              stdout: "script-supervisor-stdout\n",
+              stderr: "script-supervisor-stderr\n",
+            });
+            throw error;
+          },
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: process.execPath,
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: path.basename(process.execPath) },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    await expect(
+      mechanism(
+        round({
+          artifactRoot,
+          executorFamily: "script",
+          logPaths: [logPath],
+        }),
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "SUPERVISOR_FAILED" });
+
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "[single-shot-script] stdout:\nscript-supervisor-stdout",
+    );
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "[single-shot-script] stderr:\nscript-supervisor-stderr",
+    );
+  });
+
   it("kills an in-flight script process group when the SDK signal aborts", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();

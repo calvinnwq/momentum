@@ -45,6 +45,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 import type {
@@ -477,17 +478,19 @@ export async function runLiveStepWrapperAsync(
     }
 
     const start = Date.now();
-    const processResult = await runProcessGroup(
-      config.command,
-      [...config.args],
-      {
+    let processResult: SpawnSyncReturns<string>;
+    try {
+      processResult = await runProcessGroup(config.command, [...config.args], {
         cwd,
         env,
         timeoutMs: config.timeoutSec * 1000,
         maxBuffer: outputMaxBytes,
         signal,
-      },
-    );
+      });
+    } catch (error) {
+      writeSupervisorFailureOutput(logHandle, error, "stdout", "stderr");
+      throw error;
+    }
     if (signal.aborted) {
       writeLog(logHandle, "stdout", processResult.stdout);
       writeLog(logHandle, "stderr", processResult.stderr);
@@ -759,13 +762,24 @@ async function runProbeAsync(
     };
   }
 
-  const result = await runProcessGroup(probe.command, [...probe.args], {
-    cwd,
-    env,
-    timeoutMs: probe.timeoutSec * 1000,
-    maxBuffer: outputMaxBytes,
-    signal,
-  });
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = await runProcessGroup(probe.command, [...probe.args], {
+      cwd,
+      env,
+      timeoutMs: probe.timeoutSec * 1000,
+      maxBuffer: outputMaxBytes,
+      signal,
+    });
+  } catch (error) {
+    writeSupervisorFailureOutput(
+      logHandle,
+      error,
+      "probe stdout",
+      "probe stderr",
+    );
+    throw error;
+  }
   if (signal.aborted) {
     writeLog(logHandle, "probe stdout", result.stdout);
     writeLog(logHandle, "probe stderr", result.stderr);
@@ -1253,8 +1267,13 @@ export function runProcessGroup(
             if (anchorCleanupSucceeded && !fallbackStarted) finish(true);
             else runFallback();
           };
-          if (child.stdio[3] !== null) {
-            child.stdio[3]?.once("end", controlEnded);
+          const controlStream = child.stdio[3] as Readable | null | undefined;
+          if (controlStream !== null && controlStream !== undefined) {
+            if (controlStream.readableEnded || controlStream.destroyed) {
+              controlEnded();
+            } else {
+              controlStream.once("end", controlEnded);
+            }
           } else {
             child.once("exit", controlEnded);
           }
@@ -1296,7 +1315,7 @@ export function runProcessGroup(
       if (closeDeadline !== undefined) clearTimeout(closeDeadline);
       options.signal?.removeEventListener("abort", abort);
       if (errnoCode(terminalError) === "SUPERVISOR_FAILED") {
-        reject(terminalError);
+        reject(attachProcessOutput(terminalError, stdout, stderr));
         return;
       }
       resolve(
@@ -1578,7 +1597,7 @@ async function terminateOwnedPosixTree(
 ): Promise<boolean> {
   await new Promise<void>((resolve) => setImmediate(resolve));
   let anchorExited = child.exitCode !== null || child.signalCode !== null;
-  if (anchorExited && !anchorCleanupReported()) return false;
+  let safe = !anchorExited || anchorCleanupReported();
   if (hasUnownedEscapedDescendant(groupLeaderPid, ownershipToken)) {
     const owned = listOwnedPosixProcesses(ownershipToken);
     if (owned.ok) {
@@ -1595,7 +1614,6 @@ async function terminateOwnedPosixTree(
     return false;
   }
 
-  let safe = true;
   for (const pid of initial.pids) {
     if (pid === groupLeaderPid) continue;
     const ownership = posixProcessOwnership(pid, ownershipToken);
@@ -1615,14 +1633,12 @@ async function terminateOwnedPosixTree(
       safe = anchorExited && anchorCleanupReported() && safe;
     }
   }
-  if (!safe) return false;
-
   onInitialized();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const remaining = listOwnedPosixProcesses(ownershipToken);
     if (!remaining.ok) return false;
-    if (remaining.pids.length === 0) return true;
+    if (remaining.pids.length === 0) return safe;
     for (const pid of remaining.pids) {
       const ownership = posixProcessOwnership(pid, ownershipToken);
       if (ownership === "unknown") return false;
@@ -1791,9 +1807,16 @@ function killWindowsProcessTree(
     `$rootPid = ${rootPid}`,
     `$ownershipToken = ${JSON.stringify(ownershipToken)}`,
     '$root = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $rootPid)',
-    "if ($null -eq $root -or $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
     "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
-    "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+    ...(hasCommandIdentity
+      ? [
+          "if ($null -ne $root -and $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
+          "if ($null -ne $root) { $identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks }",
+        ]
+      : [
+          "if ($null -eq $root -or $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
+          "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+        ]),
     ...(hasCommandIdentity
       ? [
           `$commandPid = ${commandIdentity.pid}`,
@@ -1950,6 +1973,17 @@ function spawnError(code: string, message: string): NodeJS.ErrnoException {
   const error = new Error(message) as NodeJS.ErrnoException;
   error.code = code;
   return error;
+}
+
+function attachProcessOutput(
+  error: Error | undefined,
+  stdout: string,
+  stderr: string,
+): Error {
+  return Object.assign(
+    error ?? spawnError("SUPERVISOR_FAILED", "process supervisor failed"),
+    { stdout, stderr },
+  );
 }
 
 const LIVE_STEP_ASYNC_GROUP_ANCHOR = String.raw`
@@ -2663,6 +2697,18 @@ function writeLog(
   if (!chunk.endsWith("\n")) {
     fs.writeSync(handle, "\n");
   }
+}
+
+function writeSupervisorFailureOutput(
+  handle: number,
+  error: unknown,
+  stdoutLabel: "stdout" | "probe stdout",
+  stderrLabel: "stderr" | "probe stderr",
+): void {
+  if (typeof error !== "object" || error === null) return;
+  const output = error as { stdout?: unknown; stderr?: unknown };
+  writeLog(handle, stdoutLabel, output.stdout);
+  writeLog(handle, stderrLabel, output.stderr);
 }
 
 function writeLine(handle: number, line: string): void {
