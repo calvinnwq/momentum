@@ -109,21 +109,20 @@ repo-ownership proof succeeds, before the host records the cancelled round,
 invocation, and classification checkpoint atomically. Missing ownership proof or
 failed process-tree cleanup, reset residue, or other failed cleanup leaves the
 durable in-flight state for recovery instead of recording a false terminal
-cancellation. Read-only runners require a clean
-captured baseline before launch, so cancellation cleanup never erases
-pre-existing worktree changes. Host-owned repo-local log and result paths are
-excluded from the ignored-path baseline so durable evidence is not mistaken for
-runner residue. Ignored-path comparison recursively snapshots entry metadata and
-intentionally treats additions, removals, or metadata changes as residue. Very
-large ignored trees can make capture expensive, and concurrent cache churn can
-conservatively refuse cleanup; mutable caches should live outside the supervised
-worktree when practical. Agent-loop will repeat bounded runner rounds, and
+cancellation.
+Read-only runners require clean tracked/untracked status plus a captured ignored-path baseline before launch, so cancellation cleanup never erases pre-existing worktree changes.
+Host-owned repo-local log and result paths are excluded from the ignored-path baseline so durable evidence is not mistaken for runner residue.
+Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
+Directory-only mode or timestamp mutations therefore cannot evade the baseline.
+Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
+Agent-loop will repeat bounded runner rounds, and
 delegate-supervisor will poll a tool adapter across ticks when those lifecycle
 classes land. The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
+The single-shot lifecycle validates result evidence before artifact writes: successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
 fallback receives its own bounded cleanup budget. The POSIX budget starts only

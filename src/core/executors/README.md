@@ -66,15 +66,16 @@ cleanup for the anchored group and sampled descendants that retain the ownership
 token, but a hostile descendant that escapes between ancestry samples and strips
 the token requires kernel-backed containment outside this implementation.
 Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
-Ignored-worktree comparison recursively snapshots entry metadata and is
-intentionally strict; large ignored trees and concurrent cache churn remain
-operational risks, so mutable caches should live outside the supervised worktree
-when practical.
+Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
+Ignored-worktree comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants.
+Directory-only mode or timestamp mutations therefore remain residue.
+The comparison is intentionally strict; large ignored trees and concurrent cache churn remain operational risks, so mutable caches should live outside the supervised worktree when practical.
 New single-shot dispatches insert their invocation, initial running round, and
 hashed dispatch-binding checkpoint in one transaction after resolving runtime
 inputs, so reattach never inherits a new invocation without its complete binding.
 Registration/discovery and structural-preflight schema validation remain separate
 wiring.
+Before artifact writes, the lifecycle requires a successful normalized `RunnerResult` for successful `one-shot` turns and forbids result-document evidence from exit-code-based `script` turns.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.

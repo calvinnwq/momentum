@@ -58,6 +58,7 @@ Cancellation is cooperative and cleanup-bearing: a runner that observes `signal`
 The built-in asynchronous process adapters preserve stdout and stderr captured before and during cancellation in the executor log, and decode streaming UTF-8 without corrupting characters split across pipe chunks.
 
 The shipped agent-once and script process adapters supervise their spawned process trees asynchronously. A separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash. Every launched process inherits a cryptographically random per-run ownership token; POSIX cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process. Windows cleanup discovers descendants from the still-live anchor and retained command start/exit identity even after the command leader exits. Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint. Cleanup verifies tracked/untracked status and a recursive metadata snapshot of ignored paths. Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation. Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
+Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
 If the anchor does not confirm cleanup, Momentum gives the ownership-checked POSIX or Windows fallback its own bounded cleanup budget.
 A POSIX fallback starts that budget only after its blocking ownership and escaped-descendant preflight completes.
 If the POSIX anchor has already exited, fallback cleanup may preserve the known outcome only when the anchor first reported that it had entered cleanup; an abrupt exit without that report fails closed.
@@ -65,6 +66,9 @@ Windows fallback binds descendant discovery to retained process identities and c
 A fallback that proves cleanup preserves the already-known timeout, cancellation, or command-exit outcome; any fallback that cannot prove cleanup changes the result to `SUPERVISOR_FAILED`.
 Repo-local log and result paths owned by the host are excluded from the ignored-path baseline so writing durable evidence does not look like runner residue.
 Ignored-path comparison is intentionally strict: entry additions, removals, and metadata changes are treated as runner residue.
+For each non-excluded entry, the digest hashes its relative path, mode, size, nanosecond modification and change times, inode, and symlink target when applicable.
+A non-empty ignored directory's own metadata is hashed before all descendants are traversed recursively, so directory-only mode or timestamp changes cannot hide behind unchanged children.
+When a host-owned descendant is excluded, its ignored ancestors remain represented by mode and inode so ancestor mode changes or replacement are still detected.
 Very large ignored trees can make snapshotting expensive, and concurrent cache churn can cause a conservative cleanup refusal; operators should keep mutable caches outside the supervised worktree when practical.
 
 Portable POSIX supervision is userland containment, not a sandbox.
@@ -146,6 +150,11 @@ The deterministic script host also requires `timeoutSec` to be a positive intege
 An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
+
+The lifecycle also validates result evidence before writing artifacts.
+A successful `one-shot` turn requires a successful normalized `RunnerResult`; a `script` turn is exit-code based and must not return a result document or result-document artifact.
+A result digest is valid only when its result document is present.
+Successful turns pass through `capturing_result`, but only a captured document produces `result_captured`; failures do not invent a capture checkpoint.
 
 ## Lifecycle extension points
 
