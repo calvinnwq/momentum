@@ -976,6 +976,31 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.outcome).toEqual({ ok: true });
   });
 
+  it("rejects read-only success that changes ignored directory metadata", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    const ignoredRoot = path.join(repoPath, "ignored");
+    fs.mkdirSync(ignoredRoot);
+    fs.writeFileSync(path.join(ignoredRoot, "fixture.txt"), "ignored");
+    fs.chmodSync(ignoredRoot, 0o755);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "chmod 700 ignored"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed",
+    });
+    expect(fs.statSync(ignoredRoot).mode & 0o777).toBe(0o700);
+  });
+
   it("rejects oversized script host timeouts before sync or SDK launch", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();

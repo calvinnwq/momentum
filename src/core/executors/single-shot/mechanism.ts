@@ -979,24 +979,6 @@ function digestIgnoredPath(
     return false;
   }
   const stat = fs.lstatSync(absolutePath, { bigint: true });
-  if (stat.isDirectory()) {
-    const entries = fs.readdirSync(absolutePath).sort();
-    if (entries.length > 0) {
-      for (const entry of entries) {
-        if (
-          !digestIgnoredPath(
-            repoRoot,
-            `${relativePath}/${entry}`,
-            exclusions,
-            digest,
-          )
-        ) {
-          return false;
-        }
-      }
-      return true;
-    }
-  }
   digest.update(relativePath);
   digest.update("\0");
   digest.update(
@@ -1004,6 +986,21 @@ function digestIgnoredPath(
   );
   if (stat.isSymbolicLink()) digest.update(fs.readlinkSync(absolutePath));
   digest.update("\0");
+  if (stat.isDirectory()) {
+    const entries = fs.readdirSync(absolutePath).sort();
+    for (const entry of entries) {
+      if (
+        !digestIgnoredPath(
+          repoRoot,
+          `${relativePath}/${entry}`,
+          exclusions,
+          digest,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
   return true;
 }
 
