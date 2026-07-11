@@ -132,7 +132,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
     expect(plan.kind).toBe("no-mistakes");
-    expect(plan.family).toBe("no-mistakes");
+    expect(plan.family).toBe("delegate-supervisor");
     expect(plan.isExternalWrite).toBe(false);
     expect(plan.probeOnly).toBe(true);
     expect(plan.command).toBe("/usr/bin/true");
