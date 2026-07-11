@@ -80,9 +80,10 @@ When `mechanism_completed` is durable but daemon classification is not, the
 single-shot daemon entrypoint reattaches the matching non-terminal invocation,
 reconstructs the outcome from that checkpoint, and resumes only classification;
 it never reruns the completed mechanism.
-New single-shot dispatches materialize the invocation and initial running round
-in one transaction after resolving runtime inputs, so the first durable owner
-always has its reattach binding.
+New single-shot dispatches materialize the invocation, initial running round,
+and hashed `round_started` dispatch-binding checkpoint in one transaction after
+resolving runtime inputs, so the first durable owner always has its complete
+reattach binding.
 
 Every executor declares a strict object config schema. The schema describes only
 portable workflow intent: agent harness/model/effort, tool or command identity,
@@ -112,7 +113,11 @@ cancellation. Read-only runners require a clean
 captured baseline before launch, so cancellation cleanup never erases
 pre-existing worktree changes. Host-owned repo-local log and result paths are
 excluded from the ignored-path baseline so durable evidence is not mistaken for
-runner residue. Agent-loop will repeat bounded runner rounds, and
+runner residue. Ignored-path comparison recursively snapshots entry metadata and
+intentionally treats additions, removals, or metadata changes as residue. Very
+large ignored trees can make capture expensive, and concurrent cache churn can
+conservatively refuse cleanup; mutable caches should live outside the supervised
+worktree when practical. Agent-loop will repeat bounded runner rounds, and
 delegate-supervisor will poll a tool adapter across ticks when those lifecycle
 classes land. The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
@@ -121,9 +126,15 @@ executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
-fallback receives its own bounded cleanup budget. Successful fallback cleanup
-preserves the known timeout, cancellation, or command-exit outcome; only an
-unverified fallback changes that outcome to `SUPERVISOR_FAILED`.
+fallback receives its own bounded cleanup budget. The POSIX budget starts only
+after blocking ownership and escaped-descendant preflight completes. Once its
+anchor has exited, POSIX fallback can preserve a known outcome only if the anchor
+first reported entering cleanup; an abrupt unreported exit fails closed. Windows
+fallback binds cleanup to retained anchor and command start/exit identities, and
+the synchronous helper retains command status and signal for diagnostics when
+cleanup proof fails without accepting that outcome. Successful fallback cleanup
+preserves the known timeout, cancellation, or command-exit outcome; an unverified
+fallback changes that outcome to `SUPERVISOR_FAILED`.
 
 Portable POSIX process supervision is userland containment.
 It can prove cleanup for the anchored group and sampled descendants that retain

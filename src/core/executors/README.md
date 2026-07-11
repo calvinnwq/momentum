@@ -54,6 +54,11 @@ When the anchor cannot confirm cleanup, the ownership-checked POSIX or Windows
 fallback receives its own bounded cleanup budget. A verified fallback preserves
 the known timeout, cancellation, or command-exit outcome; only an unverified
 fallback changes that outcome to `SUPERVISOR_FAILED`.
+The POSIX budget begins after its ownership preflight; an already-exited anchor
+must have reported entering cleanup before fallback may preserve the outcome.
+Windows fallback retains bounded anchor and command start/exit identities, while
+the synchronous helper preserves command status only as diagnostics when cleanup
+proof fails.
 Captured stdout and stderr remain in the executor log through cancellation, and
 streaming UTF-8 decoding preserves characters split across pipe chunks.
 POSIX supervision is portable userland containment, not a sandbox: it proves
@@ -61,9 +66,13 @@ cleanup for the anchored group and sampled descendants that retain the ownership
 token, but a hostile descendant that escapes between ancestry samples and strips
 the token requires kernel-backed containment outside this implementation.
 Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
-New single-shot dispatches insert their invocation and initial running round in
-one transaction after resolving runtime inputs, so reattach never inherits a
-new invocation without its round binding.
+Ignored-worktree comparison recursively snapshots entry metadata and is
+intentionally strict; large ignored trees and concurrent cache churn remain
+operational risks, so mutable caches should live outside the supervised worktree
+when practical.
+New single-shot dispatches insert their invocation, initial running round, and
+hashed dispatch-binding checkpoint in one transaction after resolving runtime
+inputs, so reattach never inherits a new invocation without its complete binding.
 Registration/discovery and structural-preflight schema validation remain separate
 wiring.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.

@@ -1115,9 +1115,11 @@ export function runProcessGroupSync(
  * token requires kernel-backed containment; detected escapes or any lost cleanup
  * proof reject with `SUPERVISOR_FAILED` rather than claiming success.
  * If the anchor cannot confirm cleanup, a verified ownership-checked fallback
- * preserves the known timeout, cancellation, or command-exit outcome. Only a
- * fallback that cannot prove cleanup replaces that outcome with
- * `SUPERVISOR_FAILED`.
+ * preserves the known timeout, cancellation, or command-exit outcome. POSIX
+ * starts the fallback deadline after ownership preflight and, once the anchor
+ * exits, requires its prior cleanup-attempt report. Windows retains bounded
+ * anchor and command start/exit identities. Any fallback that cannot prove
+ * cleanup replaces the known outcome with `SUPERVISOR_FAILED`.
  */
 export function runProcessGroup(
   command: string,

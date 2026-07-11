@@ -11,7 +11,7 @@
  * goal-loop projections — but simpler, because a single shot owns exactly one
  * round and never loops:
  *
- *   atomically insert invocation + round-start rows
+ *   atomically insert invocation + round-start + dispatch-binding checkpoint
  *      (running, deterministic identity and agent/model/input frozen in)
  *   -> run the bounded mechanism  (the one-shot agent pass / the script command)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
@@ -51,10 +51,10 @@
  * cleanup failures throw and preserve the durable in-flight state. Two ordering
  * invariants tie the lifecycle to the contract:
  *
- *   - The durable invocation and round-start rows are inserted atomically
- *     *before* the mechanism runs (contract Round Lifecycle step 4), so a lost
- *     process leaves a complete durable `running` dispatch binding for recovery
- *     rather than an invocation-only owner.
+ *   - The durable invocation, round-start, and dispatch-binding checkpoint are
+ *     inserted atomically *before* the mechanism runs (contract Round Lifecycle
+ *     step 4), so a lost process leaves a complete durable `running` reattach
+ *     binding for recovery rather than an invocation-only owner.
  *   - A *successful* outcome captures (running -> capturing_result) before
  *     terminalizing — even a `script` success with no result document emits a bare
  *     capture, because the round transition graph forbids `running -> succeeded`
@@ -315,7 +315,7 @@ type RunSingleShotStepBase = {
   signal?: AbortSignal;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => SingleShotRoundRuntimeInputs;
-  /** Clock for the invocation + round timestamps; defaults to {@link Date.now}. */
+  /** Clock for invocation, round, checkpoint, and later writes; defaults to {@link Date.now}. */
   now?: () => number;
 };
 
@@ -346,13 +346,13 @@ export type RunSingleShotStepResult = {
  * The single-shot executor adapter "below `StepRun`" (contract "State Model":
  * `StepRun -> ExecutorInvocation -> ExecutorRound[]`, here exactly one round).
  * This is the single entrypoint a daemon / scheduler calls with a step-run
- * identity: it {@link planSingleShotInvocation | materializes} the durable
- * single-shot `executor_invocations` row with a deterministic, reattachable id,
- * drives the one round through {@link runSingleShotRound} (materializing the
- * round's identity via {@link planSingleShotRoundStartForInvocation} so the round
- * inherits the invocation's identity and family and the deterministic
- * {@link singleShotRoundId}), then settles the invocation into the round
- * decision's terminal state.
+ * identity: it atomically materializes the durable invocation, initial round,
+ * and hashed dispatch-binding checkpoint with a deterministic, reattachable id,
+ * then drives the round through {@link runSingleShotRound}. The round identity
+ * comes from {@link planSingleShotRoundStartForInvocation}, inherits the
+ * invocation identity and family, and uses the deterministic
+ * {@link singleShotRoundId}. The final daemon decision settles the invocation
+ * into the round decision's terminal state.
  *
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
  * invocation reattaches from `(workflowRunId, stepRunId, family, attempt)` and the
@@ -380,8 +380,8 @@ export type RunSingleShotStepResult = {
  * already belongs to a terminal attempt.
  * @throws {ExecutorRoundConflictError} if first round materialization collides
  * with a different durable owner (via {@link runSingleShotRound}).
- * @throws {Error} if a non-terminal invocation has no durable round binding or
- * its existing round does not match the current dispatch inputs.
+ * @throws {Error} if a non-terminal invocation has no complete durable dispatch
+ * binding or its existing round does not match the current dispatch inputs.
  */
 export async function runSingleShotStep(
   input: RunSingleShotStepInput,
