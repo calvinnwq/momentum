@@ -836,6 +836,46 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     12_000,
   );
 
+  it.skipIf(process.platform !== "darwin")(
+    "accepts verified fallback cleanup after a safe anchor cleanup report",
+    async () => {
+      const root = makeTempDir("momentum-live-step-exited-anchor-");
+      const shimDir = path.join(root, "bin");
+      const shimPath = path.join(shimDir, "ps");
+      const realPs = fs.existsSync("/bin/ps") ? "/bin/ps" : "/usr/bin/ps";
+      fs.mkdirSync(shimDir);
+      fs.writeFileSync(
+        shimPath,
+        [
+          "#!/bin/sh",
+          'if [ -n "$MOMENTUM_PROCESS_TREE_TOKEN" ] && [ "$1" = eww ]; then',
+          "  exit 1",
+          "fi",
+          `exec ${JSON.stringify(realPs)} "$@"`,
+        ].join("\n"),
+      );
+      fs.chmodSync(shimPath, 0o755);
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${shimDir}${path.delimiter}${originalPath ?? ""}`;
+
+      try {
+        const out = await runProcessGroup(process.execPath, ["-e", ""], {
+          cwd: root,
+          env: process.env,
+          timeoutMs: 10_000,
+          maxBuffer: 1_024,
+        });
+
+        expect(out.status).toBe(0);
+        expect(out.error).toBeUndefined();
+      } finally {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+      }
+    },
+    10_000,
+  );
+
   it.skipIf(process.platform !== "win32")(
     "kills synchronous Windows descendants after their leader exits",
     () => {

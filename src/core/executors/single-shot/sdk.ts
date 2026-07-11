@@ -329,25 +329,30 @@ export class SingleShotExecutor implements Executor<
       selection,
     });
     const frozenLogPaths = [...start.logPaths];
-    const dispatchBinding = dispatchBindingDetail(
+    const dispatchBinding = singleShotDispatchBindingDetail(
       this.name,
       config,
       hostBindings.start,
     );
-    const durableStart =
+    const materialized =
       hostBindings.roundAlreadyMaterialized === true
-        ? loadMaterializedSingleShotRound(this.name, {
+        ? loadMaterializedSingleShotRound(this.name, dispatchBinding, {
             ...context,
             config,
             hostBindings,
           })
-        : context.envelope.startRound(roundStartForSdk(start));
-    const roundStartedCheckpoint = context.envelope.recordCheckpoint(
-      start.roundId,
-      withoutRoundId(
-        planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
-      ),
-    );
+        : undefined;
+    const durableStart =
+      materialized?.round ??
+      context.envelope.startRound(roundStartForSdk(start));
+    const roundStartedCheckpoint =
+      materialized?.checkpoint ??
+      context.envelope.recordCheckpoint(
+        start.roundId,
+        withoutRoundId(
+          planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
+        ),
+      );
     context.signal.throwIfAborted();
 
     const mechanism = await this.#runRound(cloneRoundForRunner(durableStart), {
@@ -428,11 +433,12 @@ export class SingleShotExecutor implements Executor<
 
 function loadMaterializedSingleShotRound(
   family: SingleShotExecutorFamily,
+  dispatchBinding: string,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
     SingleShotExecutorHostBindings
   >,
-): ExecutorRoundView {
+): { round: ExecutorRoundView; checkpoint: ExecutorCheckpointRecord } {
   if (context.state.rounds.length !== 1) {
     throw new Error(
       `SingleShotExecutor ${family} expected exactly one atomically materialized round.`,
@@ -444,12 +450,12 @@ function loadMaterializedSingleShotRound(
   }
   if (
     snapshot.artifacts.length > 0 ||
-    snapshot.checkpoints.length > 0 ||
+    snapshot.checkpoints.length !== 1 ||
     snapshot.findings.length > 0 ||
     snapshot.decisions.length > 0
   ) {
     throw new Error(
-      `Single-shot round ${snapshot.round.roundId} already has durable evidence and cannot be treated as newly materialized.`,
+      `Single-shot round ${snapshot.round.roundId} does not contain exactly its atomically materialized dispatch binding.`,
     );
   }
   if (
@@ -461,7 +467,23 @@ function loadMaterializedSingleShotRound(
     );
   }
   assertSingleShotRoundMatchesHost(family, context, snapshot.round);
-  return snapshot.round;
+  const expectedCheckpoint = planSingleShotRoundStartedCheckpoint(
+    snapshot.round.roundId,
+    dispatchBinding,
+  );
+  const checkpoint = snapshot.checkpoints[0];
+  if (
+    checkpoint === undefined ||
+    checkpoint.checkpointId !== expectedCheckpoint.checkpointId ||
+    checkpoint.sequence !== expectedCheckpoint.sequence ||
+    checkpoint.stage !== expectedCheckpoint.stage ||
+    checkpoint.detail !== expectedCheckpoint.detail
+  ) {
+    throw new Error(
+      `Single-shot round ${snapshot.round.roundId} has an invalid atomically materialized dispatch binding.`,
+    );
+  }
+  return { round: snapshot.round, checkpoint };
 }
 
 const SINGLE_SHOT_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
@@ -589,7 +611,11 @@ function assertResumableDispatchBinding(
   const bindingCheckpoint = checkpoints.find(
     (checkpoint) => checkpoint.stage === "round_started",
   );
-  const expectedBinding = dispatchBindingDetail(family, context.config, host);
+  const expectedBinding = singleShotDispatchBindingDetail(
+    family,
+    context.config,
+    host,
+  );
   if (bindingCheckpoint?.detail !== expectedBinding) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
@@ -597,7 +623,7 @@ function assertResumableDispatchBinding(
   }
 }
 
-function dispatchBindingDetail(
+export function singleShotDispatchBindingDetail(
   family: SingleShotExecutorFamily,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],

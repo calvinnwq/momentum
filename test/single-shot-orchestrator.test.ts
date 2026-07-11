@@ -1151,6 +1151,54 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).toBe(0);
   });
 
+  it("rolls back the invocation and round when dispatch binding materialization fails", async () => {
+    const db = openStepDb();
+    db.exec(`
+      CREATE TRIGGER reject_initial_dispatch_binding
+      BEFORE INSERT ON executor_checkpoints
+      WHEN NEW.stage = 'round_started'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated dispatch binding insertion failure');
+      END
+    `);
+
+    await expect(
+      runSingleShotStep({
+        db,
+        family: "one-shot",
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        stepKey: "implementation",
+        attempt: 1,
+        selection: resolveSingleShotRoundSelection({}),
+        resolveRoundInputs: roundInputs,
+        runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
+      }),
+    ).rejects.toThrow("simulated dispatch binding insertion failure");
+
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM executor_rounds").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(0);
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM executor_checkpoints")
+          .get() as { count: number }
+      ).count,
+    ).toBe(0);
+  });
+
   it("routes a failing round to a terminal failed invocation", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({

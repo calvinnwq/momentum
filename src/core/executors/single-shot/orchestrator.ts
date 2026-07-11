@@ -68,6 +68,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  insertExecutorCheckpoint,
   insertExecutorInvocation,
   insertExecutorRound,
   listExecutorRoundsForInvocation,
@@ -85,6 +86,7 @@ import { createDurableExecutorEnvelope } from "../sdk/envelope.js";
 import {
   planSingleShotInvocation,
   planSingleShotRoundStart,
+  planSingleShotRoundStartedCheckpoint,
   planSingleShotRoundStartForInvocation,
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
@@ -93,6 +95,7 @@ import {
 } from "./executor.js";
 import {
   SingleShotExecutor,
+  singleShotDispatchBindingDetail,
   singleShotExecutorConfigError,
   singleShotSdkConfigFromSelection,
   singleShotSelectionFromSdkConfig,
@@ -441,10 +444,19 @@ export async function runSingleShotStep(
   ) {
     // A terminal duplicate still conflicts on invocation identity. The
     // transaction rolls back the invocation if round insertion fails.
+    const { selection: _selection, ...sdkStart } = start;
     materializeSingleShotDispatch(
       db,
       plannedInvocation,
       planSingleShotRoundStart(start),
+      planSingleShotRoundStartedCheckpoint(
+        start.roundId,
+        singleShotDispatchBindingDetail(
+          input.family,
+          effectiveConfig,
+          sdkStart,
+        ),
+      ),
       invocationStartedAt,
     );
     roundAlreadyMaterialized = true;
@@ -488,6 +500,7 @@ function materializeSingleShotDispatch(
   db: MomentumDb,
   invocation: ExecutorInvocationRecord,
   round: ExecutorRoundRecord,
+  dispatchBinding: ExecutorCheckpointRecord,
   now: number,
 ): void {
   const nested = db.isTransaction;
@@ -496,6 +509,7 @@ function materializeSingleShotDispatch(
   try {
     insertExecutorInvocation(db, invocation, { now });
     insertExecutorRound(db, round, { now });
+    insertExecutorCheckpoint(db, dispatchBinding, { now });
     db.exec(nested ? `RELEASE SAVEPOINT ${savepoint}` : "COMMIT");
   } catch (error) {
     rollbackMaterialization(db, nested ? savepoint : null);

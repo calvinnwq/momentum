@@ -1164,6 +1164,7 @@ export function runProcessGroup(
     let closeDeadline: ReturnType<typeof setTimeout> | undefined;
     let treeTermination: Promise<boolean> | undefined;
     let anchorCleanupSucceeded = false;
+    let anchorCleanupReported = false;
     let terminationStatus: number | null = null;
     let terminationSignal: NodeJS.Signals | null = null;
     const processTreeToken = crypto.randomUUID();
@@ -1198,21 +1199,32 @@ export function runProcessGroup(
           const runFallback = (): void => {
             if (fallbackStarted) return;
             fallbackStarted = true;
-            const fallback =
-              process.platform === "win32"
-                ? killWindowsProcessTree(groupLeaderPid, processTreeToken)
-                : terminateOwnedPosixTree(
-                    groupLeaderPid,
-                    child,
-                    processTreeToken,
-                    POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
-                  );
-            armCloseDeadline(
-              (process.platform === "win32"
-                ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
-                : POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS) +
-                PROCESS_TREE_CLEANUP_MARGIN_MS,
-            );
+            let fallback: Promise<boolean>;
+            if (process.platform === "win32") {
+              fallback = killWindowsProcessTree(
+                groupLeaderPid,
+                processTreeToken,
+              );
+              armCloseDeadline(
+                WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
+                  PROCESS_TREE_CLEANUP_MARGIN_MS,
+              );
+            } else {
+              if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+              closeDeadline = undefined;
+              fallback = terminateOwnedPosixTree(
+                groupLeaderPid,
+                child,
+                processTreeToken,
+                POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
+                () => anchorCleanupReported,
+                () =>
+                  armCloseDeadline(
+                    POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
+                      PROCESS_TREE_CLEANUP_MARGIN_MS,
+                  ),
+              );
+            }
             void fallback.then(finish);
           };
           const controlEnded = (): void => {
@@ -1421,6 +1433,7 @@ export function runProcessGroup(
         if (meta.cleanupSucceeded === true) {
           anchorCleanupSucceeded = true;
         }
+        if (meta.cleanupOnly === true) anchorCleanupReported = true;
         if (meta.unsafeDetachedDescendant === true) {
           terminalError = spawnError(
             "SUPERVISOR_FAILED",
@@ -1522,7 +1535,12 @@ async function terminateOwnedPosixTree(
   child: ReturnType<typeof spawn>,
   ownershipToken: string,
   timeoutMs: number,
+  anchorCleanupReported: () => boolean,
+  onInitialized: () => void,
 ): Promise<boolean> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  let anchorExited = child.exitCode !== null || child.signalCode !== null;
+  if (anchorExited && !anchorCleanupReported()) return false;
   if (hasUnownedEscapedDescendant(groupLeaderPid, ownershipToken)) {
     const owned = listOwnedPosixProcesses(ownershipToken);
     if (owned.ok) {
@@ -1551,9 +1569,17 @@ async function terminateOwnedPosixTree(
       safe = signalPosixTarget(pid, "SIGKILL") && safe;
     }
   }
-  safe = killOwnedPosixGroup(groupLeaderPid, child) && safe;
+  if (!anchorExited) {
+    const groupKilled = killOwnedPosixGroup(groupLeaderPid, child);
+    if (!groupKilled) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      anchorExited = child.exitCode !== null || child.signalCode !== null;
+      safe = anchorExited && anchorCleanupReported() && safe;
+    }
+  }
   if (!safe) return false;
 
+  onInitialized();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const remaining = listOwnedPosixProcesses(ownershipToken);
@@ -2179,7 +2205,7 @@ function writeMeta(status, signal) {
     errorMessage: state.errorMessage
   }));
 }
-function killTree(commandExited = false) {
+function killTree(commandExited = false, commandStatus = null, commandSignal = null) {
   if (cleanupResult !== undefined) return cleanupResult;
   if (!child || child.pid === undefined) {
     cleanupResult = true;
@@ -2252,9 +2278,12 @@ function killTree(commandExited = false) {
   });
   cleanupResult = cleanup.status === 0 && !cleanup.error;
   if (!cleanupResult) {
+    // Cleanup proof is a safety precondition for settlement, even when the
+    // command exited successfully. Retain its outcome for diagnostics without
+    // converting an unverified tree into a successful step.
     state.errorCode = "SUPERVISOR_FAILED";
     state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
-    writeMeta(null, null);
+    writeMeta(commandStatus, commandSignal);
     process.exit(0);
   }
   return cleanupResult;
@@ -2294,8 +2323,8 @@ child.on("error", (error) => {
     state.errorMessage = error && error.message ? error.message : String(error);
   }
 });
-child.on("exit", () => {
-  killTree(true);
+child.on("exit", (status, signal) => {
+  killTree(true, status, signal);
 });
 const timer = setTimeout(() => {
   if (state.errorCode === undefined) {
@@ -2308,7 +2337,7 @@ child.on("close", (status, signal) => {
   if (finished) return;
   finished = true;
   clearTimeout(timer);
-  killTree(true);
+  killTree(true, status, signal);
   writeMeta(status, signal);
 });
 `;
