@@ -228,7 +228,7 @@ describe("runSingleShotRound — one-shot success", () => {
     expect(outcome.round.agentProvider).toBe("claude");
     expect(outcome.round.model).toBe("claude-opus-4-8");
     expect(outcome.round.inputDigest).toBe("sha256:input");
-    expect(outcome.round.startedAt).toBe(1_000);
+    expect(outcome.round.startedAt).toBe(3_000);
 
     // The terminal clock stamps finishedAt + heartbeatAt (the pure projection cannot).
     expect(outcome.round.finishedAt).toBe(3_000);
@@ -252,7 +252,7 @@ describe("runSingleShotRound — one-shot success", () => {
       },
     });
 
-    expect(outcome.round.startedAt).toBe(1_000);
+    expect(outcome.round.startedAt).toBe(1_500);
     expect(outcome.round.finishedAt).toBe(5_000);
     expect(outcome.round.heartbeatAt).toBe(5_000);
     expect(outcome.invocation.finishedAt).toBe(5_000);

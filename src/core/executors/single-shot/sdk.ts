@@ -1083,6 +1083,8 @@ function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
   const {
     classification: _classification,
     executorRecommendation: _executorRecommendation,
+    startedAt: _startedAt,
+    heartbeatAt: _heartbeatAt,
     finishedAt: _finishedAt,
     recoveryCode: _recoveryCode,
     humanGate: _humanGate,

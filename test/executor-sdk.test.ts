@@ -13,6 +13,8 @@ import {
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
+  listExecutorDecisionsForRound,
+  listExecutorFindingsForRound,
   loadExecutorInvocation,
   loadExecutorRound,
   updateExecutorInvocationState,
@@ -372,6 +374,129 @@ describe("executor SDK core contract", () => {
     );
   });
 
+  it("uses the envelope clock for executor round timestamps", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    let clockCalls = 0;
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => {
+        clockCalls += 1;
+        return 25;
+      },
+    });
+    const round = emptyRound(invocation, "running");
+    const hostileStart = {
+      ...roundStartForSdk(round),
+      startedAt: Number.MAX_SAFE_INTEGER,
+      heartbeatAt: Number.MAX_SAFE_INTEGER,
+    } as unknown as ExecutorRoundStart;
+
+    const started = envelope.facade.startRound(hostileStart);
+
+    expect(started).toMatchObject({ startedAt: 25, heartbeatAt: 25 });
+    expect(loadExecutorRound(db, round.roundId)).toMatchObject({
+      startedAt: 25,
+      heartbeatAt: 25,
+    });
+    expect(clockCalls).toBe(1);
+  });
+
+  it("rejects malformed round starts and observations without coercion", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 25,
+    });
+    const round = emptyRound(invocation, "running");
+
+    expect(() =>
+      envelope.facade.startRound({
+        ...roundStartForSdk(round),
+        logPaths: "/tmp/executor.log",
+      } as unknown as ExecutorRoundStart),
+    ).toThrow("round start logPaths must be an array of strings");
+    expect(loadExecutorRound(db, round.roundId)).toBeUndefined();
+
+    envelope.facade.startRound(roundStartForSdk(round));
+    expect(() =>
+      envelope.facade.observeRound(round.roundId, {
+        changedFiles: "src/index.ts",
+      } as unknown as Parameters<typeof envelope.facade.observeRound>[1]),
+    ).toThrow("round observation changedFiles must be an array of strings");
+    expect(loadExecutorRound(db, round.roundId)?.changedFiles).toEqual([]);
+  });
+
+  it("rejects malformed progress and child evidence before any durable write", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 25,
+    });
+    const round = emptyRound(invocation, "mirroring_external_state");
+    envelope.facade.startRound(roundStartForSdk(round));
+
+    expect(() =>
+      envelope.facade.recordRoundProgress(round.roundId, {
+        observation: { summary: "must not persist" },
+        checkpoints: [
+          {
+            checkpointId: "bad-sequence",
+            sequence: 0.5,
+            stage: "captured",
+            detail: null,
+          },
+        ],
+      }),
+    ).toThrow("checkpoint sequence must be a non-negative integer");
+    expect(loadExecutorRound(db, round.roundId)?.summary).toBeNull();
+
+    expect(() =>
+      envelope.facade.recordArtifact(round.roundId, {
+        artifactId: "artifact",
+        artifactClass: "logs",
+        path: 42,
+        digest: null,
+        description: null,
+      } as unknown as Parameters<typeof envelope.facade.recordArtifact>[1]),
+    ).toThrow("artifact path must be a non-empty string");
+    expect(() =>
+      envelope.facade.recordCheckpoint(round.roundId, {
+        checkpointId: "checkpoint",
+        sequence: -1,
+        stage: "captured",
+        detail: null,
+      }),
+    ).toThrow("checkpoint sequence must be a non-negative integer");
+    expect(() =>
+      envelope.facade.recordFinding(round.roundId, {
+        findingId: "finding",
+        severity: null,
+        title: "finding",
+        detail: null,
+        selected: "false",
+        externalRef: null,
+      } as unknown as Parameters<typeof envelope.facade.recordFinding>[1]),
+    ).toThrow("finding selected must be a boolean");
+    expect(() =>
+      envelope.facade.recordDecision(round.roundId, {
+        decisionId: "decision",
+        summary: "decision",
+        allowedActions: "apply",
+        recommendedAction: null,
+        chosenAction: null,
+        resolution: null,
+      } as unknown as Parameters<typeof envelope.facade.recordDecision>[1]),
+    ).toThrow("decision allowedActions must be an array of strings");
+
+    expect(listExecutorArtifactsForRound(db, round.roundId)).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
+    expect(listExecutorFindingsForRound(db, round.roundId)).toEqual([]);
+    expect(listExecutorDecisionsForRound(db, round.roundId)).toEqual([]);
+  });
+
   it("atomically records a round observation with its checkpoint batch", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
@@ -729,12 +854,105 @@ describe("executor SDK core contract", () => {
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
   });
+
+  it("rejects classification-inconsistent recovery codes and human gates", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 40,
+    });
+    const round = emptyRound(invocation, "mirroring_external_state");
+    envelope.facade.startRound(roundStartForSdk(round));
+    const invalid = [
+      {
+        classification: "complete",
+        roundState: "succeeded",
+        invocationState: "succeeded",
+        recoveryCode: "auth_unavailable",
+        humanGate: null,
+      },
+      {
+        classification: "complete",
+        roundState: "succeeded",
+        invocationState: "succeeded",
+        recoveryCode: null,
+        humanGate: "credential_required",
+      },
+      {
+        classification: "failed",
+        roundState: "failed",
+        invocationState: "failed",
+        recoveryCode: null,
+        humanGate: null,
+      },
+      {
+        classification: "blocked",
+        roundState: "blocked",
+        invocationState: "blocked",
+        recoveryCode: null,
+        humanGate: null,
+      },
+      {
+        classification: "manual_recovery_required",
+        roundState: "manual_recovery_required",
+        invocationState: "manual_recovery_required",
+        recoveryCode: "reset_failed",
+        humanGate: "credential_required",
+      },
+      {
+        classification: "approval_required",
+        roundState: "waiting_operator",
+        invocationState: "waiting_operator",
+        recoveryCode: null,
+        humanGate: null,
+      },
+      {
+        classification: "operator_decision_required",
+        roundState: "waiting_operator",
+        invocationState: "waiting_operator",
+        recoveryCode: null,
+        humanGate: null,
+      },
+      {
+        classification: "cancelled",
+        roundState: "cancelled",
+        invocationState: "cancelled",
+        recoveryCode: "cancelled",
+        humanGate: null,
+      },
+    ] as const;
+
+    for (const decision of invalid) {
+      expect(() =>
+        envelope.applyDaemonDecision(
+          {
+            roundId: round.roundId,
+            executorRecommendation: decision.classification,
+            ...decision,
+          },
+          { classificationCheckpoint: daemonCheckpoint(round.roundId, 0) },
+        ),
+      ).toThrow(/incompatible (recovery code|human gate)/);
+    }
+
+    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+      "running",
+    );
+    expect(loadExecutorRound(db, round.roundId)).toMatchObject({
+      state: "mirroring_external_state",
+      classification: null,
+    });
+    expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
+  });
 });
 
 function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
   const {
     classification: _classification,
     executorRecommendation: _executorRecommendation,
+    startedAt: _startedAt,
+    heartbeatAt: _heartbeatAt,
     finishedAt: _finishedAt,
     recoveryCode: _recoveryCode,
     humanGate: _humanGate,

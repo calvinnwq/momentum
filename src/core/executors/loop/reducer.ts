@@ -164,6 +164,61 @@ export function isExecutorRoundStateCompatibleWithClassification(
   return ROUND_STATES_BY_CLASSIFICATION[classification].includes(roundState);
 }
 
+export function isExecutorRecoveryCodeCompatibleWithClassification(
+  classification: ExecutorCompletionClassification,
+  recoveryCode: string | null,
+): boolean {
+  const requiresRecovery =
+    classification === "manual_recovery_required" ||
+    classification === "blocked" ||
+    classification === "failed";
+  return requiresRecovery
+    ? typeof recoveryCode === "string" && recoveryCode.trim().length > 0
+    : recoveryCode === null;
+}
+
+const BLOCKED_HUMAN_GATES: ReadonlySet<ExecutorHumanGateType> = new Set([
+  "credential_required",
+  "external_state_required",
+]);
+const APPROVAL_HUMAN_GATES: ReadonlySet<ExecutorHumanGateType> = new Set([
+  "approval_required",
+  "policy_boundary_exceeded",
+  "scope_boundary_exceeded",
+  "destructive_action_requested",
+]);
+const OPERATOR_DECISION_HUMAN_GATES: ReadonlySet<ExecutorHumanGateType> =
+  new Set([
+    "operator_decision_required",
+    "quota_exhausted",
+    "policy_boundary_exceeded",
+    "scope_boundary_exceeded",
+    "credential_required",
+    "external_state_required",
+    "destructive_action_requested",
+  ]);
+
+export function isExecutorHumanGateCompatibleWithClassification(
+  classification: ExecutorCompletionClassification,
+  humanGate: ExecutorHumanGateType | null,
+): boolean {
+  switch (classification) {
+    case "complete":
+    case "continue":
+    case "failed":
+    case "cancelled":
+      return humanGate === null;
+    case "manual_recovery_required":
+      return humanGate === "manual_recovery_required";
+    case "blocked":
+      return humanGate === null || BLOCKED_HUMAN_GATES.has(humanGate);
+    case "approval_required":
+      return humanGate !== null && APPROVAL_HUMAN_GATES.has(humanGate);
+    case "operator_decision_required":
+      return humanGate !== null && OPERATOR_DECISION_HUMAN_GATES.has(humanGate);
+  }
+}
+
 /**
  * Human-gate types (contract "Human Gates"). Gates are durable records, not
  * prompts hidden inside an executor.

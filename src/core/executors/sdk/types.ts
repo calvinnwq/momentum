@@ -132,6 +132,8 @@ export type ExecutorRoundStart = Omit<
   | "state"
   | "classification"
   | "executorRecommendation"
+  | "startedAt"
+  | "heartbeatAt"
   | "finishedAt"
   | "recoveryCode"
   | "humanGate"

@@ -19,7 +19,14 @@ import {
   type ExecutorRoundUpdate,
 } from "../loop/persist.js";
 import {
+  EXECUTOR_ARTIFACT_CLASSES,
+  EXECUTOR_COMPLETION_CLASSIFICATIONS,
+  EXECUTOR_HUMAN_GATE_TYPES,
+  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ROUND_STATES,
   executorInvocationStateForClassification,
+  isExecutorHumanGateCompatibleWithClassification,
+  isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
@@ -137,6 +144,7 @@ export class DurableExecutorEnvelope {
 
   startRound(record: ExecutorRoundStart): ExecutorRoundView {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertRoundStartInput(record);
       const invocation = this.#loadInvocation();
       assertObservationPhase(record.state, `start round ${record.roundId}`);
       this.#assertRoundIdentity(record, invocation);
@@ -160,10 +168,11 @@ export class DurableExecutorEnvelope {
           `Cannot start round ${record.roundId}: expected roundIndex ${expectedIndex}, got ${record.roundIndex}.`,
         );
       }
-      const durableRecord = roundRecordFromStart(record);
+      const now = this.#now();
+      const durableRecord = roundRecordFromStart(record, now);
       return cloneRound(
         insertExecutorRound(this.#db, durableRecord, {
-          now: record.startedAt ?? this.#now(),
+          now,
         }),
       );
     });
@@ -174,6 +183,8 @@ export class DurableExecutorEnvelope {
     observation: ExecutorRoundObservation,
   ): ExecutorRoundView {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertRoundObservationInput(observation);
       const invocation = this.#loadInvocation();
       this.#assertExecutorWritable(invocation, `observe round ${roundId}`);
       const current = this.#loadOwnedRound(roundId);
@@ -198,6 +209,13 @@ export class DurableExecutorEnvelope {
     progress: ExecutorRoundProgress,
   ): ExecutorRoundProgressResult {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertRecord(progress, "round progress");
+      assertRoundObservationInput(progress.observation);
+      if (!Array.isArray(progress.checkpoints)) {
+        invalidInput("round progress checkpoints must be an array");
+      }
+      progress.checkpoints.forEach(assertCheckpointInput);
       const round = this.observeRound(roundId, progress.observation);
       const checkpoints = progress.checkpoints.map((checkpoint) =>
         this.recordCheckpoint(roundId, checkpoint),
@@ -241,6 +259,8 @@ export class DurableExecutorEnvelope {
     artifact: ExecutorArtifactInput,
   ): Readonly<ExecutorArtifactRecord> {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertArtifactInput(artifact);
       this.#assertEvidenceWritable(roundId);
       return {
         ...insertExecutorArtifact(
@@ -257,6 +277,8 @@ export class DurableExecutorEnvelope {
     checkpoint: ExecutorCheckpointInput,
   ): Readonly<ExecutorCheckpointRecord> {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertCheckpointInput(checkpoint);
       this.#assertEvidenceWritable(roundId);
       return {
         ...insertExecutorCheckpoint(
@@ -273,6 +295,8 @@ export class DurableExecutorEnvelope {
     finding: ExecutorFindingInput,
   ): Readonly<ExecutorFindingRecord> {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertFindingInput(finding);
       this.#assertEvidenceWritable(roundId);
       return {
         ...insertExecutorFinding(
@@ -289,6 +313,8 @@ export class DurableExecutorEnvelope {
     decision: ExecutorDecisionInput,
   ): Readonly<ExecutorDecisionRecord> {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertNonEmptyString(roundId, "round id");
+      assertDecisionInput(decision);
       this.#assertEvidenceWritable(roundId);
       return {
         ...insertExecutorDecision(
@@ -306,6 +332,7 @@ export class DurableExecutorEnvelope {
     options: ApplyExecutorDaemonDecisionOptions,
   ): AppliedExecutorDaemonDecision {
     return withSqliteTransaction(this.#db, "write", () => {
+      assertDaemonDecisionInput(decision);
       const currentInvocation = this.#loadInvocation();
       this.#assertInvocationUnsettled(
         currentInvocation,
@@ -333,6 +360,26 @@ export class DurableExecutorEnvelope {
       ) {
         throw new ExecutorEnvelopeAccessError(
           `Cannot classify round ${decision.roundId} as ${decision.classification}: incompatible round state ${decision.roundState}.`,
+        );
+      }
+      if (
+        !isExecutorRecoveryCodeCompatibleWithClassification(
+          decision.classification,
+          decision.recoveryCode,
+        )
+      ) {
+        throw new ExecutorEnvelopeAccessError(
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: incompatible recovery code ${String(decision.recoveryCode)}.`,
+        );
+      }
+      if (
+        !isExecutorHumanGateCompatibleWithClassification(
+          decision.classification,
+          decision.humanGate,
+        )
+      ) {
+        throw new ExecutorEnvelopeAccessError(
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: incompatible human gate ${String(decision.humanGate)}.`,
         );
       }
       const now = this.#now();
@@ -374,16 +421,14 @@ export class DurableExecutorEnvelope {
               checkpointId: options.classificationCheckpoint.checkpointId,
               sequence: options.classificationCheckpoint.sequence,
             };
+      const checkpoint = {
+        ...options.classificationCheckpoint,
+        ...checkpointIdentity,
+        roundId: decision.roundId,
+      };
+      assertCheckpointInput(checkpoint);
       const classificationCheckpoint = {
-        ...insertExecutorCheckpoint(
-          this.#db,
-          {
-            ...options.classificationCheckpoint,
-            ...checkpointIdentity,
-            roundId: decision.roundId,
-          },
-          { now },
-        ),
+        ...insertExecutorCheckpoint(this.#db, checkpoint, { now }),
       };
       return {
         round: cloneRound(round),
@@ -602,6 +647,278 @@ function copyObservation(
   };
 }
 
+const ARTIFACT_CLASSES: ReadonlySet<string> = new Set(
+  EXECUTOR_ARTIFACT_CLASSES,
+);
+const COMPLETION_CLASSIFICATIONS: ReadonlySet<string> = new Set(
+  EXECUTOR_COMPLETION_CLASSIFICATIONS,
+);
+const HUMAN_GATE_TYPES: ReadonlySet<string> = new Set(
+  EXECUTOR_HUMAN_GATE_TYPES,
+);
+const INVOCATION_STATES: ReadonlySet<string> = new Set(
+  EXECUTOR_INVOCATION_STATES,
+);
+const ROUND_STATES: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
+
+function invalidInput(message: string): never {
+  throw new ExecutorEnvelopeAccessError(
+    `Invalid executor envelope input: ${message}.`,
+  );
+}
+
+function assertRecord(
+  value: unknown,
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    invalidInput(`${label} must be an object`);
+  }
+}
+
+function assertNonEmptyString(
+  value: unknown,
+  label: string,
+): asserts value is string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    invalidInput(`${label} must be a non-empty string`);
+  }
+}
+
+function assertNullableString(value: unknown, label: string): void {
+  if (value !== null && typeof value !== "string") {
+    invalidInput(`${label} must be a string or null`);
+  }
+}
+
+function assertStringArray(
+  value: unknown,
+  label: string,
+): asserts value is string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    invalidInput(`${label} must be an array of strings`);
+  }
+}
+
+function assertNonNegativeInteger(value: unknown, label: string): void {
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    invalidInput(`${label} must be a non-negative integer`);
+  }
+}
+
+function assertVerificationResults(value: unknown, label: string): void {
+  if (!Array.isArray(value)) invalidInput(`${label} must be an array`);
+  for (const [index, candidate] of value.entries()) {
+    assertRecord(candidate, `${label}[${index}]`);
+    assertNonEmptyString(candidate["command"], `${label}[${index}].command`);
+    if (
+      candidate["exitCode"] !== null &&
+      !Number.isInteger(candidate["exitCode"])
+    ) {
+      invalidInput(`${label}[${index}].exitCode must be an integer or null`);
+    }
+    if (
+      typeof candidate["durationMs"] !== "number" ||
+      !Number.isFinite(candidate["durationMs"]) ||
+      candidate["durationMs"] < 0
+    ) {
+      invalidInput(
+        `${label}[${index}].durationMs must be a non-negative number`,
+      );
+    }
+    if (typeof candidate["timedOut"] !== "boolean") {
+      invalidInput(`${label}[${index}].timedOut must be a boolean`);
+    }
+  }
+}
+
+function assertRoundStartInput(
+  value: unknown,
+): asserts value is ExecutorRoundStart {
+  assertRecord(value, "round start");
+  for (const field of [
+    "roundId",
+    "invocationId",
+    "workflowRunId",
+    "stepRunId",
+    "stepKey",
+    "executorFamily",
+  ]) {
+    assertNonEmptyString(value[field], `round start ${field}`);
+  }
+  if (!Number.isInteger(value["attempt"]) || (value["attempt"] as number) < 1) {
+    invalidInput("round start attempt must be a positive integer");
+  }
+  assertNonNegativeInteger(value["roundIndex"], "round start roundIndex");
+  assertObservationPhase(value["state"], "start round");
+  for (const field of [
+    "agentProvider",
+    "model",
+    "effort",
+    "inputDigest",
+    "resultDigest",
+    "artifactRoot",
+    "summary",
+    "verificationStatus",
+    "commitSha",
+  ]) {
+    assertNullableString(value[field], `round start ${field}`);
+  }
+  for (const field of [
+    "logPaths",
+    "keyChanges",
+    "keyLearnings",
+    "remainingWork",
+    "changedFiles",
+  ]) {
+    assertStringArray(value[field], `round start ${field}`);
+  }
+  if (value["verificationResults"] !== undefined) {
+    assertVerificationResults(
+      value["verificationResults"],
+      "round start verificationResults",
+    );
+  }
+}
+
+function assertRoundObservationInput(
+  value: unknown,
+): asserts value is ExecutorRoundObservation {
+  assertRecord(value, "round observation");
+  if (value["phase"] !== undefined) {
+    assertObservationPhase(value["phase"], "observe round");
+  }
+  for (const field of [
+    "agentProvider",
+    "model",
+    "effort",
+    "inputDigest",
+    "resultDigest",
+    "artifactRoot",
+    "summary",
+    "verificationStatus",
+    "commitSha",
+  ]) {
+    if (value[field] !== undefined) {
+      assertNullableString(value[field], `round observation ${field}`);
+    }
+  }
+  for (const field of [
+    "logPaths",
+    "keyChanges",
+    "keyLearnings",
+    "remainingWork",
+    "changedFiles",
+  ]) {
+    if (value[field] !== undefined) {
+      assertStringArray(value[field], `round observation ${field}`);
+    }
+  }
+  if (value["verificationResults"] !== undefined) {
+    assertVerificationResults(
+      value["verificationResults"],
+      "round observation verificationResults",
+    );
+  }
+}
+
+function assertArtifactInput(
+  value: unknown,
+): asserts value is ExecutorArtifactInput {
+  assertRecord(value, "artifact");
+  assertNonEmptyString(value["artifactId"], "artifact id");
+  if (
+    typeof value["artifactClass"] !== "string" ||
+    !ARTIFACT_CLASSES.has(value["artifactClass"])
+  ) {
+    invalidInput("artifact class is unknown");
+  }
+  assertNonEmptyString(value["path"], "artifact path");
+  assertNullableString(value["digest"], "artifact digest");
+  assertNullableString(value["description"], "artifact description");
+}
+
+function assertCheckpointInput(
+  value: unknown,
+): asserts value is ExecutorCheckpointInput {
+  assertRecord(value, "checkpoint");
+  assertNonEmptyString(value["checkpointId"], "checkpoint id");
+  assertNonNegativeInteger(value["sequence"], "checkpoint sequence");
+  assertNonEmptyString(value["stage"], "checkpoint stage");
+  assertNullableString(value["detail"], "checkpoint detail");
+}
+
+function assertFindingInput(
+  value: unknown,
+): asserts value is ExecutorFindingInput {
+  assertRecord(value, "finding");
+  assertNonEmptyString(value["findingId"], "finding id");
+  assertNullableString(value["severity"], "finding severity");
+  assertNonEmptyString(value["title"], "finding title");
+  assertNullableString(value["detail"], "finding detail");
+  if (typeof value["selected"] !== "boolean") {
+    invalidInput("finding selected must be a boolean");
+  }
+  assertNullableString(value["externalRef"], "finding externalRef");
+}
+
+function assertDecisionInput(
+  value: unknown,
+): asserts value is ExecutorDecisionInput {
+  assertRecord(value, "decision");
+  assertNonEmptyString(value["decisionId"], "decision id");
+  assertNonEmptyString(value["summary"], "decision summary");
+  assertStringArray(value["allowedActions"], "decision allowedActions");
+  for (const field of [
+    "recommendedAction",
+    "chosenAction",
+    "resolution",
+  ] as const) {
+    assertNullableString(value[field], `decision ${field}`);
+  }
+  if (value["externalRef"] !== undefined) {
+    assertNullableString(value["externalRef"], "decision externalRef");
+  }
+}
+
+function assertDaemonDecisionInput(value: unknown): void {
+  assertRecord(value, "daemon decision");
+  assertNonEmptyString(value["roundId"], "daemon decision round id");
+  if (
+    typeof value["classification"] !== "string" ||
+    !COMPLETION_CLASSIFICATIONS.has(value["classification"])
+  ) {
+    invalidInput("daemon decision classification is unknown");
+  }
+  if (
+    value["executorRecommendation"] !== null &&
+    (typeof value["executorRecommendation"] !== "string" ||
+      !COMPLETION_CLASSIFICATIONS.has(value["executorRecommendation"]))
+  ) {
+    invalidInput("daemon decision executorRecommendation is unknown");
+  }
+  if (
+    typeof value["roundState"] !== "string" ||
+    !ROUND_STATES.has(value["roundState"])
+  ) {
+    invalidInput("daemon decision roundState is unknown");
+  }
+  if (
+    typeof value["invocationState"] !== "string" ||
+    !INVOCATION_STATES.has(value["invocationState"])
+  ) {
+    invalidInput("daemon decision invocationState is unknown");
+  }
+  assertNullableString(value["recoveryCode"], "daemon decision recoveryCode");
+  if (
+    value["humanGate"] !== null &&
+    (typeof value["humanGate"] !== "string" ||
+      !HUMAN_GATE_TYPES.has(value["humanGate"]))
+  ) {
+    invalidInput("daemon decision humanGate is unknown");
+  }
+}
+
 const OBSERVATION_PHASES: ReadonlySet<string> = new Set(
   EXECUTOR_OBSERVATION_PHASES,
 );
@@ -663,12 +980,25 @@ function cloneRound(round: ExecutorRoundRecord): ExecutorRoundRecord {
   };
 }
 
-function roundRecordFromStart(start: ExecutorRoundStart): ExecutorRoundRecord {
-  const { verificationResults, ...record } = start;
+function roundRecordFromStart(
+  start: ExecutorRoundStart,
+  now: number,
+): ExecutorRoundRecord {
+  const {
+    verificationResults,
+    startedAt: _startedAt,
+    heartbeatAt: _heartbeatAt,
+    ...record
+  } = start as ExecutorRoundStart & {
+    startedAt?: unknown;
+    heartbeatAt?: unknown;
+  };
   return {
     ...record,
     classification: null,
     executorRecommendation: null,
+    startedAt: now,
+    heartbeatAt: now,
     finishedAt: null,
     recoveryCode: null,
     humanGate: null,

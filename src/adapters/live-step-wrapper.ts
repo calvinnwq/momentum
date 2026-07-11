@@ -1871,6 +1871,11 @@ function killWindowsProcessTree(
     "    foreach ($item in $processes) {",
     "      if ($item.ParentProcessId -eq $rootPid) { $observedRootChild = $true }",
     "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    ...(hasCommandIdentity && commandIdentity?.exited === true
+      ? [
+          "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
+        ]
+      : []),
     "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
     "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
     "      if ($identities.ContainsKey($item.ProcessId)) {",
@@ -2170,6 +2175,7 @@ function killOwnedTree() {
       "    $passAdded = $false",
       "    foreach ($item in $processes) {",
       "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+      "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
       "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
       "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
       "      if ($identities.ContainsKey($item.ProcessId)) {",
@@ -2195,12 +2201,8 @@ function killOwnedTree() {
       timeout: 3000,
       stdio: "ignore"
     });
-    if (cleanup.status !== 0 || cleanup.error) {
-      spawnSync("taskkill", ["/pid", String(process.pid), "/t", "/f"], {
-        timeout: 3000,
-        stdio: "ignore"
-      });
-    } else if (!unsafeDetachedDescendant) {
+    const cleanupSucceeded = cleanup.status === 0 && !cleanup.error && !unsafeDetachedDescendant;
+    if (cleanupSucceeded) {
       emitMeta({
         status: null,
         signal: null,
@@ -2208,7 +2210,7 @@ function killOwnedTree() {
         cleanupSucceeded: true
       });
     }
-    process.exit(0);
+    process.exit(cleanupSucceeded ? 0 : 1);
   }
   let stablePasses = 0;
   const deadline = Date.now() + 3000;
@@ -2473,6 +2475,7 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     "    $passAdded = $false",
     "    foreach ($item in $processes) {",
     "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
     "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
     "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
     "      if ($identities.ContainsKey($item.ProcessId)) {",
