@@ -19,6 +19,8 @@ import {
   type ExecutorRoundUpdate,
 } from "../loop/persist.js";
 import {
+  executorInvocationStateForClassification,
+  isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
   type ExecutorArtifactRecord,
@@ -313,6 +315,24 @@ export class DurableExecutorEnvelope {
       if (isTerminalExecutorRoundState(currentRound.state)) {
         throw new ExecutorEnvelopeAccessError(
           `Cannot reclassify terminal round ${decision.roundId} (${currentRound.state}).`,
+        );
+      }
+      const expectedInvocationState = executorInvocationStateForClassification(
+        decision.classification,
+      );
+      if (decision.invocationState !== expectedInvocationState) {
+        throw new ExecutorEnvelopeAccessError(
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: expected invocation state ${expectedInvocationState}, got ${decision.invocationState}.`,
+        );
+      }
+      if (
+        !isExecutorRoundStateCompatibleWithClassification(
+          decision.classification,
+          decision.roundState,
+        )
+      ) {
+        throw new ExecutorEnvelopeAccessError(
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: incompatible round state ${decision.roundState}.`,
         );
       }
       const now = this.#now();

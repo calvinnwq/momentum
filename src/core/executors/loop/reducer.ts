@@ -125,6 +125,45 @@ export const EXECUTOR_COMPLETION_CLASSIFICATIONS = [
 export type ExecutorCompletionClassification =
   (typeof EXECUTOR_COMPLETION_CLASSIFICATIONS)[number];
 
+const INVOCATION_STATE_BY_CLASSIFICATION: Readonly<
+  Record<ExecutorCompletionClassification, ExecutorInvocationState>
+> = {
+  complete: "succeeded",
+  continue: "running",
+  approval_required: "waiting_operator",
+  operator_decision_required: "waiting_operator",
+  manual_recovery_required: "manual_recovery_required",
+  blocked: "blocked",
+  failed: "failed",
+  cancelled: "cancelled",
+};
+
+const ROUND_STATES_BY_CLASSIFICATION: Readonly<
+  Record<ExecutorCompletionClassification, readonly ExecutorRoundState[]>
+> = {
+  complete: ["succeeded"],
+  continue: ["succeeded", "failed"],
+  approval_required: ["waiting_operator", "succeeded", "failed"],
+  operator_decision_required: ["waiting_operator", "succeeded", "failed"],
+  manual_recovery_required: ["manual_recovery_required"],
+  blocked: ["blocked"],
+  failed: ["failed"],
+  cancelled: ["cancelled"],
+};
+
+export function executorInvocationStateForClassification(
+  classification: ExecutorCompletionClassification,
+): ExecutorInvocationState {
+  return INVOCATION_STATE_BY_CLASSIFICATION[classification];
+}
+
+export function isExecutorRoundStateCompatibleWithClassification(
+  classification: ExecutorCompletionClassification,
+  roundState: ExecutorRoundState,
+): boolean {
+  return ROUND_STATES_BY_CLASSIFICATION[classification].includes(roundState);
+}
+
 /**
  * Human-gate types (contract "Human Gates"). Gates are durable records, not
  * prompts hidden inside an executor.

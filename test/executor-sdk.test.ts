@@ -620,6 +620,13 @@ describe("executor SDK core contract", () => {
     });
     const round = emptyRound(invocation, "mirroring_external_state");
     envelope.facade.startRound(roundStartForSdk(round));
+    db.exec(`
+      CREATE TRIGGER fail_invocation_settlement
+      BEFORE UPDATE ON executor_invocations
+      BEGIN
+        SELECT RAISE(ABORT, 'forced invocation settlement failure');
+      END
+    `);
 
     expect(() =>
       envelope.applyDaemonDecision(
@@ -628,7 +635,7 @@ describe("executor SDK core contract", () => {
           classification: "complete",
           executorRecommendation: "complete",
           roundState: "succeeded",
-          invocationState: "preparing",
+          invocationState: "succeeded",
           recoveryCode: null,
           humanGate: null,
         },
@@ -641,7 +648,77 @@ describe("executor SDK core contract", () => {
           },
         },
       ),
-    ).toThrow();
+    ).toThrow("forced invocation settlement failure");
+
+    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+      "running",
+    );
+    expect(loadExecutorRound(db, round.roundId)).toMatchObject({
+      state: "mirroring_external_state",
+      classification: null,
+    });
+    expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
+  });
+
+  it("rejects daemon decisions with inconsistent invocation state before writing", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 40,
+    });
+    const round = emptyRound(invocation, "mirroring_external_state");
+    envelope.facade.startRound(roundStartForSdk(round));
+
+    expect(() =>
+      envelope.applyDaemonDecision(
+        {
+          roundId: round.roundId,
+          classification: "continue",
+          executorRecommendation: "continue",
+          roundState: "succeeded",
+          invocationState: "succeeded",
+          recoveryCode: null,
+          humanGate: null,
+        },
+        { classificationCheckpoint: daemonCheckpoint(round.roundId, 0) },
+      ),
+    ).toThrow("expected invocation state running, got succeeded");
+
+    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+      "running",
+    );
+    expect(loadExecutorRound(db, round.roundId)).toMatchObject({
+      state: "mirroring_external_state",
+      classification: null,
+    });
+    expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
+  });
+
+  it("rejects daemon decisions with incompatible round state before writing", () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 40,
+    });
+    const round = emptyRound(invocation, "mirroring_external_state");
+    envelope.facade.startRound(roundStartForSdk(round));
+
+    expect(() =>
+      envelope.applyDaemonDecision(
+        {
+          roundId: round.roundId,
+          classification: "complete",
+          executorRecommendation: "complete",
+          roundState: "failed",
+          invocationState: "succeeded",
+          recoveryCode: null,
+          humanGate: null,
+        },
+        { classificationCheckpoint: daemonCheckpoint(round.roundId, 0) },
+      ),
+    ).toThrow("incompatible round state failed");
 
     expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
       "running",
