@@ -491,10 +491,10 @@ export async function runLiveStepWrapperAsync(
       writeSupervisorFailureOutput(logHandle, error, "stdout", "stderr");
       throw error;
     }
-    if (signal.aborted) {
+    if (errnoCode(processResult.error) === "ABORT_ERR") {
       writeLog(logHandle, "stdout", processResult.stdout);
       writeLog(logHandle, "stderr", processResult.stderr);
-      signal.throwIfAborted();
+      throwProcessCancellation(processResult, signal);
     }
     return finishLiveStepWrapperProcess({
       input,
@@ -780,10 +780,10 @@ async function runProbeAsync(
     );
     throw error;
   }
-  if (signal.aborted) {
+  if (errnoCode(result.error) === "ABORT_ERR") {
     writeLog(logHandle, "probe stdout", result.stdout);
     writeLog(logHandle, "probe stderr", result.stderr);
-    signal.throwIfAborted();
+    throwProcessCancellation(result, signal);
   }
   return finishProbe(logHandle, probe, result, outputMaxBytes);
 }
@@ -2900,6 +2900,14 @@ function readResultFile(
 function errnoCode(error: unknown): string | undefined {
   if (error === undefined || error === null) return undefined;
   return (error as NodeJS.ErrnoException).code;
+}
+
+function throwProcessCancellation(
+  result: SpawnSyncReturns<string>,
+  signal: AbortSignal,
+): never {
+  if (signal.aborted) signal.throwIfAborted();
+  throw result.error ?? spawnError("ABORT_ERR", "process cancelled");
 }
 
 function wrapperError(

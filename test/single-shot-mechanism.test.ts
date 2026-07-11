@@ -137,6 +137,119 @@ function resultJson(value: RunnerResult): string {
 }
 
 describe("single-shot concrete mechanisms", () => {
+  it("preserves a settled script result when cancellation arrives afterward", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const abort = new AbortController();
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runProcessGroup: async () => {
+            abort.abort();
+            return {
+              pid: 123,
+              status: 0,
+              signal: null,
+              stdout: "completed\n",
+              stderr: "",
+              output: [null, "completed\n", ""],
+            };
+          },
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: process.execPath,
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = await mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      {
+        config: { command: path.basename(process.execPath) },
+        hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+        signal: abort.signal,
+      },
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("preserves a settled one-shot result when cancellation arrives afterward", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const abort = new AbortController();
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runLiveStepWrapperAsync: async (input: { iterationDir: string }) => {
+            const resultJsonPath = path.join(input.iterationDir, "result.json");
+            fs.writeFileSync(resultJsonPath, resultJson(runnerResult()));
+            abort.abort();
+            return {
+              ok: true as const,
+              result: runnerResult(),
+              executorLogPath: path.join(input.iterationDir, "executor.log"),
+              resultJsonPath,
+            };
+          },
+        };
+      },
+    );
+    const {
+      createOneShotLiveWrapperRoundRunner:
+        createMockedOneShotLiveWrapperRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedOneShotLiveWrapperRoundRunner(
+      {
+        command: process.execPath,
+        args: [],
+        cwd: "iteration",
+        timeoutSec: 5,
+        envAllow: [],
+        resultFile: "result.json",
+        probe: undefined,
+      },
+      {
+        repoPath,
+        kind: "preflight",
+        repoSafety: { mode: "read-only" },
+      },
+    );
+
+    const result = await mechanism(round({ artifactRoot }), {
+      config: {},
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    });
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(result.result).toEqual(runnerResult());
+  });
+
   it("persists script output when async process supervision fails", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();

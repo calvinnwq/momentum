@@ -259,11 +259,6 @@ async function runOneShotLiveWrapperAsync(
       throw error;
     }
     if (isProcessSupervisorFailure(error)) throw error;
-    if (signal.aborted) {
-      cleanupOneShotRepoAfterCancellation(options, readOnlySnapshot);
-      signal.throwIfAborted();
-      throw error;
-    }
     const mechanism = oneShotWrapperThrow(
       oneShotOptionsWithCancellationGuard(options, signal),
       readOnlySnapshot,
@@ -271,16 +266,17 @@ async function runOneShotLiveWrapperAsync(
     throwIfOneShotCancelledAfterFinalization(signal, options, readOnlySnapshot);
     return mechanism;
   }
-  if (signal.aborted) {
-    cleanupOneShotRepoAfterCancellation(options, readOnlySnapshot);
-    signal.throwIfAborted();
-  }
+  const finalizationSignal = finalizationSignalAfterSettledProcess(signal);
   const mechanism = finishOneShotWrapperResult(
     result,
-    oneShotOptionsWithCancellationGuard(options, signal),
+    oneShotOptionsWithCancellationGuard(options, finalizationSignal),
     readOnlySnapshot,
   );
-  throwIfOneShotCancelledAfterFinalization(signal, options, readOnlySnapshot);
+  throwIfOneShotCancelledAfterFinalization(
+    finalizationSignal,
+    options,
+    readOnlySnapshot,
+  );
   return mechanism;
 }
 
@@ -491,6 +487,7 @@ async function executeScriptCommandAsync(
     return invalidInput("script command runner could not open log path");
   }
   let cancellationHandled = false;
+  let finalizationSignal: AbortSignal | undefined;
   try {
     writeScriptStart(logHandle, config);
     const start = Date.now();
@@ -505,7 +502,7 @@ async function executeScriptCommandAsync(
         signal,
       },
     );
-    if (signal.aborted) {
+    if (errnoCode(result.error) === "ABORT_ERR") {
       writeLog(logHandle, "stdout", result.stdout);
       writeLog(logHandle, "stderr", result.stderr);
       writeLine(
@@ -515,36 +512,38 @@ async function executeScriptCommandAsync(
       writeLine(logHandle, "[single-shot-script] result: cancelled");
       cancellationHandled = true;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
-      signal.throwIfAborted();
+      throwProcessCancellation(result, signal);
     }
+    finalizationSignal = finalizationSignalAfterSettledProcess(signal);
     const mechanism = classifyScriptProcess(
-      scriptConfigWithCancellationGuard(config, signal),
+      scriptConfigWithCancellationGuard(config, finalizationSignal),
       logHandle,
       result,
       Date.now() - start,
       readOnlySnapshot,
     );
-    if (signal.aborted) {
+    if (finalizationSignal.aborted) {
       cancellationHandled = true;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
-      signal.throwIfAborted();
+      finalizationSignal.throwIfAborted();
     }
     return mechanism;
   } catch (error) {
-    if (signal.aborted && error === signal.reason) {
+    const cancellationSignal = finalizationSignal ?? signal;
+    if (cancellationSignal.aborted && error === cancellationSignal.reason) {
       if (cancellationHandled) throw error;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
-      signal.throwIfAborted();
+      cancellationSignal.throwIfAborted();
       throw error;
     }
     if (isProcessSupervisorFailure(error)) {
       writeProcessSupervisorOutput(logHandle, error);
       throw error;
     }
-    if (signal.aborted) {
+    if (cancellationSignal.aborted) {
       if (cancellationHandled) throw error;
       cleanupScriptRepoAfterCancellation(config, readOnlySnapshot);
-      signal.throwIfAborted();
+      cancellationSignal.throwIfAborted();
       throw error;
     }
     writeScriptSpawnError(logHandle, error);
@@ -1416,6 +1415,12 @@ function cancellationAwareMutationGuard(
   };
 }
 
+function finalizationSignalAfterSettledProcess(
+  signal: AbortSignal,
+): AbortSignal {
+  return signal.aborted ? new AbortController().signal : signal;
+}
+
 function throwIfOneShotCancelledAfterFinalization(
   signal: AbortSignal,
   options: OneShotLiveWrapperRoundRunnerOptions,
@@ -1568,6 +1573,14 @@ function ensureParentDir(filePath: string): void {
 function errnoCode(error: Error | undefined): string | undefined {
   if (error === undefined) return undefined;
   return (error as NodeJS.ErrnoException).code;
+}
+
+function throwProcessCancellation(
+  result: SpawnSyncReturns<string>,
+  signal: AbortSignal,
+): never {
+  if (signal.aborted) signal.throwIfAborted();
+  throw result.error ?? new Error("process cancelled");
 }
 
 function isProcessSupervisorFailure(error: unknown): boolean {
