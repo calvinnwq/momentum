@@ -90,6 +90,7 @@ const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
 const PROCESS_TREE_TOKEN_ENV = "MOMENTUM_PROCESS_TREE_TOKEN";
 const PROCESS_TREE_FALLBACK_DELAY_MS = 3_800;
 const POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 1_000;
+const POSIX_PROCESS_QUERY_TIMEOUT_MS = 2_000;
 const WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 3_800;
 const PROCESS_TREE_CLEANUP_MARGIN_MS = 200;
 
@@ -1667,7 +1668,7 @@ function hasUnownedEscapedDescendant(
 ): boolean {
   const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid="], {
     encoding: "utf-8",
-    timeout: 1_000,
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
     maxBuffer: 4 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
   });
@@ -1747,7 +1748,7 @@ function listOwnedPosixProcesses(ownershipToken: string): OwnedPosixProcesses {
   }
   const result = spawnSync("ps", ["eww", "-axo", "pid=,state=,command="], {
     encoding: "utf-8",
-    timeout: 1_000,
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
     maxBuffer: 16 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
   });
