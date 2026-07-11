@@ -16,16 +16,14 @@ describe("Windows process cleanup source contract", () => {
     expect(source).not.toContain('spawnSync("taskkill"');
   });
 
-  it("validates the command parent before retaining Windows identity", () => {
-    const parentCheck =
-      '[int]$p.ParentProcessId -ne " + expectedParentPid + ") { exit 1 }';
-
-    expect(source.split(parentCheck)).toHaveLength(3);
-    expect(
-      source.split("readWindowsCreationTicks(command.pid, process.pid)"),
-    ).toHaveLength(2);
-    expect(
-      source.split("readWindowsCreationTicks(child.pid, process.pid)"),
-    ).toHaveLength(2);
+  it("retains a live wrapper identity instead of querying a spawned PID", () => {
+    expect(source).not.toContain("readWindowsCreationTicks");
+    expect(source).toContain("const LIVE_STEP_COMMAND_WRAPPER = String.raw`");
+    expect(source).toContain(
+      'emit({ type: "identity", pid: process.pid, creationTicks });',
+    );
+    expect(source.split('meta.type === "identity"')).toHaveLength(3);
+    expect(source.split("meta.pid === command.pid")).toHaveLength(2);
+    expect(source.split("meta.pid === child.pid")).toHaveLength(2);
   });
 });

@@ -1617,12 +1617,12 @@ async function terminateOwnedPosixTree(
         if (pid !== groupLeaderPid) signalPosixTarget(pid, "SIGKILL");
       }
     }
-    killOwnedPosixGroup(groupLeaderPid, child, ownershipToken);
+    killOwnedPosixGroup(child);
     return false;
   }
   const initial = listOwnedPosixProcesses(ownershipToken);
   if (!initial.ok) {
-    killOwnedPosixGroup(groupLeaderPid, child, ownershipToken);
+    killOwnedPosixGroup(child);
     return false;
   }
 
@@ -1638,11 +1638,7 @@ async function terminateOwnedPosixTree(
     }
   }
   if (!anchorExited) {
-    const groupKilled = killOwnedPosixGroup(
-      groupLeaderPid,
-      child,
-      ownershipToken,
-    );
+    const groupKilled = killOwnedPosixGroup(child);
     if (!groupKilled) {
       await new Promise<void>((resolve) => setImmediate(resolve));
       anchorExited = child.exitCode !== null || child.signalCode !== null;
@@ -1768,37 +1764,13 @@ function listOwnedPosixProcesses(ownershipToken: string): OwnedPosixProcesses {
   return { ok: true, pids };
 }
 
-function killOwnedPosixGroup(
-  groupLeaderPid: number,
-  child: ReturnType<typeof spawn>,
-  ownershipToken: string,
-): boolean {
-  const group = spawnSync("ps", ["-o", "pgid=", "-p", String(groupLeaderPid)], {
-    encoding: "utf-8",
-    timeout: 500,
-    maxBuffer: 1024 * 1024,
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  const leaderOwnership = posixProcessOwnership(groupLeaderPid, ownershipToken);
-  if (
-    group.error !== undefined ||
-    group.status !== 0 ||
-    Number(group.stdout.trim()) !== groupLeaderPid ||
-    leaderOwnership !== "owned"
-  ) {
-    if (leaderOwnership === "owned") {
-      signalPosixTarget(groupLeaderPid, "SIGKILL");
-    }
-    return false;
-  }
-  let safe = signalPosixTarget(-groupLeaderPid, "SIGKILL");
-  if (child.exitCode !== null || child.signalCode !== null) return safe;
+function killOwnedPosixGroup(child: ReturnType<typeof spawn>): boolean {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
   try {
-    child.kill("SIGKILL");
+    return child.kill("SIGKILL");
   } catch (error) {
-    if (errnoCode(error) !== "ESRCH") safe = false;
+    return errnoCode(error) === "ESRCH";
   }
-  return safe;
 }
 
 function signalPosixTarget(target: number, signal: NodeJS.Signals): boolean {
@@ -2016,9 +1988,84 @@ function attachProcessOutput(
   );
 }
 
+const LIVE_STEP_COMMAND_WRAPPER = String.raw`
+const fs = require("node:fs");
+const { spawn, spawnSync } = require("node:child_process");
+const request = JSON.parse(fs.readFileSync(4, "utf-8"));
+let reported = false;
+
+function emit(meta) {
+  try { fs.writeSync(3, JSON.stringify(meta) + "\n"); } catch {}
+}
+
+function report(meta) {
+  if (reported) return;
+  reported = true;
+  emit({ type: "result", ...meta });
+}
+
+function ownCreationTicks() {
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + process.pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf-8",
+    timeout: 1000,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  const value = result.stdout && result.stdout.trim();
+  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
+}
+
+const creationTicks = process.platform === "win32" ? ownCreationTicks() : undefined;
+if (process.platform === "win32" && creationTicks === undefined) {
+  report({
+    status: null,
+    signal: null,
+    errorCode: "SUPERVISOR_FAILED",
+    errorMessage: "Windows command wrapper could not retain its launch identity"
+  });
+} else {
+  if (creationTicks !== undefined) {
+    emit({ type: "identity", pid: process.pid, creationTicks });
+  }
+  try {
+    const target = spawn(request.command, request.args, {
+      cwd: request.cwd,
+      env: request.env,
+      detached: false,
+      stdio: ["ignore", "inherit", "inherit"]
+    });
+    target.once("error", (error) => {
+      report({
+        status: null,
+        signal: null,
+        errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+        errorMessage: error && error.message ? error.message : String(error)
+      });
+    });
+    target.once("exit", (status, signal) => report({ status, signal }));
+  } catch (error) {
+    report({
+      status: null,
+      signal: null,
+      errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+      errorMessage: error && error.message ? error.message : String(error)
+    });
+  }
+}
+process.stdin.setEncoding("utf-8");
+process.stdin.on("data", (chunk) => {
+  if (process.platform !== "win32" && chunk.split("\n").includes("kill")) {
+    try { process.kill(-process.pid, "SIGKILL"); } catch { process.exit(1); }
+  }
+});
+process.stdin.resume();
+setInterval(() => {}, 2147483647);
+`;
+
 const LIVE_STEP_ASYNC_GROUP_ANCHOR = String.raw`
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
+const COMMAND_WRAPPER = ${JSON.stringify(LIVE_STEP_COMMAND_WRAPPER)};
 let command;
 let finished = false;
 let reported = false;
@@ -2033,18 +2080,6 @@ let commandLaunchFailed = false;
 let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
-
-function readWindowsCreationTicks(pid, expectedParentPid) {
-  if (process.platform !== "win32" || !Number.isInteger(pid) || !Number.isInteger(expectedParentPid)) return undefined;
-  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p -or [int]$p.ParentProcessId -ne " + expectedParentPid + ") { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
-  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf-8",
-    timeout: 1000,
-    stdio: ["ignore", "pipe", "ignore"]
-  });
-  const value = result.stdout && result.stdout.trim();
-  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
-}
 
 function ownedPosixPids() {
   if (process.platform === "linux") {
@@ -2164,6 +2199,7 @@ function killOwnedTree() {
     }
     const commandExited = command.exitCode !== null || command.signalCode !== null;
     if (!Number.isInteger(commandPid) || commandPid <= 0 || !/^\d+$/.test(commandCreationTicks || "") || commandStartedAtMs <= 0 || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
+      try { command.kill("SIGKILL"); } catch {}
       process.exit(1);
     }
     const script = [
@@ -2283,13 +2319,57 @@ function reportThenAwaitCleanup(meta) {
 function launch(request) {
   try {
     commandStartedAtMs = Date.now();
-    command = spawn(request.command, request.args, {
-      cwd: request.cwd,
-      env: request.env,
-      detached: false,
-      stdio: ["ignore", "inherit", "inherit"]
-    });
-    commandCreationTicks = readWindowsCreationTicks(command.pid, process.pid);
+    command = process.platform === "win32"
+      ? spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
+          cwd: request.cwd,
+          env: process.env,
+          detached: false,
+          stdio: ["pipe", "inherit", "inherit", "pipe", "pipe"]
+        })
+      : spawn(request.command, request.args, {
+          cwd: request.cwd,
+          env: request.env,
+          detached: false,
+          stdio: ["ignore", "inherit", "inherit"]
+        });
+    if (process.platform === "win32") {
+      let wrapperControl = "";
+      command.stdio[3].setEncoding("utf-8");
+      command.stdio[3].on("data", (chunk) => {
+        wrapperControl += chunk;
+        let newline = wrapperControl.indexOf("\n");
+        while (newline >= 0) {
+          const line = wrapperControl.slice(0, newline);
+          wrapperControl = wrapperControl.slice(newline + 1);
+          try {
+            const meta = JSON.parse(line);
+            if (meta.type === "identity" && meta.pid === command.pid && /^\d+$/.test(meta.creationTicks || "")) {
+              commandCreationTicks = meta.creationTicks;
+            } else if (meta.type === "result") {
+              commandExitedAtMs = Date.now();
+              if (executionTimer) clearTimeout(executionTimer);
+              reportThenAwaitCleanup({
+                pid: command.pid,
+                status: meta.status ?? null,
+                signal: meta.signal ?? null,
+                errorCode: meta.errorCode,
+                errorMessage: meta.errorMessage
+              });
+            }
+          } catch (error) {
+            reportThenAwaitCleanup({
+              pid: command.pid,
+              status: null,
+              signal: null,
+              errorCode: "SUPERVISOR_FAILED",
+              errorMessage: error && error.message ? error.message : String(error)
+            });
+          }
+          newline = wrapperControl.indexOf("\n");
+        }
+      });
+      command.stdio[4].end(JSON.stringify(request));
+    }
   } catch (error) {
     commandLaunchFailed = true;
     reportThenAwaitCleanup({
@@ -2320,6 +2400,16 @@ function launch(request) {
     });
   });
   command.once("exit", (status, signal) => {
+    if (process.platform === "win32" && !reported) {
+      reportThenAwaitCleanup({
+        pid: command.pid,
+        status: null,
+        signal,
+        errorCode: "SUPERVISOR_FAILED",
+        errorMessage: "Windows command wrapper exited before reporting a result"
+      });
+      return;
+    }
     commandExitedAtMs = Date.now();
     if (executionTimer) clearTimeout(executionTimer);
     reportThenAwaitCleanup({
@@ -2367,6 +2457,7 @@ process.stdin.resume();
 const LIVE_STEP_PROCESS_GROUP_HELPER = String.raw`
 const fs = require("node:fs");
 const { spawn, spawnSync } = require("node:child_process");
+const COMMAND_WRAPPER = ${JSON.stringify(LIVE_STEP_COMMAND_WRAPPER)};
 const [requestPath, metaPath, stdoutPath, stderrPath] = process.argv.slice(1);
 const request = JSON.parse(fs.readFileSync(requestPath, "utf-8"));
 let child;
@@ -2411,17 +2502,6 @@ function ownedPosixPids() {
     .map((match) => Number(match[1]))
     .filter((pid) => Number.isInteger(pid));
 }
-function readWindowsCreationTicks(pid, expectedParentPid) {
-  if (process.platform !== "win32" || !Number.isInteger(pid) || !Number.isInteger(expectedParentPid)) return undefined;
-  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p -or [int]$p.ParentProcessId -ne " + expectedParentPid + ") { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
-  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf-8",
-    timeout: 1000,
-    stdio: ["ignore", "pipe", "ignore"]
-  });
-  const value = result.stdout && result.stdout.trim();
-  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
-}
 function writeMeta(status, signal) {
   fs.writeFileSync(metaPath, JSON.stringify({
     pid: child && child.pid,
@@ -2438,6 +2518,7 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     return cleanupResult;
   }
   if (process.platform !== "win32") {
+    try { child.stdin.write("kill\n"); } catch {}
     let stablePasses = 0;
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline && stablePasses < 2) {
@@ -2449,7 +2530,6 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
       stablePasses = owned.length === 0 ? stablePasses + 1 : 0;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
-    try { process.kill(-child.pid, "SIGKILL"); } catch {}
     try { child.kill("SIGKILL"); } catch {}
     cleanupResult = stablePasses >= 2;
     if (!cleanupResult) {
@@ -2461,6 +2541,7 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
   }
   if (!/^\d+$/.test(commandCreationTicks || "") || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
     cleanupResult = false;
+    try { child.kill("SIGKILL"); } catch {}
     state.errorCode = "SUPERVISOR_FAILED";
     state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
     writeMeta(commandStatus, commandSignal);
@@ -2551,13 +2632,12 @@ function onData(filePath, field) {
 }
 try {
   commandStartedAtMs = Date.now();
-  child = spawn(request.command, request.args, {
+  child = spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
     cwd: request.cwd,
-    env: request.env,
+    env: process.platform === "win32" ? process.env : request.env,
     detached: process.platform !== "win32",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"]
   });
-  commandCreationTicks = readWindowsCreationTicks(child.pid, process.pid);
 } catch (error) {
   state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
   state.errorMessage = error && error.message ? error.message : String(error);
@@ -2566,6 +2646,43 @@ try {
 }
 child.stdout.on("data", onData(stdoutPath, "stdoutBytes"));
 child.stderr.on("data", onData(stderrPath, "stderrBytes"));
+{
+  let wrapperControl = "";
+  child.stdio[3].setEncoding("utf-8");
+  child.stdio[3].on("data", (chunk) => {
+    wrapperControl += chunk;
+    let newline = wrapperControl.indexOf("\n");
+    while (newline >= 0) {
+      const line = wrapperControl.slice(0, newline);
+      wrapperControl = wrapperControl.slice(newline + 1);
+      try {
+        const meta = JSON.parse(line);
+        if (meta.type === "identity" && meta.pid === child.pid && /^\d+$/.test(meta.creationTicks || "")) {
+          commandCreationTicks = meta.creationTicks;
+        } else if (meta.type === "result" && !finished) {
+          finished = true;
+          commandExitedAtMs = Date.now();
+          clearTimeout(timer);
+          if (meta.errorCode !== undefined && state.errorCode === undefined) {
+            state.errorCode = meta.errorCode;
+            state.errorMessage = meta.errorMessage;
+          }
+          killTree(false, meta.status ?? null, meta.signal ?? null);
+          writeMeta(meta.status ?? null, meta.signal ?? null);
+          process.exit(0);
+        }
+      } catch (error) {
+        if (state.errorCode === undefined) {
+          state.errorCode = "SUPERVISOR_FAILED";
+          state.errorMessage = error && error.message ? error.message : String(error);
+        }
+        killTree();
+      }
+      newline = wrapperControl.indexOf("\n");
+    }
+  });
+  child.stdio[4].end(JSON.stringify(request));
+}
 child.on("error", (error) => {
   if (state.errorCode === undefined) {
     state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
@@ -2573,6 +2690,17 @@ child.on("error", (error) => {
   }
 });
 child.on("exit", (status, signal) => {
+  if (process.platform === "win32") {
+    if (!finished) {
+      finished = true;
+      if (state.errorCode === undefined) {
+        state.errorCode = "SUPERVISOR_FAILED";
+        state.errorMessage = "Windows command wrapper exited before reporting a result";
+      }
+      writeMeta(null, signal);
+    }
+    return;
+  }
   commandExitedAtMs = Date.now();
   killTree(true, status, signal);
 });
@@ -2585,6 +2713,7 @@ const timer = setTimeout(() => {
 }, request.timeoutMs);
 child.on("close", (status, signal) => {
   if (finished) return;
+  if (process.platform === "win32") return;
   finished = true;
   clearTimeout(timer);
   killTree(true, status, signal);
