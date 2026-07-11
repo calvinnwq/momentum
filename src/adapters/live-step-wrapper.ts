@@ -1183,7 +1183,7 @@ export function runProcessGroup(
                     processTreeToken,
                     1_000,
                   );
-            void fallback.then(() => finish(false));
+            void fallback.then(finish);
           };
           const controlEnded = (): void => {
             if (anchorCleanupSucceeded && !fallbackStarted) finish(true);

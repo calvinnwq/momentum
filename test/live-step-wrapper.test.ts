@@ -724,6 +724,41 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "accepts verified fallback cleanup when the process anchor is unresponsive",
+    async () => {
+      const root = makeTempDir("momentum-live-step-fallback-");
+      const readyPath = path.join(root, "anchor-stopped");
+      const program = [
+        'const fs = require("node:fs")',
+        `fs.writeFileSync(${JSON.stringify(readyPath)}, "ready")`,
+        'process.kill(process.ppid, "SIGSTOP")',
+        "setTimeout(() => {}, 10_000)",
+      ].join(";");
+      const abort = new AbortController();
+      const running = runProcessGroup(process.execPath, ["-e", program], {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 10_000,
+        maxBuffer: 1_024,
+        signal: abort.signal,
+      });
+      const readyDeadline = Date.now() + 3_000;
+      while (!fs.existsSync(readyPath) && Date.now() < readyDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(fs.existsSync(readyPath)).toBe(true);
+
+      abort.abort();
+
+      const out = await running;
+      expect((out.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+        "ABORT_ERR",
+      );
+    },
+    10_000,
+  );
+
   it("fails closed when a detached descendant discards its ownership token", async () => {
     const root = makeTempDir("momentum-live-step-unowned-");
     const pidPath = path.join(root, "descendant.pid");
