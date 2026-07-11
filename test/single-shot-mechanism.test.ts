@@ -9,6 +9,7 @@ import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../src/shared/process-limits.js";
 import {
   createOneShotLiveWrapperRoundRunner,
   createScriptCommandRoundRunner,
@@ -973,6 +974,40 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
 
     expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("rejects oversized script host timeouts before sync or SDK launch", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "oversized-timeout-launched.txt");
+    const args = ["-c", `printf launched > ${JSON.stringify(marker)}`];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: MAX_BUILT_IN_PROCESS_TIMEOUT_SEC + 1,
+      repoSafety: { mode: "read-only" },
+    });
+    const scriptRound = round({
+      artifactRoot,
+      executorFamily: "script",
+      logPaths: [path.join(artifactRoot, "script.log")],
+    });
+
+    const syncResult = mechanism(scriptRound);
+    const sdkResult = await mechanism(scriptRound, {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    });
+
+    for (const result of [syncResult, sdkResult]) {
+      expect(result.outcome).toEqual({
+        ok: false,
+        recoveryCode: "invalid_input",
+      });
+    }
+    expect(fs.existsSync(marker)).toBe(false);
   });
 
   it("rejects a portable script command that does not match its host resolution", async () => {

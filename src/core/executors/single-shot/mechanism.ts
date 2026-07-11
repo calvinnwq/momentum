@@ -38,6 +38,7 @@ import {
   type LiveStepWrapperRecoveryCode,
 } from "../../../adapters/live-step-wrapper.js";
 import type { LiveWrapperConfig } from "../../../adapters/live-wrapper-registry.js";
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
 import type { ExecutorRoundRecord } from "../loop/reducer.js";
 import type { CommitIntent } from "../runner/types.js";
 import type {
@@ -1237,6 +1238,12 @@ function validateScriptCommandConfig(
   }
   if (!Number.isInteger(config.timeoutSec) || config.timeoutSec <= 0) {
     return { ok: false, error: "script timeoutSec must be a positive integer" };
+  }
+  if (config.timeoutSec > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+    return {
+      ok: false,
+      error: `script timeoutSec must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds`,
+    };
   }
   return { ok: true };
 }
