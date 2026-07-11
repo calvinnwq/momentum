@@ -1617,12 +1617,12 @@ async function terminateOwnedPosixTree(
         if (pid !== groupLeaderPid) signalPosixTarget(pid, "SIGKILL");
       }
     }
-    killOwnedPosixGroup(groupLeaderPid, child);
+    killOwnedPosixGroup(groupLeaderPid, child, ownershipToken);
     return false;
   }
   const initial = listOwnedPosixProcesses(ownershipToken);
   if (!initial.ok) {
-    killOwnedPosixGroup(groupLeaderPid, child);
+    killOwnedPosixGroup(groupLeaderPid, child, ownershipToken);
     return false;
   }
 
@@ -1638,7 +1638,11 @@ async function terminateOwnedPosixTree(
     }
   }
   if (!anchorExited) {
-    const groupKilled = killOwnedPosixGroup(groupLeaderPid, child);
+    const groupKilled = killOwnedPosixGroup(
+      groupLeaderPid,
+      child,
+      ownershipToken,
+    );
     if (!groupKilled) {
       await new Promise<void>((resolve) => setImmediate(resolve));
       anchorExited = child.exitCode !== null || child.signalCode !== null;
@@ -1767,7 +1771,26 @@ function listOwnedPosixProcesses(ownershipToken: string): OwnedPosixProcesses {
 function killOwnedPosixGroup(
   groupLeaderPid: number,
   child: ReturnType<typeof spawn>,
+  ownershipToken: string,
 ): boolean {
+  const group = spawnSync("ps", ["-o", "pgid=", "-p", String(groupLeaderPid)], {
+    encoding: "utf-8",
+    timeout: 500,
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const leaderOwnership = posixProcessOwnership(groupLeaderPid, ownershipToken);
+  if (
+    group.error !== undefined ||
+    group.status !== 0 ||
+    Number(group.stdout.trim()) !== groupLeaderPid ||
+    leaderOwnership !== "owned"
+  ) {
+    if (leaderOwnership === "owned") {
+      signalPosixTarget(groupLeaderPid, "SIGKILL");
+    }
+    return false;
+  }
   let safe = signalPosixTarget(-groupLeaderPid, "SIGKILL");
   if (child.exitCode !== null || child.signalCode !== null) return safe;
   try {
@@ -2011,9 +2034,9 @@ let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
 
-function readWindowsCreationTicks(pid) {
-  if (process.platform !== "win32" || !Number.isInteger(pid)) return undefined;
-  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+function readWindowsCreationTicks(pid, expectedParentPid) {
+  if (process.platform !== "win32" || !Number.isInteger(pid) || !Number.isInteger(expectedParentPid)) return undefined;
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p -or [int]$p.ParentProcessId -ne " + expectedParentPid + ") { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
   const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf-8",
     timeout: 1000,
@@ -2266,7 +2289,7 @@ function launch(request) {
       detached: false,
       stdio: ["ignore", "inherit", "inherit"]
     });
-    commandCreationTicks = readWindowsCreationTicks(command.pid);
+    commandCreationTicks = readWindowsCreationTicks(command.pid, process.pid);
   } catch (error) {
     commandLaunchFailed = true;
     reportThenAwaitCleanup({
@@ -2388,9 +2411,9 @@ function ownedPosixPids() {
     .map((match) => Number(match[1]))
     .filter((pid) => Number.isInteger(pid));
 }
-function readWindowsCreationTicks(pid) {
-  if (process.platform !== "win32" || !Number.isInteger(pid)) return undefined;
-  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+function readWindowsCreationTicks(pid, expectedParentPid) {
+  if (process.platform !== "win32" || !Number.isInteger(pid) || !Number.isInteger(expectedParentPid)) return undefined;
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + pid + "\"); if ($null -eq $p -or [int]$p.ParentProcessId -ne " + expectedParentPid + ") { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
   const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf-8",
     timeout: 1000,
@@ -2534,7 +2557,7 @@ try {
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"]
   });
-  commandCreationTicks = readWindowsCreationTicks(child.pid);
+  commandCreationTicks = readWindowsCreationTicks(child.pid, process.pid);
 } catch (error) {
   state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
   state.errorMessage = error && error.message ? error.message : String(error);
