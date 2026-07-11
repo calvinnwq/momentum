@@ -912,6 +912,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
           '      cat "$snapshot_path"',
           "      exit $status",
           '    elif [ "$count" -eq 2 ]; then',
+          "      sleep 1.2",
           '      cat "$snapshot_path"',
           "      exit 0",
           "    fi",
