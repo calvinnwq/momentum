@@ -1135,9 +1135,11 @@ export function runProcessGroupSync(
  * If the anchor cannot confirm cleanup, a verified ownership-checked fallback
  * preserves the known timeout, cancellation, or command-exit outcome. POSIX
  * starts the fallback deadline after ownership preflight and, once the anchor
- * exits, requires its prior cleanup-attempt report. Windows retains bounded
- * anchor and command start/exit identities. Any fallback that cannot prove
- * cleanup replaces the known outcome with `SUPERVISOR_FAILED`.
+ * exits, requires its prior cleanup-attempt report. Every Windows cleanup path
+ * retains anchor and command start/exit identities and limits direct command
+ * descendants to the command's creation-to-exit interval. It never substitutes
+ * an unverified broad tree kill. Any fallback that cannot prove cleanup replaces
+ * the known outcome with `SUPERVISOR_FAILED`.
  */
 export function runProcessGroup(
   command: string,
@@ -1787,6 +1789,8 @@ function signalPosixTarget(target: number, signal: NodeJS.Signals): boolean {
 /**
  * Discover descendants from retained ParentProcessId values, so cleanup does
  * not depend on the leader still being alive when its `exit` event fires.
+ * When the command exited, direct descendants must have been created between
+ * its retained creation and exit times to remain cleanup targets.
  */
 function killWindowsProcessTree(
   rootPid: number,

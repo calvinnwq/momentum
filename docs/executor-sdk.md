@@ -52,32 +52,34 @@ export class ReviewSupervisor implements Executor<Config, HostBindings> {
 
 The tick may be synchronous or asynchronous. It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason. Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision. The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
-The daemon controller rejects a decision atomically unless its classification, invocation state, and round state form a supported combination:
+The daemon controller rejects a decision atomically unless its classification, invocation state, round state, recovery code, and human gate form a supported combination:
 
-| Classification | Required invocation state | Allowed round states |
-| --- | --- | --- |
-| `complete` | `succeeded` | `succeeded` |
-| `continue` | `running` | `succeeded`, `failed` |
-| `approval_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` |
-| `operator_decision_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` |
-| `manual_recovery_required` | `manual_recovery_required` | `manual_recovery_required` |
-| `blocked` | `blocked` | `blocked` |
-| `failed` | `failed` | `failed` |
-| `cancelled` | `cancelled` | `cancelled` |
+| Classification | Required invocation state | Allowed round states | Recovery code | Human gate |
+| --- | --- | --- | --- | --- |
+| `complete` | `succeeded` | `succeeded` | `null` | `null` |
+| `continue` | `running` | `succeeded`, `failed` | `null` | `null` |
+| `approval_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` | `null` | `approval_required`, `policy_boundary_exceeded`, `scope_boundary_exceeded`, or `destructive_action_requested` |
+| `operator_decision_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` | `null` | `operator_decision_required`, `quota_exhausted`, `policy_boundary_exceeded`, `scope_boundary_exceeded`, `credential_required`, `external_state_required`, or `destructive_action_requested` |
+| `manual_recovery_required` | `manual_recovery_required` | `manual_recovery_required` | Non-empty | `manual_recovery_required` |
+| `blocked` | `blocked` | `blocked` | Non-empty | `null`, `credential_required`, or `external_state_required` |
+| `failed` | `failed` | `failed` | Non-empty | `null` |
+| `cancelled` | `cancelled` | `cancelled` | `null` | `null` |
 
 An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
 
-The host reads its durable clock after awaited runner work when recording observations and terminal settlement; an asynchronous round cannot be stamped as finished before its bounded work completes.
+The durable envelope, not executor input, stamps round start and heartbeat timestamps from its own clock.
+The host reads that clock again after awaited runner work when recording observations and terminal settlement, so an asynchronous round cannot be stamped as finished before its bounded work completes.
 
 Cancellation is cooperative and cleanup-bearing: a runner that observes `signal` must stop and clean up before propagating the signal's reason. If a runner returns normally, completion wins even when the signal flips immediately afterward; the host does not manufacture a cancellation that the runner did not acknowledge.
 The built-in asynchronous process adapters preserve stdout and stderr captured before and during cancellation in the executor log, and decode streaming UTF-8 without corrupting characters split across pipe chunks.
 
-The shipped agent-once and script process adapters supervise their spawned process trees asynchronously. A separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash. Every launched process inherits a cryptographically random per-run ownership token; POSIX cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process. Windows cleanup discovers descendants from the still-live anchor and retained command start/exit identity even after the command leader exits. Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint. Cleanup verifies tracked/untracked status and a recursive metadata snapshot of ignored paths. Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation. Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
+The shipped agent-once and script process adapters supervise their spawned process trees asynchronously. A separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash. Every launched process inherits a cryptographically random per-run ownership token; POSIX cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process. Windows cleanup discovers descendants from the still-live anchor and retained command start/exit identity even after the command leader exits. In the asynchronous anchor, synchronous helper, and fallback cleanup paths, a direct child of an exited command is eligible only when its creation time falls between that command's retained creation and exit times. Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint. Cleanup verifies tracked/untracked status and a recursive metadata snapshot of ignored paths. Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation. Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
 Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
 If the anchor does not confirm cleanup, Momentum gives the ownership-checked POSIX or Windows fallback its own bounded cleanup budget.
 A POSIX fallback starts that budget only after its blocking ownership and escaped-descendant preflight completes.
 If the POSIX anchor has already exited, fallback cleanup may preserve the known outcome only when the anchor first reported that it had entered cleanup; an abrupt exit without that report fails closed.
 Windows fallback binds descendant discovery to retained process identities and creation times, and the synchronous helper retains the command status and signal for diagnostics when cleanup proof fails without treating that command outcome as settled.
+Momentum does not substitute an unverified broad `taskkill` when ownership-checked Windows cleanup fails.
 A fallback that proves cleanup preserves the already-known timeout, cancellation, or command-exit outcome; any fallback that cannot prove cleanup changes the result to `SUPERVISOR_FAILED`.
 Repo-local log and result paths owned by the host are excluded from the ignored-path baseline so writing durable evidence does not look like runner residue.
 Ignored-path comparison is intentionally strict: entry additions, removals, and metadata changes are treated as runner residue.
@@ -102,7 +104,7 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 - `heartbeat()` for liveness;
 - `recordArtifact()`, `recordCheckpoint()`, `recordFinding()`, and `recordDecision()` for append-only evidence.
 
-It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
+It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
 Executor writes are available only while the invocation is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the invocation again.
 
 If `mechanism_completed` evidence is durable but daemon classification is not, the single-shot daemon entrypoint reattaches the matching non-terminal deterministic invocation, reconstructs the outcome from that checkpoint, and returns the same recommendation without rerunning the mechanism.

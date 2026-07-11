@@ -50,11 +50,13 @@ envelope controller can apply terminal classification and state transitions.
 The controller and executor facade are different runtime objects, so an executor
 cannot recover daemon authority with a type cast.
 Before settlement, the controller validates that the classification maps to its
-required invocation state and permits the requested round state; an inconsistent
-daemon decision writes no round, invocation, or classification-checkpoint change.
-Durable observations and terminal settlement read the daemon clock after awaited
-runner work, so asynchronous rounds cannot finish before their bounded work in
-the persisted timeline.
+required invocation state, permits the requested round state, and carries a
+classification-compatible recovery code and human gate; an inconsistent daemon
+decision writes no round, invocation, or classification-checkpoint change.
+The envelope clock owns round start and heartbeat timestamps as well as durable
+observations and terminal settlement after awaited runner work, so executor input
+cannot forge liveness and asynchronous rounds cannot finish before their bounded
+work in the persisted timeline.
 Cancellation terminalizes only when it happens before bounded work starts or the
 runner propagates the signal reason after verified cleanup. A normal runner
 return wins a simultaneous post-run abort rather than creating an unverified
@@ -69,8 +71,9 @@ checkpoints, findings, and decisions. It exposes no SQLite handle and rejects
 cross-invocation evidence, overlapping or non-sequential rounds, and evidence
 mutation after either the round or invocation becomes terminal. State-dependent
 writes and coherent snapshots use SQLite transactions so concurrent ticks cannot
-cross those guards. Runtime phase validation and an explicit observation-field
-whitelist prevent JavaScript or casted inputs from restoring terminal authority.
+cross those guards. Every public envelope write validates its complete runtime
+payload, and an explicit observation-field whitelist prevents JavaScript or
+casted inputs from restoring terminal authority.
 Daemon-allocated classification checkpoint identity is chosen inside the same
 write transaction as terminal settlement. Its snapshots include all durable child
 evidence so a later tick can resume without terminal scrollback or
@@ -133,12 +136,15 @@ If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
 fallback receives its own bounded cleanup budget. The POSIX budget starts only
 after blocking ownership and escaped-descendant preflight completes. Once its
 anchor has exited, POSIX fallback can preserve a known outcome only if the anchor
-first reported entering cleanup; an abrupt unreported exit fails closed. Windows
-fallback binds cleanup to retained anchor and command start/exit identities, and
-the synchronous helper retains command status and signal for diagnostics when
-cleanup proof fails without accepting that outcome. Successful fallback cleanup
-preserves the known timeout, cancellation, or command-exit outcome; an unverified
-fallback changes that outcome to `SUPERVISOR_FAILED`.
+first reported entering cleanup; an abrupt unreported exit fails closed. Every
+Windows descendant-discovery path binds cleanup to retained anchor and command
+start/exit identities and accepts direct children of an exited command only when
+their creation times fall between the command's retained creation and exit
+times. The synchronous helper retains command status and signal for diagnostics
+when cleanup proof fails without accepting that outcome. Successful fallback
+cleanup preserves the known timeout, cancellation, or command-exit outcome; an
+unverified fallback changes that outcome to `SUPERVISOR_FAILED` without invoking
+an unverified broad `taskkill` fallback.
 
 Portable POSIX process supervision is userland containment.
 It can prove cleanup for the anchored group and sampled descendants that retain

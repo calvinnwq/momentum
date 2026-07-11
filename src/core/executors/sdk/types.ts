@@ -124,8 +124,9 @@ export type ExecutorObservationPhase =
   (typeof EXECUTOR_OBSERVATION_PHASES)[number];
 
 /**
- * Initial record an executor may submit. Decision-owned fields are omitted and
- * filled with null by the durable facade.
+ * Initial record an executor may submit.
+ * Decision-owned fields are omitted and filled with null by the durable facade;
+ * start and heartbeat timestamps are omitted and stamped from the facade clock.
  */
 export type ExecutorRoundStart = Omit<
   ExecutorRoundRecord,
