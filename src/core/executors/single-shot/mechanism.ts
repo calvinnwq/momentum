@@ -376,8 +376,10 @@ function finishOneShotWrapperResult(
 /**
  * Build a deterministic `script` round runner.
  *
- * The runner requires an absolute command, absolute cwd, positive timeout, and
- * at least one absolute round log path. A zero exit code is the success signal;
+ * The runner requires an absolute command, absolute cwd, a positive timeout no
+ * greater than the shared built-in process ceiling, and at least one absolute
+ * round log path. Invalid host config returns `invalid_input` before either
+ * execution path launches the command. A zero exit code is the success signal;
  * stdout/stderr plus the exit metadata are the evidence, so no normalized result
  * document or result digest is produced for script success.
  */

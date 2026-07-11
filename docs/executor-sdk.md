@@ -135,6 +135,8 @@ Before invoking that adapter, the built-in lifecycle clones and freezes its port
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
 The shipped adapters cross-check script command/argv/timeout/policy and agent-once agent/timeout/policy identity before launching a process.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.
+The deterministic script host also requires `timeoutSec` to be a positive integer no greater than 2,147,453 seconds.
+An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
