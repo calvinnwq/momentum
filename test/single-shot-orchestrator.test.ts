@@ -166,6 +166,18 @@ function roundInputs(): SingleShotRoundRuntimeInputs {
   };
 }
 
+function expectDurableDispatchBinding(db: MomentumDb): void {
+  expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([
+    {
+      checkpointId: "round-1-checkpoint-0",
+      roundId: "round-1",
+      sequence: 0,
+      stage: "round_started",
+      detail: expect.stringMatching(/^dispatch binding: sha256:[a-f0-9]{64}$/),
+    },
+  ]);
+}
+
 describe("runSingleShotRound — one-shot success", () => {
   it("inserts a running round, captures the result, and persists a complete terminal round", async () => {
     const db = openRoundDb("one-shot");
@@ -279,6 +291,15 @@ describe("runSingleShotRound — one-shot success", () => {
         checkpointId: "round-1-checkpoint-0",
         roundId: "round-1",
         sequence: 0,
+        stage: "round_started",
+        detail: expect.stringMatching(
+          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+        ),
+      },
+      {
+        checkpointId: "round-1-checkpoint-1",
+        roundId: "round-1",
+        sequence: 1,
         stage: "classified",
         detail: "classification: cancelled",
       },
@@ -346,10 +367,10 @@ describe("runSingleShotRound — one-shot success", () => {
           insertExecutorCheckpoint(
             db,
             {
-              checkpointId: "round-1-checkpoint-1",
+              checkpointId: "round-1-cleanup-started",
               roundId: round.roundId,
-              sequence: 0,
-              stage: "round_started",
+              sequence: 1,
+              stage: "cleanup_started",
               detail: "existing durable progress",
             },
             { now: 2_500 },
@@ -362,16 +383,25 @@ describe("runSingleShotRound — one-shot success", () => {
 
     expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([
       {
-        checkpointId: "round-1-checkpoint-1",
+        checkpointId: "round-1-checkpoint-0",
         roundId: "round-1",
         sequence: 0,
         stage: "round_started",
+        detail: expect.stringMatching(
+          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+        ),
+      },
+      {
+        checkpointId: "round-1-cleanup-started",
+        roundId: "round-1",
+        sequence: 1,
+        stage: "cleanup_started",
         detail: "existing durable progress",
       },
       {
-        checkpointId: "round-1-checkpoint-1-1",
+        checkpointId: "round-1-checkpoint-2",
         roundId: "round-1",
-        sequence: 1,
+        sequence: 2,
         stage: "classified",
         detail: "classification: cancelled",
       },
@@ -408,22 +438,40 @@ describe("runSingleShotRound — one-shot success", () => {
       classification: null,
       finishedAt: null,
     });
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
-  it("inserts the round before the mechanism runs", async () => {
+  it("persists the round and dispatch binding before the mechanism runs", async () => {
     const db = openRoundDb("one-shot");
     let stateDuringMechanism: string | undefined;
+    let checkpointsDuringMechanism: ReturnType<
+      typeof listExecutorCheckpointsForRound
+    > = [];
     await runSingleShotRound({
       db,
       start: buildStart("one-shot"),
       finishedAt: 3_000,
       runRound: () => {
         stateDuringMechanism = loadExecutorRound(db, "round-1")?.state;
+        checkpointsDuringMechanism = listExecutorCheckpointsForRound(
+          db,
+          "round-1",
+        );
         return { outcome: { ok: true }, result: runnerResult() };
       },
     });
     expect(stateDuringMechanism).toBe("running");
+    expect(checkpointsDuringMechanism).toEqual([
+      {
+        checkpointId: "round-1-checkpoint-0",
+        roundId: "round-1",
+        sequence: 0,
+        stage: "round_started",
+        detail: expect.stringMatching(
+          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+        ),
+      },
+    ]);
   });
 
   it("persists the round's logs (from frozen logPaths) + reported artifact pointers", async () => {
@@ -556,7 +604,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
   it("rejects a successful script mechanism output with a result document", async () => {
@@ -577,7 +625,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
   it("rejects a script mechanism output with a result-document artifact", async () => {
@@ -600,7 +648,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
   it("rejects a failed script mechanism output with result evidence", async () => {
@@ -624,7 +672,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
   it("rejects a successful one-shot mechanism output with a failed runner result", async () => {
@@ -644,7 +692,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 
   it("validates terminal evidence before writing artifact rows", async () => {
@@ -668,7 +716,7 @@ describe("runSingleShotRound — family output invariants", () => {
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
-    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+    expectDurableDispatchBinding(db);
   });
 });
 

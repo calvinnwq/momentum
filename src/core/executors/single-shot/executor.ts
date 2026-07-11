@@ -69,7 +69,7 @@ import type {
   ExecutorInvocationState,
   ExecutorRoundRecord,
   ExecutorRoundState,
-  WorkflowExecutorFamily
+  WorkflowExecutorFamily,
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../../adapters/live-step-wrapper.js";
@@ -82,14 +82,14 @@ import type { RunnerResult } from "../runner/types.js";
  */
 export const SINGLE_SHOT_EXECUTOR_FAMILIES = [
   "one-shot",
-  "script"
+  "script",
 ] as const satisfies readonly WorkflowExecutorFamily[];
 
 export type SingleShotExecutorFamily =
   (typeof SINGLE_SHOT_EXECUTOR_FAMILIES)[number];
 
 const SINGLE_SHOT_FAMILY_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_EXECUTOR_FAMILIES
+  SINGLE_SHOT_EXECUTOR_FAMILIES,
 );
 
 /**
@@ -98,7 +98,7 @@ const SINGLE_SHOT_FAMILY_SET: ReadonlySet<string> = new Set(
  * two names at the call site.
  */
 export function isSingleShotExecutorFamily(
-  family: string
+  family: string,
 ): family is SingleShotExecutorFamily {
   return SINGLE_SHOT_FAMILY_SET.has(family);
 }
@@ -111,7 +111,7 @@ export function isSingleShotExecutorFamily(
  */
 export const SINGLE_SHOT_BLOCKED_RECOVERY_CODES = [
   "runtime_unavailable",
-  "auth_unavailable"
+  "auth_unavailable",
 ] as const;
 
 /**
@@ -124,7 +124,7 @@ export const SINGLE_SHOT_FAILED_RECOVERY_CODES = [
   "command_timed_out",
   "output_overflow",
   "result_missing",
-  "result_invalid"
+  "result_invalid",
 ] as const;
 
 /**
@@ -141,7 +141,7 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
   "reset_failed",
   "commit_failed",
   "git_failed",
-  "invalid_input"
+  "invalid_input",
 ] as const;
 
 /**
@@ -156,19 +156,20 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
 export const SINGLE_SHOT_RECOVERY_CODES = [
   ...SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
   ...SINGLE_SHOT_FAILED_RECOVERY_CODES,
-  ...SINGLE_SHOT_MANUAL_RECOVERY_CODES
+  ...SINGLE_SHOT_MANUAL_RECOVERY_CODES,
 ] as const;
 
-export type SingleShotRecoveryCode = (typeof SINGLE_SHOT_RECOVERY_CODES)[number];
+export type SingleShotRecoveryCode =
+  (typeof SINGLE_SHOT_RECOVERY_CODES)[number];
 
 const BLOCKED_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_BLOCKED_RECOVERY_CODES
+  SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
 );
 const FAILED_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_FAILED_RECOVERY_CODES
+  SINGLE_SHOT_FAILED_RECOVERY_CODES,
 );
 const MANUAL_RECOVERY_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_MANUAL_RECOVERY_CODES
+  SINGLE_SHOT_MANUAL_RECOVERY_CODES,
 );
 
 // The execution-time codes must stay a subset of the live-wrapper taxonomy so
@@ -178,8 +179,11 @@ const MANUAL_RECOVERY_SET: ReadonlySet<string> = new Set(
 // uncovered code collapses the whole assertion to `never` (a missing code would
 // otherwise hide behind the union's other `true` members).
 type LiveWrapperCode = (typeof LIVE_STEP_WRAPPER_RECOVERY_CODES)[number];
-type _AssertWrapperCodesCovered =
-  [LiveWrapperCode] extends [SingleShotRecoveryCode] ? true : never;
+type _AssertWrapperCodesCovered = [LiveWrapperCode] extends [
+  SingleShotRecoveryCode,
+]
+  ? true
+  : never;
 const _wrapperCodesCovered: _AssertWrapperCodesCovered = true;
 void _wrapperCodesCovered;
 
@@ -190,8 +194,7 @@ void _wrapperCodesCovered;
  * precise recovery code the mechanism reported.
  */
 export type SingleShotInvocationOutcome =
-  | { ok: true }
-  | { ok: false; recoveryCode: SingleShotRecoveryCode };
+  { ok: true } | { ok: false; recoveryCode: SingleShotRecoveryCode };
 
 /**
  * The daemon's decision for one completed single-shot invocation. There is no
@@ -218,7 +221,7 @@ export type SingleShotDecision = {
  * never a silent default to a guessed classification.
  */
 export function decideSingleShotInvocation(
-  outcome: SingleShotInvocationOutcome
+  outcome: SingleShotInvocationOutcome,
 ): SingleShotDecision {
   if (outcome.ok) {
     return {
@@ -227,7 +230,7 @@ export function decideSingleShotInvocation(
       invocationState: "succeeded",
       recoveryCode: null,
       humanGate: null,
-      reason: "single-shot invocation succeeded"
+      reason: "single-shot invocation succeeded",
     };
   }
 
@@ -245,7 +248,7 @@ export function decideSingleShotInvocation(
       invocationState: "blocked",
       recoveryCode,
       humanGate,
-      reason: `single-shot invocation blocked (${recoveryCode}); resolve the environment or credentials and re-run`
+      reason: `single-shot invocation blocked (${recoveryCode}); resolve the environment or credentials and re-run`,
     };
   }
 
@@ -256,7 +259,7 @@ export function decideSingleShotInvocation(
       invocationState: "failed",
       recoveryCode,
       humanGate: null,
-      reason: `single-shot invocation failed (${recoveryCode})`
+      reason: `single-shot invocation failed (${recoveryCode})`,
     };
   }
 
@@ -267,12 +270,12 @@ export function decideSingleShotInvocation(
       invocationState: "manual_recovery_required",
       recoveryCode,
       humanGate: "manual_recovery_required",
-      reason: `single-shot invocation finalize outcome ${recoveryCode} requires manual recovery before any retry`
+      reason: `single-shot invocation finalize outcome ${recoveryCode} requires manual recovery before any retry`,
     };
   }
 
   throw new Error(
-    `decideSingleShotInvocation: unknown recovery code ${String(recoveryCode)}`
+    `decideSingleShotInvocation: unknown recovery code ${String(recoveryCode)}`,
   );
 }
 
@@ -289,7 +292,7 @@ export function singleShotInvocationId(
   workflowRunId: string,
   stepRunId: string,
   family: SingleShotExecutorFamily,
-  attempt: number
+  attempt: number,
 ): string {
   return `${workflowRunId}::${stepRunId}::${family}::${attempt}`;
 }
@@ -329,14 +332,14 @@ export type PlanSingleShotInvocationInput = {
  * invented beyond the supplied `startedAt`.
  */
 export function planSingleShotInvocation(
-  input: PlanSingleShotInvocationInput
+  input: PlanSingleShotInvocationInput,
 ): ExecutorInvocationRecord {
   return {
     invocationId: singleShotInvocationId(
       input.workflowRunId,
       input.stepRunId,
       input.family,
-      input.attempt
+      input.attempt,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
@@ -346,7 +349,7 @@ export function planSingleShotInvocation(
     attempt: input.attempt,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
@@ -418,7 +421,8 @@ export type SingleShotRoundSelection = {
  * documented hook for a future family-specific default without disturbing the
  * resolver.
  */
-export const SINGLE_SHOT_FAMILY_DEFAULT_SELECTION: SingleShotSelectionConfig = {};
+export const SINGLE_SHOT_FAMILY_DEFAULT_SELECTION: SingleShotSelectionConfig =
+  {};
 
 /**
  * The Momentum global default selection (precedence level 5, the floor). Every
@@ -432,7 +436,7 @@ export const SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION: Required<SingleShotSelectionC
     model: null,
     effort: null,
     timeoutMs: null,
-    policyEnvelope: null
+    policyEnvelope: null,
   };
 
 /**
@@ -461,7 +465,7 @@ export type ResolveSingleShotRoundSelectionInput = {
  * same layered config always yields the same selection.
  */
 export function resolveSingleShotRoundSelection(
-  input: ResolveSingleShotRoundSelectionInput
+  input: ResolveSingleShotRoundSelectionInput,
 ): SingleShotRoundSelection {
   // Highest precedence first. The caller's `globalDefault` overrides the built-in
   // floor at the same source level; the built-in floor is always all-defined so
@@ -472,13 +476,13 @@ export function resolveSingleShotRoundSelection(
     { config: input.repositoryPolicy, source: "repository_policy" },
     {
       config: input.familyDefault ?? SINGLE_SHOT_FAMILY_DEFAULT_SELECTION,
-      source: "executor_family_default"
+      source: "executor_family_default",
     },
     { config: input.globalDefault, source: "momentum_global_default" },
     {
       config: SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION,
-      source: "momentum_global_default"
-    }
+      source: "momentum_global_default",
+    },
   ];
 
   const agentProvider = resolveSelectionField(levels, (c) => c.agentProvider);
@@ -498,8 +502,8 @@ export function resolveSingleShotRoundSelection(
       model: model.source,
       effort: effort.source,
       timeoutMs: timeoutMs.source,
-      policyEnvelope: policyEnvelope.source
-    }
+      policyEnvelope: policyEnvelope.source,
+    },
   };
 }
 
@@ -539,7 +543,7 @@ export type PlanSingleShotRoundStartInput = {
  * not rewrite the historical record for an already-started round."
  */
 export function planSingleShotRoundStart(
-  input: PlanSingleShotRoundStartInput
+  input: PlanSingleShotRoundStartInput,
 ): ExecutorRoundRecord {
   return {
     roundId: input.roundId,
@@ -570,7 +574,7 @@ export function planSingleShotRoundStart(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
@@ -617,13 +621,13 @@ export type PlanSingleShotRoundStartForInvocationInput = {
  * invariant {@link planSingleShotInvocation} establishes).
  */
 export function planSingleShotRoundStartForInvocation(
-  input: PlanSingleShotRoundStartForInvocationInput
+  input: PlanSingleShotRoundStartForInvocationInput,
 ): PlanSingleShotRoundStartInput {
   const { invocation, runtime } = input;
   const family = invocation.executorFamily;
   if (!isSingleShotExecutorFamily(family)) {
     throw new Error(
-      `planSingleShotRoundStartForInvocation: invocation ${invocation.invocationId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`
+      `planSingleShotRoundStartForInvocation: invocation ${invocation.invocationId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`,
     );
   }
   return {
@@ -638,7 +642,7 @@ export function planSingleShotRoundStartForInvocation(
     inputDigest: runtime.inputDigest,
     artifactRoot: runtime.artifactRoot,
     ...(runtime.logPaths !== undefined ? { logPaths: runtime.logPaths } : {}),
-    startedAt: input.startedAt
+    startedAt: input.startedAt,
   };
 }
 
@@ -702,7 +706,7 @@ export type PlanSingleShotRoundArtifactsInput = {
  * evidence is stable and reattachable. Pure: no SQLite, no file system.
  */
 export function planSingleShotRoundArtifacts(
-  input: PlanSingleShotRoundArtifactsInput
+  input: PlanSingleShotRoundArtifactsInput,
 ): ExecutorArtifactRecord[] {
   const { roundId, logPaths } = input;
   const artifacts = input.artifacts ?? {};
@@ -715,8 +719,8 @@ export function planSingleShotRoundArtifacts(
       singleShotArtifactRecord(
         roundId,
         "result_document",
-        artifacts.resultDocument
-      )
+        artifacts.resultDocument,
+      ),
     );
   }
   logPaths.forEach((path, index) => {
@@ -727,8 +731,8 @@ export function planSingleShotRoundArtifacts(
       singleShotArtifactRecord(
         roundId,
         "checkpoint_stream",
-        artifacts.checkpointStream
-      )
+        artifacts.checkpointStream,
+      ),
     );
   }
   if (artifacts.verificationOutput != null) {
@@ -736,8 +740,8 @@ export function planSingleShotRoundArtifacts(
       singleShotArtifactRecord(
         roundId,
         "verification_output",
-        artifacts.verificationOutput
-      )
+        artifacts.verificationOutput,
+      ),
     );
   }
   if (artifacts.commitOrResetEvidence != null) {
@@ -745,13 +749,17 @@ export function planSingleShotRoundArtifacts(
       singleShotArtifactRecord(
         roundId,
         "commit_or_reset_evidence",
-        artifacts.commitOrResetEvidence
-      )
+        artifacts.commitOrResetEvidence,
+      ),
     );
   }
   if (artifacts.recoveryNote != null) {
     records.push(
-      singleShotArtifactRecord(roundId, "recovery_note", artifacts.recoveryNote)
+      singleShotArtifactRecord(
+        roundId,
+        "recovery_note",
+        artifacts.recoveryNote,
+      ),
     );
   }
   return records;
@@ -766,7 +774,7 @@ function singleShotArtifactRecord(
   roundId: string,
   artifactClass: ExecutorArtifactClass,
   pointer: SingleShotArtifactPointer,
-  index?: number
+  index?: number,
 ): ExecutorArtifactRecord {
   const suffix =
     index !== undefined ? `${artifactClass}-${index}` : artifactClass;
@@ -776,7 +784,7 @@ function singleShotArtifactRecord(
     artifactClass,
     path: pointer.path,
     digest: pointer.digest ?? null,
-    description: pointer.description ?? null
+    description: pointer.description ?? null,
   };
 }
 
@@ -801,6 +809,19 @@ export type PlanSingleShotRoundCheckpointsInput = {
   classification: ExecutorCompletionClassification;
 };
 
+export function planSingleShotRoundStartedCheckpoint(
+  roundId: string,
+  detail: string | null = null,
+): ExecutorCheckpointRecord {
+  return {
+    checkpointId: `${roundId}-checkpoint-0`,
+    roundId,
+    sequence: 0,
+    stage: "round_started",
+    detail,
+  };
+}
+
 /**
  * Project a finished single-shot round's major executor stages into the durable
  * {@link ExecutorCheckpointRecord} stream the executor-loop persistence layer
@@ -823,10 +844,12 @@ export type PlanSingleShotRoundCheckpointsInput = {
  * no file system.
  */
 export function planSingleShotRoundCheckpoints(
-  input: PlanSingleShotRoundCheckpointsInput
+  input: PlanSingleShotRoundCheckpointsInput,
 ): ExecutorCheckpointRecord[] {
   const { roundId } = input;
-  const records: ExecutorCheckpointRecord[] = [];
+  const records: ExecutorCheckpointRecord[] = [
+    planSingleShotRoundStartedCheckpoint(roundId),
+  ];
   const checkpoint = (stage: string, detail: string | null): void => {
     const sequence = records.length;
     records.push({
@@ -834,7 +857,7 @@ export function planSingleShotRoundCheckpoints(
       roundId,
       sequence,
       stage,
-      detail
+      detail,
     });
   };
 
@@ -849,7 +872,6 @@ export function planSingleShotRoundCheckpoints(
   // bounded mechanism + normalized result, classification. A round that produced no
   // result skips `result_captured` — the `script` family always, and any failed
   // round that routed straight from running to its terminal state.
-  checkpoint("round_started", null);
   checkpoint("mechanism_completed", outcomeDetail);
   if (input.capturedResult) {
     checkpoint("result_captured", null);
@@ -875,14 +897,14 @@ export type SingleShotRoundEvidence = {
 export const SINGLE_SHOT_VERIFICATION_STATUSES = [
   "passed",
   "failed",
-  "skipped"
+  "skipped",
 ] as const;
 
 export type SingleShotVerificationStatus =
   (typeof SINGLE_SHOT_VERIFICATION_STATUSES)[number];
 
 const SINGLE_SHOT_VERIFICATION_STATUS_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_VERIFICATION_STATUSES
+  SINGLE_SHOT_VERIFICATION_STATUSES,
 );
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 
@@ -963,7 +985,7 @@ export type SingleShotRoundPersistencePlan = {
  * {@link decideSingleShotInvocation}).
  */
 export function planSingleShotRoundPersistence(
-  input: PlanSingleShotRoundPersistenceInput
+  input: PlanSingleShotRoundPersistenceInput,
 ): SingleShotRoundPersistencePlan {
   const decision = decideSingleShotInvocation(input.outcome);
   if (
@@ -972,7 +994,7 @@ export function planSingleShotRoundPersistence(
     input.result.success !== true
   ) {
     throw new Error(
-      "Invalid single-shot persistence input: successful outcomes require a successful result document."
+      "Invalid single-shot persistence input: successful outcomes require a successful result document.",
     );
   }
   const evidence = input.evidence ?? {};
@@ -982,21 +1004,23 @@ export function planSingleShotRoundPersistence(
     !SINGLE_SHOT_VERIFICATION_STATUS_SET.has(verificationStatus)
   ) {
     throw new Error(
-      `Invalid single-shot persistence input: verificationStatus must be one of ${SINGLE_SHOT_VERIFICATION_STATUSES.join(", ")}.`
+      `Invalid single-shot persistence input: verificationStatus must be one of ${SINGLE_SHOT_VERIFICATION_STATUSES.join(", ")}.`,
     );
   }
   if (input.outcome.ok && verificationStatus === "failed") {
     throw new Error(
-      "Invalid single-shot persistence input: successful outcomes cannot carry failed verificationStatus."
+      "Invalid single-shot persistence input: successful outcomes cannot carry failed verificationStatus.",
     );
   }
   const capturedResult = input.result != null;
   const canStampCommitEvidence = input.outcome.ok;
   const commitSha = canStampCommitEvidence ? evidence.commitSha : undefined;
-  const changedFiles = canStampCommitEvidence ? evidence.changedFiles : undefined;
+  const changedFiles = canStampCommitEvidence
+    ? evidence.changedFiles
+    : undefined;
   if (commitSha != null && !COMMIT_SHA_RE.test(commitSha)) {
     throw new Error(
-      "Invalid single-shot persistence input: commitSha must be a 40-character hex SHA."
+      "Invalid single-shot persistence input: commitSha must be a 40-character hex SHA.",
     );
   }
   if (
@@ -1005,7 +1029,7 @@ export function planSingleShotRoundPersistence(
     (commitSha == null || commitSha.trim() === "")
   ) {
     throw new Error(
-      "Invalid single-shot persistence input: changedFiles requires commitSha."
+      "Invalid single-shot persistence input: changedFiles requires commitSha.",
     );
   }
 
@@ -1024,12 +1048,12 @@ export function planSingleShotRoundPersistence(
               summary: input.result.summary,
               keyChanges: input.result.key_changes_made,
               keyLearnings: input.result.key_learnings,
-              remainingWork: input.result.remaining_work
+              remainingWork: input.result.remaining_work,
             }
           : {}),
         ...(capturedResult && input.resultDigest != null
           ? { resultDigest: input.resultDigest }
-          : {})
+          : {}),
       }
     : null;
 
@@ -1045,7 +1069,9 @@ export function planSingleShotRoundPersistence(
       ? { verificationStatus: evidence.verificationStatus }
       : {}),
     ...(commitSha !== undefined ? { commitSha } : {}),
-    ...(changedFiles != null && changedFiles.length > 0 ? { changedFiles } : {})
+    ...(changedFiles != null && changedFiles.length > 0
+      ? { changedFiles }
+      : {}),
   };
 
   return { decision, captureUpdate, terminalUpdate };
@@ -1065,7 +1091,7 @@ type SelectionLevel = {
  */
 function resolveSelectionField<T extends string | number>(
   levels: readonly SelectionLevel[],
-  pick: (config: SingleShotSelectionConfig) => T | null | undefined
+  pick: (config: SingleShotSelectionConfig) => T | null | undefined,
 ): { value: T | null; source: SingleShotSelectionSource } {
   for (const level of levels) {
     if (level.config === undefined) continue;

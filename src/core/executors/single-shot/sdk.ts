@@ -28,6 +28,7 @@ import {
   planSingleShotRoundCheckpoints,
   planSingleShotRoundPersistence,
   planSingleShotRoundStart,
+  planSingleShotRoundStartedCheckpoint,
   resolveSingleShotRoundSelection,
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
@@ -341,6 +342,12 @@ export class SingleShotExecutor implements Executor<
             hostBindings,
           })
         : context.envelope.startRound(roundStartForSdk(start));
+    const roundStartedCheckpoint = context.envelope.recordCheckpoint(
+      start.roundId,
+      withoutRoundId(
+        planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
+      ),
+    );
     context.signal.throwIfAborted();
 
     const mechanism = await this.#runRound(cloneRoundForRunner(durableStart), {
@@ -380,13 +387,6 @@ export class SingleShotExecutor implements Executor<
       capturedResult: mechanism.outcome.ok && mechanism.result != null,
       classification: plan.decision.classification,
     });
-    const roundStartedCheckpoint = checkpointPlan.find(
-      (checkpoint) => checkpoint.stage === "round_started",
-    );
-    if (roundStartedCheckpoint === undefined) {
-      throw new Error("Single-shot checkpoint plan omitted round_started.");
-    }
-    roundStartedCheckpoint.detail = dispatchBinding;
     const classificationCheckpoint = checkpointPlan.at(-1);
     if (classificationCheckpoint === undefined) {
       throw new Error(
@@ -405,10 +405,10 @@ export class SingleShotExecutor implements Executor<
       // with that observation. A restart can therefore either classify the
       // completed turn or see no completion proof; it never sees a torn pair.
       checkpoints: checkpointPlan
-        .slice(0, -1)
+        .slice(1, -1)
         .map((checkpoint) => withoutRoundId(checkpoint)),
     });
-    const checkpoints = [...progress.checkpoints];
+    const checkpoints = [roundStartedCheckpoint, ...progress.checkpoints];
 
     return {
       roundId: start.roundId,
