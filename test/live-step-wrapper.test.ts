@@ -622,6 +622,32 @@ describe("runLiveStepWrapper — command failure mapping", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "kills commands that clear their token before the process anchor exits",
+    async () => {
+      const root = makeTempDir("momentum-live-step-cleared-token-");
+      const markerPath = path.join(root, "command-survived");
+      const program = [
+        "delete process.env.MOMENTUM_PROCESS_TREE_TOKEN",
+        'process.kill(process.ppid, "SIGKILL")',
+        `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "survived"), 1_000)`,
+      ].join(";");
+
+      await expect(
+        runProcessGroup(process.execPath, ["-e", program], {
+          cwd: root,
+          env: process.env,
+          timeoutMs: 5_000,
+          maxBuffer: 1_024,
+        }),
+      ).rejects.toMatchObject({ code: "SUPERVISOR_FAILED" });
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+
+      expect(fs.existsSync(markerPath)).toBe(false);
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "persists captured output when async wrapper supervision fails",
     async () => {
       const input = setup({

@@ -1756,8 +1756,8 @@ function killOwnedPosixGroup(
   groupLeaderPid: number,
   child: ReturnType<typeof spawn>,
 ): boolean {
-  if (child.exitCode !== null || child.signalCode !== null) return false;
   let safe = signalPosixTarget(-groupLeaderPid, "SIGKILL");
+  if (child.exitCode !== null || child.signalCode !== null) return safe;
   try {
     child.kill("SIGKILL");
   } catch (error) {

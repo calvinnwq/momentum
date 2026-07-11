@@ -1709,6 +1709,38 @@ describe("single-shot concrete mechanisms", () => {
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("rejects metadata changes above excluded repo-local host artifacts", () => {
+    const { repoPath } = initRepo();
+    fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-runs/\n");
+    runGit(repoPath, ["add", ".gitignore"]);
+    runGit(repoPath, ["commit", "-m", "ignore agent runs", "--quiet"]);
+    const ignoredRoot = path.join(repoPath, ".agent-runs");
+    const artifactRoot = path.join(ignoredRoot, "round-1");
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    fs.chmodSync(ignoredRoot, 0o755);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "chmod 700 .agent-runs"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed",
+    });
+    expect(fs.statSync(ignoredRoot).mode & 0o777).toBe(0o700);
+  });
+
   it("rejects read-only one-shot success that dirties the repo", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();

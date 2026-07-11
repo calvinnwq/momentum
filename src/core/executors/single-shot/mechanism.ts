@@ -908,8 +908,8 @@ function ignoredWorktreeDigest(
     "-z",
   ]);
   if (!ignored.ok) return null;
-  const roots = collapseIgnoredRoots(
-    ignored.value
+  const roots = collapseIgnoredRoots([
+    ...ignored.value
       .split("\0")
       .filter((entry) => entry.startsWith("!! "))
       .map((entry) => entry.slice(3).replace(/\/$/, ""))
@@ -921,7 +921,8 @@ function ignoredWorktreeDigest(
               relativePath.startsWith(`${excluded}/`),
           ),
       ),
-  );
+    ...ignoredExclusionAncestors(repoRoot, exclusions),
+  ]);
   const digest = crypto.createHash("sha256");
   try {
     for (const relativePath of roots) {
@@ -935,10 +936,34 @@ function ignoredWorktreeDigest(
   return `sha256:${digest.digest("hex")}`;
 }
 
+function ignoredExclusionAncestors(
+  repoRoot: string,
+  exclusions: readonly string[],
+): string[] {
+  const ancestors = new Set<string>();
+  for (const excluded of exclusions) {
+    let slash = excluded.indexOf("/");
+    while (slash >= 0) {
+      const ancestor = excluded.slice(0, slash);
+      const ignored = readGit(repoRoot, [
+        "check-ignore",
+        "--no-index",
+        "--quiet",
+        "--",
+        ancestor,
+      ]);
+      if (ignored.ok) ancestors.add(ancestor);
+      slash = excluded.indexOf("/", slash + 1);
+    }
+  }
+  return [...ancestors];
+}
+
 function collapseIgnoredRoots(paths: readonly string[]): string[] {
   const roots: string[] = [];
   const rootSet = new Set<string>();
   for (const relativePath of [...paths].sort()) {
+    if (rootSet.has(relativePath)) continue;
     let slash = relativePath.indexOf("/");
     let nested = false;
     while (slash >= 0) {
@@ -988,19 +1013,6 @@ function digestIgnoredPath(
   const entries = stat.isDirectory()
     ? fs.readdirSync(absolutePath).sort()
     : undefined;
-  if (
-    containsExcludedDescendant &&
-    entries?.every(
-      (entry) =>
-        !ignoredPathHasIncludedContent(
-          repoRoot,
-          `${relativePath}/${entry}`,
-          exclusions,
-        ),
-    )
-  ) {
-    return true;
-  }
   digest.update(relativePath);
   digest.update("\0");
   digest.update(
@@ -1026,40 +1038,6 @@ function digestIgnoredPath(
     }
   }
   return true;
-}
-
-function ignoredPathHasIncludedContent(
-  repoRoot: string,
-  relativePath: string,
-  exclusions: readonly string[],
-): boolean {
-  if (
-    exclusions.some(
-      (excluded) =>
-        relativePath === excluded || relativePath.startsWith(`${excluded}/`),
-    )
-  ) {
-    return false;
-  }
-  const containsExcludedDescendant = exclusions.some((excluded) =>
-    excluded.startsWith(`${relativePath}/`),
-  );
-  if (!containsExcludedDescendant) return true;
-  const absolutePath = path.resolve(
-    repoRoot,
-    relativePath.split("/").join(path.sep),
-  );
-  const stat = fs.lstatSync(absolutePath);
-  if (!stat.isDirectory()) return true;
-  return fs
-    .readdirSync(absolutePath)
-    .some((entry) =>
-      ignoredPathHasIncludedContent(
-        repoRoot,
-        `${relativePath}/${entry}`,
-        exclusions,
-      ),
-    );
 }
 
 function projectFinalizeResult(input: {
