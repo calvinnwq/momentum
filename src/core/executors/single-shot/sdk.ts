@@ -9,6 +9,7 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorRoundRecord,
 } from "../loop/reducer.js";
+import { normalizeRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
 import {
   EXECUTOR_OBSERVATION_PHASES,
@@ -355,12 +356,14 @@ export class SingleShotExecutor implements Executor<
       );
     context.signal.throwIfAborted();
 
-    const mechanism = await this.#runRound(cloneRoundForRunner(durableStart), {
-      config,
-      hostBindings,
-      signal: context.signal,
-    });
-    validateSingleShotMechanismResult(this.name, mechanism);
+    const mechanism = normalizeSingleShotMechanismResult(
+      this.name,
+      await this.#runRound(cloneRoundForRunner(durableStart), {
+        config,
+        hostBindings,
+        signal: context.signal,
+      }),
+    );
 
     // Validate the complete persistence plan before appending artifacts. This
     // preserves the existing all-or-nothing guard for malformed terminal
@@ -766,10 +769,10 @@ export function singleShotSelectionFromSdkConfig(
   return resolveSingleShotRoundSelection({ stepConfig });
 }
 
-function validateSingleShotMechanismResult(
+function normalizeSingleShotMechanismResult(
   family: SingleShotExecutorFamily,
   mechanism: SingleShotRoundMechanismResult,
-): void {
+): SingleShotRoundMechanismResult {
   if (mechanism.resultDigest != null && mechanism.result == null) {
     throw new Error(
       `Invalid ${family} mechanism output: resultDigest requires a result document.`,
@@ -785,19 +788,25 @@ function validateSingleShotMechanismResult(
       "Invalid script mechanism output: script rounds must not report a result document artifact.",
     );
   }
-  if (!mechanism.outcome.ok) return;
+  if (!mechanism.outcome.ok) return mechanism;
   if (family === "one-shot") {
     if (mechanism.result == null) {
       throw new Error(
         "Invalid one-shot mechanism output: successful rounds require a result document.",
       );
     }
-    if (mechanism.result.success !== true) {
+    const normalized = normalizeRunnerResult(mechanism.result);
+    if (!normalized.ok) {
+      throw new Error(`Invalid one-shot mechanism output: ${normalized.error}`);
+    }
+    if (normalized.value.success !== true) {
       throw new Error(
         "Invalid one-shot mechanism output: successful one-shot rounds require a successful result document.",
       );
     }
+    return { ...mechanism, result: normalized.value };
   }
+  return mechanism;
 }
 
 function observationFromPersistencePlan(

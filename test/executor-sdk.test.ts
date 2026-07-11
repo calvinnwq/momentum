@@ -11,6 +11,7 @@ import {
 } from "../src/core/executors/goal-loop/executor.js";
 import {
   insertExecutorInvocation,
+  listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   loadExecutorInvocation,
   loadExecutorRound,
@@ -766,6 +767,56 @@ describe("single-shot built-in SDK proof", () => {
         detail: null,
       }),
     ).toThrow("invocation inv-one-shot is terminal");
+  });
+
+  it("rejects malformed successful runner results before persisting evidence", async () => {
+    const { db, invocation } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 30,
+    });
+    const roundId = `${invocation.invocationId}::round::0`;
+    const executor = new SingleShotExecutor("one-shot", () => ({
+      outcome: { ok: true },
+      result: { success: true } as RunnerResult,
+      resultDigest: "sha256:malformed",
+      artifacts: {
+        resultDocument: { path: "/artifacts/round-0/result.json" },
+      },
+    }));
+
+    await expect(
+      executor.tick({
+        state: envelope.snapshot(),
+        config: {},
+        hostBindings: {
+          start: {
+            roundId,
+            invocationId: invocation.invocationId,
+            workflowRunId: invocation.workflowRunId,
+            stepRunId: invocation.stepRunId,
+            stepKey: invocation.stepKey,
+            family: "one-shot",
+            attempt: invocation.attempt,
+            inputDigest: "sha256:input",
+            artifactRoot: "/artifacts/round-0",
+            logPaths: ["/artifacts/round-0/executor.log"],
+            startedAt: 10,
+          },
+        },
+        envelope: envelope.facade,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(
+      "Invalid one-shot mechanism output: Runner result `summary` must be a non-empty string.",
+    );
+
+    expect(loadExecutorRound(db, roundId)?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, roundId)).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, roundId)).toEqual([
+      expect.objectContaining({ stage: "round_started" }),
+    ]);
   });
 
   it("routes portable config, host bindings, and caller cancellation to an async runner", async () => {
