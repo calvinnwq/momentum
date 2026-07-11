@@ -49,6 +49,9 @@ classification, recovery code, and gate remain advisory; only the daemon-side
 envelope controller can apply terminal classification and state transitions.
 The controller and executor facade are different runtime objects, so an executor
 cannot recover daemon authority with a type cast.
+Before settlement, the controller validates that the classification maps to its
+required invocation state and permits the requested round state; an inconsistent
+daemon decision writes no round, invocation, or classification-checkpoint change.
 Durable observations and terminal settlement read the daemon clock after awaited
 runner work, so asynchronous rounds cannot finish before their bounded work in
 the persisted timeline.
@@ -122,7 +125,9 @@ schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
-The single-shot lifecycle validates result evidence before artifact writes: successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
+The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
+Malformed JavaScript or casted returns are rejected with only the atomically materialized invocation, running round, and dispatch-binding checkpoint left for recovery.
+Successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
 fallback receives its own bounded cleanup budget. The POSIX budget starts only

@@ -180,7 +180,11 @@ export type SingleShotRoundMechanismResult = {
   readonly evidence?: SingleShotRoundEvidence;
 };
 
-/** Narrow extension point used by the agent-once and script lifecycle class. */
+/**
+ * Narrow extension point used by the agent-once and script lifecycle class.
+ * The lifecycle runtime-normalizes the complete return before persisting any
+ * adapter-produced artifacts, observations, or completion checkpoints.
+ */
 export type SingleShotRoundRunnerContext = {
   readonly config: Readonly<SingleShotExecutorConfig>;
   readonly hostBindings: Readonly<SingleShotExecutorHostBindings>;

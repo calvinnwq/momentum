@@ -268,7 +268,11 @@ export interface Executor<Config = unknown, HostBindings = unknown> {
   ): ExecutorTickResult | Promise<ExecutorTickResult>;
 }
 
-/** Host-side decision applied after inspecting an executor recommendation. */
+/**
+ * Host-side decision applied after inspecting an executor recommendation.
+ * The durable controller rejects classification, invocation-state, and
+ * round-state combinations that violate the executor-loop classification map.
+ */
 export type ExecutorDaemonDecision = {
   readonly roundId: string;
   readonly classification: ExecutorCompletionClassification;

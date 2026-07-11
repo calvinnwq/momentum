@@ -52,6 +52,21 @@ export class ReviewSupervisor implements Executor<Config, HostBindings> {
 
 The tick may be synchronous or asynchronous. It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason. Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision. The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
+The daemon controller rejects a decision atomically unless its classification, invocation state, and round state form a supported combination:
+
+| Classification | Required invocation state | Allowed round states |
+| --- | --- | --- |
+| `complete` | `succeeded` | `succeeded` |
+| `continue` | `running` | `succeeded`, `failed` |
+| `approval_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` |
+| `operator_decision_required` | `waiting_operator` | `waiting_operator`, `succeeded`, `failed` |
+| `manual_recovery_required` | `manual_recovery_required` | `manual_recovery_required` |
+| `blocked` | `blocked` | `blocked` |
+| `failed` | `failed` | `failed` |
+| `cancelled` | `cancelled` | `cancelled` |
+
+An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
+
 The host reads its durable clock after awaited runner work when recording observations and terminal settlement; an asynchronous round cannot be stamped as finished before its bounded work completes.
 
 Cancellation is cooperative and cleanup-bearing: a runner that observes `signal` must stop and clean up before propagating the signal's reason. If a runner returns normally, completion wins even when the signal flips immediately afterward; the host does not manufacture a cancellation that the runner did not acknowledge.
@@ -151,7 +166,8 @@ An invalid or oversized host timeout returns `invalid_input` before either the s
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
-The lifecycle also validates result evidence before writing artifacts.
+The lifecycle runtime-normalizes the complete runner-adapter return before writing artifacts, result observations, or completion checkpoints.
+Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized invocation, running round, and dispatch-binding checkpoint for recovery.
 A successful `one-shot` turn requires a successful normalized `RunnerResult`; a `script` turn is exit-code based and must not return a result document or result-document artifact.
 A result digest is valid only when its result document is present.
 Successful turns pass through `capturing_result`, but only a captured document produces `result_captured`; failures do not invent a capture checkpoint.

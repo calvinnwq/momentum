@@ -40,6 +40,8 @@ Facade writes are available only while the invocation is `running`; an operator
 wait or any other non-running state revokes executor write access.
 Classification, its checkpoint, and invocation settlement commit atomically on
 the controller after a tick returns.
+The controller also rejects classification decisions whose invocation or round
+state is inconsistent with the classification before writing any settlement.
 `single-shot/sdk.ts` is the first built-in proof: the current `one-shot` and
 `script` families implement the same `Executor` interface and accept a runner
 adapter as their narrower lifecycle extension point. The built-in runner
@@ -75,7 +77,9 @@ hashed dispatch-binding checkpoint in one transaction after resolving runtime
 inputs, so reattach never inherits a new invocation without its complete binding.
 Registration/discovery and structural-preflight schema validation remain separate
 wiring.
-Before artifact writes, the lifecycle requires a successful normalized `RunnerResult` for successful `one-shot` turns and forbids result-document evidence from exit-code-based `script` turns.
+Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
+Malformed JavaScript or casted returns leave only the atomically materialized invocation, running round, and dispatch-binding checkpoint for recovery.
+Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
