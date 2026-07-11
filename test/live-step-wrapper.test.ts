@@ -766,13 +766,37 @@ describe("runLiveStepWrapper — command failure mapping", () => {
       const readyPath = path.join(root, "anchor-stopped");
       const shimDir = path.join(root, "bin");
       const shimPath = path.join(shimDir, "ps");
+      const shimCountPath = path.join(root, "ps-count");
+      const shimSnapshotPath = path.join(root, "ps-snapshot");
       const realPs = fs.existsSync("/bin/ps") ? "/bin/ps" : "/usr/bin/ps";
       fs.mkdirSync(shimDir);
       fs.writeFileSync(
         shimPath,
-        ["#!/bin/sh", "sleep 0.3", `exec ${JSON.stringify(realPs)} "$@"`].join(
-          "\n",
-        ),
+        [
+          "#!/bin/sh",
+          `count_path=${JSON.stringify(shimCountPath)}`,
+          `snapshot_path=${JSON.stringify(shimSnapshotPath)}`,
+          `real_ps=${JSON.stringify(realPs)}`,
+          'case "$*" in',
+          '  "-eo pid=,ppid=,pgid=") sleep 0.7 ;;',
+          '  "eww -axo pid=,state=,command=")',
+          '    count=$(test -f "$count_path" && cat "$count_path" || printf 0)',
+          "    count=$((count + 1))",
+          '    printf %s "$count" > "$count_path"',
+          '    if [ "$count" -eq 1 ]; then',
+          "      sleep 0.7",
+          '      "$real_ps" "$@" > "$snapshot_path"',
+          "      status=$?",
+          '      cat "$snapshot_path"',
+          "      exit $status",
+          '    elif [ "$count" -eq 2 ]; then',
+          '      cat "$snapshot_path"',
+          "      exit 0",
+          "    fi",
+          "    ;;",
+          "esac",
+          'exec "$real_ps" "$@"',
+        ].join("\n"),
       );
       fs.chmodSync(shimPath, 0o755);
       const program = [

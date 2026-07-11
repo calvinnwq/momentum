@@ -1160,7 +1160,23 @@ export function runProcessGroup(
     let closeDeadline: ReturnType<typeof setTimeout> | undefined;
     let treeTermination: Promise<boolean> | undefined;
     let anchorCleanupSucceeded = false;
+    let terminationStatus: number | null = null;
+    let terminationSignal: NodeJS.Signals | null = null;
     const processTreeToken = crypto.randomUUID();
+
+    const armCloseDeadline = (delayMs: number): void => {
+      if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+      closeDeadline = setTimeout(() => {
+        terminalError = spawnError(
+          "SUPERVISOR_FAILED",
+          "process tree did not terminate within the cleanup deadline",
+        );
+        void killTree();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(terminationStatus, terminationSignal);
+      }, delayMs);
+    };
 
     const killTree = (): Promise<boolean> => {
       if (treeTermination !== undefined) return treeTermination;
@@ -1187,6 +1203,12 @@ export function runProcessGroup(
                     processTreeToken,
                     POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
                   );
+            armCloseDeadline(
+              (process.platform === "win32"
+                ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
+                : POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS) +
+                PROCESS_TREE_CLEANUP_MARGIN_MS,
+            );
             void fallback.then(finish);
           };
           const controlEnded = (): void => {
@@ -1260,17 +1282,9 @@ export function runProcessGroup(
       signal: NodeJS.Signals | null = null,
     ): void => {
       if (closeDeadline === undefined) {
-        closeDeadline = setTimeout(
-          () => {
-            terminalError = spawnError(
-              "SUPERVISOR_FAILED",
-              "process tree did not terminate within the cleanup deadline",
-            );
-            void killTree();
-            child.stdout?.destroy();
-            child.stderr?.destroy();
-            settle(status, signal);
-          },
+        terminationStatus = status;
+        terminationSignal = signal;
+        armCloseDeadline(
           PROCESS_TREE_FALLBACK_DELAY_MS +
             (process.platform === "win32"
               ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
