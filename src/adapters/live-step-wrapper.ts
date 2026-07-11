@@ -87,6 +87,10 @@ export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
 const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
   "MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable";
 const PROCESS_TREE_TOKEN_ENV = "MOMENTUM_PROCESS_TREE_TOKEN";
+const PROCESS_TREE_FALLBACK_DELAY_MS = 3_800;
+const POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 1_000;
+const WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 3_800;
+const PROCESS_TREE_CLEANUP_MARGIN_MS = 200;
 
 /**
  * Workflow-context env vars injected into every live step process. Live
@@ -1181,7 +1185,7 @@ export function runProcessGroup(
                     groupLeaderPid,
                     child,
                     processTreeToken,
-                    1_000,
+                    POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
                   );
             void fallback.then(finish);
           };
@@ -1194,7 +1198,10 @@ export function runProcessGroup(
           } else {
             child.once("exit", controlEnded);
           }
-          const deadline = setTimeout(runFallback, 3_800);
+          const deadline = setTimeout(
+            runFallback,
+            PROCESS_TREE_FALLBACK_DELAY_MS,
+          );
           try {
             child.stdin?.write("kill\n", (error) => {
               if (error !== null && error !== undefined) runFallback();
@@ -1253,16 +1260,23 @@ export function runProcessGroup(
       signal: NodeJS.Signals | null = null,
     ): void => {
       if (closeDeadline === undefined) {
-        closeDeadline = setTimeout(() => {
-          terminalError = spawnError(
-            "SUPERVISOR_FAILED",
-            "process tree did not terminate within the cleanup deadline",
-          );
-          void killTree();
-          child.stdout?.destroy();
-          child.stderr?.destroy();
-          settle(status, signal);
-        }, 4_000);
+        closeDeadline = setTimeout(
+          () => {
+            terminalError = spawnError(
+              "SUPERVISOR_FAILED",
+              "process tree did not terminate within the cleanup deadline",
+            );
+            void killTree();
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            settle(status, signal);
+          },
+          PROCESS_TREE_FALLBACK_DELAY_MS +
+            (process.platform === "win32"
+              ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
+              : POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS) +
+            PROCESS_TREE_CLEANUP_MARGIN_MS,
+        );
       }
       const termination = killTree();
       void termination.then((terminated) => {
@@ -1752,7 +1766,7 @@ function launchWindowsTreeKiller(
       } catch {
         // The helper may already have exited.
       }
-    }, 3_800);
+    }, WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS);
     killer.once("exit", (code) => finish(code === 0));
     killer.once("error", () => finish(false));
     killer.unref();
@@ -2125,11 +2139,13 @@ process.stdin.resume();
 
 const LIVE_STEP_PROCESS_GROUP_HELPER = String.raw`
 const fs = require("node:fs");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const [requestPath, metaPath, stdoutPath, stderrPath] = process.argv.slice(1);
 const request = JSON.parse(fs.readFileSync(requestPath, "utf-8"));
 let child;
 let finished = false;
+let cleanupResult;
+let commandStartedAtMs = 0;
 const state = {
   stdoutBytes: 0,
   stderrBytes: 0,
@@ -2145,12 +2161,85 @@ function writeMeta(status, signal) {
     errorMessage: state.errorMessage
   }));
 }
-function killTree() {
-  if (!child || child.pid === undefined) return;
+function killTree(commandExited = false) {
+  if (cleanupResult !== undefined) return cleanupResult;
+  if (!child || child.pid === undefined) {
+    cleanupResult = true;
+    return cleanupResult;
+  }
   if (process.platform !== "win32") {
     try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    try { child.kill("SIGKILL"); } catch {}
+    cleanupResult = true;
+    return cleanupResult;
   }
-  try { child.kill("SIGKILL"); } catch {}
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$selfPid = $PID",
+    "$rootPid = " + process.pid,
+    "$commandPid = " + child.pid,
+    "$commandExited = $" + commandExited,
+    "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
+    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+    "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
+    "if ($null -eq $root) { exit 1 }",
+    "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+    "$identities[$commandPid] = -[long]$commandStartedAtTicks",
+    "$stablePasses = 0",
+    "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
+    "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
+    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+    "  $byPid = @{}",
+    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+    "  foreach ($knownPid in @($identities.Keys)) {",
+    "    $current = $byPid[$knownPid]",
+    "    if ($null -eq $current) { continue }",
+    "    $expected = [long]$identities[$knownPid]",
+    "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
+    "    if ($expected -lt 0) {",
+    "      if ($knownPid -eq $commandPid -and $commandExited) { exit 1 }",
+    "      if ($current.CreationTicks -lt -$expected) { exit 1 }",
+    "      $identities[$knownPid] = $current.CreationTicks",
+    "    }",
+    "  }",
+    "  $added = $false",
+    "  do {",
+    "    $passAdded = $false",
+    "    foreach ($item in $processes) {",
+    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
+    "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
+    "      if ($identities.ContainsKey($item.ProcessId)) {",
+    "        $expected = [long]$identities[$item.ProcessId]",
+    "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
+    "      } else {",
+    "        $identities[$item.ProcessId] = $item.CreationTicks",
+    "        $passAdded = $true",
+    "        $added = $true",
+    "      }",
+    "    }",
+    "  } while ($passAdded)",
+    "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
+    "  [array]::Reverse($targets)",
+    "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+    "  Start-Sleep -Milliseconds 50",
+    "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+    "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
+    "}",
+    "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
+  ].join("\n");
+  const cleanup = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    timeout: 3000,
+    stdio: "ignore"
+  });
+  cleanupResult = cleanup.status === 0 && !cleanup.error;
+  if (!cleanupResult) {
+    state.errorCode = "SUPERVISOR_FAILED";
+    state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
+    writeMeta(null, null);
+    process.exit(0);
+  }
+  return cleanupResult;
 }
 function onData(filePath, field) {
   return (chunk) => {
@@ -2166,6 +2255,7 @@ function onData(filePath, field) {
   };
 }
 try {
+  commandStartedAtMs = Date.now();
   child = spawn(request.command, request.args, {
     cwd: request.cwd,
     env: request.env,
@@ -2186,6 +2276,9 @@ child.on("error", (error) => {
     state.errorMessage = error && error.message ? error.message : String(error);
   }
 });
+child.on("exit", () => {
+  killTree(true);
+});
 const timer = setTimeout(() => {
   if (state.errorCode === undefined) {
     state.errorCode = "ETIMEDOUT";
@@ -2197,7 +2290,7 @@ child.on("close", (status, signal) => {
   if (finished) return;
   finished = true;
   clearTimeout(timer);
-  killTree();
+  killTree(true);
   writeMeta(status, signal);
 });
 `;

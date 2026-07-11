@@ -759,6 +759,85 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     10_000,
   );
 
+  it.skipIf(process.platform === "win32")(
+    "allows verified fallback cleanup to use its full cleanup budget",
+    async () => {
+      const root = makeTempDir("momentum-live-step-fallback-budget-");
+      const readyPath = path.join(root, "anchor-stopped");
+      const shimDir = path.join(root, "bin");
+      const shimPath = path.join(shimDir, "ps");
+      const realPs = fs.existsSync("/bin/ps") ? "/bin/ps" : "/usr/bin/ps";
+      fs.mkdirSync(shimDir);
+      fs.writeFileSync(
+        shimPath,
+        ["#!/bin/sh", "sleep 0.3", `exec ${JSON.stringify(realPs)} "$@"`].join(
+          "\n",
+        ),
+      );
+      fs.chmodSync(shimPath, 0o755);
+      const program = [
+        'const fs = require("node:fs")',
+        `fs.writeFileSync(${JSON.stringify(readyPath)}, "ready")`,
+        'process.kill(process.ppid, "SIGSTOP")',
+        "setTimeout(() => {}, 10_000)",
+      ].join(";");
+      const abort = new AbortController();
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${shimDir}${path.delimiter}${originalPath ?? ""}`;
+
+      try {
+        const running = runProcessGroup(process.execPath, ["-e", program], {
+          cwd: root,
+          env: process.env,
+          timeoutMs: 10_000,
+          maxBuffer: 1_024,
+          signal: abort.signal,
+        });
+        const readyDeadline = Date.now() + 3_000;
+        while (!fs.existsSync(readyPath) && Date.now() < readyDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(fs.existsSync(readyPath)).toBe(true);
+        abort.abort();
+
+        const out = await running;
+        expect((out.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+          "ABORT_ERR",
+        );
+      } finally {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+      }
+    },
+    12_000,
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "kills synchronous Windows descendants after their leader exits",
+    () => {
+      const markerPath = path.join(
+        makeTempDir("momentum-live-step-marker-"),
+        "windows-sync-descendant-survived",
+      );
+      const descendant = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "survived"), 1500)`;
+      const parent = [
+        'const { spawn } = require("node:child_process")',
+        `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore" }).unref()`,
+      ].join(";");
+
+      const out = runProcessGroupSync(process.execPath, ["-e", parent], {
+        cwd: path.dirname(markerPath),
+        env: process.env,
+        timeoutMs: 5_000,
+        maxBuffer: 1_024,
+      });
+      waitMs(2_000);
+
+      expect(out.status).toBe(0);
+      expect(fs.existsSync(markerPath)).toBe(false);
+    },
+  );
+
   it("fails closed when a detached descendant discards its ownership token", async () => {
     const root = makeTempDir("momentum-live-step-unowned-");
     const pidPath = path.join(root, "descendant.pid");
