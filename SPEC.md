@@ -120,6 +120,11 @@ envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 
+If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
+fallback receives its own bounded cleanup budget. Successful fallback cleanup
+preserves the known timeout, cancellation, or command-exit outcome; only an
+unverified fallback changes that outcome to `SUPERVISOR_FAILED`.
+
 Portable POSIX process supervision is userland containment.
 It can prove cleanup for the anchored group and sampled descendants that retain
 the ownership token, but a hostile descendant that escapes between ancestry

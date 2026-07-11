@@ -1111,6 +1111,10 @@ export function runProcessGroupSync(
  * descendant that escapes between ancestry samples and strips its ownership
  * token requires kernel-backed containment; detected escapes or any lost cleanup
  * proof reject with `SUPERVISOR_FAILED` rather than claiming success.
+ * If the anchor cannot confirm cleanup, a verified ownership-checked fallback
+ * preserves the known timeout, cancellation, or command-exit outcome. Only a
+ * fallback that cannot prove cleanup replaces that outcome with
+ * `SUPERVISOR_FAILED`.
  */
 export function runProcessGroup(
   command: string,

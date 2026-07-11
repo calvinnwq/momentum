@@ -50,6 +50,10 @@ repo-ownership proof before resetting mutations, and
 only then let the host atomically persist the cancelled classification. Missing
 ownership proof or cleanup failure preserves the durable in-flight state for
 recovery rather than claiming terminal cancellation.
+When the anchor cannot confirm cleanup, the ownership-checked POSIX or Windows
+fallback receives its own bounded cleanup budget. A verified fallback preserves
+the known timeout, cancellation, or command-exit outcome; only an unverified
+fallback changes that outcome to `SUPERVISOR_FAILED`.
 Captured stdout and stderr remain in the executor log through cancellation, and
 streaming UTF-8 decoding preserves characters split across pipe chunks.
 POSIX supervision is portable userland containment, not a sandbox: it proves
