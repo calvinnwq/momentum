@@ -355,6 +355,8 @@ function createDispatchLeaseGuard(
       } catch {
         // The caller observes loss through authorize/signal; still stop the worker.
       }
+      // Keep short-lived CLI processes alive until worker shutdown completes.
+      worker.ref();
       const exited = new Promise<void>((resolve) =>
         worker.once("exit", () => resolve()),
       );

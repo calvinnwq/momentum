@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
 import { runCli } from "../src/cli.js";
@@ -183,6 +184,7 @@ describe("executor registration and SDK dispatch", () => {
   });
 
   it("heartbeats independently while a synchronous executor blocks the event loop", async () => {
+    const workerRef = vi.spyOn(Worker.prototype, "ref");
     const registry = await fixtureRegistry();
     const definition = fixtureDefinition({
       message: "long synchronous turn completed",
@@ -233,6 +235,7 @@ describe("executor registration and SDK dispatch", () => {
         )
         .get("blocking-fixture-run"),
     ).toEqual({ state: "succeeded" });
+    expect(workerRef).toHaveBeenCalledOnce();
     db.close();
   });
 
