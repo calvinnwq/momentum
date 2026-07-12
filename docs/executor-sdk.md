@@ -40,7 +40,8 @@ At dispatch, a missing registration settles the attempt as `manual_recovery_requ
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
 After the executor is installed or repaired, `workflow run clear-recovery` prepares the same deterministic invocation for a new attempt; the next scheduler pass dispatches it without discarding the refused round.
 If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
-Failed daemon discovery is retried on a later scheduler pass, so repairing the module and clearing recovery does not require a daemon restart.
+Failed daemon discovery is retried on a later scheduler pass, so repairing the executor entry module and clearing recovery does not require a daemon restart.
+Node does not provide a safe in-process unload for an already-loaded ESM dependency graph; if the repair changes only a transitive dependency that was loaded successfully, restart the daemon before clearing recovery.
 
 When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the complete registry and validate third-party step config before any workflow-run rows are written.
 An invalid registry file or any module load/contract diagnostic refuses these commands with `executor_config_invalid`.

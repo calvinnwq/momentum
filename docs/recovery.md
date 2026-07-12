@@ -146,7 +146,9 @@ reconciliation parks the run behind its standard
 If the configured module for that identity cannot be imported or validated, the
 same refusal preserves the precise registry diagnostic in durable round evidence.
 The daemon retries failed discovery after recovery is cleared, so repairing the
-module does not require a daemon restart.
+executor entry module does not require a daemon restart. If the repair changes
+only a transitive dependency that Node already loaded successfully, restart the
+daemon before clearing recovery.
 The daemon-dispatchable `external-apply` path uses the same surface when issue scope, source evidence, deterministic intent seeding, valid payload, resolved target, credentials, policy, audit, or adapter safety checks refuse the write.
 The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
 The configured live-wrapper dispatch lane uses the same surface when the wrapper is

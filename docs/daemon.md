@@ -171,7 +171,10 @@ A configured module that cannot be loaded or validated becomes an honest
 `runtime_unavailable` refusal for that executor name without disabling unrelated
 registered executors.
 The daemon retries failed module discovery on a later scheduler pass, so an
-operator can repair the module and clear recovery without restarting the daemon.
+operator can repair the executor entry module and clear recovery without
+restarting the daemon. If the repair changes only a transitive dependency that
+Node already loaded successfully, restart the daemon before clearing recovery;
+the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are driven one bounded tick per daemon scheduler pass, and
 a `continue` recommendation leaves the invocation resumable for the next pass.
 The dispatch lease is heartbeated independently while a tick runs and every
