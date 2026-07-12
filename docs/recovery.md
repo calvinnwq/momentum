@@ -170,6 +170,8 @@ Clearing recovery after repairing an unsupported or unavailable runtime prepares
 the affected dispatched step for one scheduler retry, regardless of step kind or
 registered executor name; the retry uses a new attempt
 and round while preserving the refused round as durable evidence.
+The same explicit repair-and-retry path applies to registered SDK executors that
+settled with `executor_threw` or `executor_contract_invalid`.
 If the claimed run row has vanished, Momentum cannot write a run-scoped flag or gate without orphaning evidence, so it releases the lingering dispatch lease only.
 Stale `manual-recovery-required` workflow leases use the same surface;
 stale `auto-release` workflow leases are usually released, but a stale running

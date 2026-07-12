@@ -90,6 +90,48 @@ async function fixtureRegistry() {
   return loaded.registry;
 }
 
+function completeRegisteredExecutorTick(
+  context: ExecutorTickContext<Record<string, never>, Record<string, never>>,
+  summary: string,
+) {
+  const invocation = context.state.invocation;
+  const roundIndex = context.state.rounds.length;
+  const round = context.envelope.startRound({
+    roundId: `${invocation.invocationId}::round-${roundIndex + 1}`,
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    executorFamily: invocation.executorFamily,
+    attempt: invocation.attempt,
+    roundIndex,
+    state: "capturing_result",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary,
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: "passed",
+    commitSha: null,
+  });
+  return {
+    roundId: round.roundId,
+    recommendation: "complete" as const,
+    recommendedRoundState: "succeeded" as const,
+    recommendedInvocationState: "succeeded" as const,
+    recoveryCode: null,
+    humanGate: null,
+    reason: summary,
+  };
+}
+
 describe("executor registration and SDK dispatch", () => {
   it("loads a config-named third-party module and executes it end to end", async () => {
     const registry = await fixtureRegistry();
@@ -1804,6 +1846,7 @@ describe("executor registration and SDK dispatch", () => {
     if (!claim.ok) throw new Error(claim.reason);
     const registry = new Map();
     let tickCount = 0;
+    let repaired = false;
     expect(
       registerExecutor(registry, "fixture-executor", {
         name: "fixture-executor",
@@ -1812,23 +1855,26 @@ describe("executor registration and SDK dispatch", () => {
           properties: {},
           additionalProperties: false,
         },
-        tick: (context: {
-          state: { invocation: Record<string, unknown>; rounds: unknown[] };
-          envelope: {
-            startRound(value: Record<string, unknown>): { roundId: string };
-          };
-        }) => {
+        tick: (
+          context: ExecutorTickContext<
+            Record<string, never>,
+            Record<string, never>
+          >,
+        ) => {
+          if (repaired) {
+            return completeRegisteredExecutorTick(context, "repaired tick");
+          }
           tickCount += 1;
           if (tickCount > 1) return undefined;
           const invocation = context.state.invocation;
           const round = context.envelope.startRound({
-            roundId: `${String(invocation["invocationId"])}::round-1`,
-            invocationId: invocation["invocationId"],
-            workflowRunId: invocation["workflowRunId"],
-            stepRunId: invocation["stepRunId"],
-            stepKey: invocation["stepKey"],
-            executorFamily: invocation["executorFamily"],
-            attempt: invocation["attempt"],
+            roundId: `${invocation.invocationId}::round-1`,
+            invocationId: invocation.invocationId,
+            workflowRunId: invocation.workflowRunId,
+            stepRunId: invocation.stepRunId,
+            stepKey: invocation.stepKey,
+            executorFamily: invocation.executorFamily,
+            attempt: invocation.attempt,
             roundIndex: 0,
             state: "capturing_result",
             agentProvider: null,
@@ -1874,6 +1920,122 @@ describe("executor registration and SDK dispatch", () => {
         )
         .get("malformed-tick-run"),
     ).toEqual({ recovery_code: "executor_contract_invalid" });
+    repaired = true;
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "malformed-tick-run",
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "preflight",
+        recoveryCode: "executor_contract_invalid",
+      },
+    });
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "fixture-worker",
+      dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("malformed-tick-run"),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    db.close();
+  });
+
+  it("retries an executor_threw invocation after the executor is repaired", async () => {
+    const definition = fixtureDefinition({});
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "thrown-tick-run",
+      repoPath: "/repos/fixture",
+      objective: "Retry a repaired executor throw",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("thrown-tick-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "thrown-tick-run",
+      stepId: "preflight",
+      holder: "fixture-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+
+    let repaired = false;
+    const registry = new Map();
+    expect(
+      registerExecutor(registry, "fixture-executor", {
+        name: "fixture-executor",
+        configSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        tick: (
+          context: ExecutorTickContext<
+            Record<string, never>,
+            Record<string, never>
+          >,
+        ) => {
+          if (!repaired) throw new Error("broken executor implementation");
+          return completeRegisteredExecutorTick(context, "repaired throw");
+        },
+      }),
+    ).toBeNull();
+    const dispatch = createRegisteredExecutorWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry },
+    );
+    await dispatch(claim.claim, {
+      db,
+      workerId: "fixture-worker",
+      now: NOW + 1,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+        )
+        .get("thrown-tick-run"),
+    ).toEqual({ recovery_code: "executor_threw" });
+
+    repaired = true;
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "thrown-tick-run",
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "preflight",
+        recoveryCode: "executor_threw",
+      },
+    });
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "fixture-worker",
+      dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("thrown-tick-run"),
+    ).toEqual({ state: "succeeded", attempt: 2 });
     db.close();
   });
 

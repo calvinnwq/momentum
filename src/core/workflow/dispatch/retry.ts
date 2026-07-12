@@ -9,6 +9,8 @@ import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "unsupported_platform",
   "runtime_unavailable",
+  "executor_threw",
+  "executor_contract_invalid",
 ]);
 
 type RetryableStepState = "approved" | "running";

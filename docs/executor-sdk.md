@@ -151,6 +151,7 @@ Lease loss aborts the tick signal and prevents later writes from the former owne
 An executor throw settles the active round and invocation for `manual_recovery_required` with `executor_threw`.
 A malformed or internally inconsistent tick result uses `executor_contract_invalid` instead.
 These failures remain durable and do not escape as an unclassified scheduler result.
+After repairing the executor, guarded recovery clear prepares either outcome for a new attempt under the same deterministic invocation.
 
 The daemon controller rejects a decision atomically unless its classification, invocation state, round state, recovery code, and human gate form a supported combination:
 
