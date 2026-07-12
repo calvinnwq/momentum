@@ -8,20 +8,20 @@ import {
   buildLiveStepWrapperInput,
   createLiveWorkflowStepExecutor,
   createLiveWorkflowStepExecutorsFromProfile,
-  mapLiveStepWrapperResult
+  mapLiveStepWrapperResult,
 } from "../src/core/executors/live-step/executor.js";
 import {
   LIVE_STEP_WRAPPER_RECOVERY_CODES,
   type LiveStepWrapperError,
-  type LiveStepWrapperSuccess
+  type LiveStepWrapperSuccess,
 } from "../src/adapters/live-step-wrapper.js";
 import {
   WORKFLOW_STEP_EXECUTOR_ERROR_CODES,
-  type WorkflowStepExecutorInput
+  type WorkflowStepExecutorInput,
 } from "../src/core/workflow/step/executor.js";
 import {
   parseLiveWrapperProfile,
-  type LiveWrapperConfig
+  type LiveWrapperConfig,
 } from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
@@ -54,12 +54,12 @@ const RUNNER_RESULT: RunnerResult = {
     scope: undefined,
     subject: "do the thing",
     body: "",
-    breaking: false
-  }
+    breaking: false,
+  },
 };
 
 function makeWrapperSuccess(
-  overrides: Partial<LiveStepWrapperSuccess> = {}
+  overrides: Partial<LiveStepWrapperSuccess> = {},
 ): LiveStepWrapperSuccess {
   return {
     ok: true,
@@ -73,26 +73,26 @@ function makeWrapperSuccess(
       exitCode: 0,
       signal: null,
       durationMs: 12,
-      probed: false
+      probed: false,
     },
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeWrapperError(
-  overrides: Partial<LiveStepWrapperError> & Pick<LiveStepWrapperError, "code">
+  overrides: Partial<LiveStepWrapperError> & Pick<LiveStepWrapperError, "code">,
 ): LiveStepWrapperError {
   return {
     ok: false,
     error: `live wrapper failed: ${overrides.code}`,
     resultJsonPath: "/iter/result.json",
     executorLogPath: "/run/executor.log",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeExecutorInput(
-  overrides: Partial<WorkflowStepExecutorInput> = {}
+  overrides: Partial<WorkflowStepExecutorInput> = {},
 ): WorkflowStepExecutorInput {
   return {
     runId: "wfrun-deadbeef",
@@ -105,11 +105,13 @@ function makeExecutorInput(
       "/tmp/momentum-repo/.agent-workflows/wfrun-deadbeef/result.json",
     executorLogPath:
       "/tmp/momentum-repo/.agent-workflows/wfrun-deadbeef/executor.log",
-    ...overrides
+    ...overrides,
   };
 }
 
-function makeConfig(overrides: Partial<LiveWrapperConfig> = {}): LiveWrapperConfig {
+function makeConfig(
+  overrides: Partial<LiveWrapperConfig> = {},
+): LiveWrapperConfig {
   return {
     command: "/bin/sh",
     args: [],
@@ -118,7 +120,7 @@ function makeConfig(overrides: Partial<LiveWrapperConfig> = {}): LiveWrapperConf
     envAllow: [],
     resultFile: "result.json",
     probe: undefined,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -129,7 +131,7 @@ const VALID_RESULT_JSON = JSON.stringify({
   key_learnings: [],
   remaining_work: [],
   goal_complete: false,
-  commit: { type: "chore", subject: "do the thing", body: "", breaking: false }
+  commit: { type: "chore", subject: "do the thing", body: "", breaking: false },
 });
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
@@ -152,7 +154,7 @@ describe("mapLiveStepWrapperResult — success", () => {
     if (!out.ok) return;
     expect(out.result.artifacts).toEqual([
       { kind: "executor-log", path: "/run/executor.log" },
-      { kind: "runner-result", path: "/iter/result.json" }
+      { kind: "runner-result", path: "/iter/result.json" },
     ]);
     expect(out.diagnostics?.executor).toBe("live");
     expect(out.diagnostics?.command).toBe("/bin/sh");
@@ -166,9 +168,9 @@ describe("mapLiveStepWrapperResult — success", () => {
         result: {
           ...RUNNER_RESULT,
           success: false,
-          summary: "runner could not complete implementation"
-        }
-      })
+          summary: "runner could not complete implementation",
+        },
+      }),
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;
@@ -184,13 +186,14 @@ describe("mapLiveStepWrapperResult — failure recovery-code mapping", () => {
     live: (typeof LIVE_STEP_WRAPPER_RECOVERY_CODES)[number];
     executor: string;
   }> = [
+    { live: "unsupported_platform", executor: "unsupported_platform" },
     { live: "runtime_unavailable", executor: "runtime_unavailable" },
     { live: "auth_unavailable", executor: "runtime_unavailable" },
     { live: "command_failed", executor: "command_failed" },
     { live: "command_timed_out", executor: "command_timed_out" },
     { live: "output_overflow", executor: "command_failed" },
     { live: "result_missing", executor: "result_missing" },
-    { live: "result_invalid", executor: "result_invalid" }
+    { live: "result_invalid", executor: "result_invalid" },
   ];
 
   for (const { live, executor } of cases) {
@@ -216,9 +219,11 @@ describe("mapLiveStepWrapperResult — failure recovery-code mapping", () => {
 
   it("covers every live recovery code in the mapping table", () => {
     for (const live of LIVE_STEP_WRAPPER_RECOVERY_CODES) {
-      expect(LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE[live]).toBeDefined();
+      expect(
+        LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE[live],
+      ).toBeDefined();
       expect(WORKFLOW_STEP_EXECUTOR_ERROR_CODES).toContain(
-        LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE[live]
+        LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE[live],
       );
     }
   });
@@ -240,7 +245,7 @@ describe("buildLiveStepWrapperInput", () => {
   it("omits optional fields when the executor input does not provide them", () => {
     const wrapperInput = buildLiveStepWrapperInput(
       makeExecutorInput(),
-      makeConfig()
+      makeConfig(),
     );
     expect("promptPath" in wrapperInput).toBe(false);
     expect("env" in wrapperInput).toBe(false);
@@ -252,7 +257,7 @@ describe("buildLiveStepWrapperInput", () => {
     const wrapperInput = buildLiveStepWrapperInput(
       makeExecutorInput({ promptPath: "/iter/prompt.md", env }),
       makeConfig(),
-      { outputMaxBytes: 4096 }
+      { outputMaxBytes: 4096 },
     );
     expect(wrapperInput.promptPath).toBe("/iter/prompt.md");
     expect(wrapperInput.env).toBe(env);
@@ -264,7 +269,7 @@ describe("createLiveWorkflowStepExecutor", () => {
   it("exposes the configured kind and reports that it executes", () => {
     const executor = createLiveWorkflowStepExecutor(
       "implementation",
-      makeConfig()
+      makeConfig(),
     );
     expect(executor.kind).toBe("implementation");
     expect(executor.executes).toBe(true);
@@ -275,15 +280,15 @@ describe("createLiveWorkflowStepExecutor", () => {
     const runDir = makeTempDir("momentum-live-exec-run-");
     const executor = createLiveWorkflowStepExecutor(
       "implementation",
-      makeConfig({ args: ["-c", WRITE_VALID_RESULT] })
+      makeConfig({ args: ["-c", WRITE_VALID_RESULT] }),
     );
     const out = executor.execute(
       makeExecutorInput({
         repoPath,
         runDir,
         executorLogPath: path.join(runDir, "executor.log"),
-        resultJsonPath: path.join(runDir, "result.json")
-      })
+        resultJsonPath: path.join(runDir, "result.json"),
+      }),
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;
@@ -299,11 +304,11 @@ describe("createLiveWorkflowStepExecutor", () => {
       'test "$MOMENTUM_AGENT_PROVIDER" = codex',
       'test "$MOMENTUM_MODEL" = gpt-5.1',
       'test "$MOMENTUM_EFFORT" = high',
-      WRITE_VALID_RESULT
+      WRITE_VALID_RESULT,
     ].join(" && ");
     const executor = createLiveWorkflowStepExecutor(
       "implementation",
-      makeConfig({ args: ["-c", assertSelectionAndWriteResult] })
+      makeConfig({ args: ["-c", assertSelectionAndWriteResult] }),
     );
     const out = executor.execute(
       makeExecutorInput({
@@ -313,8 +318,8 @@ describe("createLiveWorkflowStepExecutor", () => {
         resultJsonPath: path.join(runDir, "result.json"),
         agentProvider: "codex",
         model: "gpt-5.1",
-        effort: "high"
-      })
+        effort: "high",
+      }),
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;
@@ -326,14 +331,14 @@ describe("createLiveWorkflowStepExecutor", () => {
     const runDir = makeTempDir("momentum-live-exec-run-");
     const executor = createLiveWorkflowStepExecutor(
       "implementation",
-      makeConfig({ args: ["-c", "exit 9"] })
+      makeConfig({ args: ["-c", "exit 9"] }),
     );
     const out = executor.execute(
       makeExecutorInput({
         repoPath,
         runDir,
-        executorLogPath: path.join(runDir, "executor.log")
-      })
+        executorLogPath: path.join(runDir, "executor.log"),
+      }),
     );
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -352,13 +357,15 @@ describe("createLiveWorkflowStepExecutorsFromProfile", () => {
           cwd: "iteration",
           timeout_sec: 30,
           env_allow: [],
-          result_file: "result.json"
-        }
-      }
+          result_file: "result.json",
+        },
+      },
     });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    const executors = createLiveWorkflowStepExecutorsFromProfile(parsed.profile);
+    const executors = createLiveWorkflowStepExecutorsFromProfile(
+      parsed.profile,
+    );
     expect([...executors.keys()]).toEqual(["implementation"]);
     expect(executors.get("implementation")?.executes).toBe(true);
     expect(executors.has("postflight")).toBe(false);

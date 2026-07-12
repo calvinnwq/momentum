@@ -134,7 +134,7 @@ condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
-`auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
+`unsupported_platform`, `auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
 uses this run-scoped surface when a claimed step cannot be resolved to a known
 definition step or uses an executor family the daemon cannot dispatch yet; that
 path opens a `manual_recovery_required` workflow gate instead of silently dropping
@@ -146,7 +146,7 @@ unconfigured for the claimed step kind, the step's repo/run directory cannot be
 derived, the run directory cannot be created, a repo-local run directory is not
 ignored by git, another live-wrapper dispatch owns the repo lock, the repo base
 HEAD cannot be read, a live wrapper returns a process-level failure such as
-`runtime_unavailable`, or post-wrapper finalization cannot safely parse the
+`unsupported_platform` or `runtime_unavailable`, or post-wrapper finalization cannot safely parse the
 result, verify, commit, reset, or retain dispatch-lease ownership.
 That includes `merge-cleanup` auth, target, PR readback, head mismatch, or
 unsafe-state preflight refusal before the wrapper command is spawned, and live

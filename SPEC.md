@@ -105,8 +105,9 @@ contract. The shipped agent-once and script lifecycle uses an asynchronous runne
 adapter. Its built-in process adapters run work below a separate process-group
 anchor and watchdog. The anchor's parent-liveness pipe provides crash cleanup,
 and every process inherits a cryptographically random ownership token that
-POSIX cleanup freshly verifies before signalling an individual PID. Windows
-cleanup uses the live anchor as its retained ownership root. They terminate the
+POSIX cleanup freshly verifies before signalling an individual PID. Native
+Windows process execution fails closed with `unsupported_platform` before the
+supervised command is spawned. On supported hosts, the adapters terminate the
 owned tree when the tick's cancellation
 signal aborts, the command times out, its leader exits, or the daemon disappears.
 The runner then resets
@@ -132,22 +133,18 @@ The single-shot lifecycle runtime-normalizes the complete runner-adapter return 
 Malformed JavaScript or casted returns are rejected with only the atomically materialized invocation, running round, and dispatch-binding checkpoint left for recovery.
 Successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
-If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
-fallback receives its own bounded cleanup budget. The POSIX budget starts only
+If the anchor cannot confirm termination, the ownership-checked POSIX fallback
+receives its own bounded cleanup budget. The fallback budget starts only
 after blocking ownership and escaped-descendant preflight completes. POSIX
 fallback succeeds only after two consecutive snapshots find neither a
 token-owned process nor a live member of the retained process group; an empty
 token scan alone is not cleanup proof. Once its
 anchor has exited, POSIX fallback can preserve a known outcome only if the anchor
-first reported entering cleanup; an abrupt unreported exit fails closed. Every
-Windows descendant-discovery path binds cleanup to retained anchor and command
-start/exit identities and accepts direct children of an exited command only when
-their creation times fall between the command's retained creation and exit
-times. The synchronous helper retains command status and signal for diagnostics
-when cleanup proof fails without accepting that outcome. Successful fallback
-cleanup preserves the known timeout, cancellation, or command-exit outcome; an
-unverified fallback changes that outcome to `SUPERVISOR_FAILED` without invoking
-an unverified broad `taskkill` fallback.
+first reported entering cleanup; an abrupt unreported exit fails closed. The
+synchronous helper retains command status and signal for diagnostics when
+cleanup proof fails without accepting that outcome. Successful fallback cleanup
+preserves the known timeout, cancellation, or command-exit outcome; an
+unverified fallback changes that outcome to `SUPERVISOR_FAILED`.
 
 Portable POSIX process supervision is userland containment.
 It can prove cleanup for the anchored group and sampled descendants that retain

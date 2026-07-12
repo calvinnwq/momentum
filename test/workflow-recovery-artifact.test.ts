@@ -14,12 +14,12 @@ import {
   resolveWorkflowRecoveryArtifactPath,
   workflowRecoverySafeNextSteps,
   writeWorkflowRecoveryArtifact,
-  type WorkflowRecoveryArtifactInput
+  type WorkflowRecoveryArtifactInput,
 } from "../src/core/workflow/recovery/artifact.js";
 import {
   WORKFLOW_MONITOR_RECOVERY_CODES,
   type WorkflowMonitorNextAction,
-  type WorkflowMonitorRecovery
+  type WorkflowMonitorRecovery,
 } from "../src/core/workflow/monitor/state.js";
 
 const tempRoots: string[] = [];
@@ -40,7 +40,7 @@ function makeTempDir(prefix = "momentum-workflow-recovery-"): string {
 }
 
 function makeFullInput(
-  overrides: Partial<WorkflowRecoveryArtifactInput> = {}
+  overrides: Partial<WorkflowRecoveryArtifactInput> = {},
 ): WorkflowRecoveryArtifactInput {
   return {
     runId: "run-abc",
@@ -51,16 +51,16 @@ function makeFullInput(
     recommendedNextAction: {
       code: "investigate_stale",
       detail:
-        "Running step's dispatch lease is stale and no recent checkpoint has been observed. Inspect the run directory before forcing progress."
+        "Running step's dispatch lease is stale and no recent checkpoint has been observed. Inspect the run directory before forcing progress.",
     },
     evidencePointers: [
       { label: "Run directory", ref: ".agent-workflows/run-abc/" },
-      { label: "Ledger", ref: ".agent-workflows/run-abc/ledger.jsonl" }
+      { label: "Ledger", ref: ".agent-workflows/run-abc/ledger.jsonl" },
     ],
     repoPath: "/tmp/some-repo",
     classifiedAt: 1717000000000,
     schemaVersion: 1,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -68,21 +68,21 @@ describe("resolveWorkflowRecoveryArtifactPath", () => {
   it("locates recovery.md under the run directory in the agent-workflows tree", () => {
     const base = "/tmp/data/.agent-workflows";
     expect(resolveWorkflowRecoveryArtifactPath(base, "run-abc")).toBe(
-      path.join(base, "run-abc", WORKFLOW_RECOVERY_ARTIFACT_FILENAME)
+      path.join(base, "run-abc", WORKFLOW_RECOVERY_ARTIFACT_FILENAME),
     );
   });
 
   it("rejects an empty run id", () => {
     expect(() => resolveWorkflowRecoveryArtifactPath("/tmp/x", "")).toThrow(
-      /runId is required/
+      /runId is required/,
     );
   });
 
   it("rejects run ids that are not safe path segments", () => {
     for (const runId of ["../escape", "nested/run", "nested\\run", "."]) {
-      expect(() => resolveWorkflowRecoveryArtifactPath("/tmp/x", runId)).toThrow(
-        /safe path segment/
-      );
+      expect(() =>
+        resolveWorkflowRecoveryArtifactPath("/tmp/x", runId),
+      ).toThrow(/safe path segment/);
     }
   });
 });
@@ -92,7 +92,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     const body = buildWorkflowRecoveryMarkdown(makeFullInput());
     expect(body).toContain("# Manual recovery required: workflow run run-abc");
     expect(body).toContain(
-      `- Schema version: ${WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION}`
+      `- Schema version: ${WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION}`,
     );
     expect(body).toContain("- Run ID: run-abc");
     expect(body).toContain("- Step ID: no-mistakes");
@@ -100,7 +100,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     expect(body).toContain("- Repo path: /tmp/some-repo");
     expect(body).toContain("- Classified at (epoch ms): 1717000000000");
     expect(body).toContain(
-      "Step is running but the dispatch lease is stale and no recent checkpoint has been observed."
+      "Step is running but the dispatch lease is stale and no recent checkpoint has been observed.",
     );
   });
 
@@ -109,7 +109,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     expect(body).toContain("## Recommended next action");
     expect(body).toContain("- Code: investigate_stale");
     expect(body).toContain(
-      "Inspect the run directory before forcing progress."
+      "Inspect the run directory before forcing progress.",
     );
   });
 
@@ -122,7 +122,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
 
   it("renders a placeholder when no evidence pointers are present", () => {
     const body = buildWorkflowRecoveryMarkdown(
-      makeFullInput({ evidencePointers: [] })
+      makeFullInput({ evidencePointers: [] }),
     );
     expect(body).toContain("## Evidence pointers");
     expect(body).toMatch(/## Evidence pointers\n- \(none\)/);
@@ -130,7 +130,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
 
   it("renders (none) for a null step id and (unset) for a null repo path", () => {
     const body = buildWorkflowRecoveryMarkdown(
-      makeFullInput({ stepId: null, repoPath: null })
+      makeFullInput({ stepId: null, repoPath: null }),
     );
     expect(body).toContain("- Step ID: (none)");
     expect(body).toContain("- Repo path: (unset)");
@@ -139,7 +139,7 @@ describe("buildWorkflowRecoveryMarkdown", () => {
   it("renders classification-specific safe next steps for every recovery code", () => {
     for (const code of WORKFLOW_MONITOR_RECOVERY_CODES) {
       const body = buildWorkflowRecoveryMarkdown(
-        makeFullInput({ classification: code })
+        makeFullInput({ classification: code }),
       );
       expect(body).toContain("## Safe next steps");
       const steps = workflowRecoverySafeNextSteps(code);
@@ -152,10 +152,10 @@ describe("buildWorkflowRecoveryMarkdown", () => {
 
   it("renders the evidence-backed clear command for failed external side effect steps", () => {
     const body = buildWorkflowRecoveryMarkdown(
-      makeFullInput({ classification: "failed_external_side_effect_step" })
+      makeFullInput({ classification: "failed_external_side_effect_step" }),
     );
     expect(body).toContain(
-      "momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>"
+      "momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>",
     );
   });
 
@@ -171,8 +171,8 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     const body = buildWorkflowRecoveryMarkdown(
       makeFullInput({
         safeNextSteps: ["Custom operator step."],
-        safetyNotes: ["Custom safety note."]
-      })
+        safetyNotes: ["Custom safety note."],
+      }),
     );
     expect(body).toContain("1. Custom operator step.");
     expect(body).toContain("- Custom safety note.");
@@ -190,15 +190,15 @@ describe("buildWorkflowRecoveryMarkdown", () => {
 
   it("requires a run id", () => {
     expect(() =>
-      buildWorkflowRecoveryMarkdown(makeFullInput({ runId: "" }))
+      buildWorkflowRecoveryMarkdown(makeFullInput({ runId: "" })),
     ).toThrow(/runId is required/);
   });
 
   it("requires a finite classifiedAt", () => {
     expect(() =>
       buildWorkflowRecoveryMarkdown(
-        makeFullInput({ classifiedAt: Number.NaN })
-      )
+        makeFullInput({ classifiedAt: Number.NaN }),
+      ),
     ).toThrow(/classifiedAt/);
   });
 
@@ -206,9 +206,9 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     expect(() =>
       buildWorkflowRecoveryMarkdown(
         makeFullInput({
-          classification: "not_a_real_code" as never
-        })
-      )
+          classification: "not_a_real_code" as never,
+        }),
+      ),
     ).toThrow(/classification/);
   });
 });
@@ -224,13 +224,14 @@ describe("live run-level recovery classifications (M9)", () => {
       "git_failed",
       "commit_failed",
       "invalid_input",
+      "unsupported_platform",
       "runtime_unavailable",
       "auth_unavailable",
       "command_failed",
       "command_timed_out",
       "output_overflow",
       "executor_threw",
-      "manual_recovery_required"
+      "manual_recovery_required",
     ]);
     // The full recovery.md render vocabulary is the M7 monitor codes plus the
     // M9 live run-level codes; neither set drops out.
@@ -245,7 +246,7 @@ describe("live run-level recovery classifications (M9)", () => {
   it("renders recovery.md for each live run-level code with classification-specific safe next steps", () => {
     for (const code of WORKFLOW_LIVE_RUN_RECOVERY_CODES) {
       const body = buildWorkflowRecoveryMarkdown(
-        makeFullInput({ classification: code })
+        makeFullInput({ classification: code }),
       );
       expect(body).toContain(`- Recovery classification: ${code}`);
       const steps = workflowRecoverySafeNextSteps(code);
@@ -256,11 +257,19 @@ describe("live run-level recovery classifications (M9)", () => {
     }
   });
 
+  it("orders unsupported-platform recovery clearing before re-dispatch", () => {
+    expect(workflowRecoverySafeNextSteps("unsupported_platform")).toEqual([
+      "Move the workflow to a supported Linux or macOS host.",
+      "Confirm that no process was launched and no worktree edits were made.",
+      "Clear recovery on the supported host, then re-dispatch the prepared step.",
+    ]);
+  });
+
   it("still rejects a classification outside the monitor + live taxonomy", () => {
     expect(() =>
       buildWorkflowRecoveryMarkdown(
-        makeFullInput({ classification: "totally_made_up" as never })
-      )
+        makeFullInput({ classification: "totally_made_up" as never }),
+      ),
     ).toThrow(/classification/);
   });
 });
@@ -270,13 +279,13 @@ describe("buildWorkflowRecoveryArtifactInput", () => {
     const recovery: WorkflowMonitorRecovery = {
       code: "failed_required_step",
       message: "A required step finalized in failed state.",
-      stepId: "implementation"
+      stepId: "implementation",
     };
     const nextAction: WorkflowMonitorNextAction = {
       code: "rerun_failed_step",
       stepId: "implementation",
       leaseKind: "managed-step",
-      detail: "A required step failed. Decide whether to retry the step."
+      detail: "A required step failed. Decide whether to retry the step.",
     };
     const input = buildWorkflowRecoveryArtifactInput({
       runId: "run-xyz",
@@ -284,7 +293,7 @@ describe("buildWorkflowRecoveryArtifactInput", () => {
       recovery,
       nextAction,
       evidencePointers: [{ label: "Ledger", ref: "ledger.jsonl" }],
-      classifiedAt: 1717000000111
+      classifiedAt: 1717000000111,
     });
     expect(input.runId).toBe("run-xyz");
     expect(input.stepId).toBe("implementation");
@@ -300,13 +309,13 @@ describe("buildWorkflowRecoveryArtifactInput", () => {
     const recovery: WorkflowMonitorRecovery = {
       code: "manual_recovery_lease",
       message: "An outstanding manual-recovery-required lease is blocking.",
-      stepId: "no-mistakes"
+      stepId: "no-mistakes",
     };
     const nextAction: WorkflowMonitorNextAction = {
       code: "clear_recovery",
       stepId: "no-mistakes",
       leaseKind: null,
-      detail: "Run is blocked. Clear the manual recovery once resolved."
+      detail: "Run is blocked. Clear the manual recovery once resolved.",
     };
     const input = buildWorkflowRecoveryArtifactInput({
       runId: "run-block",
@@ -314,7 +323,7 @@ describe("buildWorkflowRecoveryArtifactInput", () => {
       recovery,
       nextAction,
       evidencePointers: [],
-      classifiedAt: 1717000000222
+      classifiedAt: 1717000000222,
     });
     const body = buildWorkflowRecoveryMarkdown(input);
     expect(body).toContain("- Recovery classification: manual_recovery_lease");
@@ -330,14 +339,14 @@ describe("writeWorkflowRecoveryArtifact", () => {
     const base = makeTempDir();
     const result = writeWorkflowRecoveryArtifact({
       agentWorkflowsDir: base,
-      input: makeFullInput({ runId: "run-write" })
+      input: makeFullInput({ runId: "run-write" }),
     });
     expect(result.path).toBe(
-      path.join(base, "run-write", WORKFLOW_RECOVERY_ARTIFACT_FILENAME)
+      path.join(base, "run-write", WORKFLOW_RECOVERY_ARTIFACT_FILENAME),
     );
     const onDisk = fs.readFileSync(result.path, "utf-8");
     expect(onDisk).toContain(
-      "# Manual recovery required: workflow run run-write"
+      "# Manual recovery required: workflow run run-write",
     );
     expect(onDisk).toContain("## Safe next steps");
   });
@@ -348,20 +357,20 @@ describe("writeWorkflowRecoveryArtifact", () => {
       agentWorkflowsDir: base,
       input: makeFullInput({
         runId: "run-rewrite",
-        classification: "stale_running_step"
-      })
+        classification: "stale_running_step",
+      }),
     });
     const second = writeWorkflowRecoveryArtifact({
       agentWorkflowsDir: base,
       input: makeFullInput({
         runId: "run-rewrite",
-        classification: "failed_required_step"
-      })
+        classification: "failed_required_step",
+      }),
     });
     const onDisk = fs.readFileSync(second.path, "utf-8");
     expect(onDisk).toContain("- Recovery classification: failed_required_step");
     expect(onDisk).not.toContain(
-      "- Recovery classification: stale_running_step"
+      "- Recovery classification: stale_running_step",
     );
   });
 
@@ -377,16 +386,16 @@ describe("writeWorkflowRecoveryArtifact", () => {
 
     const result = writeWorkflowRecoveryArtifact({
       agentWorkflowsDir: base,
-      input: makeFullInput({ runId: "run-symlink" })
+      input: makeFullInput({ runId: "run-symlink" }),
     });
 
     expect(result.path).toBe(symlinkPath);
     expect(fs.readFileSync(outside, "utf8")).toBe(
-      "outside must remain unchanged"
+      "outside must remain unchanged",
     );
     expect(fs.lstatSync(symlinkPath).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(symlinkPath, "utf8")).toContain(
-      "# Manual recovery required: workflow run run-symlink"
+      "# Manual recovery required: workflow run run-symlink",
     );
   });
 });

@@ -12,20 +12,20 @@ import {
   listExecutingWorkflowStepExecutorKinds,
   listWorkflowStepExecutorKinds,
   type WorkflowStepExecutorInput,
-  type WorkflowStepExecutorKind
+  type WorkflowStepExecutorKind,
 } from "../src/core/workflow/step/executor.js";
 import { buildFakeWorkflowStepExecutorRegistry } from "./helpers/fake-workflow-step-executor.js";
 import {
   deriveWorkflowRunState,
   isTerminalStepState,
   transitionWorkflowStep,
-  type WorkflowStepRecord
+  type WorkflowStepRecord,
 } from "../src/core/workflow/run/reducer.js";
 
 function makeInput(
   overrides: Partial<WorkflowStepExecutorInput> & {
     kind: WorkflowStepExecutorKind;
-  }
+  },
 ): WorkflowStepExecutorInput {
   const { kind, ...rest } = overrides;
   return {
@@ -39,7 +39,7 @@ function makeInput(
       "/tmp/momentum-repo/.agent-workflows/cwfp-deadbeef/result.json",
     executorLogPath:
       "/tmp/momentum-repo/.agent-workflows/cwfp-deadbeef/executor.log",
-    ...rest
+    ...rest,
   };
 }
 
@@ -54,7 +54,7 @@ const FAKE_REGISTRY = buildFakeWorkflowStepExecutorRegistry();
 
 function dispatchFake(
   kind: string,
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
 ): ReturnType<typeof dispatchWorkflowStepExecutor> {
   return dispatchWorkflowStepExecutor(kind, input, FAKE_REGISTRY);
 }
@@ -62,7 +62,7 @@ function dispatchFake(
 describe("workflow-step-executor registry", () => {
   it("registers one executor per canonical step kind", () => {
     expect([...listWorkflowStepExecutorKinds()]).toEqual([
-      ...WORKFLOW_STEP_EXECUTOR_KINDS
+      ...WORKFLOW_STEP_EXECUTOR_KINDS,
     ]);
   });
 
@@ -73,7 +73,7 @@ describe("workflow-step-executor registry", () => {
       "postflight",
       "no-mistakes",
       "merge-cleanup",
-      "linear-refresh"
+      "linear-refresh",
     ] as const) {
       const adapter = getWorkflowStepExecutor(kind);
       expect(adapter, `expected executor for ${kind}`).toBeDefined();
@@ -84,7 +84,7 @@ describe("workflow-step-executor registry", () => {
 
   it("marks every built-in kind as executing through the real default adapters", () => {
     expect([...listExecutingWorkflowStepExecutorKinds()]).toEqual([
-      ...WORKFLOW_STEP_EXECUTOR_KINDS
+      ...WORKFLOW_STEP_EXECUTOR_KINDS,
     ]);
   });
 
@@ -104,26 +104,27 @@ describe("workflow-step-executor registry", () => {
         "result_missing",
         "command_failed",
         "command_timed_out",
+        "unsupported_platform",
         "runtime_unavailable",
         "dispatch_lease_unavailable",
-        "manual_recovery_required"
-      ].sort()
+        "manual_recovery_required",
+      ].sort(),
     );
     expect([...WORKFLOW_STEP_EXECUTOR_RETRY_HINTS]).toEqual([
       "retry_now",
       "retry_after_delay",
-      "do_not_retry"
+      "do_not_retry",
     ]);
     expect([...WORKFLOW_STEP_EXECUTOR_RECOVERY_HINTS]).toEqual([
       "resume",
       "skip_already_complete",
       "repair_required",
-      "manual_recovery_required"
+      "manual_recovery_required",
     ]);
     expect([...WORKFLOW_STEP_EXECUTOR_TERMINAL_STATES]).toEqual([
       "succeeded",
       "failed",
-      "skipped"
+      "skipped",
     ]);
   });
 });
@@ -172,17 +173,17 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
       config: {
         artifacts: [
           { kind: "plan", path: "plan.json", digest: "sha256:abc" },
-          { kind: "ledger", path: "ledger.jsonl" }
+          { kind: "ledger", path: "ledger.jsonl" },
         ],
-        resultDigest: "sha256:result"
-      }
+        resultDigest: "sha256:result",
+      },
     });
     const out = dispatchFake("implementation", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.artifacts).toEqual([
       { kind: "plan", path: "plan.json", digest: "sha256:abc" },
-      { kind: "ledger", path: "ledger.jsonl" }
+      { kind: "ledger", path: "ledger.jsonl" },
     ]);
     expect(out.result.resultDigest).toBe("sha256:result");
     expect(out.result).not.toHaveProperty("gnhf");
@@ -192,7 +193,7 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
   it("maps a fail_retry outcome to a failed result with retry/recovery hints", () => {
     const input = makeInput({
       kind: "no-mistakes",
-      config: { outcome: "fail_retry", errorMessage: "patch conflict" }
+      config: { outcome: "fail_retry", errorMessage: "patch conflict" },
     });
     const out = dispatchFake("no-mistakes", input);
     expect(out.ok).toBe(true);
@@ -207,7 +208,7 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
   it("maps a fail_manual_recovery outcome to a manual_recovery_required recovery hint", () => {
     const input = makeInput({
       kind: "merge-cleanup",
-      config: { outcome: "fail_manual_recovery" }
+      config: { outcome: "fail_manual_recovery" },
     });
     const out = dispatchFake("merge-cleanup", input);
     expect(out.ok).toBe(true);
@@ -221,7 +222,7 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
   it("maps a skip outcome to skipped with the skip_already_complete recovery hint", () => {
     const input = makeInput({
       kind: "postflight",
-      config: { outcome: "skip" }
+      config: { outcome: "skip" },
     });
     const out = dispatchFake("postflight", input);
     expect(out.ok).toBe(true);
@@ -234,7 +235,7 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
   it("traps a thrown executor as executor_threw and surfaces the configured paths", () => {
     const input = makeInput({
       kind: "implementation",
-      config: { outcome: "throw", errorMessage: "boom" }
+      config: { outcome: "throw", errorMessage: "boom" },
     });
     const out = dispatchFake("implementation", input);
     expect(out.ok).toBe(false);
@@ -250,8 +251,8 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
       kind: "linear-refresh",
       config: {
         outcome: "runtime_unavailable",
-        errorMessage: "linear cli not installed"
-      }
+        errorMessage: "linear cli not installed",
+      },
     });
     const out = dispatchFake("linear-refresh", input);
     expect(out.ok).toBe(false);
@@ -265,8 +266,8 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
       kind: "preflight",
       config: {
         outcome: "fail_retry",
-        errorCode: "command_timed_out"
-      }
+        errorCode: "command_timed_out",
+      },
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(true);
@@ -302,12 +303,12 @@ describe("dispatchWorkflowStepExecutor input validation (registry-agnostic bound
       "repoPath",
       "runDir",
       "executorLogPath",
-      "resultJsonPath"
+      "resultJsonPath",
     ] as const) {
       const broken = { ...base, [field]: "" } as WorkflowStepExecutorInput;
       const out = dispatchWorkflowStepExecutor("preflight", broken);
       expect(out.ok, `expected invalid_input when ${field} is empty`).toBe(
-        false
+        false,
       );
       if (out.ok) continue;
       expect(out.code).toBe("invalid_input");
@@ -329,7 +330,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects malformed config with invalid_input", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { outcome: "explode" } as unknown as Record<string, unknown>
+      config: { outcome: "explode" } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -341,7 +342,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects config as array with invalid_input", () => {
     const input = makeInput({
       kind: "preflight",
-      config: [] as unknown as Record<string, unknown>
+      config: [] as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -353,7 +354,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects non-string errorCode in config", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { errorCode: 42 } as unknown as Record<string, unknown>
+      config: { errorCode: 42 } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -367,8 +368,8 @@ describe("fake seam config validation (test-only config schema)", () => {
       kind: "preflight",
       config: {
         outcome: "fail_retry",
-        errorCode: "gnhf_prompt_rejected"
-      } as unknown as Record<string, unknown>
+        errorCode: "gnhf_prompt_rejected",
+      } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -381,7 +382,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects non-string errorMessage in config", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { errorMessage: false } as unknown as Record<string, unknown>
+      config: { errorMessage: false } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -393,7 +394,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects non-string resultDigest in config", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { resultDigest: 99 } as unknown as Record<string, unknown>
+      config: { resultDigest: 99 } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -406,8 +407,11 @@ describe("fake seam config validation (test-only config schema)", () => {
     const input = makeInput({
       kind: "preflight",
       config: {
-        artifacts: [{ kind: 5, path: "x" }] as unknown as Record<string, unknown>[]
-      }
+        artifacts: [{ kind: 5, path: "x" }] as unknown as Record<
+          string,
+          unknown
+        >[],
+      },
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -420,8 +424,13 @@ describe("fake seam config validation (test-only config schema)", () => {
     const input = makeInput({
       kind: "preflight",
       config: {
-        artifacts: [{ kind: "plan", path: "p.json", digest: 3 } as unknown as Record<string, unknown>]
-      }
+        artifacts: [
+          { kind: "plan", path: "p.json", digest: 3 } as unknown as Record<
+            string,
+            unknown
+          >,
+        ],
+      },
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -434,8 +443,8 @@ describe("fake seam config validation (test-only config schema)", () => {
     const input = makeInput({
       kind: "preflight",
       config: {
-        checkpointMessages: [1, 2] as unknown as string[]
-      }
+        checkpointMessages: [1, 2] as unknown as string[],
+      },
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -447,7 +456,7 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects non-array config.artifacts", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { artifacts: "not-array" } as unknown as Record<string, unknown>
+      config: { artifacts: "not-array" } as unknown as Record<string, unknown>,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -459,7 +468,10 @@ describe("fake seam config validation (test-only config schema)", () => {
   it("rejects non-array config.checkpointMessages", () => {
     const input = makeInput({
       kind: "preflight",
-      config: { checkpointMessages: "not-array" } as unknown as Record<string, unknown>
+      config: { checkpointMessages: "not-array" } as unknown as Record<
+        string,
+        unknown
+      >,
     });
     const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
@@ -481,7 +493,7 @@ describe("fake executors driving the workflow state machine", () => {
       { stepId: "s2", kind: "implementation", order: 2, required: true },
       { stepId: "s3", kind: "postflight", order: 3, required: true },
       { stepId: "s4", kind: "no-mistakes", order: 4, required: true },
-      { stepId: "s5", kind: "merge-cleanup", order: 5, required: true }
+      { stepId: "s5", kind: "merge-cleanup", order: 5, required: true },
     ];
 
     const steps: WorkflowStepRecord[] = plan.map((p) => ({
@@ -489,7 +501,7 @@ describe("fake executors driving the workflow state machine", () => {
       kind: p.kind,
       state: "approved",
       order: p.order,
-      required: p.required
+      required: p.required,
     }));
 
     expect(deriveWorkflowRunState(steps)).toBe("approved");
@@ -508,7 +520,7 @@ describe("fake executors driving the workflow state machine", () => {
 
       const input = makeInput({
         kind: entry.kind,
-        stepId: entry.stepId
+        stepId: entry.stepId,
       });
       const out = dispatchFake(entry.kind, input);
       expect(out.ok).toBe(true);
@@ -531,16 +543,16 @@ describe("fake executors driving the workflow state machine", () => {
         kind: "preflight",
         state: "running",
         order: 1,
-        required: true
-      }
+        required: true,
+      },
     ];
     const out = dispatchFake(
       "preflight",
       makeInput({
         kind: "preflight",
         stepId: "s1",
-        config: { outcome: "fail_retry" }
-      })
+        config: { outcome: "fail_retry" },
+      }),
     );
     expect(out.ok).toBe(true);
     if (!out.ok) return;

@@ -33,10 +33,7 @@
  * dispatcher.
  */
 
-import {
-  WORKFLOW_STEP_KINDS,
-  type WorkflowStepKind
-} from "../run/reducer.js";
+import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 
 export type WorkflowStepExecutorKind = WorkflowStepKind;
 
@@ -51,6 +48,7 @@ export type WorkflowStepExecutorErrorCode =
   | "result_missing"
   | "command_failed"
   | "command_timed_out"
+  | "unsupported_platform"
   | "runtime_unavailable"
   | "dispatch_lease_unavailable"
   | "manual_recovery_required";
@@ -64,15 +62,16 @@ export const WORKFLOW_STEP_EXECUTOR_ERROR_CODES: readonly WorkflowStepExecutorEr
     "result_missing",
     "command_failed",
     "command_timed_out",
+    "unsupported_platform",
     "runtime_unavailable",
     "dispatch_lease_unavailable",
-    "manual_recovery_required"
+    "manual_recovery_required",
   ];
 
 export const WORKFLOW_STEP_EXECUTOR_TERMINAL_STATES = [
   "succeeded",
   "failed",
-  "skipped"
+  "skipped",
 ] as const;
 
 export type WorkflowStepExecutorTerminalState =
@@ -81,7 +80,7 @@ export type WorkflowStepExecutorTerminalState =
 export const WORKFLOW_STEP_EXECUTOR_RETRY_HINTS = [
   "retry_now",
   "retry_after_delay",
-  "do_not_retry"
+  "do_not_retry",
 ] as const;
 
 export type WorkflowStepExecutorRetryHint =
@@ -97,7 +96,7 @@ export const WORKFLOW_STEP_EXECUTOR_RECOVERY_HINTS = [
   "resume",
   "skip_already_complete",
   "repair_required",
-  "manual_recovery_required"
+  "manual_recovery_required",
 ] as const;
 
 export type WorkflowStepExecutorRecoveryHint =
@@ -162,23 +161,22 @@ export type WorkflowStepExecutorError = {
 };
 
 export type WorkflowStepExecutorDispatchResult =
-  | WorkflowStepExecutorSuccess
-  | WorkflowStepExecutorError;
+  WorkflowStepExecutorSuccess | WorkflowStepExecutorError;
 
 export type WorkflowStepExecutor = {
   kind: WorkflowStepExecutorKind;
   executes: boolean;
   execute: (
-    input: WorkflowStepExecutorInput
+    input: WorkflowStepExecutorInput,
   ) => WorkflowStepExecutorDispatchResult;
 };
 
 const EXECUTOR_KIND_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_EXECUTOR_KINDS
+  WORKFLOW_STEP_EXECUTOR_KINDS,
 );
 
 export function isWorkflowStepExecutorKind(
-  value: string
+  value: string,
 ): value is WorkflowStepExecutorKind {
   return EXECUTOR_KIND_SET.has(value);
 }
@@ -204,7 +202,7 @@ export type WorkflowStepExecutorRegistry = ReadonlyMap<
  * reuses this for canonical kinds a live-wrapper profile does not configure.
  */
 export function createUnconfiguredWorkflowStepExecutor(
-  kind: WorkflowStepExecutorKind
+  kind: WorkflowStepExecutorKind,
 ): WorkflowStepExecutor {
   return {
     kind,
@@ -214,8 +212,8 @@ export function createUnconfiguredWorkflowStepExecutor(
       code: "runtime_unavailable",
       error: `No live workflow-step wrapper is configured for step kind "${kind}"; configure a live-wrapper profile to execute it.`,
       executorLogPath: input.executorLogPath,
-      resultJsonPath: input.resultJsonPath
-    })
+      resultJsonPath: input.resultJsonPath,
+    }),
   };
 }
 
@@ -227,13 +225,13 @@ export function createUnconfiguredWorkflowStepExecutor(
  */
 const DEFAULT_REGISTRY: WorkflowStepExecutorRegistry = new Map(
   WORKFLOW_STEP_EXECUTOR_KINDS.map(
-    (kind) => [kind, createUnconfiguredWorkflowStepExecutor(kind)] as const
-  )
+    (kind) => [kind, createUnconfiguredWorkflowStepExecutor(kind)] as const,
+  ),
 );
 
 export function getWorkflowStepExecutor(
   kind: string,
-  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY,
 ): WorkflowStepExecutor | undefined {
   if (!isWorkflowStepExecutorKind(kind)) return undefined;
   return registry.get(kind);
@@ -244,7 +242,7 @@ export function listWorkflowStepExecutorKinds(): readonly WorkflowStepExecutorKi
 }
 
 export function listExecutingWorkflowStepExecutorKinds(
-  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY,
 ): readonly WorkflowStepExecutorKind[] {
   return WORKFLOW_STEP_EXECUTOR_KINDS.filter((kind) => {
     const adapter = registry.get(kind);
@@ -255,7 +253,7 @@ export function listExecutingWorkflowStepExecutorKinds(
 export function dispatchWorkflowStepExecutor(
   kind: string,
   input: WorkflowStepExecutorInput,
-  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY,
 ): WorkflowStepExecutorDispatchResult {
   const invalid = validateInput(input, kind);
   if (invalid !== null) return invalid;
@@ -277,14 +275,14 @@ export function dispatchWorkflowStepExecutor(
       code: "executor_threw",
       error: `Executor "${kind}" threw: ${detail}`,
       executorLogPath: input.executorLogPath,
-      resultJsonPath: input.resultJsonPath
+      resultJsonPath: input.resultJsonPath,
     };
   }
 }
 
 function unsupportedStepError(
   kind: string,
-  registry: WorkflowStepExecutorRegistry
+  registry: WorkflowStepExecutorRegistry,
 ): WorkflowStepExecutorError {
   const executing = listExecutingWorkflowStepExecutorKinds(registry);
   return {
@@ -292,27 +290,21 @@ function unsupportedStepError(
     code: "unsupported_step",
     error: `Workflow step "${kind}" is not supported for execution; supported step kinds: ${executing.join(", ") || "<none>"}.`,
     executorLogPath: undefined,
-    resultJsonPath: undefined
+    resultJsonPath: undefined,
   };
 }
 
 function validateInput(
   input: WorkflowStepExecutorInput,
-  kind: string
+  kind: string,
 ): WorkflowStepExecutorError | null {
   if (typeof kind !== "string" || kind.length === 0) {
     return invalidInputError("kind", undefined, undefined);
   }
-  if (
-    typeof input.runId !== "string" ||
-    input.runId.trim().length === 0
-  ) {
+  if (typeof input.runId !== "string" || input.runId.trim().length === 0) {
     return invalidInputError("runId", undefined, undefined);
   }
-  if (
-    typeof input.stepId !== "string" ||
-    input.stepId.trim().length === 0
-  ) {
+  if (typeof input.stepId !== "string" || input.stepId.trim().length === 0) {
     return invalidInputError("stepId", undefined, undefined);
   }
   if (!isWorkflowStepExecutorKind(input.kind)) {
@@ -320,7 +312,7 @@ function validateInput(
       "kind",
       undefined,
       undefined,
-      `WorkflowStepExecutorInput.kind must be one of: ${WORKFLOW_STEP_EXECUTOR_KINDS.join(", ")}.`
+      `WorkflowStepExecutorInput.kind must be one of: ${WORKFLOW_STEP_EXECUTOR_KINDS.join(", ")}.`,
     );
   }
   if (input.kind !== kind) {
@@ -328,7 +320,7 @@ function validateInput(
       "kind",
       undefined,
       undefined,
-      `WorkflowStepExecutorInput.kind "${input.kind}" must match dispatch kind "${kind}".`
+      `WorkflowStepExecutorInput.kind "${input.kind}" must match dispatch kind "${kind}".`,
     );
   }
   if (
@@ -338,14 +330,14 @@ function validateInput(
     return invalidInputError(
       "repoPath",
       input.executorLogPath,
-      input.resultJsonPath
+      input.resultJsonPath,
     );
   }
   if (typeof input.runDir !== "string" || input.runDir.trim().length === 0) {
     return invalidInputError(
       "runDir",
       input.executorLogPath,
-      input.resultJsonPath
+      input.resultJsonPath,
     );
   }
   if (!Number.isInteger(input.attempt) || input.attempt < 1) {
@@ -353,7 +345,7 @@ function validateInput(
       "attempt",
       input.executorLogPath,
       input.resultJsonPath,
-      "WorkflowStepExecutorInput.attempt must be a positive integer."
+      "WorkflowStepExecutorInput.attempt must be a positive integer.",
     );
   }
   if (
@@ -366,7 +358,11 @@ function validateInput(
     typeof input.resultJsonPath !== "string" ||
     input.resultJsonPath.trim().length === 0
   ) {
-    return invalidInputError("resultJsonPath", input.executorLogPath, undefined);
+    return invalidInputError(
+      "resultJsonPath",
+      input.executorLogPath,
+      undefined,
+    );
   }
   return null;
 }
@@ -375,13 +371,13 @@ function invalidInputError(
   field: string,
   executorLogPath: string | undefined,
   resultJsonPath: string | undefined,
-  message?: string
+  message?: string,
 ): WorkflowStepExecutorError {
   return {
     ok: false,
     code: "invalid_input",
     error: message ?? `WorkflowStepExecutorInput.${field} is required.`,
     executorLogPath,
-    resultJsonPath
+    resultJsonPath,
   };
 }

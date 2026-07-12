@@ -69,6 +69,7 @@ import {
  * outcomes; a single process run only emits the codes below.
  */
 export const LIVE_STEP_WRAPPER_RECOVERY_CODES = [
+  "unsupported_platform",
   "runtime_unavailable",
   "auth_unavailable",
   "command_failed",
@@ -92,8 +93,18 @@ const PROCESS_TREE_FALLBACK_DELAY_MS = 3_800;
 const POSIX_PROCESS_QUERY_TIMEOUT_MS = 2_000;
 const POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS =
   POSIX_PROCESS_QUERY_TIMEOUT_MS + 1_000;
-const WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 3_800;
 const PROCESS_TREE_CLEANUP_MARGIN_MS = 200;
+
+export const NATIVE_WINDOWS_UNSUPPORTED_MESSAGE =
+  "native Windows process execution is unsupported; run Momentum on Linux or macOS";
+
+export function processExecutionPlatformError(
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ErrnoException | undefined {
+  return platform === "win32"
+    ? spawnError("UNSUPPORTED_PLATFORM", NATIVE_WINDOWS_UNSUPPORTED_MESSAGE)
+    : undefined;
+}
 
 /**
  * Workflow-context env vars injected into every live step process. Live
@@ -200,6 +211,21 @@ export function runLiveStepWrapper(
     writeLine(logHandle, `[live-step] run_id: ${input.runId}`);
     writeLine(logHandle, `[live-step] step_id: ${input.stepId}`);
     writeLine(logHandle, `[live-step] attempt: ${input.attempt}`);
+
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      writeLine(
+        logHandle,
+        `[live-step] unsupported_platform: ${platformError.message}`,
+      );
+      writeLine(logHandle, "[live-step] summary: platform unsupported");
+      return wrapperError(
+        executorLogPath,
+        undefined,
+        "unsupported_platform",
+        platformError.message,
+      );
+    }
 
     if (!resultJsonPathResult.ok) {
       writeLine(
@@ -378,6 +404,21 @@ export async function runLiveStepWrapperAsync(
     writeLine(logHandle, `[live-step] run_id: ${input.runId}`);
     writeLine(logHandle, `[live-step] step_id: ${input.stepId}`);
     writeLine(logHandle, `[live-step] attempt: ${input.attempt}`);
+
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      writeLine(
+        logHandle,
+        `[live-step] unsupported_platform: ${platformError.message}`,
+      );
+      writeLine(logHandle, "[live-step] summary: platform unsupported");
+      return wrapperError(
+        executorLogPath,
+        undefined,
+        "unsupported_platform",
+        platformError.message,
+      );
+    }
 
     if (!resultJsonPathResult.ok) {
       writeLine(
@@ -569,6 +610,20 @@ function finishLiveStepWrapperProcess(input: {
       resultJsonPath,
       "command_timed_out",
       `live step command timed out after ${config.timeoutSec}s: ${config.command}`,
+    );
+  }
+
+  if (errnoCode(processResult.error) === "UNSUPPORTED_PLATFORM") {
+    writeLine(
+      logHandle,
+      `[live-step] unsupported_platform: ${processResult.error?.message}`,
+    );
+    writeLine(logHandle, "[live-step] summary: platform unsupported");
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "unsupported_platform",
+      processResult.error?.message ?? NATIVE_WINDOWS_UNSUPPORTED_MESSAGE,
     );
   }
 
@@ -989,10 +1044,6 @@ export type AsyncProcessGroupOptions = ProcessGroupOptions & {
 
 type ProcessGroupMeta = {
   pid?: number;
-  commandCreationTicks?: string;
-  commandStartedAtMs?: number;
-  commandExitedAtMs?: number;
-  commandExited?: boolean;
   status: number | null;
   signal: NodeJS.Signals | null;
   errorCode?: string;
@@ -1013,6 +1064,16 @@ export function runProcessGroupSync(
   args: string[],
   options: ProcessGroupOptions,
 ): SpawnSyncReturns<string> {
+  const platformError = processExecutionPlatformError();
+  if (platformError !== undefined) {
+    return spawnReturn({
+      status: null,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      error: platformError,
+    });
+  }
   const optionsError = processGroupOptionsError(options);
   if (optionsError !== undefined) {
     return spawnReturn({
@@ -1135,17 +1196,26 @@ export function runProcessGroupSync(
  * If the anchor cannot confirm cleanup, a verified ownership-checked fallback
  * preserves the known timeout, cancellation, or command-exit outcome. POSIX
  * starts the fallback deadline after ownership preflight and, once the anchor
- * exits, requires its prior cleanup-attempt report. Every Windows cleanup path
- * retains anchor and command start/exit identities and limits direct command
- * descendants to the command's creation-to-exit interval. It never substitutes
- * an unverified broad tree kill. Any fallback that cannot prove cleanup replaces
- * the known outcome with `SUPERVISOR_FAILED`.
+ * exits, requires its prior cleanup-attempt report. Any fallback that cannot
+ * prove cleanup replaces the known outcome with `SUPERVISOR_FAILED`.
  */
 export function runProcessGroup(
   command: string,
   args: string[],
   options: AsyncProcessGroupOptions,
 ): Promise<SpawnSyncReturns<string>> {
+  const platformError = processExecutionPlatformError();
+  if (platformError !== undefined) {
+    return Promise.resolve(
+      spawnReturn({
+        status: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: platformError,
+      }),
+    );
+  }
   const optionsError = processGroupOptionsError(options);
   if (optionsError !== undefined) {
     return Promise.resolve(
@@ -1181,10 +1251,6 @@ export function runProcessGroup(
     let stderrBytes = 0;
     let terminalError: Error | undefined;
     let commandPid: number | undefined;
-    let commandCreationTicks: string | undefined;
-    let commandStartedAtMs: number | undefined;
-    let commandExitedAtMs: number | undefined;
-    let commandExited = false;
     let commandStatus: number | null | undefined;
     let commandSignal: NodeJS.Signals | null | undefined;
     let settled = false;
@@ -1228,49 +1294,20 @@ export function runProcessGroup(
           const runFallback = (): void => {
             if (fallbackStarted) return;
             fallbackStarted = true;
-            let fallback: Promise<boolean>;
-            if (process.platform === "win32") {
-              if (commandPid !== undefined) {
-                fallback =
-                  commandStartedAtMs === undefined
-                    ? Promise.resolve(false)
-                    : killWindowsProcessTree(groupLeaderPid, processTreeToken, {
-                        pid: commandPid,
-                        ...(commandCreationTicks !== undefined
-                          ? { creationTicks: commandCreationTicks }
-                          : {}),
-                        startedAtMs: commandStartedAtMs,
-                        ...(commandExitedAtMs !== undefined
-                          ? { exitedAtMs: commandExitedAtMs }
-                          : {}),
-                        exited: commandExited,
-                      });
-              } else {
-                fallback = killWindowsProcessTree(
-                  groupLeaderPid,
-                  processTreeToken,
-                );
-              }
-              armCloseDeadline(
-                WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
-                  PROCESS_TREE_CLEANUP_MARGIN_MS,
-              );
-            } else {
-              if (closeDeadline !== undefined) clearTimeout(closeDeadline);
-              closeDeadline = undefined;
-              fallback = terminateOwnedPosixTree(
-                groupLeaderPid,
-                child,
-                processTreeToken,
-                POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
-                () => anchorCleanupReported,
-                () =>
-                  armCloseDeadline(
-                    POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
-                      PROCESS_TREE_CLEANUP_MARGIN_MS,
-                  ),
-              );
-            }
+            if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+            closeDeadline = undefined;
+            const fallback = terminateOwnedPosixTree(
+              groupLeaderPid,
+              child,
+              processTreeToken,
+              POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
+              () => anchorCleanupReported,
+              () =>
+                armCloseDeadline(
+                  POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
+                    PROCESS_TREE_CLEANUP_MARGIN_MS,
+                ),
+            );
             void fallback.then(finish);
           };
           const controlEnded = (): void => {
@@ -1353,9 +1390,7 @@ export function runProcessGroup(
         terminationSignal = signal;
         armCloseDeadline(
           PROCESS_TREE_FALLBACK_DELAY_MS +
-            (process.platform === "win32"
-              ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
-              : POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS) +
+            POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
             PROCESS_TREE_CLEANUP_MARGIN_MS,
         );
       }
@@ -1406,7 +1441,7 @@ export function runProcessGroup(
         {
           cwd: options.cwd,
           env: processAnchorEnvironment(processTreeToken),
-          detached: process.platform !== "win32",
+          detached: true,
           stdio: ["pipe", "pipe", "pipe", "pipe"],
         },
       );
@@ -1481,25 +1516,6 @@ export function runProcessGroup(
             Number.isInteger(meta.pid) && (meta.pid ?? 0) > 0
               ? meta.pid
               : undefined;
-          commandCreationTicks =
-            commandPid !== undefined &&
-            typeof meta.commandCreationTicks === "string" &&
-            /^\d+$/.test(meta.commandCreationTicks)
-              ? meta.commandCreationTicks
-              : undefined;
-          commandStartedAtMs =
-            commandPid !== undefined &&
-            Number.isInteger(meta.commandStartedAtMs) &&
-            (meta.commandStartedAtMs ?? 0) > 0
-              ? meta.commandStartedAtMs
-              : undefined;
-          commandExitedAtMs =
-            commandPid !== undefined &&
-            Number.isInteger(meta.commandExitedAtMs) &&
-            (meta.commandExitedAtMs ?? 0) >= (commandStartedAtMs ?? 0)
-              ? meta.commandExitedAtMs
-              : undefined;
-          commandExited = meta.commandExited === true;
           commandStatus = meta.status;
           commandSignal = meta.signal;
         }
@@ -1822,162 +1838,6 @@ function signalPosixTarget(target: number, signal: NodeJS.Signals): boolean {
   }
 }
 
-/**
- * Discover descendants from retained ParentProcessId values, so cleanup does
- * not depend on the leader still being alive when its `exit` event fires.
- * When the command exited, direct descendants must have been created between
- * its retained creation and exit times to remain cleanup targets.
- */
-function killWindowsProcessTree(
-  rootPid: number,
-  ownershipToken: string,
-  commandIdentity?: {
-    pid: number;
-    creationTicks?: string;
-    startedAtMs: number;
-    exitedAtMs?: number;
-    exited: boolean;
-  },
-): Promise<boolean> {
-  const hasCommandIdentity =
-    commandIdentity !== undefined &&
-    Number.isInteger(commandIdentity.pid) &&
-    commandIdentity.pid > 0 &&
-    typeof commandIdentity.creationTicks === "string" &&
-    /^\d+$/.test(commandIdentity.creationTicks) &&
-    Number.isInteger(commandIdentity.startedAtMs) &&
-    commandIdentity.startedAtMs > 0 &&
-    (!commandIdentity.exited ||
-      (Number.isInteger(commandIdentity.exitedAtMs) &&
-        (commandIdentity.exitedAtMs ?? 0) >= commandIdentity.startedAtMs));
-  if (commandIdentity !== undefined && !hasCommandIdentity) {
-    return Promise.resolve(false);
-  }
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$selfPid = $PID",
-    `$rootPid = ${rootPid}`,
-    `$ownershipToken = ${JSON.stringify(ownershipToken)}`,
-    '$root = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $rootPid)',
-    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
-    ...(hasCommandIdentity
-      ? [
-          "if ($null -ne $root -and $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
-          "if ($null -ne $root) { $identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks }",
-        ]
-      : [
-          "if ($null -eq $root -or $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
-          "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
-        ]),
-    ...(hasCommandIdentity
-      ? [
-          `$commandPid = ${commandIdentity.pid}`,
-          `$commandCreationTicks = [long]${commandIdentity.creationTicks}`,
-          `$commandExited = $${commandIdentity.exited}`,
-          `$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.startedAtMs}).UtcDateTime.Ticks`,
-          "$commandExitedAtTicks = 0",
-          ...(commandIdentity.exitedAtMs !== undefined
-            ? [
-                `$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.exitedAtMs}).UtcDateTime.Ticks`,
-              ]
-            : []),
-          "$identities[$commandPid] = $commandCreationTicks",
-        ]
-      : []),
-    "$stablePasses = 0",
-    "$observedRootChild = $false",
-    "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
-    "while ($watch.ElapsedMilliseconds -lt 3500) {",
-    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
-    "  $byPid = @{}",
-    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
-    "  foreach ($knownPid in @($identities.Keys)) {",
-    "    $current = $byPid[$knownPid]",
-    ...(hasCommandIdentity && commandIdentity?.exited !== true
-      ? [
-          "    if ($knownPid -eq $commandPid -and $null -eq $current) { exit 1 }",
-        ]
-      : []),
-    "    if ($null -eq $current) { continue }",
-    "    $expected = [long]$identities[$knownPid]",
-    "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-    "  }",
-    "  $added = $false",
-    "  do {",
-    "    $passAdded = $false",
-    "    foreach ($item in $processes) {",
-    "      if ($item.ParentProcessId -eq $rootPid) { $observedRootChild = $true }",
-    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
-    ...(hasCommandIdentity && commandIdentity?.exited === true
-      ? [
-          "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
-        ]
-      : []),
-    "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
-    "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-    "      if ($identities.ContainsKey($item.ProcessId)) {",
-    "        if ([long]$identities[$item.ProcessId] -ne $item.CreationTicks) { exit 1 }",
-    "      } else {",
-    "        $identities[$item.ProcessId] = $item.CreationTicks",
-    "        $passAdded = $true",
-    "        $added = $true",
-    "      }",
-    "    }",
-    "  } while ($passAdded)",
-    "  $targets = @($identities.Keys | Where-Object { $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
-    "  [array]::Reverse($targets)",
-    "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
-    "  Start-Sleep -Milliseconds 50",
-    "  $alive = @($identities.Keys | Where-Object { $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
-    "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
-    `  if ($stablePasses -ge 2 -and ($${hasCommandIdentity} -or $observedRootChild)) { exit 0 }`,
-    "}",
-    "exit 1",
-  ].join("\n");
-  return launchWindowsTreeKiller("powershell.exe", [
-    "-NoLogo",
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    script,
-  ]);
-}
-
-function launchWindowsTreeKiller(
-  command: string,
-  args: string[],
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    let killer: ReturnType<typeof spawn>;
-    try {
-      killer = spawn(command, args, {
-        stdio: "ignore",
-        windowsHide: true,
-      });
-    } catch {
-      resolve(false);
-      return;
-    }
-    let finished = false;
-    const finish = (success: boolean): void => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(deadline);
-      resolve(success);
-    };
-    const deadline = setTimeout(() => {
-      try {
-        killer.kill("SIGKILL");
-      } catch {
-        // The helper may already have exited.
-      }
-    }, WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS);
-    killer.once("exit", (code) => finish(code === 0));
-    killer.once("error", () => finish(false));
-    killer.unref();
-  });
-}
-
 function readOptionalFile(filePath: string): string {
   try {
     return fs.readFileSync(filePath, "utf-8");
@@ -2032,71 +1892,43 @@ function attachProcessOutput(
 
 const LIVE_STEP_COMMAND_WRAPPER = String.raw`
 const fs = require("node:fs");
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const request = JSON.parse(fs.readFileSync(4, "utf-8"));
 let reported = false;
-
-function emit(meta) {
-  try { fs.writeSync(3, JSON.stringify(meta) + "\n"); } catch {}
-}
 
 function report(meta) {
   if (reported) return;
   reported = true;
-  emit({ type: "result", ...meta });
+  try { fs.writeSync(3, JSON.stringify({ type: "result", ...meta }) + "\n"); } catch {}
 }
 
-function ownCreationTicks() {
-  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + process.pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
-  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf-8",
-    timeout: 1000,
-    stdio: ["ignore", "pipe", "ignore"]
+try {
+  const target = spawn(request.command, request.args, {
+    cwd: request.cwd,
+    env: request.env,
+    detached: false,
+    stdio: ["ignore", "inherit", "inherit"]
   });
-  const value = result.stdout && result.stdout.trim();
-  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
-}
-
-const creationTicks = process.platform === "win32" ? ownCreationTicks() : undefined;
-if (process.platform === "win32" && creationTicks === undefined) {
-  report({
-    status: null,
-    signal: null,
-    errorCode: "SUPERVISOR_FAILED",
-    errorMessage: "Windows command wrapper could not retain its launch identity"
-  });
-} else {
-  if (creationTicks !== undefined) {
-    emit({ type: "identity", pid: process.pid, creationTicks });
-  }
-  try {
-    const target = spawn(request.command, request.args, {
-      cwd: request.cwd,
-      env: request.env,
-      detached: false,
-      stdio: ["ignore", "inherit", "inherit"]
-    });
-    target.once("error", (error) => {
-      report({
-        status: null,
-        signal: null,
-        errorCode: error && error.code ? error.code : "SPAWN_ERROR",
-        errorMessage: error && error.message ? error.message : String(error)
-      });
-    });
-    target.once("exit", (status, signal) => report({ status, signal }));
-  } catch (error) {
+  target.once("error", (error) => {
     report({
       status: null,
       signal: null,
       errorCode: error && error.code ? error.code : "SPAWN_ERROR",
       errorMessage: error && error.message ? error.message : String(error)
     });
-  }
+  });
+  target.once("exit", (status, signal) => report({ status, signal }));
+} catch (error) {
+  report({
+    status: null,
+    signal: null,
+    errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+    errorMessage: error && error.message ? error.message : String(error)
+  });
 }
 process.stdin.setEncoding("utf-8");
 process.stdin.on("data", (chunk) => {
-  if (process.platform !== "win32" && chunk.split("\n").includes("kill")) {
+  if (chunk.split("\n").includes("kill")) {
     try { process.kill(-process.pid, "SIGKILL"); } catch { process.exit(1); }
   }
 });
@@ -2107,7 +1939,6 @@ setInterval(() => {}, 2147483647);
 const LIVE_STEP_ASYNC_GROUP_ANCHOR = String.raw`
 const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
-const COMMAND_WRAPPER = ${JSON.stringify(LIVE_STEP_COMMAND_WRAPPER)};
 let command;
 let finished = false;
 let reported = false;
@@ -2115,10 +1946,6 @@ let input = "";
 let executionTimer;
 let fallbackTimer;
 let ancestryTracker;
-let commandStartedAtMs = 0;
-let commandExitedAtMs = 0;
-let commandCreationTicks;
-let commandLaunchFailed = false;
 let unsafeDetachedDescendant = false;
 const retainedEscapedPids = new Set();
 const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
@@ -2156,7 +1983,6 @@ function ownedPosixPids() {
 }
 
 function refreshDetachedDescendants() {
-  if (process.platform === "win32") return;
   const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid="], {
     encoding: "utf-8",
     timeout: 1000,
@@ -2226,93 +2052,6 @@ function killOwnedTree() {
   if (executionTimer) clearTimeout(executionTimer);
   if (fallbackTimer) clearTimeout(fallbackTimer);
   if (ancestryTracker) clearInterval(ancestryTracker);
-  if (process.platform === "win32") {
-    const commandPid = command && command.pid;
-    if (commandLaunchFailed && !Number.isInteger(commandPid)) {
-      if (!unsafeDetachedDescendant) {
-        emitMeta({
-          status: null,
-          signal: null,
-          cleanupOnly: true,
-          cleanupSucceeded: true
-        });
-      }
-      process.exit(unsafeDetachedDescendant ? 1 : 0);
-    }
-    const commandExited = command.exitCode !== null || command.signalCode !== null;
-    if (!Number.isInteger(commandPid) || commandPid <= 0 || !/^\d+$/.test(commandCreationTicks || "") || commandStartedAtMs <= 0 || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
-      try { command.kill("SIGKILL"); } catch {}
-      process.exit(1);
-    }
-    const script = [
-      "$ErrorActionPreference = 'Stop'",
-      "$selfPid = $PID",
-      "$rootPid = " + process.pid,
-      "$commandPid = " + commandPid,
-      "$commandCreationTicks = [long]" + commandCreationTicks,
-      "$commandExited = $" + commandExited,
-      "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
-      "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
-      "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
-      "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
-      "if ($null -eq $root) { exit 1 }",
-      "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
-      "$identities[$commandPid] = $commandCreationTicks",
-      "$stablePasses = 0",
-      "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
-      "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
-      "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
-      "  $byPid = @{}",
-      "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
-      "  foreach ($knownPid in @($identities.Keys)) {",
-      "    $current = $byPid[$knownPid]",
-      "    if ($knownPid -eq $commandPid -and -not $commandExited -and $null -eq $current) { exit 1 }",
-      "    if ($null -eq $current) { continue }",
-      "    $expected = [long]$identities[$knownPid]",
-      "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-      "  }",
-      "  $added = $false",
-      "  do {",
-      "    $passAdded = $false",
-      "    foreach ($item in $processes) {",
-      "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
-      "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
-      "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
-      "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-      "      if ($identities.ContainsKey($item.ProcessId)) {",
-      "        $expected = [long]$identities[$item.ProcessId]",
-      "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
-      "      } else {",
-      "        $identities[$item.ProcessId] = $item.CreationTicks",
-      "        $passAdded = $true",
-      "        $added = $true",
-      "      }",
-      "    }",
-      "  } while ($passAdded)",
-      "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
-      "  [array]::Reverse($targets)",
-      "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
-      "  Start-Sleep -Milliseconds 50",
-      "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
-      "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
-      "  }",
-      "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
-    ].join("\n");
-    const cleanup = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-      timeout: 3000,
-      stdio: "ignore"
-    });
-    const cleanupSucceeded = cleanup.status === 0 && !cleanup.error && !unsafeDetachedDescendant;
-    if (cleanupSucceeded) {
-      emitMeta({
-        status: null,
-        signal: null,
-        cleanupOnly: true,
-        cleanupSucceeded: true
-      });
-    }
-    process.exit(cleanupSucceeded ? 0 : 1);
-  }
   let stablePasses = 0;
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline && stablePasses < 2) {
@@ -2347,12 +2086,6 @@ function reportThenAwaitCleanup(meta) {
   refreshDetachedDescendants();
   emitMeta({
     ...meta,
-    commandStartedAtMs,
-    commandCreationTicks,
-    commandExitedAtMs: commandExitedAtMs > 0 ? commandExitedAtMs : undefined,
-    commandExited:
-      meta.commandExited === true ||
-      (command && (command.exitCode !== null || command.signalCode !== null)),
     unsafeDetachedDescendant
   });
   fallbackTimer = setTimeout(killOwnedTree, 5000);
@@ -2360,60 +2093,13 @@ function reportThenAwaitCleanup(meta) {
 
 function launch(request) {
   try {
-    commandStartedAtMs = Date.now();
-    command = process.platform === "win32"
-      ? spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
-          cwd: request.cwd,
-          env: process.env,
-          detached: false,
-          stdio: ["pipe", "inherit", "inherit", "pipe", "pipe"]
-        })
-      : spawn(request.command, request.args, {
-          cwd: request.cwd,
-          env: request.env,
-          detached: false,
-          stdio: ["ignore", "inherit", "inherit"]
-        });
-    if (process.platform === "win32") {
-      let wrapperControl = "";
-      command.stdio[3].setEncoding("utf-8");
-      command.stdio[3].on("data", (chunk) => {
-        wrapperControl += chunk;
-        let newline = wrapperControl.indexOf("\n");
-        while (newline >= 0) {
-          const line = wrapperControl.slice(0, newline);
-          wrapperControl = wrapperControl.slice(newline + 1);
-          try {
-            const meta = JSON.parse(line);
-            if (meta.type === "identity" && meta.pid === command.pid && /^\d+$/.test(meta.creationTicks || "")) {
-              commandCreationTicks = meta.creationTicks;
-            } else if (meta.type === "result") {
-              commandExitedAtMs = Date.now();
-              if (executionTimer) clearTimeout(executionTimer);
-              reportThenAwaitCleanup({
-                pid: command.pid,
-                status: meta.status ?? null,
-                signal: meta.signal ?? null,
-                errorCode: meta.errorCode,
-                errorMessage: meta.errorMessage
-              });
-            }
-          } catch (error) {
-            reportThenAwaitCleanup({
-              pid: command.pid,
-              status: null,
-              signal: null,
-              errorCode: "SUPERVISOR_FAILED",
-              errorMessage: error && error.message ? error.message : String(error)
-            });
-          }
-          newline = wrapperControl.indexOf("\n");
-        }
-      });
-      command.stdio[4].end(JSON.stringify(request));
-    }
+    command = spawn(request.command, request.args, {
+      cwd: request.cwd,
+      env: request.env,
+      detached: false,
+      stdio: ["ignore", "inherit", "inherit"]
+    });
   } catch (error) {
-    commandLaunchFailed = true;
     reportThenAwaitCleanup({
       status: null,
       signal: null,
@@ -2432,7 +2118,6 @@ function launch(request) {
     });
   }, request.timeoutMs);
   command.once("error", (error) => {
-    if (!Number.isInteger(command.pid)) commandLaunchFailed = true;
     reportThenAwaitCleanup({
       pid: command.pid,
       status: null,
@@ -2442,29 +2127,15 @@ function launch(request) {
     });
   });
   command.once("exit", (status, signal) => {
-    if (process.platform === "win32" && !reported) {
-      reportThenAwaitCleanup({
-        pid: command.pid,
-        status: null,
-        signal,
-        errorCode: "SUPERVISOR_FAILED",
-        errorMessage: "Windows command wrapper exited before reporting a result"
-      });
-      return;
-    }
-    commandExitedAtMs = Date.now();
     if (executionTimer) clearTimeout(executionTimer);
     reportThenAwaitCleanup({
       pid: command.pid,
       status,
-      signal,
-      commandExited: true
+      signal
     });
   });
-  if (process.platform !== "win32") {
-    refreshDetachedDescendants();
-    ancestryTracker = setInterval(refreshDetachedDescendants, 250);
-  }
+  refreshDetachedDescendants();
+  ancestryTracker = setInterval(refreshDetachedDescendants, 250);
 }
 
 process.stdin.setEncoding("utf-8");
@@ -2505,9 +2176,6 @@ const request = JSON.parse(fs.readFileSync(requestPath, "utf-8"));
 let child;
 let finished = false;
 let cleanupResult;
-let commandStartedAtMs = 0;
-let commandExitedAtMs = 0;
-let commandCreationTicks;
 const state = {
   stdoutBytes: 0,
   stderrBytes: 0,
@@ -2573,104 +2241,25 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     cleanupResult = true;
     return cleanupResult;
   }
-  if (process.platform !== "win32") {
-    try { child.stdin.write("kill\n"); } catch {}
-    let stablePasses = 0;
-    const deadline = Date.now() + 3000;
-    while (Date.now() < deadline && stablePasses < 2) {
-      const owned = ownedPosixPids();
-      const group = posixGroupPids(child.pid);
-      if (!owned || !group) break;
-      for (const pid of owned) {
-        try { process.kill(pid, "SIGKILL"); } catch {}
-      }
-      stablePasses = owned.length === 0 && group.length === 0 ? stablePasses + 1 : 0;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  try { child.stdin.write("kill\n"); } catch {}
+  let stablePasses = 0;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && stablePasses < 2) {
+    const owned = ownedPosixPids();
+    const group = posixGroupPids(child.pid);
+    if (!owned || !group) break;
+    for (const pid of owned) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
     }
-    try { child.kill("SIGKILL"); } catch {}
-    cleanupResult = stablePasses >= 2;
-    if (!cleanupResult) {
-      state.errorCode = "SUPERVISOR_FAILED";
-      state.errorMessage = "ownership-checked POSIX process-tree cleanup failed";
-      writeMeta(commandStatus, commandSignal);
-    }
-    return cleanupResult;
+    stablePasses = owned.length === 0 && group.length === 0 ? stablePasses + 1 : 0;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
-  if (!/^\d+$/.test(commandCreationTicks || "") || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
-    cleanupResult = false;
-    try { child.kill("SIGKILL"); } catch {}
-    state.errorCode = "SUPERVISOR_FAILED";
-    state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
-    writeMeta(commandStatus, commandSignal);
-    return cleanupResult;
-  }
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$selfPid = $PID",
-    "$rootPid = " + process.pid,
-    "$commandPid = " + child.pid,
-    "$commandCreationTicks = [long]" + commandCreationTicks,
-    "$commandExited = $" + commandExited,
-    "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
-    "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
-    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
-    "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
-    "if ($null -eq $root) { exit 1 }",
-    "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
-    "$identities[$commandPid] = $commandCreationTicks",
-    "$stablePasses = 0",
-    "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
-    "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
-    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
-    "  $byPid = @{}",
-    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
-    "  foreach ($knownPid in @($identities.Keys)) {",
-    "    $current = $byPid[$knownPid]",
-    "    if ($knownPid -eq $commandPid -and -not $commandExited -and $null -eq $current) { exit 1 }",
-    "    if ($null -eq $current) { continue }",
-    "    $expected = [long]$identities[$knownPid]",
-    "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
-    "  }",
-    "  $added = $false",
-    "  do {",
-    "    $passAdded = $false",
-    "    foreach ($item in $processes) {",
-    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
-    "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
-    "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
-    "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
-    "      if ($identities.ContainsKey($item.ProcessId)) {",
-    "        $expected = [long]$identities[$item.ProcessId]",
-    "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
-    "      } else {",
-    "        $identities[$item.ProcessId] = $item.CreationTicks",
-    "        $passAdded = $true",
-    "        $added = $true",
-    "      }",
-    "    }",
-    "  } while ($passAdded)",
-    "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
-    "  [array]::Reverse($targets)",
-    "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
-    "  Start-Sleep -Milliseconds 50",
-    "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
-    "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
-    "}",
-    "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
-  ].join("\n");
-  const cleanup = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
-    timeout: 3000,
-    stdio: "ignore"
-  });
-  cleanupResult = cleanup.status === 0 && !cleanup.error;
+  try { child.kill("SIGKILL"); } catch {}
+  cleanupResult = stablePasses >= 2;
   if (!cleanupResult) {
-    // Cleanup proof is a safety precondition for settlement, even when the
-    // command exited successfully. Retain its outcome for diagnostics without
-    // converting an unverified tree into a successful step.
     state.errorCode = "SUPERVISOR_FAILED";
-    state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
+    state.errorMessage = "ownership-checked POSIX process-tree cleanup failed";
     writeMeta(commandStatus, commandSignal);
-    process.exit(0);
   }
   return cleanupResult;
 }
@@ -2688,11 +2277,10 @@ function onData(filePath, field) {
   };
 }
 try {
-  commandStartedAtMs = Date.now();
   child = spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
     cwd: request.cwd,
-    env: process.platform === "win32" ? process.env : request.env,
-    detached: process.platform !== "win32",
+    env: request.env,
+    detached: true,
     stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"]
   });
 } catch (error) {
@@ -2714,11 +2302,8 @@ child.stderr.on("data", onData(stderrPath, "stderrBytes"));
       wrapperControl = wrapperControl.slice(newline + 1);
       try {
         const meta = JSON.parse(line);
-        if (meta.type === "identity" && meta.pid === child.pid && /^\d+$/.test(meta.creationTicks || "")) {
-          commandCreationTicks = meta.creationTicks;
-        } else if (meta.type === "result" && !finished) {
+        if (meta.type === "result" && !finished) {
           finished = true;
-          commandExitedAtMs = Date.now();
           clearTimeout(timer);
           if (meta.errorCode !== undefined && state.errorCode === undefined) {
             state.errorCode = meta.errorCode;
@@ -2747,18 +2332,6 @@ child.on("error", (error) => {
   }
 });
 child.on("exit", (status, signal) => {
-  if (process.platform === "win32") {
-    if (!finished) {
-      finished = true;
-      if (state.errorCode === undefined) {
-        state.errorCode = "SUPERVISOR_FAILED";
-        state.errorMessage = "Windows command wrapper exited before reporting a result";
-      }
-      writeMeta(null, signal);
-    }
-    return;
-  }
-  commandExitedAtMs = Date.now();
   killTree(true, status, signal);
 });
 const timer = setTimeout(() => {
@@ -2770,7 +2343,6 @@ const timer = setTimeout(() => {
 }, request.timeoutMs);
 child.on("close", (status, signal) => {
   if (finished) return;
-  if (process.platform === "win32") return;
   finished = true;
   clearTimeout(timer);
   killTree(true, status, signal);

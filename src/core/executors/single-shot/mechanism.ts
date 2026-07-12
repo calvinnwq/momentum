@@ -587,6 +587,18 @@ function classifyScriptProcess(
       readOnlySnapshot,
     );
   }
+  if (errnoCode(result.error) === "UNSUPPORTED_PLATFORM") {
+    writeLine(
+      logHandle,
+      `[single-shot-script] unsupported_platform: ${result.error?.message}`,
+    );
+    return finalizeScriptResult(
+      config,
+      false,
+      "unsupported_platform",
+      readOnlySnapshot,
+    );
+  }
   if (result.error !== undefined) {
     writeLine(
       logHandle,
