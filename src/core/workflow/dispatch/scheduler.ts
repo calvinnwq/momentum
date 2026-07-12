@@ -53,6 +53,7 @@ import {
 } from "../leases.js";
 import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
 import {
+  listExecutorDecisionsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
@@ -1220,7 +1221,22 @@ function isRegisteredSdkContinuation(
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
     rounds[0]?.roundIndex === 0 &&
-    rounds.at(-1)?.classification === "continue"
+    isResumableRegisteredSdkTick(db, invocation.state, rounds.at(-1))
+  );
+}
+
+function isResumableRegisteredSdkTick(
+  db: MomentumDb,
+  invocationState: string,
+  round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
+): boolean {
+  if (invocationState !== "running" || round === undefined) return false;
+  if (round.classification === "continue") return true;
+  return (
+    round.state === "running" &&
+    listExecutorDecisionsForRound(db, round.roundId).some(
+      (decision) => decision.chosenAction !== null,
+    )
   );
 }
 
@@ -1255,7 +1271,11 @@ function buildActiveSubworkflowClaim(
       : listExecutorRoundsForInvocation(db, invocation.invocationId);
   const resumableSdkTick =
     invocationRounds[0]?.roundIndex === 0 &&
-    invocationRounds.at(-1)?.classification === "continue";
+    isResumableRegisteredSdkTick(
+      db,
+      invocation?.state ?? "missing",
+      invocationRounds.at(-1),
+    );
   if (
     invocation === undefined ||
     (invocation.executorFamily !== "subworkflow" && !resumableSdkTick) ||

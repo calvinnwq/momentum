@@ -1,10 +1,7 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import { insertExecutorRound } from "../../executors/loop/persist.js";
 import type { ExecutorRoundRecord } from "../../executors/loop/reducer.js";
-import {
-  isWorkflowExecutorFamily,
-  type WorkflowExecutorFamily,
-} from "../definition/definition.js";
+import { isExecutorName, type ExecutorName } from "../definition/definition.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
@@ -33,7 +30,7 @@ export type RetryableDispatchedStepRecovery = {
   stepId: string;
   kind: WorkflowStepKind;
   invocationId: string;
-  executorFamily: WorkflowExecutorFamily;
+  executorFamily: ExecutorName;
   invocationState: "manual_recovery_required";
   attempt: number;
   latestRoundIndex: number;
@@ -255,7 +252,7 @@ function parseRetryableDispatchRow(
   if (row === undefined) return undefined;
   if (!isWorkflowStepKind(row.kind)) return undefined;
   if (row.invocation_state !== "manual_recovery_required") return undefined;
-  if (!isWorkflowExecutorFamily(row.executor_family)) return undefined;
+  if (!isExecutorName(row.executor_family)) return undefined;
   if (
     row.executor_family === "external-apply" ||
     row.executor_family === "subworkflow"
@@ -357,10 +354,8 @@ function isWorkflowStepKind(value: string): value is WorkflowStepKind {
 }
 
 function isRetryableDispatchRecovery(
-  kind: WorkflowStepKind,
+  _kind: WorkflowStepKind,
   recoveryCode: string,
 ): boolean {
-  if (!RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return false;
-  if (recoveryCode === "unsupported_platform") return true;
-  return kind === "no-mistakes" || kind === "merge-cleanup";
+  return RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode);
 }

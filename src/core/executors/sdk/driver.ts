@@ -257,6 +257,18 @@ function validateExecutorTickResult(
       "Executor tick recommendation, states, recovery code, and human gate are inconsistent.",
     );
   }
+  if (
+    (recommendation === "approval_required" ||
+      recommendation === "operator_decision_required") &&
+    !state.currentRound?.decisions.some(
+      (decision) =>
+        decision.chosenAction === null && decision.allowedActions.length > 0,
+    )
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor gate recommendations require an unresolved durable decision with allowed actions.",
+    );
+  }
   return value as ExecutorTickResult;
 }
 

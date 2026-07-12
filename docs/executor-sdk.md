@@ -36,8 +36,9 @@ preflight and daemon dispatch resolve the same implementation.
 
 Executor names are permanent durable identities.
 Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them.
-At dispatch, a missing registration settles the attempt as `blocked` with `runtime_unavailable` and an `external_state_required` executor recommendation.
+At dispatch, a missing registration settles the attempt as `manual_recovery_required` with `runtime_unavailable`.
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
+After the executor is installed or repaired, `workflow run clear-recovery` prepares the same deterministic invocation for a new attempt; the next scheduler pass dispatches it without discarding the refused round.
 If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
 
 When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the complete registry and validate third-party step config before any workflow-run rows are written.
@@ -164,6 +165,9 @@ The daemon controller rejects a decision atomically unless its classification, i
 | `cancelled` | `cancelled` | `cancelled` | `null` | `null` |
 
 An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
+An `approval_required` or `operator_decision_required` recommendation must also name a current round with an unresolved durable executor decision and a non-empty allowed-action set.
+The dispatcher mirrors that decision into a round-scoped workflow gate, releases its dispatch lease, and leaves the invocation paused at `waiting_operator`.
+Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the same round and invocation, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.
 
 The durable envelope, not executor input, stamps round start and heartbeat timestamps from its own clock.
 The host reads that clock again after awaited runner work when recording observations and terminal settlement, so an asynchronous round cannot be stamped as finished before its bounded work completes.

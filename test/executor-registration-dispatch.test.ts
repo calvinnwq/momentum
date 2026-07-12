@@ -32,6 +32,8 @@ import {
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { preflightWorkflowExecutorConfigs } from "../src/core/workflow/preflight/structural.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
+import type { ExecutorTickContext } from "../src/core/executors/sdk/types.js";
 
 const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
@@ -1401,12 +1403,259 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
         )
         .get("unregistered-run"),
-    ).toEqual({ recovery_code: "runtime_unavailable" });
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "runtime_unavailable",
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("unregistered-run"),
+    ).toEqual({ state: "manual_recovery_required" });
+
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "unregistered-run",
+        now: NOW + 2,
+      }),
+    ).toMatchObject({ ok: true });
+
+    const registry = await fixtureRegistry();
+    const repairedDispatch = createRegisteredExecutorWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry },
+    );
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "fixture-worker",
+      dispatch: repairedDispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("unregistered-run"),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get("unregistered-run", "preflight"),
+    ).toEqual({ state: "succeeded" });
     db.close();
   });
+
+  it.each([
+    {
+      classification: "approval_required" as const,
+      action: "approve",
+    },
+    {
+      classification: "operator_decision_required" as const,
+      action: "apply",
+    },
+  ])(
+    "persists and resumes a registered executor $classification gate",
+    async ({ classification, action }) => {
+      const dataDir = tempDir();
+      const runId = `registered-gate-${classification}`;
+      const definition = fixtureDefinition({});
+      let db = openDb(dataDir);
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath: "/repos/fixture",
+        objective: "Resume a durable executor decision",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run(runId);
+
+      const registry = new Map();
+      expect(
+        registerExecutor(registry, "fixture-executor", {
+          name: "fixture-executor",
+          configSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          tick: (
+            context: ExecutorTickContext<
+              Record<string, never>,
+              Record<string, never>
+            >,
+          ) => {
+            const current = context.state.currentRound;
+            const chosen = current?.decisions.find(
+              (decision) => decision.chosenAction !== null,
+            );
+            if (current !== null && chosen !== undefined) {
+              context.envelope.observeRound(current.round.roundId, {
+                phase: "capturing_result",
+                summary: `accepted ${chosen.chosenAction}`,
+              });
+              return {
+                roundId: current.round.roundId,
+                recommendation: "complete",
+                recommendedRoundState: "succeeded",
+                recommendedInvocationState: "succeeded",
+                recoveryCode: null,
+                humanGate: null,
+                reason: "The durable operator decision was applied.",
+              };
+            }
+
+            const invocation = context.state.invocation;
+            const round = context.envelope.startRound({
+              roundId: `${invocation.invocationId}::round-1`,
+              invocationId: invocation.invocationId,
+              workflowRunId: invocation.workflowRunId,
+              stepRunId: invocation.stepRunId,
+              stepKey: invocation.stepKey,
+              executorFamily: invocation.executorFamily,
+              attempt: invocation.attempt,
+              roundIndex: context.state.rounds.length,
+              state: "mirroring_external_state",
+              agentProvider: null,
+              model: null,
+              effort: null,
+              inputDigest: null,
+              resultDigest: null,
+              artifactRoot: null,
+              logPaths: [],
+              summary: "Waiting for a durable operator decision",
+              keyChanges: [],
+              keyLearnings: [],
+              remainingWork: [],
+              changedFiles: [],
+              verificationStatus: null,
+              commitSha: null,
+            });
+            context.envelope.recordDecision(round.roundId, {
+              decisionId: `${round.roundId}::decision-1`,
+              summary: "Choose how the executor should continue",
+              allowedActions: [action, "cancel"],
+              recommendedAction: action,
+              chosenAction: null,
+              resolution: null,
+              externalRef: null,
+            });
+            return {
+              roundId: round.roundId,
+              recommendation: classification,
+              recommendedRoundState: "waiting_operator",
+              recommendedInvocationState: "waiting_operator",
+              recoveryCode: null,
+              humanGate: classification,
+              reason: "The executor needs an operator decision.",
+            };
+          },
+        }),
+      ).toBeNull();
+      const dispatch = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        { registry },
+      );
+      const claim = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "preflight",
+        holder: "fixture-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+      await dispatch(claim.claim, {
+        db,
+        workerId: "fixture-worker",
+        now: NOW + 1,
+      });
+
+      const gate = db
+        .prepare(
+          "SELECT gate_id, gate_type, reason, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+        )
+        .get(runId) as
+        | {
+            gate_id: string;
+            gate_type: string;
+            reason: string;
+            resolved_at: number | null;
+          }
+        | undefined;
+      expect(gate?.reason).toBe("Choose how the executor should continue");
+      expect(gate).toMatchObject({
+        gate_type: classification,
+        resolved_at: null,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT released_at IS NOT NULL AS released FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
+          )
+          .get(runId),
+      ).toEqual({ released: 1 });
+      db.close();
+
+      let stdout = "";
+      let stderr = "";
+      const exitCode = await runCli(
+        [
+          "workflow",
+          "run",
+          "decide",
+          gate?.gate_id ?? "missing-gate",
+          "--action",
+          action,
+          "--actor",
+          "fixture-operator",
+          "--data-dir",
+          dataDir,
+          "--json",
+        ],
+        {
+          stdout: { write: (chunk) => ((stdout += chunk), true) },
+          stderr: { write: (chunk) => ((stderr += chunk), true) },
+          env: {},
+        },
+      );
+      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+      expect(JSON.parse(stdout)).toMatchObject({ chosenAction: action });
+
+      db = openDb(dataDir);
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "restarted-worker",
+        dispatch,
+        now: () => NOW + 3,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, "preflight"),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        db
+          .prepare(
+            "SELECT chosen_action FROM executor_decisions WHERE round_id = (SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1)",
+          )
+          .get(runId),
+      ).toEqual({ chosen_action: action });
+      db.close();
+    },
+  );
 
   it("settles malformed tick results as executor_contract_invalid", async () => {
     const definition = fixtureDefinition({});

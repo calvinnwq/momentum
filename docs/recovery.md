@@ -139,9 +139,9 @@ The workflow scheduler dispatcher also uses this run-scoped surface when a
 claimed step cannot be resolved to a known definition step or carries an invalid
 executor identity; that path opens a `manual_recovery_required` workflow gate
 instead of silently dropping the claim.
-A valid but unregistered executor identity instead records a blocked invocation
-and round with `runtime_unavailable` plus an `external_state_required` executor
-recommendation, then workflow reconciliation parks the run behind its standard
+A valid but unregistered executor identity instead records an invocation and
+round at `manual_recovery_required` with `runtime_unavailable`, then workflow
+reconciliation parks the run behind its standard
 `manual_recovery_required` step gate.
 If the configured module for that identity cannot be imported or validated, the
 same refusal preserves the precise registry diagnostic in durable round evidence.
@@ -164,8 +164,9 @@ evidence when it is available.
 For `unsupported_platform`, move the workflow to Linux or macOS and confirm from
 the executor log and worktree that no supervised process ran and no edits were
 made.
-Clearing recovery on the supported host prepares the affected dispatched step
-for one scheduler retry, regardless of step kind; the retry uses a new attempt
+Clearing recovery after repairing an unsupported or unavailable runtime prepares
+the affected dispatched step for one scheduler retry, regardless of step kind or
+registered executor name; the retry uses a new attempt
 and round while preserving the refused round as durable evidence.
 If the claimed run row has vanished, Momentum cannot write a run-scoped flag or gate without orphaning evidence, so it releases the lingering dispatch lease only.
 Stale `manual-recovery-required` workflow leases use the same surface;

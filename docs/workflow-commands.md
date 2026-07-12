@@ -940,7 +940,7 @@ Behaviour:
   A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, `unsupported_platform`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - An `unsupported_platform` refusal is retryable for any dispatched step after the workflow moves to Linux or macOS; clearing recovery on the supported host prepares the same step for one safe scheduler retry.
-- Other retryable live-wrapper setup failures are limited to dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path, missing no-mistakes branch-start state, current no-mistakes cancellation evidence before clean runner evidence exists, or a `merge-cleanup` auth, target, PR readback, expected-head, cleanup-branch, or mergeability refusal reported as `runtime_unavailable` before clean runner evidence exists).
+- A `runtime_unavailable` refusal is retryable for any dispatched step after its registered executor, wrapper, credentials, or other runtime dependency is repaired. This includes stale wrapper/build paths, missing no-mistakes branch-start state, current no-mistakes cancellation evidence before clean runner evidence exists, and merge-cleanup auth, target, PR readback, expected-head, cleanup-branch, or mergeability refusals reported before clean runner evidence exists.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
@@ -1030,6 +1030,7 @@ Optional arguments:
 - `--json` — emit structured JSON; success writes to stdout, while structured refusals and usage errors write JSON to stderr.
 
 The resolution is race-safe: the update is guarded by `resolved_at IS NULL`, so a concurrent resolve that closed the gate between load and write is refused as `gate_already_resolved` rather than overwriting the prior decision.
+For a round-scoped registered-executor gate, the same transaction records the chosen action on the executor decision and reopens the paused round and invocation. The next scheduler pass can then reacquire dispatch and resume from that durable decision.
 
 ### JSON envelope
 

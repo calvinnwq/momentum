@@ -68,6 +68,7 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../../core/workflow/dispatch/execute.js";
 import { resolveClaimedWorkflowStepFamily } from "../../core/workflow/dispatch/persist.js";
+import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchDeps,
@@ -147,7 +148,6 @@ import {
 import {
   WorkflowGateDecisionError,
   WorkflowGateNotFoundError,
-  resolveWorkflowGate,
 } from "../../core/workflow/gate/persist.js";
 import {
   InvalidWorkflowEventCursorError,
@@ -1644,7 +1644,7 @@ function isGateDecisionMode(value: string): value is GateDecisionMode {
  * `momentum workflow run decide` — the durable operator decision surface for a
  * workflow / step / executor human gate. It resolves a single
  * persisted gate by routing the requested action through the same pure
- * {@link resolveWorkflowGate} brain the daemon uses: an operator may pick any
+ * durable gate-decision brain the daemon uses: an operator may pick any
  * allowed action, while `--mode delegated` may only auto-apply an action inside
  * the gate's policy envelope and otherwise pauses for an operator. The brain's
  * refusal codes (action not allowed, out-of-envelope delegated action, already
@@ -1724,7 +1724,11 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   try {
-    const resolved = resolveWorkflowGate(db, gateId, request);
+    const resolved = resolveWorkflowGateAndResumeRegisteredExecutor(
+      db,
+      gateId,
+      request,
+    );
     return emitWorkflowRunDecideSuccess(parsed, io, dataDir, resolved);
   } catch (error) {
     if (error instanceof WorkflowGateNotFoundError) {

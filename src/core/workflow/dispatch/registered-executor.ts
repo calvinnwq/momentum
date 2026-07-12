@@ -20,6 +20,7 @@ import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
+import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import {
   resolveClaimedWorkflowStepFamily,
   resolveWorkflowStepExecutorRuntime,
@@ -217,6 +218,13 @@ export function createRegisteredExecutorWorkflowDispatch(
           holder: claim.lease.holder,
           acquiredAt: claim.lease.acquiredAt,
         },
+        now: logicalNow(),
+      });
+    } else if (after?.state === "waiting_operator") {
+      parkRegisteredExecutorAtHumanGate({
+        db: context.db,
+        claim,
+        invocationId,
         now: logicalNow(),
       });
     }
@@ -482,11 +490,11 @@ function runtimeUnavailableTick(
   context.envelope.observeRound(round.roundId, { summary: reason });
   return {
     roundId: round.roundId,
-    recommendation: "blocked",
-    recommendedRoundState: "blocked",
-    recommendedInvocationState: "blocked",
+    recommendation: "manual_recovery_required",
+    recommendedRoundState: "manual_recovery_required",
+    recommendedInvocationState: "manual_recovery_required",
     recoveryCode: "runtime_unavailable",
-    humanGate: "external_state_required",
+    humanGate: "manual_recovery_required",
     reason,
   };
 }
