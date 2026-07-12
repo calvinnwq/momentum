@@ -229,6 +229,9 @@ describe("single-shot concrete mechanisms", () => {
       });
       expect(gitSpawned).toBe(false);
       expect(fs.existsSync(marker)).toBe(false);
+      expect(
+        fs.readFileSync(path.join(artifactRoot, "executor.log"), "utf8"),
+      ).toContain("[single-shot-one-shot] unsupported_platform:");
     },
   );
 
@@ -276,6 +279,9 @@ describe("single-shot concrete mechanisms", () => {
       });
       expect(gitSpawned).toBe(false);
       expect(fs.existsSync(marker)).toBe(false);
+      expect(
+        fs.readFileSync(path.join(artifactRoot, "script.log"), "utf8"),
+      ).toContain("[single-shot-script] unsupported_platform:");
     },
   );
 

@@ -186,8 +186,13 @@ export function createOneShotLiveWrapperRoundRunner(
         "one-shot live wrapper rounds require an absolute log path",
       );
     }
-    if (processExecutionPlatformError() !== undefined) {
-      return readOnlyRecovery("unsupported_platform");
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      return unsupportedPlatformRecovery(
+        logPath,
+        "one-shot",
+        platformError.message,
+      );
     }
     if (options.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
@@ -410,8 +415,13 @@ export function createScriptCommandRoundRunner(
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
     }
-    if (processExecutionPlatformError() !== undefined) {
-      return readOnlyRecovery("unsupported_platform");
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      return unsupportedPlatformRecovery(
+        logPath,
+        "script",
+        platformError.message,
+      );
     }
     if (config.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
@@ -691,6 +701,27 @@ function readOnlyRecovery(
   recoveryCode: SingleShotRecoveryCode,
 ): SingleShotRoundMechanismResult {
   return { outcome: { ok: false, recoveryCode } };
+}
+
+function unsupportedPlatformRecovery(
+  logPath: string,
+  family: "one-shot" | "script",
+  detail: string,
+): SingleShotRoundMechanismResult {
+  const logHandle = openScriptLog(logPath);
+  if (logHandle === null) {
+    return invalidInput(`${family} runner could not open refusal log path`);
+  }
+  try {
+    writeLine(
+      logHandle,
+      `[single-shot-${family}] unsupported_platform: ${detail}`,
+    );
+    writeLine(logHandle, `[single-shot-${family}] result: blocked`);
+  } finally {
+    closeLog(logHandle);
+  }
+  return readOnlyRecovery("unsupported_platform");
 }
 
 function liveRecoveryCode(
