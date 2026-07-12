@@ -48,6 +48,7 @@ import {
   type LiveStepSdkHostBindings,
 } from "../executors/live-step/sdk-executor.js";
 import type { Executor } from "../executors/sdk/types.js";
+import type { ExecutorRegistryLoadResult } from "../executors/sdk/registry.js";
 import {
   loadDispatchedStepRunProvenance,
   resolveDispatchedStepExecutorContext,
@@ -213,6 +214,7 @@ export function resolveDaemonWorkflowStepDispatch(
   }
 
   let registeredDispatch: AsyncWorkflowStepDispatch | undefined;
+  let registeredLoad: ExecutorRegistryLoadResult | undefined;
   const profileHostBindings =
     profile.status === "resolved"
       ? createLiveStepHostBindingsResolver(
@@ -239,16 +241,19 @@ export function resolveDaemonWorkflowStepDispatch(
           unavailableReasons.has(runtime.executorName) ||
           !isWorkflowExecutorFamily(runtime.executorName))
       ) {
-        registeredDispatch ??= createRegisteredExecutorWorkflowDispatch(
-          baseDispatch,
-          {
-            registry: loaded.registry,
-            unavailableReasons,
-            ...(profileHostBindings !== undefined
-              ? { resolveHostBindings: profileHostBindings }
-              : {}),
-          },
-        );
+        if (registeredDispatch === undefined || registeredLoad !== loaded) {
+          registeredDispatch = createRegisteredExecutorWorkflowDispatch(
+            baseDispatch,
+            {
+              registry: loaded.registry,
+              unavailableReasons,
+              ...(profileHostBindings !== undefined
+                ? { resolveHostBindings: profileHostBindings }
+                : {}),
+            },
+          );
+          registeredLoad = loaded;
+        }
         return registeredDispatch(claim, context);
       }
       return legacy.dispatch(claim, context);

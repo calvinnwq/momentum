@@ -877,6 +877,36 @@ describe("executor registration and SDK dispatch", () => {
     expect(wrappedOnly.registry.get("commonjs-executor")).toBe(executor);
   });
 
+  it("reloads a repaired CommonJS executor with a fresh import identity", async () => {
+    const root = tempDir();
+    const modulePath = path.join(root, "repairable.cjs");
+    const config = {
+      executors: { "commonjs-executor": modulePath },
+    };
+    fs.writeFileSync(
+      modulePath,
+      'module.exports = { name: "commonjs-executor" };\n',
+    );
+    const invalid = await loadExecutorRegistry({
+      config,
+      configDir: root,
+      importCacheKey: "before-repair",
+    });
+    expect(invalid.ok).toBe(false);
+
+    fs.writeFileSync(
+      modulePath,
+      'module.exports = { name: "commonjs-executor", configSchema: { type: "object", properties: {}, additionalProperties: false }, tick() {} };\n',
+    );
+    const repaired = await loadExecutorRegistry({
+      config,
+      configDir: root,
+      importCacheKey: "after-repair",
+    });
+    expect(repaired.ok).toBe(true);
+    expect(repaired.registry.has("commonjs-executor")).toBe(true);
+  });
+
   it("resolves npm package specifiers from the executor config directory", async () => {
     const root = tempDir();
     const packageDir = path.join(root, "node_modules", "fixture-package");
@@ -1457,14 +1487,26 @@ describe("executor registration and SDK dispatch", () => {
     {
       classification: "approval_required" as const,
       action: "approve",
+      roundState: "waiting_operator" as const,
     },
     {
       classification: "operator_decision_required" as const,
       action: "apply",
+      roundState: "waiting_operator" as const,
+    },
+    {
+      classification: "approval_required" as const,
+      action: "approve",
+      roundState: "succeeded" as const,
+    },
+    {
+      classification: "operator_decision_required" as const,
+      action: "apply",
+      roundState: "failed" as const,
     },
   ])(
-    "persists and resumes a registered executor $classification gate",
-    async ({ classification, action }) => {
+    "persists and resumes a registered executor $classification gate after a $roundState round",
+    async ({ classification, action, roundState }) => {
       const dataDir = tempDir();
       const runId = `registered-gate-${classification}`;
       const definition = fixtureDefinition({});
@@ -1501,12 +1543,40 @@ describe("executor registration and SDK dispatch", () => {
               (decision) => decision.chosenAction !== null,
             );
             if (current !== null && chosen !== undefined) {
-              context.envelope.observeRound(current.round.roundId, {
-                phase: "capturing_result",
-                summary: `accepted ${chosen.chosenAction}`,
-              });
+              const resumedRound =
+                current.round.state !== "succeeded" &&
+                current.round.state !== "failed"
+                  ? context.envelope.observeRound(current.round.roundId, {
+                      phase: "capturing_result",
+                      summary: `accepted ${chosen.chosenAction}`,
+                    })
+                  : context.envelope.startRound({
+                      roundId: `${context.state.invocation.invocationId}::round-2`,
+                      invocationId: context.state.invocation.invocationId,
+                      workflowRunId: context.state.invocation.workflowRunId,
+                      stepRunId: context.state.invocation.stepRunId,
+                      stepKey: context.state.invocation.stepKey,
+                      executorFamily: context.state.invocation.executorFamily,
+                      attempt: context.state.invocation.attempt,
+                      roundIndex: context.state.rounds.length,
+                      state: "capturing_result",
+                      agentProvider: null,
+                      model: null,
+                      effort: null,
+                      inputDigest: null,
+                      resultDigest: null,
+                      artifactRoot: null,
+                      logPaths: [],
+                      summary: `accepted ${chosen.chosenAction}`,
+                      keyChanges: [],
+                      keyLearnings: [],
+                      remainingWork: [],
+                      changedFiles: [],
+                      verificationStatus: null,
+                      commitSha: null,
+                    });
               return {
-                roundId: current.round.roundId,
+                roundId: resumedRound.roundId,
                 recommendation: "complete",
                 recommendedRoundState: "succeeded",
                 recommendedInvocationState: "succeeded",
@@ -1554,7 +1624,7 @@ describe("executor registration and SDK dispatch", () => {
             return {
               roundId: round.roundId,
               recommendation: classification,
-              recommendedRoundState: "waiting_operator",
+              recommendedRoundState: roundState,
               recommendedInvocationState: "waiting_operator",
               recoveryCode: null,
               humanGate: classification,
@@ -1642,6 +1712,13 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
+            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        db
+          .prepare(
             "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
           )
           .get(runId, "preflight"),
@@ -1649,7 +1726,7 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
-            "SELECT chosen_action FROM executor_decisions WHERE round_id = (SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1)",
+            "SELECT d.chosen_action FROM executor_decisions AS d JOIN executor_rounds AS r ON r.round_id = d.round_id WHERE r.workflow_run_id = ? ORDER BY r.round_index DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ chosen_action: action });
@@ -1818,7 +1895,7 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
-  it("durably refuses a configured module that fails to load", async () => {
+  it("retries a repaired configured module without restarting dispatch", async () => {
     const definition = fixtureDefinition({ message: "never runs" });
     const db = openDb(tempDir());
     persistWorkflowDefinition(db, definition, { now: NOW });
@@ -1841,9 +1918,16 @@ describe("executor registration and SDK dispatch", () => {
     });
     if (!claim.ok) throw new Error(claim.reason);
     const configPath = path.join(tempDir(), "broken-executors.json");
+    const modulePath = path.join(path.dirname(configPath), "repairable.mjs");
+    fs.writeFileSync(
+      modulePath,
+      'export default { name: "fixture-executor" };\n',
+    );
     fs.writeFileSync(
       configPath,
-      JSON.stringify({ executors: { "fixture-executor": "./missing.mjs" } }),
+      JSON.stringify({
+        executors: { "fixture-executor": "./repairable.mjs" },
+      }),
     );
     const production = resolveDaemonWorkflowStepDispatch(
       { [DAEMON_EXECUTOR_CONFIG_ENV_VAR]: configPath },
@@ -1864,8 +1948,39 @@ describe("executor registration and SDK dispatch", () => {
         .get("module-load-failure-run"),
     ).toMatchObject({
       recovery_code: "runtime_unavailable",
-      summary: expect.stringContaining("executor_module_unavailable"),
+      summary: expect.stringContaining("executor_module_invalid"),
     });
+
+    fs.copyFileSync(
+      path.join(import.meta.dirname, "fixtures/third-party-executor.mjs"),
+      modulePath,
+    );
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "module-load-failure-run",
+        now: NOW + 2,
+      }),
+    ).toMatchObject({ ok: true });
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "fixture-worker",
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("module-load-failure-run"),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get("module-load-failure-run", "preflight"),
+    ).toEqual({ state: "succeeded" });
     db.close();
   });
 });

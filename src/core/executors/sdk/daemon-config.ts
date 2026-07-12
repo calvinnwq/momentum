@@ -45,14 +45,29 @@ export function resolveDaemonExecutorRegistry(
     };
   }
   let loaded: Promise<ExecutorRegistryLoadResult> | undefined;
+  let loadAttempt = 0;
   return {
     status: "configured",
     source,
-    load: () =>
-      (loaded ??= loadExecutorRegistry({
+    load: () => {
+      if (loaded !== undefined) return loaded;
+      const loading = loadExecutorRegistry({
         config: parsed.config,
         configDir: path.dirname(path.resolve(source)),
         builtIns,
-      })),
+        importCacheKey: String((loadAttempt += 1)),
+      });
+      loaded = loading.then(
+        (result) => {
+          if (!result.ok) loaded = undefined;
+          return result;
+        },
+        (error: unknown) => {
+          loaded = undefined;
+          throw error;
+        },
+      );
+      return loaded;
+    },
   };
 }

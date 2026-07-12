@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { Executor } from "./types.js";
 import { validateExecutorConfigSchema } from "./config-schema.js";
@@ -125,6 +126,7 @@ export async function loadExecutorRegistry(input: {
   configDir: string;
   builtIns?: readonly Executor[];
   importModule?: (specifier: string) => Promise<unknown>;
+  importCacheKey?: string;
 }): Promise<ExecutorRegistryLoadResult> {
   const registry = new Map<string, Executor>();
   const builtInNames = new Set<string>();
@@ -146,7 +148,10 @@ export async function loadExecutorRegistry(input: {
     try {
       specifier =
         input.importModule === undefined
-          ? resolveModuleSpecifier(configuredSpecifier, input.configDir)
+          ? withFreshImportIdentity(
+              resolveModuleSpecifier(configuredSpecifier, input.configDir),
+              input.importCacheKey,
+            )
           : configuredSpecifier;
     } catch (error) {
       diagnostics.push({
@@ -191,6 +196,20 @@ export async function loadExecutorRegistry(input: {
   return diagnostics.length > 0
     ? { ok: false, registry, diagnostics }
     : { ok: true, registry };
+}
+
+const moduleRequire = createRequire(import.meta.url);
+
+function withFreshImportIdentity(
+  specifier: string,
+  importCacheKey: string | undefined,
+): string {
+  if (importCacheKey === undefined) return specifier;
+  const url = new URL(specifier);
+  if (url.protocol !== "file:") return specifier;
+  delete moduleRequire.cache[fileURLToPath(url)];
+  url.searchParams.set("momentumExecutorRegistryLoad", importCacheKey);
+  return url.href;
 }
 
 export function resolveRegisteredExecutor(

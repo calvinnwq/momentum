@@ -36,11 +36,13 @@ export function parkRegisteredExecutorAtHumanGate(input: {
     const round = listExecutorRoundsForInvocation(db, invocationId).at(-1);
     if (
       round === undefined ||
-      round.state !== "waiting_operator" ||
+      !["waiting_operator", "succeeded", "failed"].includes(round.state) ||
+      (round.classification !== "approval_required" &&
+        round.classification !== "operator_decision_required") ||
       round.humanGate === null
     ) {
       throw new Error(
-        `Cannot park registered executor invocation ${invocationId}: no waiting operator round exists.`,
+        `Cannot park registered executor invocation ${invocationId}: no resumable operator round exists.`,
       );
     }
     const decision = listExecutorDecisionsForRound(db, round.roundId)
@@ -127,7 +129,8 @@ export function resolveWorkflowGateAndResumeRegisteredExecutor(
       );
       if (
         invocation?.state === "waiting_operator" &&
-        round?.state === "waiting_operator" &&
+        round !== undefined &&
+        ["waiting_operator", "succeeded", "failed"].includes(round.state) &&
         decision?.chosenAction === null
       ) {
         const updated = db
@@ -149,19 +152,21 @@ export function resolveWorkflowGateAndResumeRegisteredExecutor(
             `Executor decision ${decision.decisionId} was resolved concurrently.`,
           );
         }
-        updateExecutorRound(
-          db,
-          round.roundId,
-          {
-            toState: "running",
-            classification: null,
-            executorRecommendation: null,
-            recoveryCode: null,
-            humanGate: null,
-            finishedAt: null,
-          },
-          { now },
-        );
+        if (round.state === "waiting_operator") {
+          updateExecutorRound(
+            db,
+            round.roundId,
+            {
+              toState: "running",
+              classification: null,
+              executorRecommendation: null,
+              recoveryCode: null,
+              humanGate: null,
+              finishedAt: null,
+            },
+            { now },
+          );
+        }
         updateExecutorInvocationState(db, invocation.invocationId, "running", {
           finishedAt: null,
           now,

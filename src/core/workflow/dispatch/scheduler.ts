@@ -1232,11 +1232,16 @@ function isResumableRegisteredSdkTick(
 ): boolean {
   if (invocationState !== "running" || round === undefined) return false;
   if (round.classification === "continue") return true;
+  const resolvedDecision = listExecutorDecisionsForRound(
+    db,
+    round.roundId,
+  ).some((decision) => decision.chosenAction !== null);
   return (
-    round.state === "running" &&
-    listExecutorDecisionsForRound(db, round.roundId).some(
-      (decision) => decision.chosenAction !== null,
-    )
+    resolvedDecision &&
+    (round.state === "running" ||
+      ((round.state === "succeeded" || round.state === "failed") &&
+        (round.classification === "approval_required" ||
+          round.classification === "operator_decision_required")))
   );
 }
 

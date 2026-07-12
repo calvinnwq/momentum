@@ -40,6 +40,7 @@ At dispatch, a missing registration settles the attempt as `manual_recovery_requ
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
 After the executor is installed or repaired, `workflow run clear-recovery` prepares the same deterministic invocation for a new attempt; the next scheduler pass dispatches it without discarding the refused round.
 If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
+Failed daemon discovery is retried on a later scheduler pass, so repairing the module and clearing recovery does not require a daemon restart.
 
 When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the complete registry and validate third-party step config before any workflow-run rows are written.
 An invalid registry file or any module load/contract diagnostic refuses these commands with `executor_config_invalid`.
@@ -167,7 +168,9 @@ The daemon controller rejects a decision atomically unless its classification, i
 An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
 An `approval_required` or `operator_decision_required` recommendation must also name a current round with an unresolved durable executor decision and a non-empty allowed-action set.
 The dispatcher mirrors that decision into a round-scoped workflow gate, releases its dispatch lease, and leaves the invocation paused at `waiting_operator`.
-Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the same round and invocation, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.
+Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the invocation, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.
+A `waiting_operator` round reopens in place.
+A terminal `succeeded` or `failed` gate round remains immutable, and the resumed executor starts a new round after reading the resolved decision from the prior round.
 
 The durable envelope, not executor input, stamps round start and heartbeat timestamps from its own clock.
 The host reads that clock again after awaited runner work when recording observations and terminal settlement, so an asynchronous round cannot be stamped as finished before its bounded work completes.

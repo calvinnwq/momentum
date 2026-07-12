@@ -121,8 +121,10 @@ non-terminal invocations, so single-round and multi-round executors share one
 driving loop.
 Approval and operator-decision ticks must include an unresolved durable decision.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
-gate resolution records the chosen action, reopens the same round, and makes the
-invocation scheduler-resumable.
+gate resolution records the chosen action and makes the invocation
+scheduler-resumable.
+A paused round reopens in place, while a terminal gate round remains immutable
+and the executor starts its next round from the resolved decision.
 Retries preserve earlier rounds under the deterministic invocation and increment
 the attempt, while the driver rejects cross-attempt or non-current round results.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
