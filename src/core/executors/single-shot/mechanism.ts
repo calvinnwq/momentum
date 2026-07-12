@@ -33,6 +33,7 @@ import {
 } from "../shared/step-finalize.js";
 import {
   LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
+  processExecutionPlatformError,
   runProcessGroup,
   runLiveStepWrapper,
   runLiveStepWrapperAsync,
@@ -184,6 +185,9 @@ export function createOneShotLiveWrapperRoundRunner(
       return invalidInput(
         "one-shot live wrapper rounds require an absolute log path",
       );
+    }
+    if (processExecutionPlatformError() !== undefined) {
+      return readOnlyRecovery("unsupported_platform");
     }
     if (options.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
@@ -405,6 +409,9 @@ export function createScriptCommandRoundRunner(
     }
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
+    }
+    if (processExecutionPlatformError() !== undefined) {
+      return readOnlyRecovery("unsupported_platform");
     }
     if (config.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(

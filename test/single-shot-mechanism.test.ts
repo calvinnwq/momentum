@@ -37,6 +37,51 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform,
+  action: () => T | Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) throw new Error("process.platform is missing");
+  Object.defineProperty(process, "platform", {
+    ...descriptor,
+    value: platform,
+  });
+  try {
+    return await action();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+}
+
+async function captureGitSpawn<T>(
+  artifactRoot: string,
+  action: () => T | Promise<T>,
+): Promise<{ value: T; gitSpawned: boolean }> {
+  const fakeBin = path.join(artifactRoot, "fake-bin");
+  const marker = path.join(artifactRoot, "git-spawned");
+  const fakeGit = path.join(fakeBin, "git");
+  fs.mkdirSync(fakeBin);
+  fs.writeFileSync(
+    fakeGit,
+    `#!${process.execPath}\nrequire("node:fs").writeFileSync(process.env.GIT_SPAWN_MARKER, "spawned");\nprocess.exit(1);\n`,
+    { mode: 0o755 },
+  );
+  const previousPath = process.env["PATH"];
+  const previousMarker = process.env["GIT_SPAWN_MARKER"];
+  process.env["PATH"] = fakeBin;
+  process.env["GIT_SPAWN_MARKER"] = marker;
+  try {
+    const value = await action();
+    return { value, gitSpawned: fs.existsSync(marker) };
+  } finally {
+    if (previousPath === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previousPath;
+    if (previousMarker === undefined) delete process.env["GIT_SPAWN_MARKER"];
+    else process.env["GIT_SPAWN_MARKER"] = previousMarker;
+  }
+}
+
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
@@ -137,6 +182,103 @@ function resultJson(value: RunnerResult): string {
 }
 
 describe("single-shot concrete mechanisms", () => {
+  it.each(["sync", "async"] as const)(
+    "refuses a %s one-shot round before repository preflight on native Windows",
+    async (mode) => {
+      const artifactRoot = makeTempDir();
+      const missingRepo = path.join(artifactRoot, "missing-repo");
+      const marker = path.join(artifactRoot, "one-shot-spawned");
+      const mechanism = createOneShotLiveWrapperRoundRunner(
+        {
+          command: process.execPath,
+          args: [
+            "-e",
+            `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`,
+          ],
+          cwd: "iteration",
+          timeoutSec: 5,
+          envAllow: [],
+          resultFile: "result.json",
+          probe: undefined,
+        },
+        {
+          repoPath: missingRepo,
+          kind: "preflight",
+          repoSafety: { mode: "read-only" },
+        },
+      );
+
+      const { value: result, gitSpawned } = await captureGitSpawn(
+        artifactRoot,
+        () =>
+          withProcessPlatform("win32", () =>
+            mode === "sync"
+              ? mechanism(round({ artifactRoot }))
+              : mechanism(round({ artifactRoot }), {
+                  config: {},
+                  hostBindings:
+                    {} as SingleShotRoundRunnerContext["hostBindings"],
+                  signal: new AbortController().signal,
+                }),
+          ),
+      );
+
+      expect(result.outcome).toEqual({
+        ok: false,
+        recoveryCode: "unsupported_platform",
+      });
+      expect(gitSpawned).toBe(false);
+      expect(fs.existsSync(marker)).toBe(false);
+    },
+  );
+
+  it.each(["sync", "async"] as const)(
+    "refuses a %s script round before repository preflight on native Windows",
+    async (mode) => {
+      const artifactRoot = makeTempDir();
+      const missingRepo = path.join(artifactRoot, "missing-repo");
+      const marker = path.join(artifactRoot, "script-spawned");
+      const args = [
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned")`,
+      ];
+      const mechanism = createScriptCommandRoundRunner({
+        command: process.execPath,
+        args,
+        cwd: missingRepo,
+        timeoutSec: 5,
+        repoSafety: { mode: "read-only" },
+      });
+      const scriptRound = round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      });
+
+      const { value: result, gitSpawned } = await captureGitSpawn(
+        artifactRoot,
+        () =>
+          withProcessPlatform("win32", () =>
+            mode === "sync"
+              ? mechanism(scriptRound)
+              : mechanism(scriptRound, {
+                  config: { command: path.basename(process.execPath), args },
+                  hostBindings:
+                    {} as SingleShotRoundRunnerContext["hostBindings"],
+                  signal: new AbortController().signal,
+                }),
+          ),
+      );
+
+      expect(result.outcome).toEqual({
+        ok: false,
+        recoveryCode: "unsupported_platform",
+      });
+      expect(gitSpawned).toBe(false);
+      expect(fs.existsSync(marker)).toBe(false);
+    },
+  );
+
   it("preserves a settled script result when cancellation arrives afterward", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
