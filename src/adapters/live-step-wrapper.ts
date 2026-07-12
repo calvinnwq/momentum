@@ -1651,10 +1651,18 @@ async function terminateOwnedPosixTree(
   }
   onInitialized();
   const deadline = Date.now() + timeoutMs;
+  let extinctPasses = 0;
   while (Date.now() < deadline) {
     const remaining = listOwnedPosixProcesses(ownershipToken);
     if (!remaining.ok) return false;
-    if (remaining.pids.length === 0) return safe;
+    if (remaining.pids.length === 0) {
+      const group = listLivePosixProcessGroupMembers(groupLeaderPid);
+      if (!group.ok) return false;
+      extinctPasses = group.pids.length === 0 ? extinctPasses + 1 : 0;
+      if (extinctPasses >= 2) return safe;
+    } else {
+      extinctPasses = 0;
+    }
     for (const pid of remaining.pids) {
       const ownership = posixProcessOwnership(pid, ownershipToken);
       if (ownership === "unknown") return false;
@@ -1732,6 +1740,34 @@ function posixProcessOwnership(
 }
 
 type OwnedPosixProcesses = { ok: true; pids: number[] } | { ok: false };
+
+type PosixProcessGroupMembers = { ok: true; pids: number[] } | { ok: false };
+
+function listLivePosixProcessGroupMembers(
+  processGroupId: number,
+): PosixProcessGroupMembers {
+  const result = spawnSync("ps", ["-eo", "pid=,pgid=,state="], {
+    encoding: "utf-8",
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) {
+    return { ok: false };
+  }
+  const pids = result.stdout
+    .split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line))
+    .filter(
+      (match) =>
+        match !== null &&
+        Number(match[2]) === processGroupId &&
+        !match[3]?.startsWith("Z"),
+    )
+    .map((match) => Number(match?.[1]))
+    .filter((pid) => Number.isInteger(pid));
+  return { ok: true, pids };
+}
 
 function listOwnedPosixProcesses(ownershipToken: string): OwnedPosixProcesses {
   const marker = `${PROCESS_TREE_TOKEN_ENV}=${ownershipToken}`;
@@ -2508,6 +2544,20 @@ function ownedPosixPids() {
     .map((match) => Number(match[1]))
     .filter((pid) => Number.isInteger(pid));
 }
+function posixGroupPids(processGroupId) {
+  const result = spawnSync("ps", ["-eo", "pid=,pgid=,state="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && Number(match[2]) === processGroupId && !match[3]?.startsWith("Z"))
+    .map((match) => Number(match[1]))
+    .filter((pid) => Number.isInteger(pid));
+}
 function writeMeta(status, signal) {
   fs.writeFileSync(metaPath, JSON.stringify({
     pid: child && child.pid,
@@ -2529,11 +2579,12 @@ function killTree(commandExited = false, commandStatus = null, commandSignal = n
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline && stablePasses < 2) {
       const owned = ownedPosixPids();
-      if (!owned) break;
+      const group = posixGroupPids(child.pid);
+      if (!owned || !group) break;
       for (const pid of owned) {
         try { process.kill(pid, "SIGKILL"); } catch {}
       }
-      stablePasses = owned.length === 0 ? stablePasses + 1 : 0;
+      stablePasses = owned.length === 0 && group.length === 0 ? stablePasses + 1 : 0;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
     try { child.kill("SIGKILL"); } catch {}

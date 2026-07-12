@@ -882,6 +882,92 @@ describe("runLiveStepWrapper — command failure mapping", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "fails closed when an unresponsive anchor leaves a tokenless same-group descendant",
+    async () => {
+      const root = makeTempDir("momentum-live-step-same-group-");
+      const pidPath = path.join(root, "descendant.pid");
+      const descendant = "setTimeout(() => {}, 15_000)";
+      const program = [
+        'const { spawn } = require("node:child_process")',
+        'const fs = require("node:fs")',
+        `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore", env: {} })`,
+        `fs.writeFileSync(${JSON.stringify(pidPath)}, String(child.pid))`,
+        "child.unref()",
+        'process.kill(process.ppid, "SIGSTOP")',
+        "setTimeout(() => {}, 15_000)",
+      ].join(";");
+      const abort = new AbortController();
+      const running = runProcessGroup(process.execPath, ["-e", program], {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 10_000,
+        maxBuffer: 1_024,
+        signal: abort.signal,
+      });
+      const readyDeadline = Date.now() + 3_000;
+      while (!fs.existsSync(pidPath) && Date.now() < readyDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(fs.existsSync(pidPath)).toBe(true);
+      const descendantPid = Number(fs.readFileSync(pidPath, "utf-8"));
+
+      try {
+        abort.abort();
+        await expect(running).rejects.toMatchObject({
+          code: "SUPERVISOR_FAILED",
+        });
+      } finally {
+        try {
+          process.kill(descendantPid, "SIGKILL");
+        } catch {
+          // The fail-closed descendant may already have exited.
+        }
+      }
+    },
+    12_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "fails closed synchronously when cleanup leaves a tokenless same-group descendant",
+    () => {
+      const root = makeTempDir("momentum-live-step-sync-same-group-");
+      const pidPath = path.join(root, "descendant.pid");
+      const descendant = "setTimeout(() => {}, 15_000)";
+      const program = [
+        'const { spawn } = require("node:child_process")',
+        'const fs = require("node:fs")',
+        `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "ignore", env: {} })`,
+        `fs.writeFileSync(${JSON.stringify(pidPath)}, String(child.pid))`,
+        "child.unref()",
+        'process.kill(process.ppid, "SIGSTOP")',
+        "setTimeout(() => {}, 15_000)",
+      ].join(";");
+
+      const out = runProcessGroupSync(process.execPath, ["-e", program], {
+        cwd: root,
+        env: process.env,
+        timeoutMs: 500,
+        maxBuffer: 1_024,
+      });
+      expect(fs.existsSync(pidPath)).toBe(true);
+      const descendantPid = Number(fs.readFileSync(pidPath, "utf-8"));
+
+      try {
+        expect((out.error as NodeJS.ErrnoException | undefined)?.code).toBe(
+          "SUPERVISOR_FAILED",
+        );
+      } finally {
+        try {
+          process.kill(descendantPid, "SIGKILL");
+        } catch {
+          // The fail-closed descendant may already have exited.
+        }
+      }
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "allows verified fallback cleanup to use its full cleanup budget",
     async () => {
       const root = makeTempDir("momentum-live-step-fallback-budget-");

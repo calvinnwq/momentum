@@ -134,7 +134,10 @@ Successful `one-shot` turns require a successful normalized `RunnerResult`, whil
 
 If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
 fallback receives its own bounded cleanup budget. The POSIX budget starts only
-after blocking ownership and escaped-descendant preflight completes. Once its
+after blocking ownership and escaped-descendant preflight completes. POSIX
+fallback succeeds only after two consecutive snapshots find neither a
+token-owned process nor a live member of the retained process group; an empty
+token scan alone is not cleanup proof. Once its
 anchor has exited, POSIX fallback can preserve a known outcome only if the anchor
 first reported entering cleanup; an abrupt unreported exit fails closed. Every
 Windows descendant-discovery path binds cleanup to retained anchor and command

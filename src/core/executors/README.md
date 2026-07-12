@@ -65,8 +65,11 @@ Captured stdout and stderr remain in the executor log through cancellation, and
 streaming UTF-8 decoding preserves characters split across pipe chunks.
 POSIX supervision is portable userland containment, not a sandbox: it proves
 cleanup for the anchored group and sampled descendants that retain the ownership
-token, but a hostile descendant that escapes between ancestry samples and strips
-the token requires kernel-backed containment outside this implementation.
+token. Fallback also requires two consecutive snapshots with no live member of
+the retained process group, so a token-stripped same-group descendant cannot be
+mistaken for successful cleanup. A hostile descendant that escapes between
+ancestry samples and strips the token requires kernel-backed containment outside
+this implementation.
 Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
 Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
 Ignored-worktree comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants.

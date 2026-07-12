@@ -77,6 +77,7 @@ The shipped agent-once and script process adapters supervise their spawned proce
 Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
 If the anchor does not confirm cleanup, Momentum gives the ownership-checked POSIX or Windows fallback its own bounded cleanup budget.
 A POSIX fallback starts that budget only after its blocking ownership and escaped-descendant preflight completes.
+Async and sync POSIX fallback report success only after two consecutive snapshots find neither a token-owned process nor a live member of the retained process group; an empty token scan alone is not cleanup proof.
 If the POSIX anchor has already exited, fallback cleanup may preserve the known outcome only when the anchor first reported that it had entered cleanup; an abrupt exit without that report fails closed.
 Windows fallback binds descendant discovery to retained process identities and creation times, and the synchronous helper retains the command status and signal for diagnostics when cleanup proof fails without treating that command outcome as settled.
 Momentum does not substitute an unverified broad `taskkill` when ownership-checked Windows cleanup fails.
