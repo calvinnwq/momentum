@@ -458,7 +458,7 @@ function workflowRunStartCoding(
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
  * approval boundary, route/profile, implementation engine, and per-step route
- * selections, definition key/version, and every step with its executor family
+ * selections, definition key/version, and every step with its executor identity
  * and optional portable config - before approving or executing it. The preview
  * is a pure projection of the version-pinned built-in definition plus inputs, so
  * the durable run a later `start-coding` persists matches it exactly.

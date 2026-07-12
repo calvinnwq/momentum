@@ -3,7 +3,7 @@
  *.
  *
  * `dispatch.ts` owns the *pure* dispatch decision: given a claimed
- * step's already-resolved executor family (a {@link WorkflowStepDispatchResolution}),
+ * step's already-resolved executor identity (a {@link WorkflowStepDispatchResolution}),
  * {@link planWorkflowStepDispatch} routes it to a real dispatch or a fail-closed
  * manual-recovery outcome. This module owns the read-only half that produces that
  * resolution from durable SQLite state — the storage twin, exactly as
@@ -13,7 +13,7 @@
  * Resolution walks the same chain the workflow-first runtime materializes a run
  * from, in reverse: a claimed step is identified by `(runId, stepId)`; the run
  * carries the `(workflow_definition_key, workflow_definition_version)` link
- * recorded at `workflow run start`; and the step's executor family normally
+ * recorded at `workflow run start`; and the step's executor identity normally
  * lives on the matching `step_definitions` row (`stepId` is the definition
  * step's stable `step_key`). Momentum-native coding runs are the source-specific
  * exception: they resolve from the built-in registry by the recorded key/version
@@ -25,7 +25,7 @@
  *   - the `workflow_runs` row is gone               → `run_not_found`
  *   - the run has no (or a partial) definition link → `definition_unlinked`
  *   - no `step_definitions` row or built-in step matches the step → `step_definition_not_found`
- *   - the step's `executor` is not a known family   → `unknown_executor_family`
+ *   - the step's `executor` is not a valid identity → `unknown_executor_family`
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
  * touches a lease. The side-effecting half of the dispatcher lives in
@@ -150,7 +150,7 @@ export function resolveWorkflowStepExecutorRuntime(
 }
 
 /**
- * Resolve a claimed step's executor family from durable run / definition / step
+ * Resolve a claimed step's executor identity from durable run / definition / step
  * state, or a typed {@link WorkflowStepResolutionFailure} when the durable state
  * cannot answer. Read-only and total with respect to the database: it never
  * mutates a row and always returns a {@link WorkflowStepDispatchResolution},
@@ -175,7 +175,7 @@ export function resolveClaimedWorkflowStepFamily(
   const definitionKey = run.workflow_definition_key;
   const definitionVersion = run.workflow_definition_version;
   // Either half of the link missing means the run cannot be resolved to a
-  // definition (e.g. an workflow-run-imported run), so its step has no executor family.
+  // definition (for example, an imported run), so its step has no executor identity.
   if (
     definitionKey === null ||
     definitionKey === "" ||

@@ -134,11 +134,17 @@ condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
-`unsupported_platform`, `auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
-uses this run-scoped surface when a claimed step cannot be resolved to a known
-definition step or uses an executor family the daemon cannot dispatch yet; that
-path opens a `manual_recovery_required` workflow gate instead of silently dropping
-the claim.
+`unsupported_platform`, `auth_unavailable`, and `executor_threw`.
+The workflow scheduler dispatcher also uses this run-scoped surface when a
+claimed step cannot be resolved to a known definition step or carries an invalid
+executor identity; that path opens a `manual_recovery_required` workflow gate
+instead of silently dropping the claim.
+A valid but unregistered executor identity instead records a blocked invocation
+and round with `runtime_unavailable` plus an `external_state_required` executor
+recommendation, then workflow reconciliation parks the run behind its standard
+`manual_recovery_required` step gate.
+If the configured module for that identity cannot be imported or validated, the
+same refusal preserves the precise registry diagnostic in durable round evidence.
 The daemon-dispatchable `external-apply` path uses the same surface when issue scope, source evidence, deterministic intent seeding, valid payload, resolved target, credentials, policy, audit, or adapter safety checks refuse the write.
 The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
 The configured live-wrapper dispatch lane uses the same surface when the wrapper is

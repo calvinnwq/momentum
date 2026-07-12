@@ -19,15 +19,31 @@ Set `MOMENTUM_EXECUTOR_CONFIG` to a JSON file that maps durable executor names t
 }
 ```
 
-Relative paths resolve from the config file's directory. A module exports one executor as its default export or named `executor` export. The export's `name` must exactly match the configured name and it must expose a valid strict object `configSchema` plus a callable `tick(context)` method. An unreadable module or contract-invalid export fails registry loading with an `executor_module_unavailable` or `executor_module_invalid` diagnostic; it is never silently skipped.
+Executor names must start with a lowercase letter or digit and may then use lowercase letters, digits, `.`, `_`, `/`, or `-`.
+Relative and absolute paths resolve from the config file's directory.
+Bare npm package and package-subpath specifiers resolve from `node_modules` at the config directory or one of its ancestors; Momentum does not install executor packages.
+A module exports one executor as its default export or named `executor` export.
+ESM and CommonJS modules are accepted.
+Configured modules are trusted code imported into the Momentum process, not
+sandboxed plugins; module initialization has the same Node.js capabilities as
+the daemon or CLI process that loads it.
+The export's `name` must exactly match the configured name and it must expose a valid strict object `configSchema` plus a callable `tick(context)` method.
+An unreadable module or contract-invalid export produces an `executor_module_unavailable` or `executor_module_invalid` diagnostic; it is never silently skipped.
 
 An explicitly configured module supersedes a same-named built-in. The selected
 module still passes through the identical registration and schema guards, so
 preflight and daemon dispatch resolve the same implementation.
 
-Executor names are permanent durable identities. Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them. At dispatch, a missing registration settles the attempt with the honest `runtime_unavailable` recovery class.
+Executor names are permanent durable identities.
+Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them.
+At dispatch, a missing registration settles the attempt as `blocked` with `runtime_unavailable` and an `external_state_required` executor recommendation.
+Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
+If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
 
-When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the registry and validate third-party step config before any workflow-run rows are written. The resulting `preflightEvidence` identifies the executor, step config path, and schema violation. Built-in steps continue through their existing built-in structural checks unless that built-in name is explicitly supplied by the registry.
+When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the complete registry and validate third-party step config before any workflow-run rows are written.
+An invalid registry file or any module load/contract diagnostic refuses these commands with `executor_config_invalid`.
+The resulting `preflightEvidence` identifies an unregistered executor or the executor, step config path, and schema violation.
+Built-in steps continue through their existing built-in structural checks unless that built-in name is explicitly supplied by the registry.
 
 ## The core interface
 
@@ -36,16 +52,15 @@ An executor declares a durable name, a strict config schema, and one `tick` meth
 ```ts
 import type {
   Executor,
-  ExecutorTickContext,
-  ExecutorTickResult
+  ExecutorTickContext
 } from "../src/core/executors/sdk/types.js";
 
 type Config = { tool: string; pollIntervalMs?: number };
-type HostBindings = { client: { poll(): unknown } };
+type HostBindings = Record<string, never>;
 
-export class ReviewSupervisor implements Executor<Config, HostBindings> {
-  readonly name = "review-supervisor";
-  readonly configSchema = {
+export const executor: Executor<Config, HostBindings> = {
+  name: "review-supervisor",
+  configSchema: {
     type: "object",
     properties: {
       tool: { type: "string", minLength: 1 },
@@ -53,16 +68,50 @@ export class ReviewSupervisor implements Executor<Config, HostBindings> {
     },
     required: ["tool"],
     additionalProperties: false
-  } as const;
+  },
 
   tick(
     context: ExecutorTickContext<Config, HostBindings>
-  ): ExecutorTickResult {
-    // Inspect context.state, perform one bounded poll, and persist evidence
-    // only through context.envelope.
-    throw new Error("example");
+  ) {
+    context.signal.throwIfAborted();
+    const invocation = context.state.invocation;
+    const roundIndex = context.state.rounds.length;
+    const round = context.envelope.startRound({
+      roundId: `${invocation.invocationId}::round-${roundIndex + 1}`,
+      invocationId: invocation.invocationId,
+      workflowRunId: invocation.workflowRunId,
+      stepRunId: invocation.stepRunId,
+      stepKey: invocation.stepKey,
+      executorFamily: invocation.executorFamily,
+      attempt: invocation.attempt,
+      roundIndex,
+      state: "capturing_result",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: `Completed one ${context.config.tool} poll.`,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: "passed",
+      commitSha: null
+    });
+    return {
+      roundId: round.roundId,
+      recommendation: "complete",
+      recommendedRoundState: "succeeded",
+      recommendedInvocationState: "succeeded",
+      recoveryCode: null,
+      humanGate: null,
+      reason: "The bounded review poll completed."
+    };
   }
-}
+};
 ```
 
 `ExecutorTickContext` contains:
@@ -73,7 +122,33 @@ export class ReviewSupervisor implements Executor<Config, HostBindings> {
 - `envelope`: the only durable-state API available to executor code;
 - `signal`: the daemon's cancellation signal for the bounded turn.
 
-The tick may be synchronous or asynchronous. It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason. Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision. The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
+The tick may be synchronous or asynchronous.
+It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason.
+Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
+The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
+
+Third-party modules loaded only through `MOMENTUM_EXECUTOR_CONFIG` currently receive an empty `hostBindings` object.
+The public registration surface does not inject machine-local commands, credentials, or clients into those modules.
+Profile-backed built-ins use Momentum's internal host-binding resolver for live-wrapper execution.
+
+## Registered dispatch lifecycle
+
+The managed daemon drives at most one registered-executor tick per scheduler pass.
+The tick must return the id of the current non-terminal round for the current invocation attempt.
+A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.
+The executor starts the next sequential round when its next tick observes no current non-terminal round.
+
+Retries keep the deterministic invocation id, increment the invocation attempt, and preserve every earlier attempt's rounds as immutable evidence.
+A tick cannot settle a round from an earlier attempt or any round other than the current one.
+This prevents a delayed result from an old attempt from completing the active retry.
+
+Dispatch lease heartbeats run independently of the executor tick, including while synchronous executor code blocks the main event loop.
+Every durable envelope write is fenced against the current lease identity and freshness.
+Lease loss aborts the tick signal and prevents later writes from the former owner.
+
+An executor throw settles the active round and invocation for `manual_recovery_required` with `executor_threw`.
+A malformed or internally inconsistent tick result uses `executor_contract_invalid` instead.
+These failures remain durable and do not escape as an unclassified scheduler result.
 
 The daemon controller rejects a decision atomically unless its classification, invocation state, round state, recovery code, and human gate form a supported combination:
 
@@ -188,7 +263,7 @@ Registration and structural preflight apply the declaration before a tick.
 
 Looping lifecycle schemas may add an opt-in round cap when they ship.
 Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings.
-Generic executors receive their resolved bindings through `ExecutorTickContext.hostBindings`.
+Executors receive any host-provided bindings through `ExecutorTickContext.hostBindings`; config-only third-party registration currently provides the empty object described above.
 The shipped single-shot lifecycle keeps round-start identity in that field and captures its resolved live-wrapper or script runtime when the runner adapter is constructed.
 Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.

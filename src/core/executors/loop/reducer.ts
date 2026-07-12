@@ -450,11 +450,11 @@ export function transitionExecutorRound(
 
 /**
  * The resolved executor configuration the contract calls `ExecutorDefinition`.
- * `StepDefinition.executor` names the executor family and its optional `config`
- * carries portable recipe intent; this record carries the deterministic agent /
- * model / effort / timeout / policy knobs resolved by the contract's selection
- * precedence ("Agent And Model Selection") and copied into each round before it
- * starts.
+ * `StepDefinition.executor` names the permanent executor identity and its
+ * optional `config` carries portable recipe intent; this record carries the
+ * deterministic agent / model / effort / timeout / policy knobs resolved by the
+ * contract's selection precedence ("Agent And Model Selection") and copied into
+ * each round before it starts.
  */
 export type ExecutorDefinitionRecord = {
   executorKey: string;

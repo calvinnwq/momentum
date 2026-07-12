@@ -21,10 +21,10 @@
  *     collide. Inserting a duplicate refuses with a typed conflict error and
  *     leaves the existing row untouched — a durable executor row is the proof a
  *     bounded unit started, not an idempotent re-ingest.
- *   - Persistence is validation-gated: an unknown executor family / state /
- *     classification / human-gate is rejected with {@link InvalidExecutorRecordError}
- *     *before* any row is written, so durable executor state can never carry a
- *     vocabulary string outside the contract.
+ *   - Persistence is validation-gated: an invalid executor identity, state,
+ *     classification, or human-gate is rejected with
+ *     {@link InvalidExecutorRecordError} *before* any row is written, so durable
+ *     executor state can never carry a value outside the contract.
  *   - State changes are transition-gated through the same
  *     {@link transitionExecutorInvocation} / {@link transitionExecutorRound}
  *     reducers used everywhere else: a round can never fast-path to `succeeded`

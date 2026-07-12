@@ -24,8 +24,11 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
   data served by `recovery clear`, daemon status/startup recovery, and doctor.
   `goal-loop` remains an executor family.
 
-Executor families currently include `goal-loop`, `one-shot`, `script`,
-`no-mistakes`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
+Built-in executor identities currently include `goal-loop`, `one-shot`,
+`script`, `no-mistakes`, `delegate-supervisor`, `external-apply`, and
+`subworkflow`.
+Step definitions may also name arbitrary valid permanent identities supplied by
+the configured executor registry.
 The legacy values remain readable for durable compatibility. The current
 `coding-workflow` definition classifies implementation and no-mistakes as
 `delegate-supervisor`, with `{ "tool": "gnhf" }` and
@@ -104,13 +107,20 @@ at runtime before it creates a durable round.
 binds permanent executor names to npm specifiers or local module paths. The
 daemon imports each configured module in-process, accepts a default or named
 `executor` export, and validates its name, strict config schema, and tick method
-through the same registration guard used for built-ins. Invalid config or module
-exports fail closed with precise load diagnostics. Workflow structural preflight
-validates third-party step config against the registered declaration before
-workflow-run rows are written. An unregistered executor records the honest
-`runtime_unavailable` class. The daemon SDK driver applies one bounded tick per
-scheduler pass and rechecks non-terminal invocations, so single-round and
-multi-round executors share one driving loop.
+through the same registration guard used for built-ins.
+These are trusted, unsandboxed Node.js modules with the capabilities of the
+loading daemon or CLI process.
+Invalid config or module exports fail closed with precise load diagnostics.
+Workflow structural preflight validates third-party step config against the
+registered declaration before workflow-run rows are written.
+An unregistered executor records the honest `runtime_unavailable` class.
+The daemon SDK driver applies one bounded tick per scheduler pass and rechecks
+non-terminal invocations, so single-round and multi-round executors share one
+driving loop.
+Retries preserve earlier rounds under the deterministic invocation and increment
+the attempt, while the driver rejects cross-attempt or non-current round results.
+An independent dispatch-lease heartbeat continues during synchronous ticks, and
+every executor write is fenced against live lease ownership.
 
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
@@ -331,7 +341,8 @@ still resolves the executing live-wrapper profile from
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
-`workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family, portable config, and on-start state) so an operator can inspect the proposed run before approval or execution.
+`workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor identity, portable config, and on-start state) so an operator can inspect the proposed run before approval or execution.
+Configured modules are trusted in-process code, so the no-write guarantee does not cover arbitrary module-initialization behavior.
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
 `--implementation-engine` accepts `gnhf`, the persisted compatibility label `native-goal-loop`, or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
