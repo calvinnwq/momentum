@@ -9,29 +9,29 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import {
   acquireWorkflowLease,
   getWorkflowLease,
-  releaseWorkflowLease
+  releaseWorkflowLease,
 } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
-  startWorkflowStep
+  startWorkflowStep,
 } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
-  updateExecutorInvocationState
+  updateExecutorInvocationState,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorInvocationState } from "../src/core/executors/loop/reducer.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
-  WORKFLOW_RECONCILE_RESULT_STATUS
+  WORKFLOW_RECONCILE_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/reconcile-execute.js";
 
 /**
@@ -66,7 +66,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-workflow-reconcile-exec-")
+    path.join(os.tmpdir(), "momentum-workflow-reconcile-exec-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -81,7 +81,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-480",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -92,17 +92,17 @@ function approveAndClaim(
   stepId: string,
   runId: string = RUN_ID,
   now: number = NOW,
-  holder: string = WORKER
+  holder: string = WORKER,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder,
     leaseExpiresAt: now + 30_000,
-    now
+    now,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -116,10 +116,14 @@ function approveAndClaim(
 function dispatchStep(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): void {
   const claim = approveAndClaim(db, stepId, runId);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
 }
 
 function dispatchInvocationId(stepId: string, runId: string = RUN_ID): string {
@@ -131,32 +135,37 @@ function driveInvocationTerminal(
   db: MomentumDb,
   stepId: string,
   state: ExecutorInvocationState,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): void {
-  updateExecutorInvocationState(db, dispatchInvocationId(stepId, runId), state, {
-    now: TERMINAL_AT,
-    finishedAt: TERMINAL_AT
-  });
+  updateExecutorInvocationState(
+    db,
+    dispatchInvocationId(stepId, runId),
+    state,
+    {
+      now: TERMINAL_AT,
+      finishedAt: TERMINAL_AT,
+    },
+  );
 }
 
 function stepRow(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): { state: string; finishedAt: number | null; resultDigest: string | null } {
   const row = getWorkflowStep(db, runId, stepId);
   if (!row) throw new Error(`step ${stepId} not found`);
   return {
     state: row.state,
     finishedAt: row.finishedAt,
-    resultDigest: row.resultDigest
+    resultDigest: row.resultDigest,
   };
 }
 
 function countInvocations(db: MomentumDb, runId: string = RUN_ID): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?"
+      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -173,7 +182,7 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
   const CLEAN: ReadonlyArray<[ExecutorInvocationState, string]> = [
     ["succeeded", "succeeded"],
     ["failed", "failed"],
-    ["cancelled", "canceled"]
+    ["cancelled", "canceled"],
   ];
 
   for (const [invocationState, stepState] of CLEAN) {
@@ -186,7 +195,7 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
         db,
         runId: RUN_ID,
         stepId: "preflight",
-        now: RECONCILE_AT
+        now: RECONCILE_AT,
       });
 
       expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
@@ -199,7 +208,9 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
       expect(step.resultDigest).toContain("rc2-reconcile");
 
       // The dispatch lease is released (the bounded session is terminal).
-      expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+      expect(
+        getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt,
+      ).not.toBeNull();
 
       // Cached run state was refreshed through the ARCH-08 runtime-state seam.
       expect(runUpdatedAt(db)).toBe(RECONCILE_AT);
@@ -207,9 +218,9 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
       // The seam reads executor evidence but never writes executor rows — the
       // dispatch invocation is left in its terminal state, unchanged.
       expect(countInvocations(db)).toBe(1);
-      expect(loadExecutorInvocation(db, dispatchInvocationId("preflight"))?.state).toBe(
-        invocationState
-      );
+      expect(
+        loadExecutorInvocation(db, dispatchInvocationId("preflight"))?.state,
+      ).toBe(invocationState);
     });
   }
 });
@@ -224,7 +235,7 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
 
     expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.deferred);
@@ -232,7 +243,7 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
     // The dispatch lease is still held: nothing terminalized, nothing released.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
   });
 });
@@ -240,7 +251,7 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
 describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual recovery", () => {
   const UNCLEAN: ReadonlyArray<ExecutorInvocationState> = [
     "blocked",
-    "manual_recovery_required"
+    "manual_recovery_required",
   ];
 
   for (const invocationState of UNCLEAN) {
@@ -253,11 +264,11 @@ describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual
         db,
         runId: RUN_ID,
         stepId: "preflight",
-        now: RECONCILE_AT
+        now: RECONCILE_AT,
       });
 
       expect(result.status).toBe(
-        WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+        WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
       );
 
       // The run is durably parked, not finalized to a clean step terminal.
@@ -275,11 +286,13 @@ describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual
         targetScope: "step",
         stepRunId: "preflight",
         evidence: invocationState,
-        resolvedAt: null
+        resolvedAt: null,
       });
 
       // The dispatch lease is released so the run is not held busy.
-      expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+      expect(
+        getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt,
+      ).not.toBeNull();
     });
   }
 });
@@ -294,7 +307,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     expect(first.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
     const afterFirst = stepRow(db, "preflight");
@@ -303,13 +316,13 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT + 100
+      now: RECONCILE_AT + 100,
     });
     // A re-entry recognises the already-terminal step and makes no second
     // finalization — the immutable terminal record (state + finished_at + digest)
     // is preserved byte-for-byte.
     expect(second.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     const afterSecond = stepRow(db, "preflight");
     expect(afterSecond).toEqual(afterFirst);
@@ -320,7 +333,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
     ).run(dispatchInvocationId("preflight"));
     driveInvocationTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
@@ -330,14 +343,14 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       leaseKind: oldLease.leaseKind,
       holder: oldLease.holder,
       acquiredAt: oldLease.acquiredAt,
-      now: TERMINAL_AT
+      now: TERMINAL_AT,
     });
     const reacquired = acquireWorkflowLease(db, {
       runId: RUN_ID,
       leaseKind: "dispatch",
       holder: "worker-restarted",
       expiresAt: RECONCILE_AT + 30_000,
-      now: RECONCILE_AT + 10
+      now: RECONCILE_AT + 10,
     });
     expect(reacquired.ok).toBe(true);
 
@@ -345,13 +358,55 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT + 20
+      now: RECONCILE_AT + 20,
     });
 
     expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
     const currentLease = getWorkflowLease(db, RUN_ID, "dispatch");
     expect(currentLease?.holder).toBe("worker-restarted");
     expect(currentLease?.releasedAt).toBe(RECONCILE_AT + 20);
+  });
+
+  it("releases the fenced continuation lease for a registered executor", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    db.prepare(
+      "UPDATE executor_invocations SET executor_family = 'fixture-executor' WHERE invocation_id = ?",
+    ).run(dispatchInvocationId("preflight"));
+    driveInvocationTerminal(db, "preflight", "succeeded");
+    const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    if (!oldLease) throw new Error("test setup: missing dispatch lease");
+    releaseWorkflowLease(db, {
+      runId: oldLease.runId,
+      leaseKind: oldLease.leaseKind,
+      holder: oldLease.holder,
+      acquiredAt: oldLease.acquiredAt,
+      now: TERMINAL_AT,
+    });
+    const reacquired = acquireWorkflowLease(db, {
+      runId: RUN_ID,
+      leaseKind: "dispatch",
+      holder: "registered-worker-restarted",
+      expiresAt: RECONCILE_AT + 30_000,
+      now: RECONCILE_AT + 10,
+    });
+    if (!reacquired.ok) throw new Error(reacquired.reason);
+
+    const result = reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      leaseIdentity: {
+        holder: reacquired.lease.holder,
+        acquiredAt: reacquired.lease.acquiredAt,
+      },
+      now: RECONCILE_AT + 20,
+    });
+
+    expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBe(
+      RECONCILE_AT + 20,
+    );
   });
 
   it("does not release a newer dispatch lease while reconciling old terminal evidence", () => {
@@ -362,7 +417,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       runId: RUN_ID,
       stepId: "preflight",
       state: "succeeded",
-      now: TERMINAL_AT
+      now: TERMINAL_AT,
     });
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
     if (!oldLease) throw new Error("test setup: missing dispatch lease");
@@ -371,19 +426,25 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       leaseKind: oldLease.leaseKind,
       holder: oldLease.holder,
       acquiredAt: oldLease.acquiredAt,
-      now: TERMINAL_AT
+      now: TERMINAL_AT,
     });
-    approveAndClaim(db, "implementation", RUN_ID, RECONCILE_AT + 10, "worker-2");
+    approveAndClaim(
+      db,
+      "implementation",
+      RUN_ID,
+      RECONCILE_AT + 10,
+      "worker-2",
+    );
 
     const result = reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT + 20
+      now: RECONCILE_AT + 20,
     });
 
     expect(result.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     const currentLease = getWorkflowLease(db, RUN_ID, "dispatch");
     expect(currentLease?.holder).toBe("worker-2");
@@ -399,13 +460,13 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     const second = reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT + 100
+      now: RECONCILE_AT + 100,
     });
 
     expect(second.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery);
@@ -420,22 +481,22 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       runId: RUN_ID,
       stepId: "preflight",
       state: "succeeded",
-      now: TERMINAL_AT
+      now: TERMINAL_AT,
     });
 
     const result = reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
 
     expect(result.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     expect(stepRow(db, "preflight").state).toBe("succeeded");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(0);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -448,14 +509,14 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     // M9 live wrappers own the full lifecycle directly: startWorkflowStep ->
     // finishWorkflowStep, writing ZERO executor invocation/round rows.
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, "preflight");
     startWorkflowStep(db, { runId: RUN_ID, stepId: "preflight", now: NOW + 1 });
     finishWorkflowStep(db, {
       runId: RUN_ID,
       stepId: "preflight",
       state: "succeeded",
-      now: NOW + 2
+      now: NOW + 2,
     });
     expect(countInvocations(db)).toBe(0);
 
@@ -463,7 +524,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
 
     // The reconciliation seam owns ONLY dispatched steps, keyed on the
@@ -474,7 +535,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     expect(stepRow(db, "preflight").state).toBe("succeeded");
     expect(countInvocations(db)).toBe(0);
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
   });
 
@@ -489,20 +550,20 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
       runId: RUN_ID,
       stepId: "preflight",
       state: "canceled",
-      now: NOW + 2
+      now: NOW + 2,
     });
 
     const result = reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
 
     // The immutable terminal result is preserved; reconciliation does not
     // re-finalize a canceled step to succeeded.
     expect(result.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     expect(stepRow(db, "preflight").state).toBe("canceled");
     // The held dispatch lease is still converged to released so the run is not

@@ -7,12 +7,12 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
-import { buildDispatchedStepExecutorInput } from "../src/core/workflow/dispatch/executor-run.js";
+import { buildDispatchedStepExecutorInput } from "../src/core/workflow/dispatch/executor-context.js";
 import { dispatchWorkflowStepExecutor } from "../src/core/workflow/step/executor.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 import {
   loadDispatchedStepRunProvenance,
-  resolveDispatchedStepExecutorContext
+  resolveDispatchedStepExecutorContext,
 } from "../src/core/workflow/live-wrapper/daemon-exec-context.js";
 import { loadWorkflowRunVerificationConfig } from "../src/core/daemon/workflow-dispatch.js";
 
@@ -55,7 +55,7 @@ function openSeededNativeRun(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: REPO,
     objective: "Dogfood NGX-492",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -64,7 +64,7 @@ describe("resolveDispatchedStepExecutorContext", () => {
   it("derives a native run's session under <repoPath>/.agent-workflows/<runId>/", () => {
     const resolution = resolveDispatchedStepExecutorContext(RUN_ID, {
       repoPath: REPO,
-      sourceArtifactPath: null
+      sourceArtifactPath: null,
     });
 
     expect(resolution.ok).toBe(true);
@@ -74,33 +74,38 @@ describe("resolveDispatchedStepExecutorContext", () => {
       repoPath: REPO,
       runDir,
       resultJsonPath: path.join(runDir, "result.json"),
-      executorLogPath: path.join(runDir, "executor.log")
+      executorLogPath: path.join(runDir, "executor.log"),
     });
   });
 
   it("derives an imported run's session from its source artifact's run dir", () => {
     const sourceArtifactPath =
       "/imported/repo/.agent-workflows/run-imported-007/handoff.json";
-    const resolution = resolveDispatchedStepExecutorContext("run-imported-007", {
-      repoPath: "/imported/repo",
-      sourceArtifactPath
-    });
+    const resolution = resolveDispatchedStepExecutorContext(
+      "run-imported-007",
+      {
+        repoPath: "/imported/repo",
+        sourceArtifactPath,
+      },
+    );
 
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
     const runDir = path.dirname(sourceArtifactPath);
     expect(resolution.exec.runDir).toBe(runDir);
     expect(resolution.exec.repoPath).toBe("/imported/repo");
-    expect(resolution.exec.resultJsonPath).toBe(path.join(runDir, "result.json"));
+    expect(resolution.exec.resultJsonPath).toBe(
+      path.join(runDir, "result.json"),
+    );
     expect(resolution.exec.executorLogPath).toBe(
-      path.join(runDir, "executor.log")
+      path.join(runDir, "executor.log"),
     );
   });
 
   it("refuses honestly when the run has no repo_path (no fabricated working dir)", () => {
     const resolution = resolveDispatchedStepExecutorContext(RUN_ID, {
       repoPath: null,
-      sourceArtifactPath: null
+      sourceArtifactPath: null,
     });
 
     expect(resolution).toEqual({ ok: false, reason: "missing_repo_path" });
@@ -109,7 +114,7 @@ describe("resolveDispatchedStepExecutorContext", () => {
   it("treats a blank repo_path as missing rather than deriving from it", () => {
     const resolution = resolveDispatchedStepExecutorContext(RUN_ID, {
       repoPath: "   ",
-      sourceArtifactPath: null
+      sourceArtifactPath: null,
     });
 
     expect(resolution).toEqual({ ok: false, reason: "missing_repo_path" });
@@ -118,20 +123,20 @@ describe("resolveDispatchedStepExecutorContext", () => {
   it("treats a blank source_artifact_path as absent and falls back to the native layout", () => {
     const resolution = resolveDispatchedStepExecutorContext(RUN_ID, {
       repoPath: REPO,
-      sourceArtifactPath: "   "
+      sourceArtifactPath: "   ",
     });
 
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
     expect(resolution.exec.runDir).toBe(
-      path.join(REPO, ".agent-workflows", RUN_ID)
+      path.join(REPO, ".agent-workflows", RUN_ID),
     );
   });
 
   it("produces a context that builds a VALID executor input (passes dispatch validation)", () => {
     const resolution = resolveDispatchedStepExecutorContext(RUN_ID, {
       repoPath: REPO,
-      sourceArtifactPath: null
+      sourceArtifactPath: null,
     });
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
@@ -140,7 +145,7 @@ describe("resolveDispatchedStepExecutorContext", () => {
       "implementation",
       RUN_ID,
       "step-impl",
-      resolution.exec
+      resolution.exec,
     );
     // The real registry with no profile resolves every kind to the honest
     // `runtime_unavailable` adapter. A `runtime_unavailable` (not `invalid_input`)
@@ -149,7 +154,7 @@ describe("resolveDispatchedStepExecutorContext", () => {
     const result = dispatchWorkflowStepExecutor(
       "implementation",
       input,
-      buildRealWorkflowStepExecutorRegistry()
+      buildRealWorkflowStepExecutorRegistry(),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -165,7 +170,7 @@ describe("loadDispatchedStepRunProvenance", () => {
       const provenance = loadDispatchedStepRunProvenance(db, RUN_ID);
       expect(provenance).toEqual({
         repoPath: REPO,
-        sourceArtifactPath: null
+        sourceArtifactPath: null,
       });
     } finally {
       db.close();
@@ -178,13 +183,13 @@ describe("loadDispatchedStepRunProvenance", () => {
       const sourceArtifactPath =
         "/imported/.agent-workflows/run-execctx-001/handoff.json";
       db.prepare(
-        "UPDATE workflow_runs SET source_artifact_path = ? WHERE id = ?"
+        "UPDATE workflow_runs SET source_artifact_path = ? WHERE id = ?",
       ).run(sourceArtifactPath, RUN_ID);
 
       const provenance = loadDispatchedStepRunProvenance(db, RUN_ID);
       expect(provenance).toEqual({
         repoPath: REPO,
-        sourceArtifactPath
+        sourceArtifactPath,
       });
     } finally {
       db.close();
@@ -194,7 +199,9 @@ describe("loadDispatchedStepRunProvenance", () => {
   it("returns undefined for an unknown run", () => {
     const db = openSeededNativeRun();
     try {
-      expect(loadDispatchedStepRunProvenance(db, "run-missing")).toBeUndefined();
+      expect(
+        loadDispatchedStepRunProvenance(db, "run-missing"),
+      ).toBeUndefined();
     } finally {
       db.close();
     }
@@ -206,11 +213,14 @@ describe("loadDispatchedStepRunProvenance", () => {
       const provenance = loadDispatchedStepRunProvenance(db, RUN_ID);
       expect(provenance).toBeDefined();
       if (!provenance) return;
-      const resolution = resolveDispatchedStepExecutorContext(RUN_ID, provenance);
+      const resolution = resolveDispatchedStepExecutorContext(
+        RUN_ID,
+        provenance,
+      );
       expect(resolution.ok).toBe(true);
       if (!resolution.ok) return;
       expect(resolution.exec.runDir).toBe(
-        path.join(REPO, ".agent-workflows", RUN_ID)
+        path.join(REPO, ".agent-workflows", RUN_ID),
       );
     } finally {
       db.close();
@@ -230,29 +240,38 @@ describe("loadWorkflowRunVerificationConfig", () => {
   function attachGoal(
     db: MomentumDb,
     verification: string,
-    timeoutSec: number
+    timeoutSec: number,
   ): void {
     db.prepare(
       `INSERT INTO goals (id, title, branch, verification, verification_timeout_sec, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("goal-1", "Goal", "main", verification, timeoutSec, "/tmp/goal-art", NOW, NOW);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "goal-1",
+      "Goal",
+      "main",
+      verification,
+      timeoutSec,
+      "/tmp/goal-art",
+      NOW,
+      NOW,
+    );
     db.prepare("UPDATE workflow_runs SET goal_id = ? WHERE id = ?").run(
       "goal-1",
-      RUN_ID
+      RUN_ID,
     );
   }
 
   it("falls back to the repo MOMENTUM.md verification for a native run with no goal", () => {
     const db = openSeededNativeRun();
     const repoDir = makeRepoDir(
-      "---\nverification:\n  - pnpm test\n  - pnpm typecheck\nverification_timeout_sec: 120\n---\n"
+      "---\nverification:\n  - pnpm test\n  - pnpm typecheck\nverification_timeout_sec: 120\n---\n",
     );
     try {
       const config = loadWorkflowRunVerificationConfig(db, RUN_ID, repoDir);
       expect(config).toEqual({
         ok: true,
         commands: ["pnpm test", "pnpm typecheck"],
-        timeoutSec: 120
+        timeoutSec: 120,
       });
     } finally {
       db.close();
@@ -286,7 +305,7 @@ describe("loadWorkflowRunVerificationConfig", () => {
   it("prefers goal-backed verification over the repo policy", () => {
     const db = openSeededNativeRun();
     const repoDir = makeRepoDir(
-      "---\nverification:\n  - pnpm policy-test\nverification_timeout_sec: 120\n---\n"
+      "---\nverification:\n  - pnpm policy-test\nverification_timeout_sec: 120\n---\n",
     );
     try {
       attachGoal(db, JSON.stringify(["pnpm goal-test"]), 300);
@@ -294,7 +313,7 @@ describe("loadWorkflowRunVerificationConfig", () => {
       expect(config).toEqual({
         ok: true,
         commands: ["pnpm goal-test"],
-        timeoutSec: 300
+        timeoutSec: 300,
       });
     } finally {
       db.close();
@@ -307,7 +326,7 @@ describe("loadWorkflowRunVerificationConfig", () => {
       const config = loadWorkflowRunVerificationConfig(
         db,
         "run-missing",
-        makeRepoDir()
+        makeRepoDir(),
       );
       expect(config.ok).toBe(false);
       if (config.ok) return;
@@ -321,7 +340,11 @@ describe("loadWorkflowRunVerificationConfig", () => {
     const db = openSeededNativeRun();
     try {
       attachGoal(db, "{not json", 300);
-      const config = loadWorkflowRunVerificationConfig(db, RUN_ID, makeRepoDir());
+      const config = loadWorkflowRunVerificationConfig(
+        db,
+        RUN_ID,
+        makeRepoDir(),
+      );
       expect(config.ok).toBe(false);
       if (config.ok) return;
       expect(config.reason).toContain("verification_config_invalid");

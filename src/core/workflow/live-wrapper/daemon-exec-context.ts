@@ -1,9 +1,8 @@
 /**
  * Daemon-lane dispatched-step execution-context derivation.
  *
- * The live-wrapper dispatch composition (`dispatch/live-wrapper.ts`) runs a
- * dispatched step's executor through `executeAndReconcileDispatchedWorkflowStep`
- * (`dispatch/executor-run.ts`), which needs a {@link DispatchedStepExecutorContext}:
+ * The registered executor host-binding resolver needs a
+ * {@link DispatchedStepExecutorContext}:
  * the repo the bounded session operates on, its working directory, and the
  * result / log paths. That wrapper takes the deriver by injection precisely so the
  * daemon lane owns the run-dir layout decision; iterations 3 and 4 deferred it here.
@@ -40,7 +39,7 @@
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
-import type { DispatchedStepExecutorContext } from "../dispatch/executor-run.js";
+import type { DispatchedStepExecutorContext } from "../dispatch/executor-context.js";
 
 /**
  * The run-provenance fields the deriver reads from a durable `workflow_runs` row.
@@ -74,7 +73,7 @@ function nonBlank(value: string | null): value is string {
  */
 export function resolveDispatchedStepExecutorContext(
   runId: string,
-  provenance: DispatchedStepRunProvenance
+  provenance: DispatchedStepRunProvenance,
 ): DispatchedStepExecutorContextResolution {
   if (!nonBlank(provenance.repoPath)) {
     return { ok: false, reason: "missing_repo_path" };
@@ -91,8 +90,8 @@ export function resolveDispatchedStepExecutorContext(
       repoPath,
       runDir,
       resultJsonPath: path.join(runDir, "result.json"),
-      executorLogPath: path.join(runDir, "executor.log")
-    }
+      executorLogPath: path.join(runDir, "executor.log"),
+    },
   };
 }
 
@@ -104,11 +103,11 @@ export function resolveDispatchedStepExecutorContext(
  */
 export function loadDispatchedStepRunProvenance(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): DispatchedStepRunProvenance | undefined {
   const row = db
     .prepare(
-      "SELECT repo_path, source_artifact_path FROM workflow_runs WHERE id = ?"
+      "SELECT repo_path, source_artifact_path FROM workflow_runs WHERE id = ?",
     )
     .get(runId) as
     | { repo_path: string | null; source_artifact_path: string | null }
@@ -116,6 +115,6 @@ export function loadDispatchedStepRunProvenance(
   if (row === undefined) return undefined;
   return {
     repoPath: row.repo_path,
-    sourceArtifactPath: row.source_artifact_path
+    sourceArtifactPath: row.source_artifact_path,
   };
 }

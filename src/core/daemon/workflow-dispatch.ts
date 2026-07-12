@@ -8,57 +8,102 @@ import type { LinearExternalUpdateClient } from "../../adapters/linear-external-
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 import { inspectRepo } from "../repo/guard.js";
 import {
+  acquireRepoLock,
+  getActiveRepoLockForJob,
+  markRepoLockNeedsManualRecovery,
+  releaseRepoLock,
+  updateRepoLockHeartbeat,
+} from "../repo/locks.js";
+import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplySuccess,
-  type ExecuteExternalApplyDeps
+  type ExecuteExternalApplyDeps,
 } from "../intent/apply-execute.js";
 import { getLatestIntentApplyAudit } from "../intent/apply-audits.js";
 import {
   loadMomentumPolicy,
   resolveIntentApplyPolicy,
-  type UpdateIntentApplyPolicy
+  type UpdateIntentApplyPolicy,
 } from "../intent/policy.js";
 import {
   createUpdateIntent,
   listUpdateIntents,
-  type UpdateIntent
+  type UpdateIntent,
 } from "../intent/update-intents.js";
 import {
   getSourceItemById,
   listSourceItems,
-  type SourceItem
+  type SourceItem,
 } from "../source/items.js";
 import { DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS } from "./loop.js";
 import {
+  DAEMON_EXECUTOR_CONFIG_ENV_VAR,
+  resolveDaemonExecutorRegistry,
+} from "../executors/sdk/daemon-config.js";
+import {
+  LiveStepSdkExecutor,
+  liveStepBuiltInConfigSchema,
+  type LiveStepSdkHostBindings,
+} from "../executors/live-step/sdk-executor.js";
+import type { Executor } from "../executors/sdk/types.js";
+import {
   loadDispatchedStepRunProvenance,
-  resolveDispatchedStepExecutorContext
+  resolveDispatchedStepExecutorContext,
 } from "../workflow/live-wrapper/daemon-exec-context.js";
 import {
   readDaemonLiveWrapperProfileSource,
   resolveDaemonLiveWrapperProfile,
-  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR
+  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR,
 } from "../workflow/live-wrapper/daemon-profile.js";
 import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dispatch/dogfood.js";
 import {
   createExternalApplyWorkflowDispatch,
-  type DispatchedExternalApplyContextResolution
+  type DispatchedExternalApplyContextResolution,
 } from "../workflow/dispatch/external-apply-dispatch.js";
-import { createLiveWrapperWorkflowDispatch } from "../workflow/dispatch/live-wrapper.js";
+import {
+  createRegisteredExecutorWorkflowDispatch,
+  RegisteredExecutorHostBindingsError,
+} from "../workflow/dispatch/registered-executor.js";
 import { createSubworkflowWorkflowDispatch } from "../workflow/dispatch/subworkflow-dispatch.js";
 import { deriveDispatchedSubworkflowContext } from "../workflow/route/subworkflow-dispatch-context.js";
 import {
   planLinearRefreshAlreadyAppliedReconciliation,
   planLinearRefreshLifecycle,
-  type LinearRefreshLifecyclePlan
+  type LinearRefreshLifecyclePlan,
 } from "../workflow/dispatch/linear-refresh-lifecycle.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step/executor-real-adapters.js";
+import {
+  isWorkflowExecutorFamily,
+  WORKFLOW_EXECUTOR_FAMILIES,
+} from "../workflow/definition/definition.js";
+import { resolveWorkflowStepExecutorRuntime } from "../workflow/dispatch/persist.js";
+import {
+  buildDispatchedStepExecutorInput,
+  type DispatchedStepRepoSafetyContext,
+} from "../workflow/dispatch/executor-context.js";
+import {
+  deriveDispatchInvocationId,
+  resolveWorkflowStepDispatchRouteSelection,
+} from "../workflow/dispatch/execute.js";
+import {
+  listExecutorCheckpointsForRound,
+  listExecutorRoundsForInvocation,
+  loadExecutorInvocation,
+} from "../executors/loop/persist.js";
+import { heartbeatWorkflowLease } from "../workflow/leases.js";
+import { getWorkflowStep } from "../workflow/step/transitions.js";
+import { dispatchWorkflowStepExecutor } from "../workflow/step/executor.js";
+import {
+  WORKFLOW_RECOVERY_CLASSIFICATIONS,
+  writeWorkflowRecoveryArtifactInRunDir,
+  type WorkflowRecoveryClassification,
+} from "../workflow/recovery/artifact.js";
 import type {
   AsyncWorkflowStepDispatch,
-  WorkflowStepDispatch
+  WorkflowStepDispatch,
 } from "../workflow/dispatch/scheduler.js";
-import type { DispatchedStepRepoSafetyContext } from "../workflow/dispatch/executor-run.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
   apiKey: string | null;
@@ -72,10 +117,10 @@ export type LinearExternalUpdateClientFactoryInput = {
 
 export type DaemonWorkflowDispatchDeps = {
   buildLinearExternalUpdateClient?: (
-    input: LinearExternalUpdateClientFactoryInput
+    input: LinearExternalUpdateClientFactoryInput,
   ) => LinearExternalUpdateClient;
   buildLinearIssueRefreshClient?: (
-    input: LinearIssueRefreshClientFactoryInput
+    input: LinearIssueRefreshClientFactoryInput,
   ) => LinearIssueRefreshClient | null;
 };
 
@@ -86,121 +131,493 @@ export type DaemonWorkflowDispatchResolution =
 export function resolveDaemonWorkflowStepDispatch(
   env: Record<string, string | undefined>,
   baseDispatch: WorkflowStepDispatch,
-  deps: DaemonWorkflowDispatchDeps
+  deps: DaemonWorkflowDispatchDeps,
 ): DaemonWorkflowDispatchResolution {
   const profile = resolveDaemonLiveWrapperProfile(env, {
-    loadSource: readDaemonLiveWrapperProfileSource
+    loadSource: readDaemonLiveWrapperProfileSource,
   });
 
   if (profile.status === "invalid") {
     return {
       ok: false,
-      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`
+      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`,
+    };
+  }
+  const builtIns =
+    profile.status === "resolved" ? buildProfileBackedSdkExecutors() : [];
+  const executorConfig = resolveDaemonExecutorRegistry(env, builtIns);
+  if (executorConfig.status === "invalid") {
+    return {
+      ok: false,
+      message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} (${executorConfig.source}): ${executorConfig.message}`,
     };
   }
 
+  let legacy: DaemonWorkflowDispatchResolution;
   if (profile.status === "not_configured") {
-    return {
+    legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
         withExternalApplyDispatch(
           resolveDogfoodDaemonWorkflowDispatch(env, baseDispatch),
           env,
-          deps
-        )
-      )
+          deps,
+        ),
+      ),
+    };
+  } else {
+    const liveRegistry = buildRealWorkflowStepExecutorRegistry({
+      profile: profile.profile,
+    });
+    const registry = new Map(
+      builtIns.map((executor) => [executor.name, executor]),
+    );
+    const resolveHostBindings = createLiveStepHostBindingsResolver(
+      env,
+      liveRegistry,
+    );
+    legacy = {
+      ok: true,
+      dispatch: withSubworkflowDispatch(
+        withExternalApplyDispatch(
+          createRegisteredExecutorWorkflowDispatch(baseDispatch, {
+            registry,
+            resolveHostBindings,
+          }),
+          env,
+          deps,
+        ),
+      ),
+      leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile),
+    };
+  }
+  if (!legacy.ok) return legacy;
+
+  if (executorConfig.status === "not_configured") {
+    const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
+      baseDispatch,
+      { registry: new Map() },
+    );
+    return {
+      ok: true,
+      dispatch: (claim, context) => {
+        const runtime = resolveWorkflowStepExecutorRuntime(context.db, claim);
+        return runtime.ok && !isWorkflowExecutorFamily(runtime.executorName)
+          ? unavailableDispatch(claim, context)
+          : legacy.dispatch(claim, context);
+      },
+      ...(legacy.leaseDurationMs !== undefined
+        ? { leaseDurationMs: legacy.leaseDurationMs }
+        : {}),
     };
   }
 
-  const registry = buildRealWorkflowStepExecutorRegistry({
-    profile: profile.profile
-  });
+  let registeredDispatch: AsyncWorkflowStepDispatch | undefined;
+  const profileHostBindings =
+    profile.status === "resolved"
+      ? createLiveStepHostBindingsResolver(
+          env,
+          buildRealWorkflowStepExecutorRegistry({ profile: profile.profile }),
+        )
+      : undefined;
   return {
     ok: true,
-    dispatch: withSubworkflowDispatch(
-      withExternalApplyDispatch(
-        createLiveWrapperWorkflowDispatch(baseDispatch, {
-          registry,
-          deriveExec: (claim, context) => {
-            const provenance = loadDispatchedStepRunProvenance(
-              context.db,
-              claim.runId
-            );
-            if (provenance === undefined) {
-              return { ok: false, reason: "run_not_found" };
-            }
-            const resolved = resolveDispatchedStepExecutorContext(
-              claim.runId,
-              provenance
-            );
-            if (resolved.ok) {
-              const repoSafety = resolveDaemonDispatchedRepoSafety(
-                context.db,
-                claim.runId,
-                resolved.exec.repoPath,
-                resolved.exec.runDir
-              );
-              if (!repoSafety.ok) {
-                const { recoveryArtifact, ...repoSafetyFailure } = repoSafety;
-                return {
-                  ...repoSafetyFailure,
-                  ...(recoveryArtifact === null
-                    ? {}
-                    : {
-                        recoveryArtifact: recoveryArtifact ?? {
-                          runDir: resolved.exec.runDir,
-                          repoPath: resolved.exec.repoPath
-                        }
-                      })
-                };
-              }
-              try {
-                fs.mkdirSync(repoSafety.runDir, { recursive: true });
-              } catch (error) {
-                return {
-                  ok: false,
-                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
-                  recoveryArtifact: {
-                    runDir: repoSafety.runDir,
-                    repoPath: repoSafety.repoPath
-                  }
-                };
-              }
-              return {
-                ok: true,
-                exec: {
-                  ...resolved.exec,
-                  repoPath: repoSafety.repoPath,
-                  runDir: repoSafety.runDir,
-                  resultJsonPath: path.join(
-                    repoSafety.runDir,
-                    path.basename(resolved.exec.resultJsonPath)
-                  ),
-                  executorLogPath: path.join(
-                    repoSafety.runDir,
-                    path.basename(resolved.exec.executorLogPath)
-                  ),
-                  repoSafety: repoSafety.repoSafety,
-                  env
-                }
-              };
-            }
-            return resolved;
-          }
-        }),
-        env,
-        deps
-      )
-    ),
-    leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
+    dispatch: async (claim, context) => {
+      const loaded = await executorConfig.load();
+      const unavailableReasons = new Map(
+        loaded.ok
+          ? []
+          : loaded.diagnostics.map(
+              (item) =>
+                [item.executor, `${item.code}: ${item.message}`] as const,
+            ),
+      );
+      const runtime = resolveWorkflowStepExecutorRuntime(context.db, claim);
+      if (
+        runtime.ok &&
+        (loaded.registry.has(runtime.executorName) ||
+          unavailableReasons.has(runtime.executorName) ||
+          !isWorkflowExecutorFamily(runtime.executorName))
+      ) {
+        registeredDispatch ??= createRegisteredExecutorWorkflowDispatch(
+          baseDispatch,
+          {
+            registry: loaded.registry,
+            unavailableReasons,
+            ...(profileHostBindings !== undefined
+              ? { resolveHostBindings: profileHostBindings }
+              : {}),
+          },
+        );
+        return registeredDispatch(claim, context);
+      }
+      return legacy.dispatch(claim, context);
+    },
+    ...(legacy.leaseDurationMs !== undefined
+      ? { leaseDurationMs: legacy.leaseDurationMs }
+      : {}),
   };
+}
+
+function buildProfileBackedSdkExecutors(): Executor[] {
+  return WORKFLOW_EXECUTOR_FAMILIES.filter(
+    (name) => name !== "external-apply" && name !== "subworkflow",
+  ).map(
+    (name) => new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
+  );
+}
+
+function createLiveStepHostBindingsResolver(
+  env: Record<string, string | undefined>,
+  liveRegistry: ReturnType<typeof buildRealWorkflowStepExecutorRegistry>,
+) {
+  return (input: {
+    claim: Parameters<AsyncWorkflowStepDispatch>[0];
+    context: Parameters<AsyncWorkflowStepDispatch>[1];
+    executor: Executor;
+    executorName: string;
+    config: Readonly<Record<string, unknown>>;
+  }): LiveStepSdkHostBindings | Record<string, never> => {
+    if (!(input.executor instanceof LiveStepSdkExecutor)) return {};
+    const { claim, context } = input;
+    const provenance = loadDispatchedStepRunProvenance(context.db, claim.runId);
+    if (provenance === undefined) {
+      throw new RegisteredExecutorHostBindingsError(
+        "runtime_unavailable",
+        "run_not_found",
+      );
+    }
+    const resolved = resolveDispatchedStepExecutorContext(
+      claim.runId,
+      provenance,
+    );
+    if (!resolved.ok) {
+      throw new RegisteredExecutorHostBindingsError(
+        "runtime_unavailable",
+        resolved.reason,
+      );
+    }
+    const invocation = loadExecutorInvocation(
+      context.db,
+      deriveDispatchInvocationId(claim.runId, claim.stepId),
+    );
+    if (invocation === undefined)
+      throw new Error("dispatch_invocation_not_found");
+    if (
+      hasCompletedLiveStepMechanism(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      )
+    ) {
+      const settleRepoOwnership = recoverCompletedLiveStepRepoOwnership(
+        context.db,
+        claim.runId,
+        claim.stepId,
+        invocation.attempt,
+        context.now,
+      );
+      return {
+        repoPath: resolved.exec.repoPath,
+        run: () => {
+          throw new Error(
+            "completed live-step replay attempted to rerun its mechanism",
+          );
+        },
+        ...(settleRepoOwnership !== undefined ? { settleRepoOwnership } : {}),
+      };
+    }
+    const safety = resolveDaemonDispatchedRepoSafety(
+      context.db,
+      claim.runId,
+      resolved.exec.repoPath,
+      resolved.exec.runDir,
+    );
+    if (!safety.ok) {
+      if (safety.recoveryArtifact !== null) {
+        writeLiveStepHostRecoveryArtifact({
+          runId: claim.runId,
+          stepId: claim.stepId,
+          runDir: resolved.exec.runDir,
+          repoPath: resolved.exec.repoPath,
+          recoveryCode: safety.recoveryCode,
+          reason: safety.reason,
+          now: context.now,
+        });
+      }
+      throw new RegisteredExecutorHostBindingsError(
+        safety.recoveryCode,
+        safety.reason,
+      );
+    }
+    const attempt = invocation.attempt;
+    const runDir =
+      attempt <= 1
+        ? safety.runDir
+        : path.join(safety.runDir, `attempt-${attempt}`);
+    try {
+      fs.mkdirSync(runDir, { recursive: true });
+    } catch (error) {
+      throw new RegisteredExecutorHostBindingsError(
+        "runtime_unavailable",
+        `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const resultJsonPath = path.join(
+      runDir,
+      path.basename(resolved.exec.resultJsonPath),
+    );
+    const executorLogPath = path.join(
+      runDir,
+      path.basename(resolved.exec.executorLogPath),
+    );
+    const step = getWorkflowStep(context.db, claim.runId, claim.stepId);
+    if (step === undefined) throw new Error("workflow_step_not_found");
+    const selection = resolveWorkflowStepDispatchRouteSelection(
+      context.db,
+      claim,
+    );
+    if (!selection.ok) throw new Error(selection.reason);
+    const repoOwnership = acquireLiveStepRepoOwnership({
+      claim,
+      context,
+      repoPath: safety.repoPath,
+      attempt,
+      repoSafety: safety.repoSafety,
+    });
+    if (!repoOwnership.ok) {
+      throw new RegisteredExecutorHostBindingsError(
+        "repo_lock_lost",
+        repoOwnership.error,
+      );
+    }
+    const repoSafety = {
+      ...safety.repoSafety,
+      verificationLogPath: path.join(
+        runDir,
+        path.basename(safety.repoSafety.verificationLogPath),
+      ),
+      beforeGitMutation: repoOwnership.authorizeMutation,
+    };
+    const executorInput = buildDispatchedStepExecutorInput(
+      step.kind,
+      claim.runId,
+      claim.stepId,
+      {
+        repoPath: safety.repoPath,
+        runDir,
+        resultJsonPath,
+        executorLogPath,
+        attempt,
+        env,
+        config: { ...input.config },
+      },
+      selection.selection,
+    );
+    return {
+      repoPath: safety.repoPath,
+      repoSafety,
+      run: () =>
+        dispatchWorkflowStepExecutor(step.kind, executorInput, liveRegistry),
+      settleRepoOwnership: repoOwnership.settle,
+    };
+  };
+}
+
+function recoverCompletedLiveStepRepoOwnership(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  attempt: number,
+  now: number,
+): ((provenClean: boolean) => void) | undefined {
+  const lock = getActiveRepoLockForJob(
+    db,
+    deriveDispatchInvocationId(runId, stepId),
+  );
+  if (
+    lock === undefined ||
+    lock.goal_id !== runId ||
+    lock.iteration !== attempt
+  ) {
+    return undefined;
+  }
+  let settled = false;
+  return (provenClean) => {
+    if (settled) return;
+    settled = true;
+    if (provenClean) {
+      releaseRepoLock(db, { lockId: lock.id, now });
+    } else {
+      markRepoLockNeedsManualRecovery(db, {
+        lockId: lock.id,
+        now,
+        recoveryStatus: `completed executor mechanism for ${runId}/${stepId} requires manual repository recovery`,
+      });
+    }
+  };
+}
+
+function hasCompletedLiveStepMechanism(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): boolean {
+  return listExecutorRoundsForInvocation(db, invocationId)
+    .filter((round) => round.attempt === attempt)
+    .some((round) =>
+      listExecutorCheckpointsForRound(db, round.roundId).some(
+        (checkpoint) => checkpoint.stage === "mechanism_completed",
+      ),
+    );
+}
+
+function writeLiveStepHostRecoveryArtifact(input: {
+  runId: string;
+  stepId: string;
+  runDir: string;
+  repoPath: string;
+  recoveryCode: string;
+  reason: string;
+  now: number;
+}): void {
+  if (
+    !(WORKFLOW_RECOVERY_CLASSIFICATIONS as readonly string[]).includes(
+      input.recoveryCode,
+    )
+  ) {
+    return;
+  }
+  try {
+    writeWorkflowRecoveryArtifactInRunDir({
+      runDir: input.runDir,
+      input: {
+        runId: input.runId,
+        stepId: input.stepId,
+        classification: input.recoveryCode as WorkflowRecoveryClassification,
+        reason: input.reason,
+        recommendedNextAction: {
+          code: `investigate_${input.recoveryCode}`,
+          detail:
+            "Inspect the recorded executor and repository evidence, repair the blocking condition, then clear recovery explicitly.",
+          stepId: input.stepId,
+        },
+        evidencePointers: [],
+        repoPath: input.repoPath,
+        classifiedAt: input.now,
+      },
+    });
+  } catch {
+    // Durable recovery state remains authoritative if artifact rendering fails.
+  }
+}
+
+type LiveStepRepoOwnership =
+  | {
+      ok: true;
+      authorizeMutation: () => { ok: true } | { ok: false; error: string };
+      settle: (provenClean: boolean) => void;
+    }
+  | { ok: false; error: string };
+
+function acquireLiveStepRepoOwnership(input: {
+  claim: Parameters<AsyncWorkflowStepDispatch>[0];
+  context: Parameters<AsyncWorkflowStepDispatch>[1];
+  repoPath: string;
+  attempt: number;
+  repoSafety: DispatchedStepRepoSafetyContext;
+}): LiveStepRepoOwnership {
+  const { claim, context, repoPath, attempt, repoSafety } = input;
+  const wallClockOffset = context.now - Date.now();
+  const now = () => Date.now() + wallClockOffset;
+  const extensionMs = liveStepOwnershipExtensionMs(claim, repoSafety);
+  const acquiredAt = now();
+  const acquired = acquireRepoLock(context.db, {
+    repoRoot: repoSafety.repoRoot ?? repoPath,
+    holder: context.workerId,
+    goalId: claim.runId,
+    iteration: attempt,
+    jobId: deriveDispatchInvocationId(claim.runId, claim.stepId),
+    leaseExpiresAt: acquiredAt + extensionMs,
+    now: acquiredAt,
+  });
+  if (!acquired.ok) {
+    return {
+      ok: false,
+      error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
+    };
+  }
+  let settled = false;
+  return {
+    ok: true,
+    authorizeMutation: () => {
+      const mutationAt = now();
+      const heartbeat = heartbeatWorkflowLease(context.db, {
+        runId: claim.lease.runId,
+        leaseKind: claim.lease.leaseKind,
+        holder: claim.lease.holder,
+        acquiredAt: claim.lease.acquiredAt,
+        heartbeatAt: mutationAt,
+        expiresAt: mutationAt + extensionMs,
+      });
+      if (!heartbeat.ok) {
+        return {
+          ok: false,
+          error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`,
+        };
+      }
+      const lockBeat = updateRepoLockHeartbeat(context.db, {
+        lockId: acquired.lockId,
+        heartbeatAt: mutationAt,
+        leaseExpiresAt: mutationAt + extensionMs,
+      });
+      return lockBeat.ok
+        ? { ok: true }
+        : {
+            ok: false,
+            error: `repo lock for ${claim.runId}/${claim.stepId} is no longer active`,
+          };
+    },
+    settle: (provenClean) => {
+      if (settled) return;
+      settled = true;
+      const settledAt = now();
+      if (provenClean) {
+        releaseRepoLock(context.db, {
+          lockId: acquired.lockId,
+          now: settledAt,
+        });
+      } else {
+        markRepoLockNeedsManualRecovery(context.db, {
+          lockId: acquired.lockId,
+          now: settledAt,
+          recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
+        });
+      }
+    },
+  };
+}
+
+function liveStepOwnershipExtensionMs(
+  claim: Parameters<AsyncWorkflowStepDispatch>[0],
+  repoSafety: DispatchedStepRepoSafetyContext,
+): number {
+  const leaseDurationMs = Math.max(
+    1,
+    claim.lease.expiresAt - claim.lease.acquiredAt,
+  );
+  const verificationWindowMs =
+    Math.max(1, repoSafety.verificationCommands.length) *
+    repoSafety.verificationTimeoutSec *
+    1000;
+  return leaseDurationMs + verificationWindowMs;
 }
 
 function resolveDaemonDispatchedRepoSafety(
   db: MomentumDb,
   runId: string,
   repoPath: string,
-  runDir: string
+  runDir: string,
 ):
   | {
       ok: true;
@@ -223,16 +640,20 @@ function resolveDaemonDispatchedRepoSafety(
     return {
       ok: false,
       reason: `repo_safety_unavailable: ${repo.error}`,
-      recoveryCode
+      recoveryCode,
     };
   }
   const canonicalRunDir = canonicalizeRunDir(repoPath, repo.repoPath, runDir);
   const artifactSafety = verifyRepoLocalRunDirIgnored(
     repo.repoPath,
-    canonicalRunDir
+    canonicalRunDir,
   );
   if (!artifactSafety.ok) return artifactSafety;
-  const verification = loadWorkflowRunVerificationConfig(db, runId, repo.repoPath);
+  const verification = loadWorkflowRunVerificationConfig(
+    db,
+    runId,
+    repo.repoPath,
+  );
   if (!verification.ok) {
     // Missing run row / malformed goal verification / malformed MOMENTUM.md
     // are invalid setup inputs needing operator or config repair, never the
@@ -240,7 +661,7 @@ function resolveDaemonDispatchedRepoSafety(
     return {
       ok: false,
       reason: verification.reason,
-      recoveryCode: "invalid_input"
+      recoveryCode: "invalid_input",
     };
   }
   return {
@@ -252,15 +673,15 @@ function resolveDaemonDispatchedRepoSafety(
       baseHead: repo.head,
       verificationCommands: verification.commands,
       verificationTimeoutSec: verification.timeoutSec,
-      verificationLogPath: path.join(canonicalRunDir, "verification.log")
-    }
+      verificationLogPath: path.join(canonicalRunDir, "verification.log"),
+    },
   };
 }
 
 function canonicalizeRunDir(
   requestedRepoPath: string,
   canonicalRepoPath: string,
-  runDir: string
+  runDir: string,
 ): string {
   const requestedRepo = path.resolve(requestedRepoPath);
   const resolvedRunDir = path.resolve(runDir);
@@ -277,7 +698,7 @@ function canonicalizeRunDir(
 
 function verifyRepoLocalRunDirIgnored(
   repoPath: string,
-  runDir: string
+  runDir: string,
 ):
   | { ok: true }
   | {
@@ -296,14 +717,14 @@ function verifyRepoLocalRunDirIgnored(
       reason:
         "repo_safety_unavailable: run artifact directory resolves to the repository root",
       recoveryCode: "invalid_input",
-      recoveryArtifact: null
+      recoveryArtifact: null,
     };
   }
   try {
     execFileSync(
       "git",
       ["-C", repoPath, "check-ignore", "-q", "--", relativeRunDir],
-      { stdio: "ignore" }
+      { stdio: "ignore" },
     );
     return { ok: true };
   } catch (error) {
@@ -316,14 +737,14 @@ function verifyRepoLocalRunDirIgnored(
         ok: false,
         reason: `repo_safety_unavailable: run artifact directory ${relativeRunDir} is inside the repository but is not ignored by git`,
         recoveryCode: "invalid_input",
-        recoveryArtifact: null
+        recoveryArtifact: null,
       };
     }
     const detail = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
       reason: `repo_safety_unavailable: git check-ignore failed for run artifact directory ${relativeRunDir}: ${detail}`,
-      recoveryCode: "git_failed"
+      recoveryCode: "git_failed",
     };
   }
 }
@@ -346,7 +767,7 @@ export const DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC = 900;
 export function loadWorkflowRunVerificationConfig(
   db: MomentumDb,
   runId: string,
-  repoPath: string
+  repoPath: string,
 ):
   | { ok: true; commands: string[]; timeoutSec: number }
   | { ok: false; reason: string } {
@@ -356,7 +777,7 @@ export function loadWorkflowRunVerificationConfig(
               goals.verification_timeout_sec AS verificationTimeoutSec
          FROM workflow_runs
          LEFT JOIN goals ON goals.id = workflow_runs.goal_id
-        WHERE workflow_runs.id = ?`
+        WHERE workflow_runs.id = ?`,
     )
     .get(runId) as
     | { verification: string | null; verificationTimeoutSec: number | null }
@@ -364,7 +785,7 @@ export function loadWorkflowRunVerificationConfig(
   if (row === undefined) {
     return {
       ok: false,
-      reason: `verification_config_unavailable: workflow run ${runId} not found`
+      reason: `verification_config_unavailable: workflow run ${runId} not found`,
     };
   }
 
@@ -372,7 +793,7 @@ export function loadWorkflowRunVerificationConfig(
   if (!goalCommands.ok) {
     return {
       ok: false,
-      reason: `verification_config_invalid: goal verification for run ${runId} is not a JSON string array`
+      reason: `verification_config_invalid: goal verification for run ${runId} is not a JSON string array`,
     };
   }
   const goalTimeoutSec =
@@ -385,7 +806,7 @@ export function loadWorkflowRunVerificationConfig(
     return {
       ok: true,
       commands: goalCommands.commands,
-      timeoutSec: goalTimeoutSec ?? DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
+      timeoutSec: goalTimeoutSec ?? DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC,
     };
   }
 
@@ -393,7 +814,7 @@ export function loadWorkflowRunVerificationConfig(
   if (!policy.ok) {
     return {
       ok: false,
-      reason: `verification_policy_invalid: (${policy.code}) ${policy.error}`
+      reason: `verification_policy_invalid: (${policy.code}) ${policy.error}`,
     };
   }
   const config = policy.present ? policy.policy.config : undefined;
@@ -404,15 +825,13 @@ export function loadWorkflowRunVerificationConfig(
     timeoutSec:
       goalTimeoutSec ??
       config?.verificationTimeoutSec ??
-      DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
+      DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC,
   };
 }
 
 function parseVerificationCommands(
-  raw: string | null
-):
-  | { ok: true; commands: string[] | undefined }
-  | { ok: false } {
+  raw: string | null,
+): { ok: true; commands: string[] | undefined } | { ok: false } {
   // A null column means "no goal-backed verification configured" (no goal, or
   // a goal without commands) and defers to the MOMENTUM.md fallback; a
   // present-but-malformed column is untrusted state and fails closed instead
@@ -420,18 +839,20 @@ function parseVerificationCommands(
   if (raw === null) return { ok: true, commands: undefined };
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((item) => typeof item === "string")
+    ) {
       return { ok: true, commands: parsed as string[] };
     }
-  } catch {
-  }
+  } catch {}
   return { ok: false };
 }
 
 function withExternalApplyDispatch(
   baseDispatch: AsyncWorkflowStepDispatch,
   env: Record<string, string | undefined>,
-  deps: DaemonWorkflowDispatchDeps
+  deps: DaemonWorkflowDispatchDeps,
 ): AsyncWorkflowStepDispatch {
   return createExternalApplyWorkflowDispatch(baseDispatch, {
     deriveExternalApply: (claim, context) =>
@@ -440,16 +861,16 @@ function withExternalApplyDispatch(
         claim.stepId,
         context,
         env,
-        deps
-      )
+        deps,
+      ),
   });
 }
 
 function withSubworkflowDispatch(
-  baseDispatch: AsyncWorkflowStepDispatch
+  baseDispatch: AsyncWorkflowStepDispatch,
 ): AsyncWorkflowStepDispatch {
   return createSubworkflowWorkflowDispatch(baseDispatch, {
-    deriveSubworkflow: deriveDispatchedSubworkflowContext
+    deriveSubworkflow: deriveDispatchedSubworkflowContext,
   });
 }
 
@@ -458,7 +879,7 @@ function resolveDaemonExternalApplyContext(
   stepId: string,
   context: { db: MomentumDb; now: number },
   env: Record<string, string | undefined>,
-  deps: DaemonWorkflowDispatchDeps
+  deps: DaemonWorkflowDispatchDeps,
 ): DispatchedExternalApplyContextResolution {
   const provenance = loadDispatchedStepRunProvenance(context.db, runId);
   if (provenance === undefined) {
@@ -472,49 +893,54 @@ function resolveDaemonExternalApplyContext(
   } catch (error) {
     return {
       ok: false,
-      reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
+      reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 
   const issueScopeIdentifier = loadWorkflowRunIssueScopeIdentifier(
     context.db,
-    runId
+    runId,
   );
   let pending = findPendingLinearExternalApplyIntents(
     context.db,
-    issueScopeIdentifier ?? ""
+    issueScopeIdentifier ?? "",
   );
   const applied = findAppliedLinearExternalApplyIntents(
     context.db,
-    issueScopeIdentifier ?? ""
+    issueScopeIdentifier ?? "",
   );
   let sourceItemsById = loadLinearRefreshSourceItems(context.db, [
     ...pending,
-    ...applied
+    ...applied,
   ]);
-  const latestAuditsByIntentId = loadLatestLinearRefreshAudits(context.db, applied);
+  const latestAuditsByIntentId = loadLatestLinearRefreshAudits(
+    context.db,
+    applied,
+  );
   const operatorReason = linearRefreshOperatorReason(runId, stepId);
-  const alreadyAppliedLifecycle = planLinearRefreshAlreadyAppliedReconciliation({
-    issueScopeIdentifier,
-    pendingIntents: pending,
-    appliedIntents: applied,
-    sourceItemsById,
-    latestAuditsByIntentId,
-    expectedOperatorReason: operatorReason
-  });
+  const alreadyAppliedLifecycle = planLinearRefreshAlreadyAppliedReconciliation(
+    {
+      issueScopeIdentifier,
+      pendingIntents: pending,
+      appliedIntents: applied,
+      sourceItemsById,
+      latestAuditsByIntentId,
+      expectedOperatorReason: operatorReason,
+    },
+  );
   const alreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
     alreadyAppliedLifecycle,
     applied,
     sourceItemsById,
     latestAuditsByIntentId,
-    resolved.exec.runDir
+    resolved.exec.runDir,
   );
   if (alreadyAppliedContext !== null) return alreadyAppliedContext;
   const policy = resolveLinearRefreshPolicy(resolved.exec.repoPath);
   if (!policy.ok) {
     return {
       ok: false,
-      reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
+      reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`,
     };
   }
   let lifecycle = planLinearRefreshLifecycle({
@@ -525,14 +951,14 @@ function resolveDaemonExternalApplyContext(
     appliedIntents: applied,
     sourceItemsById,
     latestAuditsByIntentId,
-    expectedOperatorReason: operatorReason
+    expectedOperatorReason: operatorReason,
   });
   if (lifecycle.status === "intent_missing") {
     const seeded = seedLinearRefreshStatusUpdateIntent({
       db: context.db,
       runId,
       issueScopeIdentifier,
-      now: context.now
+      now: context.now,
     });
     if (!seeded.ok) {
       return { ok: false, reason: seeded.reason };
@@ -540,7 +966,7 @@ function resolveDaemonExternalApplyContext(
     pending = appendIntentIfMissing(pending, seeded.intent);
     sourceItemsById = new Map(sourceItemsById).set(
       seeded.sourceItem.id,
-      seeded.sourceItem
+      seeded.sourceItem,
     );
     lifecycle = planLinearRefreshLifecycle({
       env,
@@ -550,25 +976,27 @@ function resolveDaemonExternalApplyContext(
       appliedIntents: applied,
       sourceItemsById,
       latestAuditsByIntentId,
-      expectedOperatorReason: operatorReason
+      expectedOperatorReason: operatorReason,
     });
   }
-  const lifecycleAlreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
-    lifecycle,
-    applied,
-    sourceItemsById,
-    latestAuditsByIntentId,
-    resolved.exec.runDir
-  );
-  if (lifecycleAlreadyAppliedContext !== null) return lifecycleAlreadyAppliedContext;
+  const lifecycleAlreadyAppliedContext =
+    resolveLinearRefreshAlreadyAppliedContext(
+      lifecycle,
+      applied,
+      sourceItemsById,
+      latestAuditsByIntentId,
+      resolved.exec.runDir,
+    );
+  if (lifecycleAlreadyAppliedContext !== null)
+    return lifecycleAlreadyAppliedContext;
   if (!lifecycle.safeToMutate) {
     return {
       ok: false,
       reason: linearRefreshRefusalReason(
         lifecycle.status,
         policy.value,
-        lifecycle.message
-      )
+        lifecycle.message,
+      ),
     };
   }
 
@@ -597,7 +1025,7 @@ function resolveDaemonExternalApplyContext(
     ok: true,
     evidence: {
       executorLogPath: path.join(resolved.exec.runDir, "external-apply.log"),
-      resultJsonPath: path.join(resolved.exec.runDir, "external-apply.json")
+      resultJsonPath: path.join(resolved.exec.runDir, "external-apply.json"),
     },
     runExternalApply: () =>
       executeExternalApply({
@@ -607,8 +1035,8 @@ function resolveDaemonExternalApplyContext(
         repoPath: resolved.exec.repoPath,
         env,
         statusMutation: null,
-        deps: executeDeps
-      })
+        deps: executeDeps,
+      }),
   };
 }
 
@@ -620,19 +1048,21 @@ function resolveLinearRefreshAlreadyAppliedContext(
     string,
     NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
   >,
-  runDir: string
+  runDir: string,
 ): DispatchedExternalApplyContextResolution | null {
   if (lifecycle?.status !== "already_applied") return null;
 
-  const intent = applied.find((candidate) => candidate.id === lifecycle.evidence.intentId);
+  const intent = applied.find(
+    (candidate) => candidate.id === lifecycle.evidence.intentId,
+  );
   const source =
     lifecycle.evidence.sourceItemId === null
       ? null
-      : sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null;
+      : (sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null);
   const audit =
     lifecycle.evidence.intentId === null
       ? null
-      : latestAuditsByIntentId.get(lifecycle.evidence.intentId) ?? null;
+      : (latestAuditsByIntentId.get(lifecycle.evidence.intentId) ?? null);
   if (intent === undefined || source === null || audit === null) {
     return { ok: false, reason: "linear_refresh_reconcile_evidence_missing" };
   }
@@ -640,10 +1070,10 @@ function resolveLinearRefreshAlreadyAppliedContext(
     ok: true,
     evidence: {
       executorLogPath: path.join(runDir, "external-apply.log"),
-      resultJsonPath: path.join(runDir, "external-apply.json")
+      resultJsonPath: path.join(runDir, "external-apply.json"),
     },
     runExternalApply: async () =>
-      linearRefreshAlreadyAppliedSuccess(intent, source, audit)
+      linearRefreshAlreadyAppliedSuccess(intent, source, audit),
   };
 }
 
@@ -659,25 +1089,26 @@ function seedLinearRefreshStatusUpdateIntent(input: {
   if (issueScopeIdentifier === null) {
     return {
       ok: false,
-      reason: "linear_refresh_issue_scope_missing: cannot seed status_update intent without workflow issue scope"
+      reason:
+        "linear_refresh_issue_scope_missing: cannot seed status_update intent without workflow issue scope",
     };
   }
 
   const matches = listSourceItems(input.db, { adapterKind: "linear" }).filter(
     (sourceItem) =>
       sourceItem.externalId === issueScopeIdentifier ||
-      sourceItem.externalKey === issueScopeIdentifier
+      sourceItem.externalKey === issueScopeIdentifier,
   );
   if (matches.length === 0) {
     return {
       ok: false,
-      reason: `linear_refresh_source_missing: no Linear source item matches workflow issue scope ${issueScopeIdentifier}`
+      reason: `linear_refresh_source_missing: no Linear source item matches workflow issue scope ${issueScopeIdentifier}`,
     };
   }
   if (matches.length > 1) {
     return {
       ok: false,
-      reason: `linear_refresh_source_ambiguous: ${matches.length} Linear source items match workflow issue scope ${issueScopeIdentifier}`
+      reason: `linear_refresh_source_ambiguous: ${matches.length} Linear source items match workflow issue scope ${issueScopeIdentifier}`,
     };
   }
 
@@ -691,15 +1122,15 @@ function seedLinearRefreshStatusUpdateIntent(input: {
       payload: { state: "Done" },
       reason: `Workflow ${input.runId} reached linear-refresh for ${issueScopeIdentifier}; update Linear issue to Done.`,
       sourceItemId: sourceItem.id,
-      idempotencyKey: `linear:${sourceItem.externalId}:status_update:done`
+      idempotencyKey: `linear:${sourceItem.externalId}:status_update:done`,
     },
-    { now: () => input.now }
+    { now: () => input.now },
   ).intent;
 
   if (intent.status !== "pending") {
     return {
       ok: false,
-      reason: `linear_refresh_intent_${intent.status}: seeded status_update intent ${intent.id} is ${intent.status}, not pending`
+      reason: `linear_refresh_intent_${intent.status}: seeded status_update intent ${intent.id} is ${intent.status}, not pending`,
     };
   }
   return { ok: true, intent, sourceItem };
@@ -707,7 +1138,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
 
 function appendIntentIfMissing(
   intents: readonly UpdateIntent[],
-  intent: UpdateIntent
+  intent: UpdateIntent,
 ): UpdateIntent[] {
   if (intents.some((candidate) => candidate.id === intent.id)) {
     return [...intents];
@@ -717,32 +1148,32 @@ function appendIntentIfMissing(
 
 function findPendingLinearExternalApplyIntents(
   db: MomentumDb,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ): UpdateIntent[] {
   return listUpdateIntents(db, {
     status: "pending",
-    adapterKind: "linear"
+    adapterKind: "linear",
   }).filter((intent) =>
-    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier)
+    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier),
   );
 }
 
 function findAppliedLinearExternalApplyIntents(
   db: MomentumDb,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ): UpdateIntent[] {
   return listUpdateIntents(db, {
     status: "applied",
-    adapterKind: "linear"
+    adapterKind: "linear",
   }).filter((intent) =>
-    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier)
+    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier),
   );
 }
 
 function pendingLinearIntentMatchesIssueScope(
   db: MomentumDb,
   intent: UpdateIntent,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ): boolean {
   if (issueScopeIdentifier.trim().length === 0) return false;
   if (intent.targetExternalId === issueScopeIdentifier) return true;
@@ -758,7 +1189,7 @@ function pendingLinearIntentMatchesIssueScope(
 
 function loadLinearRefreshSourceItems(
   db: MomentumDb,
-  intents: readonly UpdateIntent[]
+  intents: readonly UpdateIntent[],
 ): ReadonlyMap<string, SourceItem> {
   const out = new Map<string, SourceItem>();
   for (const intent of intents) {
@@ -771,9 +1202,12 @@ function loadLinearRefreshSourceItems(
 
 function loadLatestLinearRefreshAudits(
   db: MomentumDb,
-  intents: readonly UpdateIntent[]
+  intents: readonly UpdateIntent[],
 ) {
-  const out = new Map<string, NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>>();
+  const out = new Map<
+    string,
+    NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
+  >();
   for (const intent of intents) {
     const audit = getLatestIntentApplyAudit(db, intent.id);
     if (audit !== null) out.set(intent.id, audit);
@@ -789,13 +1223,15 @@ type LinearRefreshPolicyResolution =
       error: string;
     };
 
-function resolveLinearRefreshPolicy(repoPath: string): LinearRefreshPolicyResolution {
+function resolveLinearRefreshPolicy(
+  repoPath: string,
+): LinearRefreshPolicyResolution {
   const loaded = loadMomentumPolicy(repoPath);
   if (!loaded.ok) {
     return {
       ok: false,
       code: loaded.code,
-      error: loaded.error
+      error: loaded.error,
     };
   }
   if (!loaded.present) {
@@ -803,14 +1239,14 @@ function resolveLinearRefreshPolicy(repoPath: string): LinearRefreshPolicyResolu
   }
   return {
     ok: true,
-    value: resolveIntentApplyPolicy(loaded.policy.config).value
+    value: resolveIntentApplyPolicy(loaded.policy.config).value,
   };
 }
 
 function linearRefreshRefusalReason(
   status: string,
   policy: string,
-  message: string
+  message: string,
 ): string {
   switch (status) {
     case "auth_missing":
@@ -825,7 +1261,7 @@ function linearRefreshRefusalReason(
 function linearRefreshAlreadyAppliedSuccess(
   intent: UpdateIntent,
   source: SourceItem,
-  audit: NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
+  audit: NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>,
 ): ExecuteExternalApplySuccess {
   return {
     ok: true,
@@ -840,19 +1276,19 @@ function linearRefreshAlreadyAppliedSuccess(
         externalId: source.externalId,
         externalKey: source.externalKey,
         url: source.url,
-        title: source.title
+        title: source.title,
       },
       applyPolicy: {
         value: audit.intentApplyPolicy,
-        source: "momentum_policy"
+        source: "momentum_policy",
       },
       allowStatusMutation: audit.allowStatusMutation,
       mutationKind: audit.mutationKind,
       auditId: audit.id,
       reconcile: {
         status: "success",
-        warning: null
-      }
+        warning: null,
+      },
     },
     intent,
     audit,
@@ -866,8 +1302,8 @@ function linearRefreshAlreadyAppliedSuccess(
       statusTransitioned: audit.externalRefs.stateTransitionId !== null,
       nextStateId: null,
       nextStateName: null,
-      idempotencyMarker: audit.idempotencyMarker
-    }
+      idempotencyMarker: audit.idempotencyMarker,
+    },
   };
 }
 
@@ -876,7 +1312,7 @@ function linearRefreshOperatorReason(runId: string, stepId: string): string {
 }
 
 function readLinearApiKey(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): string | null {
   const raw = env[LINEAR_API_KEY_ENV_VAR] ?? null;
   return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
@@ -884,7 +1320,7 @@ function readLinearApiKey(
 
 function loadWorkflowRunIssueScopeIdentifier(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): string | null {
   const row = db
     .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
@@ -909,12 +1345,14 @@ function loadWorkflowRunIssueScopeIdentifier(
   return null;
 }
 
-function maxDaemonLiveWrapperProfileTimeoutMs(profile: LiveWrapperProfile): number {
+function maxDaemonLiveWrapperProfileTimeoutMs(
+  profile: LiveWrapperProfile,
+): number {
   let maxSeconds = 0;
   for (const wrapper of profile.wrappers.values()) {
     maxSeconds = Math.max(
       maxSeconds,
-      wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0)
+      wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0),
     );
   }
   return maxSeconds * 1000 + DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;

@@ -1,0 +1,295 @@
+import type { MomentumDb } from "../../../adapters/db.js";
+import crypto from "node:crypto";
+import { loadExecutorInvocation } from "../loop/persist.js";
+import {
+  EXECUTOR_COMPLETION_CLASSIFICATIONS,
+  EXECUTOR_HUMAN_GATE_TYPES,
+  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ROUND_STATES,
+  executorInvocationStateForClassification,
+  isExecutorHumanGateCompatibleWithClassification,
+  isExecutorRecoveryCodeCompatibleWithClassification,
+  isExecutorRoundStateCompatibleWithClassification,
+  isTerminalExecutorInvocationState,
+  isTerminalExecutorRoundState,
+  type ExecutorInvocationRecord,
+  type ExecutorRoundRecord,
+} from "../loop/reducer.js";
+import { createDurableExecutorEnvelope } from "./envelope.js";
+import type { Executor, ExecutorTickResult } from "./types.js";
+
+export type DriveExecutorTicksInput = {
+  db: MomentumDb;
+  invocationId: string;
+  executor: Executor;
+  config: Readonly<Record<string, unknown>>;
+  hostBindings: Readonly<unknown>;
+  signal?: AbortSignal;
+  /** Maximum bounded turns in this daemon pass. Defaults to one. */
+  maxTicks?: number;
+  now?: () => number;
+  authorizeWrite?: () => void;
+};
+
+export type DriveExecutorTicksResult = {
+  invocation: ExecutorInvocationRecord;
+  ticks: readonly ExecutorTickResult[];
+  lastRound: ExecutorRoundRecord | null;
+};
+
+/**
+ * Drive every registered executor through the same bounded daemon-owned loop.
+ * The executor records observations and recommends; this controller alone
+ * applies terminal classification and invocation state.
+ */
+export async function driveExecutorTicks(
+  input: DriveExecutorTicksInput,
+): Promise<DriveExecutorTicksResult> {
+  const maxTicks = input.maxTicks ?? 1;
+  if (!Number.isInteger(maxTicks) || maxTicks < 1) {
+    throw new Error("driveExecutorTicks: maxTicks must be a positive integer");
+  }
+  const initial = loadExecutorInvocation(input.db, input.invocationId);
+  if (initial === undefined) {
+    throw new Error(`Executor invocation not found: ${input.invocationId}`);
+  }
+  if (initial.executorFamily !== input.executor.name) {
+    throw new Error(
+      `Registered executor ${input.executor.name} cannot drive invocation for ${initial.executorFamily}.`,
+    );
+  }
+  const envelope = createDurableExecutorEnvelope({
+    db: input.db,
+    invocationId: input.invocationId,
+    now: input.now ?? Date.now,
+    ...(input.authorizeWrite !== undefined
+      ? { authorizeWrite: input.authorizeWrite }
+      : {}),
+  });
+  const signal = input.signal ?? new AbortController().signal;
+  const ticks: ExecutorTickResult[] = [];
+  let lastRound: ExecutorRoundRecord | null = null;
+
+  for (let index = 0; index < maxTicks; index += 1) {
+    const state = envelope.snapshot();
+    if (isTerminalExecutorInvocationState(state.invocation.state)) break;
+    signal.throwIfAborted();
+    let tick: ExecutorTickResult;
+    try {
+      const returned = await input.executor.tick({
+        state,
+        config: input.config,
+        hostBindings: input.hostBindings,
+        envelope: envelope.facade,
+        signal,
+      });
+      tick = validateExecutorTickResult(returned, envelope.snapshot());
+      const applied = envelope.applyDaemonDecision(
+        {
+          roundId: tick.roundId,
+          classification: tick.recommendation,
+          executorRecommendation: tick.recommendation,
+          roundState: tick.recommendedRoundState,
+          invocationState: tick.recommendedInvocationState,
+          recoveryCode: tick.recoveryCode,
+          humanGate: tick.humanGate,
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: `classification: ${tick.recommendation}; reason: ${tick.reason}`,
+          },
+        },
+      );
+      ticks.push(tick);
+      lastRound = applied.round;
+    } catch (error) {
+      if (signal.aborted && error === signal.reason) throw error;
+      const failure = describeExecutorFailure(error);
+      const afterThrow = envelope.snapshot();
+      const current = afterThrow.currentRound?.round;
+      const round =
+        current !== undefined &&
+        current.attempt === afterThrow.invocation.attempt &&
+        !isTerminalExecutorRoundState(current.state)
+          ? current
+          : envelope.facade.startRound({
+              roundId: `${initial.invocationId}::daemon-recovery-${crypto.randomUUID()}`,
+              invocationId: afterThrow.invocation.invocationId,
+              workflowRunId: afterThrow.invocation.workflowRunId,
+              stepRunId: afterThrow.invocation.stepRunId,
+              stepKey: afterThrow.invocation.stepKey,
+              executorFamily: afterThrow.invocation.executorFamily,
+              attempt: afterThrow.invocation.attempt,
+              roundIndex: afterThrow.rounds.length,
+              state: "running",
+              agentProvider: null,
+              model: null,
+              effort: null,
+              inputDigest: null,
+              resultDigest: null,
+              artifactRoot: null,
+              logPaths: [],
+              summary: failure.message,
+              keyChanges: [],
+              keyLearnings: [],
+              remainingWork: [],
+              changedFiles: [],
+              verificationStatus: null,
+              commitSha: null,
+            });
+      const applied = envelope.applyDaemonDecision(
+        {
+          roundId: round.roundId,
+          classification: "manual_recovery_required",
+          executorRecommendation: null,
+          roundState: "manual_recovery_required",
+          invocationState: "manual_recovery_required",
+          recoveryCode: failure.contractInvalid
+            ? "executor_contract_invalid"
+            : "executor_threw",
+          humanGate: "manual_recovery_required",
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: `classification: manual_recovery_required; ${failure.message}`,
+          },
+        },
+      );
+      lastRound = applied.round;
+      break;
+    }
+    if (tick.recommendation !== "continue") break;
+  }
+
+  const invocation = loadExecutorInvocation(input.db, input.invocationId);
+  if (invocation === undefined) {
+    throw new Error(`Executor invocation disappeared: ${input.invocationId}`);
+  }
+  return { invocation, ticks, lastRound };
+}
+
+class ExecutorTickContractError extends Error {}
+
+function validateExecutorTickResult(
+  value: unknown,
+  state: ReturnType<
+    ReturnType<typeof createDurableExecutorEnvelope>["snapshot"]
+  >,
+): ExecutorTickResult {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new ExecutorTickContractError(
+      "Executor tick must return a result object.",
+    );
+  }
+  const record = value as Record<string, unknown>;
+  const roundId = record["roundId"];
+  const selectedRound =
+    typeof roundId === "string"
+      ? state.rounds.find((item) => item.round.roundId === roundId)?.round
+      : undefined;
+  if (
+    typeof roundId !== "string" ||
+    roundId.length === 0 ||
+    selectedRound === undefined ||
+    selectedRound.attempt !== state.invocation.attempt ||
+    state.currentRound?.round.roundId !== roundId ||
+    isTerminalExecutorRoundState(selectedRound.state)
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor tick roundId must name the current non-terminal round for the invocation attempt.",
+    );
+  }
+  if (
+    !includes(EXECUTOR_COMPLETION_CLASSIFICATIONS, record["recommendation"])
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor tick recommendation is invalid.",
+    );
+  }
+  if (!includes(EXECUTOR_ROUND_STATES, record["recommendedRoundState"])) {
+    throw new ExecutorTickContractError(
+      "Executor tick recommendedRoundState is invalid.",
+    );
+  }
+  if (
+    !includes(EXECUTOR_INVOCATION_STATES, record["recommendedInvocationState"])
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor tick recommendedInvocationState is invalid.",
+    );
+  }
+  const recoveryCode = record["recoveryCode"];
+  if (recoveryCode !== null && typeof recoveryCode !== "string") {
+    throw new ExecutorTickContractError(
+      "Executor tick recoveryCode must be a string or null.",
+    );
+  }
+  const humanGate = record["humanGate"];
+  if (humanGate !== null && !includes(EXECUTOR_HUMAN_GATE_TYPES, humanGate)) {
+    throw new ExecutorTickContractError("Executor tick humanGate is invalid.");
+  }
+  if (typeof record["reason"] !== "string") {
+    throw new ExecutorTickContractError(
+      "Executor tick reason must be a string.",
+    );
+  }
+  const recommendation = record["recommendation"];
+  const recommendedRoundState = record["recommendedRoundState"];
+  const recommendedInvocationState = record["recommendedInvocationState"];
+  if (
+    recommendedInvocationState !==
+      executorInvocationStateForClassification(recommendation) ||
+    !isExecutorRoundStateCompatibleWithClassification(
+      recommendation,
+      recommendedRoundState,
+    ) ||
+    !isExecutorRecoveryCodeCompatibleWithClassification(
+      recommendation,
+      recoveryCode,
+    ) ||
+    !isExecutorHumanGateCompatibleWithClassification(recommendation, humanGate)
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor tick recommendation, states, recovery code, and human gate are inconsistent.",
+    );
+  }
+  return value as ExecutorTickResult;
+}
+
+function includes<T extends string>(
+  values: readonly T[],
+  value: unknown,
+): value is T {
+  return (
+    typeof value === "string" && (values as readonly string[]).includes(value)
+  );
+}
+
+function describeExecutorFailure(error: unknown): {
+  contractInvalid: boolean;
+  message: string;
+} {
+  let contractInvalid = false;
+  try {
+    contractInvalid = error instanceof ExecutorTickContractError;
+  } catch {
+    // Hostile proxies may throw while JavaScript walks their prototype chain.
+  }
+  let detail: string;
+  try {
+    detail =
+      error instanceof Error && typeof error.message === "string"
+        ? error.message
+        : String(error);
+  } catch {
+    detail = "uninspectable thrown value";
+  }
+  return {
+    contractInvalid,
+    message: `${contractInvalid ? "Executor contract invalid" : "Executor threw"}: ${detail}`,
+  };
+}

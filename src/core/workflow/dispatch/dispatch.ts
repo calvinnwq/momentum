@@ -47,7 +47,10 @@
  * `{ action: ... }` convention used by the reducers and the gate brain.
  */
 
-import type { WorkflowExecutorFamily } from "../definition/definition.js";
+import type {
+  ExecutorName,
+  WorkflowExecutorFamily,
+} from "../definition/definition.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 
 /**
@@ -116,7 +119,7 @@ export type WorkflowStepResolutionFailure =
  * family string).
  */
 export type WorkflowStepDispatchResolution =
-  | { ok: true; executorFamily: WorkflowExecutorFamily }
+  | { ok: true; executorFamily: ExecutorName }
   | { ok: false; failure: WorkflowStepResolutionFailure; detail?: string };
 
 /**
@@ -146,7 +149,7 @@ export type WorkflowDispatchFailClosedCode =
  *     operator-visible manual-recovery outcome and releases the dispatch lease.
  */
 export type WorkflowStepDispatchPlan =
-  | { action: "dispatch"; executorFamily: Phase1DispatchableExecutorFamily }
+  | { action: "dispatch"; executorFamily: ExecutorName }
   | {
       action: "fail_closed";
       code: WorkflowDispatchFailClosedCode;
@@ -207,15 +210,5 @@ export function planWorkflowStepDispatch(
     };
   }
 
-  const family = resolution.executorFamily;
-  if (isPhase1DispatchableExecutorFamily(family)) {
-    return { action: "dispatch", executorFamily: family };
-  }
-
-  return {
-    action: "fail_closed",
-    code: "unsupported_executor_family",
-    gateType: FAIL_CLOSED_GATE_TYPE,
-    reason: `Executor family '${family}' has no landed daemon-dispatchable adapter this phase; routing the dispatch to manual recovery.`,
-  };
+  return { action: "dispatch", executorFamily: resolution.executorFamily };
 }

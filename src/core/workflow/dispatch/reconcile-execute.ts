@@ -48,15 +48,12 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   listExecutorRoundsForInvocation,
-  loadExecutorInvocation
+  loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
-import type { WorkflowExecutorFamily } from "../../executors/loop/reducer.js";
+import type { ExecutorName } from "../../executors/loop/reducer.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import { planWorkflowStepReconciliation } from "./reconcile.js";
-import {
-  insertWorkflowGate,
-  loadWorkflowGate
-} from "../gate/persist.js";
+import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import { getWorkflowLease, releaseWorkflowLease } from "../leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
 import { isTerminalStepState } from "../run/reducer.js";
@@ -65,7 +62,7 @@ import {
   finishWorkflowStep,
   getWorkflowStep,
   type WorkflowStepTerminalState,
-  type WorkflowStepTransitionOutcome
+  type WorkflowStepTransitionOutcome,
 } from "../step/transitions.js";
 
 /**
@@ -87,7 +84,7 @@ export const WORKFLOW_RECONCILE_RESULT_STATUS = {
   /** The step row vanished between dispatch and reconciliation. */
   stepNotFound: "reconcile_step_not_found",
   /** The step is non-terminal but not `running`; refused rather than forced. */
-  stepNotRunning: "reconcile_step_not_running"
+  stepNotRunning: "reconcile_step_not_running",
 } as const;
 
 export type WorkflowReconcileResultStatus =
@@ -103,6 +100,8 @@ export type ReconcileDispatchedWorkflowStepInput = {
   runId: string;
   stepId: string;
   now: number;
+  /** Current fenced lease identity when reconciliation runs inside a dispatch claim. */
+  leaseIdentity?: { holder: string; acquiredAt: number };
 };
 
 /**
@@ -116,7 +115,7 @@ export const RECONCILE_RESULT_DIGEST_PREFIX = "rc2-reconcile";
 /** The operator actions the reconciliation manual-recovery gate offers. */
 const RECONCILE_RECOVERY_GATE_ACTIONS: readonly string[] = [
   "clear_recovery",
-  "abort_run"
+  "abort_run",
 ];
 const RECONCILE_RECOVERY_RECOMMENDED_ACTION = "clear_recovery";
 
@@ -127,9 +126,9 @@ const RECONCILE_RECOVERY_RECOMMENDED_ACTION = "clear_recovery";
  * guarantees (single-owner, idempotent).
  */
 export function reconcileDispatchedWorkflowStep(
-  input: ReconcileDispatchedWorkflowStepInput
+  input: ReconcileDispatchedWorkflowStepInput,
 ): WorkflowStepReconciliationResult {
-  const { db, runId, stepId, now } = input;
+  const { db, runId, stepId, now, leaseIdentity } = input;
   const invocationId = deriveDispatchInvocationId(runId, stepId);
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation === undefined) {
@@ -139,7 +138,7 @@ export function reconcileDispatchedWorkflowStep(
     // nothing — the structural guard against a double finalize.
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.notDispatched,
-      detail: invocationId
+      detail: invocationId,
     };
   }
 
@@ -147,7 +146,7 @@ export function reconcileDispatchedWorkflowStep(
   if (plan.action === "not_terminal") {
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.deferred,
-      detail: invocation.state
+      detail: invocation.state,
     };
   }
   if (plan.action === "manual_recovery") {
@@ -159,9 +158,12 @@ export function reconcileDispatchedWorkflowStep(
       executorFamily: invocation.executorFamily,
       invocationState: plan.invocationState,
       reason:
-        recovery === null ? plan.reason : `${recovery.code}: ${recovery.summary}`,
+        recovery === null
+          ? plan.reason
+          : `${recovery.code}: ${recovery.summary}`,
       evidence: recovery?.code ?? plan.invocationState,
-      now
+      ...(leaseIdentity !== undefined ? { leaseIdentity } : {}),
+      now,
     });
   }
   return finalizeDispatchedStep(db, {
@@ -170,7 +172,8 @@ export function reconcileDispatchedWorkflowStep(
     dispatchStartedAt: invocation.startedAt,
     executorFamily: invocation.executorFamily,
     stepState: plan.stepState,
-    now
+    ...(leaseIdentity !== undefined ? { leaseIdentity } : {}),
+    now,
   });
 }
 
@@ -187,13 +190,21 @@ function finalizeDispatchedStep(
     runId: string;
     stepId: string;
     dispatchStartedAt: number | null;
-    executorFamily: WorkflowExecutorFamily;
+    executorFamily: ExecutorName;
     stepState: WorkflowStepTerminalState;
+    leaseIdentity?: { holder: string; acquiredAt: number };
     now: number;
-  }
+  },
 ): WorkflowStepReconciliationResult {
-  const { runId, stepId, dispatchStartedAt, executorFamily, stepState, now } =
-    args;
+  const {
+    runId,
+    stepId,
+    dispatchStartedAt,
+    executorFamily,
+    stepState,
+    leaseIdentity,
+    now,
+  } = args;
   db.exec("BEGIN IMMEDIATE");
   try {
     const step = getWorkflowStep(db, runId, stepId);
@@ -201,7 +212,7 @@ function finalizeDispatchedStep(
       db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound,
-        detail: stepId
+        detail: stepId,
       };
     }
 
@@ -210,12 +221,19 @@ function finalizeDispatchedStep(
       // step. The terminal result is immutable, so never override it — just
       // converge the lease + run-state so a crashed prior finalize cannot strand
       // the dispatch lease or leave cached run-state stale.
-      releaseHeldDispatchLease(db, runId, dispatchStartedAt, false, now);
+      releaseHeldDispatchLease(
+        db,
+        runId,
+        dispatchStartedAt,
+        false,
+        now,
+        leaseIdentity,
+      );
       refreshWorkflowRunRuntimeState(db, { runId, now });
       db.exec("COMMIT");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
-        detail: step.state
+        detail: step.state,
       };
     }
 
@@ -226,7 +244,7 @@ function finalizeDispatchedStep(
       db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
-        detail: step.state
+        detail: step.state,
       };
     }
 
@@ -235,7 +253,7 @@ function finalizeDispatchedStep(
       stepId,
       state: stepState,
       resultDigest: `${RECONCILE_RESULT_DIGEST_PREFIX}::${stepId}::${stepState}`,
-      now
+      now,
     });
     if (!finished.ok) {
       const recovered = recoverFinishConflict(
@@ -243,7 +261,7 @@ function finalizeDispatchedStep(
         finished,
         runId,
         dispatchStartedAt,
-        now
+        now,
       );
       if (recovered !== undefined) {
         db.exec("COMMIT");
@@ -258,7 +276,8 @@ function finalizeDispatchedStep(
       runId,
       dispatchStartedAt,
       executorFamily === "subworkflow",
-      now
+      now,
+      leaseIdentity,
     );
     refreshWorkflowRunRuntimeState(db, { runId, now });
     db.exec("COMMIT");
@@ -266,7 +285,7 @@ function finalizeDispatchedStep(
       status: finished.idempotent
         ? WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
         : WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
-      detail: stepState
+      detail: stepState,
     };
   } catch (error) {
     safeRollback(db);
@@ -287,12 +306,13 @@ function parkForManualRecovery(
     runId: string;
     stepId: string;
     dispatchStartedAt: number | null;
-    executorFamily: WorkflowExecutorFamily;
+    executorFamily: ExecutorName;
     invocationState: string;
     reason: string;
     evidence: string;
+    leaseIdentity?: { holder: string; acquiredAt: number };
     now: number;
-  }
+  },
 ): WorkflowStepReconciliationResult {
   const {
     runId,
@@ -302,7 +322,8 @@ function parkForManualRecovery(
     invocationState,
     reason,
     evidence,
-    now
+    leaseIdentity,
+    now,
   } = args;
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -311,32 +332,43 @@ function parkForManualRecovery(
       db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound,
-        detail: stepId
+        detail: stepId,
       };
     }
     if (isTerminalStepState(step.state)) {
-      releaseHeldDispatchLease(db, runId, dispatchStartedAt, false, now);
+      releaseHeldDispatchLease(
+        db,
+        runId,
+        dispatchStartedAt,
+        false,
+        now,
+        leaseIdentity,
+      );
       refreshWorkflowRunRuntimeState(db, { runId, now });
       db.exec("COMMIT");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
-        detail: step.state
+        detail: step.state,
       };
     }
     if (step.state !== "running") {
       db.exec("ROLLBACK");
       return {
         status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
-        detail: step.state
+        detail: step.state,
       };
     }
 
-    const marked = markWorkflowRunNeedsManualRecovery(db, { runId, reason, now });
+    const marked = markWorkflowRunNeedsManualRecovery(db, {
+      runId,
+      reason,
+      now,
+    });
     if (marked.ok) {
       const gateId = deriveReconcileRecoveryGateId(
         runId,
         stepId,
-        invocationState
+        invocationState,
       );
       if (loadWorkflowGate(db, gateId) === undefined) {
         // A step-scoped gate carries the run + step anchors only; the terminal
@@ -353,9 +385,9 @@ function parkForManualRecovery(
             reason,
             evidence,
             allowedActions: RECONCILE_RECOVERY_GATE_ACTIONS,
-            recommendedAction: RECONCILE_RECOVERY_RECOMMENDED_ACTION
+            recommendedAction: RECONCILE_RECOVERY_RECOMMENDED_ACTION,
           },
-          { now }
+          { now },
         );
       }
     }
@@ -364,13 +396,14 @@ function parkForManualRecovery(
       runId,
       dispatchStartedAt,
       executorFamily === "subworkflow",
-      now
+      now,
+      leaseIdentity,
     );
     refreshWorkflowRunRuntimeState(db, { runId, now });
     db.exec("COMMIT");
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
-      detail: invocationState
+      detail: invocationState,
     };
   } catch (error) {
     safeRollback(db);
@@ -380,7 +413,7 @@ function parkForManualRecovery(
 
 function readDispatchRecoveryEvidence(
   db: MomentumDb,
-  invocationId: string
+  invocationId: string,
 ): { code: string; summary: string } | null {
   const latest = listExecutorRoundsForInvocation(db, invocationId).at(-1);
   if (
@@ -406,7 +439,7 @@ function recoverFinishConflict(
   outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>,
   runId: string,
   dispatchStartedAt: number | null,
-  now: number
+  now: number,
 ): WorkflowStepReconciliationResult | undefined {
   if (
     outcome.reason === "invalid_transition" &&
@@ -416,21 +449,21 @@ function recoverFinishConflict(
     refreshWorkflowRunRuntimeState(db, { runId, now });
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
-      detail: outcome.from
+      detail: outcome.from,
     };
   }
   return undefined;
 }
 
 function mapFinishRefusal(
-  outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>
+  outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>,
 ): WorkflowStepReconciliationResult {
   if (outcome.reason === "step_not_found") {
     return { status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound };
   }
   return {
     status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
-    detail: outcome.from
+    detail: outcome.from,
   };
 }
 
@@ -444,18 +477,31 @@ function releaseHeldDispatchLease(
   runId: string,
   dispatchStartedAt: number | null,
   releaseReacquiredLease: boolean,
-  now: number
+  now: number,
+  expectedLease?: { holder: string; acquiredAt: number },
 ): void {
   if (dispatchStartedAt === null) return;
   const lease = getWorkflowLease(db, runId, "dispatch");
   if (lease === undefined || lease.releasedAt !== null) return;
-  if (lease.acquiredAt > dispatchStartedAt && !releaseReacquiredLease) return;
+  if (
+    expectedLease !== undefined &&
+    (lease.holder !== expectedLease.holder ||
+      lease.acquiredAt !== expectedLease.acquiredAt)
+  ) {
+    return;
+  }
+  if (
+    expectedLease === undefined &&
+    lease.acquiredAt > dispatchStartedAt &&
+    !releaseReacquiredLease
+  )
+    return;
   releaseWorkflowLease(db, {
     runId: lease.runId,
     leaseKind: lease.leaseKind,
     holder: lease.holder,
     acquiredAt: lease.acquiredAt,
-    now
+    now,
   });
 }
 
@@ -463,7 +509,7 @@ function releaseHeldDispatchLease(
 function deriveReconcileRecoveryGateId(
   runId: string,
   stepId: string,
-  invocationState: string
+  invocationState: string,
 ): string {
   return `${runId}::${stepId}::reconcile-recovery::${invocationState}`;
 }

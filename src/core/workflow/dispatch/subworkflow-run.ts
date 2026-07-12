@@ -60,20 +60,20 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
 import { loadExecutorInvocation } from "../../executors/loop/persist.js";
 import { deriveDispatchInvocationId } from "./execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "./executor-terminalize.js";
+import { terminalizeDispatchedExecutorInvocation } from "./executor-evidence.js";
 import {
   reconcileDispatchedWorkflowStep,
-  type WorkflowStepReconciliationResult
+  type WorkflowStepReconciliationResult,
 } from "./reconcile-execute.js";
 import {
   WORKFLOW_EXECUTE_RECONCILE_STATUS,
-  type ExecuteAndReconcileDispatchedStepResult
-} from "./executor-run.js";
+  type ExecuteAndReconcileDispatchedStepResult,
+} from "./executor-recovery.js";
 import {
   planSubworkflowChildMirror,
   type SubworkflowChildMirrorOptions,
   type SubworkflowChildMirrorPlan,
-  type SubworkflowMirrorEvidence
+  type SubworkflowMirrorEvidence,
 } from "./subworkflow.js";
 import type { WorkflowRunState } from "../run/reducer.js";
 import { getWorkflowStep } from "../step/transitions.js";
@@ -139,7 +139,7 @@ export type ExecuteAndReconcileDispatchedSubworkflowStepInput = {
  * re-entry that never re-starts the child run, no premature parent finalize).
  */
 export async function executeAndReconcileDispatchedSubworkflowStep(
-  input: ExecuteAndReconcileDispatchedSubworkflowStepInput
+  input: ExecuteAndReconcileDispatchedSubworkflowStepInput,
 ): Promise<ExecuteAndReconcileDispatchedStepResult> {
   const { db, runId, stepId, runSubworkflowChild, evidence, now } = input;
   const invocationId = deriveDispatchInvocationId(runId, stepId);
@@ -150,13 +150,13 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     // starts a child run — the structural guard against a double finalize.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: invocationId
+      detail: invocationId,
     };
   }
   if (invocation.executorFamily !== "subworkflow") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${invocationId}: ${invocation.executorFamily}`
+      detail: `${invocationId}: ${invocation.executorFamily}`,
     };
   }
 
@@ -169,18 +169,18 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
       db,
       runId,
       stepId,
-      now
+      now,
     });
     if (!reconciled.ok) {
       return {
         status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
-        detail: reconciled.detail
+        detail: reconciled.detail,
       };
     }
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
       reconcile: reconciled.reconcile,
-      detail: invocation.state
+      detail: invocation.state,
     };
   }
 
@@ -188,7 +188,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   if (step === undefined) {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotFound,
-      detail: stepId
+      detail: stepId,
     };
   }
   if (step.state !== "running") {
@@ -196,7 +196,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     // unexpected lane state the seam refuses rather than writing over.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning,
-      detail: step.state
+      detail: step.state,
     };
   }
 
@@ -209,11 +209,12 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   const mirrorEvidence: SubworkflowMirrorEvidence = {
     childRunId: observation.childRunId,
     executorLogPath: evidence.executorLogPath,
-    resultJsonPath: evidence.resultJsonPath
+    resultJsonPath: evidence.resultJsonPath,
   };
   const mirrorOptions: SubworkflowChildMirrorOptions = {};
   if (observation.childNeedsManualRecovery !== undefined) {
-    mirrorOptions.childNeedsManualRecovery = observation.childNeedsManualRecovery;
+    mirrorOptions.childNeedsManualRecovery =
+      observation.childNeedsManualRecovery;
   }
   if (observation.childManualRecoveryReason !== undefined) {
     mirrorOptions.childManualRecoveryReason =
@@ -222,7 +223,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   const plan = planSubworkflowChildMirror(
     observation.childState,
     mirrorEvidence,
-    mirrorOptions
+    mirrorOptions,
   );
 
   // Snapshot the observed child run for the operator before acting on it, so a
@@ -237,7 +238,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     // over an unfinished child.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred,
-      detail: plan.reason
+      detail: plan.reason,
     };
   }
 
@@ -249,20 +250,20 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     runId,
     stepId,
     result: plan.result,
-    now
+    now,
   });
   const reconciled = tryReconcileDispatchedWorkflowStep({
     db,
     runId,
     stepId,
-    now
+    now,
   });
   if (!reconciled.ok) {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
       executorResult: plan.result,
       terminalize,
-      detail: reconciled.detail
+      detail: reconciled.detail,
     };
   }
 
@@ -270,7 +271,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     executorResult: plan.result,
     terminalize,
-    reconcile: reconciled.reconcile
+    reconcile: reconciled.reconcile,
   };
 }
 
@@ -291,12 +292,12 @@ function tryReconcileDispatchedWorkflowStep(input: {
   try {
     return {
       ok: true,
-      reconcile: reconcileDispatchedWorkflowStep(input)
+      reconcile: reconcileDispatchedWorkflowStep(input),
     };
   } catch (error) {
     return {
       ok: false,
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -304,25 +305,25 @@ function tryReconcileDispatchedWorkflowStep(input: {
 function writeSubworkflowEvidence(
   evidence: SubworkflowMirrorEvidence,
   observation: SubworkflowChildObservation,
-  plan: SubworkflowChildMirrorPlan
+  plan: SubworkflowChildMirrorPlan,
 ): void {
   fs.mkdirSync(path.dirname(evidence.executorLogPath), { recursive: true });
   fs.mkdirSync(path.dirname(evidence.resultJsonPath), { recursive: true });
   fs.writeFileSync(
     evidence.executorLogPath,
     subworkflowLog(observation, plan),
-    "utf8"
+    "utf8",
   );
   fs.writeFileSync(
     evidence.resultJsonPath,
     `${JSON.stringify(observation, null, 2)}\n`,
-    "utf8"
+    "utf8",
   );
 }
 
 function subworkflowLog(
   observation: SubworkflowChildObservation,
-  plan: SubworkflowChildMirrorPlan
+  plan: SubworkflowChildMirrorPlan,
 ): string {
   const outcome =
     plan.outcome === "defer"
@@ -344,7 +345,7 @@ function subworkflowLog(
     plan.outcome === "defer"
       ? `reason: ${plan.reason}`
       : `result: ${plan.result.ok ? plan.result.result.state : plan.result.code}`,
-    ""
+    "",
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");

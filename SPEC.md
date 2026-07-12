@@ -100,6 +100,18 @@ wiring; the SDK contract does not make either a private executor hook. The
 single-shot compatibility host also enforces its declared family-specific schema
 at runtime before it creates a durable round.
 
+`MOMENTUM_EXECUTOR_CONFIG` names a local JSON registry whose `executors` map
+binds permanent executor names to npm specifiers or local module paths. The
+daemon imports each configured module in-process, accepts a default or named
+`executor` export, and validates its name, strict config schema, and tick method
+through the same registration guard used for built-ins. Invalid config or module
+exports fail closed with precise load diagnostics. Workflow structural preflight
+validates third-party step config against the registered declaration before
+workflow-run rows are written. An unregistered executor records the honest
+`runtime_unavailable` class. The daemon SDK driver applies one bounded tick per
+scheduler pass and rechecks non-terminal invocations, so single-round and
+multi-round executors share one driving loop.
+
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
 adapter. Its built-in process adapters run work below a separate process-group

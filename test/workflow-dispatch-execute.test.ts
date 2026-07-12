@@ -6,7 +6,7 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
@@ -14,14 +14,14 @@ import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
-  type WorkflowStepDispatch
+  type WorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 
 const NOW = 1_700_000_000_000;
@@ -44,7 +44,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-workflow-dispatch-exec-")
+    path.join(os.tmpdir(), "momentum-workflow-dispatch-exec-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -59,13 +59,13 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-367",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
 
 function openNativeCodingDbWithoutPersistedDefinition(
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): MomentumDb {
   const db = openDb(makeTempDir());
   persistWorkflowRunStart(db, {
@@ -74,14 +74,14 @@ function openNativeCodingDbWithoutPersistedDefinition(
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-508",
     now: NOW,
-    source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+    source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   });
   return db;
 }
 
 function openNativeCodingDbWithRoute(
   route: Record<string, unknown>,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): MomentumDb {
   const db = openDb(makeTempDir());
   persistWorkflowRunStart(db, {
@@ -91,13 +91,13 @@ function openNativeCodingDbWithRoute(
     objective: "Dogfood NGX-510",
     now: NOW,
     source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
-    route
+    route,
   });
   return db;
 }
 
 function persistedCodingOverride(
-  executor: "script" | "external-apply"
+  executor: "script" | "external-apply",
 ): WorkflowDefinition {
   return {
     key: "coding-workflow",
@@ -109,16 +109,16 @@ function persistedCodingOverride(
         kind: "preflight",
         executor,
         order: 0,
-        required: true
+        required: true,
       },
       {
         key: "implementation",
         kind: "implementation",
         executor: "goal-loop",
         order: 1,
-        required: false
-      }
-    ]
+        required: false,
+      },
+    ],
   };
 }
 
@@ -131,28 +131,28 @@ function persistedCodingOverride(
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   const target = db
     .prepare(
-      "SELECT step_order FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+      "SELECT step_order FROM workflow_steps WHERE run_id = ? AND step_id = ?",
     )
     .get(runId, stepId) as { step_order: number } | undefined;
   if (target === undefined) {
     throw new Error(`test setup: missing step ${stepId}`);
   }
   db.prepare(
-    "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < ?"
+    "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < ?",
   ).run(runId, target.step_order);
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) {
     throw new Error(`test setup: claim failed (${claim.reason})`);
@@ -163,7 +163,7 @@ function approveAndClaim(
 function countInvocations(db: MomentumDb, runId: string): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?"
+      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -172,7 +172,7 @@ function countInvocations(db: MomentumDb, runId: string): number {
 function stepState(db: MomentumDb, runId: string, stepId: string): string {
   const row = db
     .prepare(
-      "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+      "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
     )
     .get(runId, stepId) as { state: string };
   return row.state;
@@ -185,7 +185,10 @@ function runState(db: MomentumDb, runId: string): string {
   return row.state;
 }
 
-function monitorAdvisory(db: MomentumDb, runId: string): {
+function monitorAdvisory(
+  db: MomentumDb,
+  runId: string,
+): {
   state: string | null;
   terminal: number | null;
   step: string | null;
@@ -196,7 +199,7 @@ function monitorAdvisory(db: MomentumDb, runId: string): {
               monitor_terminal AS terminal,
               monitor_step AS step
          FROM workflow_runs
-        WHERE id = ?`
+        WHERE id = ?`,
     )
     .get(runId) as {
     state: string | null;
@@ -213,14 +216,14 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     const invocation = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`
+           FROM executor_invocations WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
     expect(invocation.executor_family).toBe("one-shot");
@@ -230,7 +233,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
   it("ignores persisted coding overrides when dispatching native coding runs", () => {
     const db = openDb(makeTempDir());
     persistWorkflowDefinition(db, persistedCodingOverride("script"), {
-      now: NOW
+      now: NOW,
     });
     persistWorkflowRunStart(db, {
       definition: CODING_WORKFLOW_DEFINITION,
@@ -238,21 +241,21 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       repoPath: "/repos/momentum",
       objective: "Dogfood NGX-508",
       now: NOW,
-      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
     });
     const claim = approveAndClaim(db, "preflight");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     const invocation = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`
+           FROM executor_invocations WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
     expect(invocation.executor_family).toBe("one-shot");
@@ -265,7 +268,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
@@ -275,7 +278,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const invocation = db
       .prepare(
         `SELECT invocation_id, step_run_id, step_key, executor_family, state, attempt
-           FROM executor_invocations WHERE workflow_run_id = ?`
+           FROM executor_invocations WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
       invocation_id: string;
@@ -290,14 +293,14 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       step_key: "preflight",
       executor_family: "one-shot",
       state: "running",
-      attempt: 1
+      attempt: 1,
     });
 
     // The first round scaffold exists, created before external work runs.
     const round = db
       .prepare(
         `SELECT invocation_id, round_index, state, executor_family
-           FROM executor_rounds WHERE workflow_run_id = ?`
+           FROM executor_rounds WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
       invocation_id: string;
@@ -315,7 +318,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(monitorAdvisory(db, RUN_ID)).toEqual({
       state: "running",
       terminal: 0,
-      step: "preflight"
+      step: "preflight",
     });
   });
 
@@ -331,7 +334,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // distinct from a future landed adapter's reattachable invocation id.
     const invocation = db
       .prepare(
-        "SELECT invocation_id FROM executor_invocations WHERE workflow_run_id = ?"
+        "SELECT invocation_id FROM executor_invocations WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { invocation_id: string };
     expect(invocation.invocation_id).toBe(`${RUN_ID}::preflight::dispatch`);
@@ -340,7 +343,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // recomputable so re-entry never forks a second round.
     const round = db
       .prepare(
-        "SELECT round_id, round_index FROM executor_rounds WHERE workflow_run_id = ?"
+        "SELECT round_id, round_index FROM executor_rounds WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { round_id: string; round_index: number };
     expect(round.round_id).toBe(`${RUN_ID}::preflight::dispatch::round-1`);
@@ -369,7 +372,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
                 remaining_work AS remainingWork, changed_files AS changedFiles,
                 verification_status AS verificationStatus, commit_sha AS commitSha,
                 recovery_code AS recoveryCode, human_gate AS humanGate
-           FROM executor_rounds WHERE workflow_run_id = ?`
+           FROM executor_rounds WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as Record<string, unknown>;
 
@@ -393,7 +396,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       verificationStatus: null,
       commitSha: null,
       recoveryCode: null,
-      humanGate: null
+      humanGate: null,
     });
   });
 
@@ -403,16 +406,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         implementation: {
           harness: "codex",
           model: "gpt-5.1",
-          effort: "high"
-        }
-      }
+          effort: "high",
+        },
+      },
     });
     const claim = approveAndClaim(db, "implementation");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
@@ -420,7 +423,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       .prepare(
         `SELECT agent_provider AS agentProvider, model, effort
            FROM executor_rounds
-          WHERE workflow_run_id = ? AND step_run_id = ?`
+          WHERE workflow_run_id = ? AND step_run_id = ?`,
       )
       .get(RUN_ID, "implementation") as {
       agentProvider: string | null;
@@ -430,20 +433,20 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(round).toEqual({
       agentProvider: "codex",
       model: "gpt-5.1",
-      effort: "high"
+      effort: "high",
     });
   });
 
   it("routes unsupported current GNHF/CWFP implementation dispatch to manual recovery", () => {
     const db = openNativeCodingDbWithRoute({
-      implementationEngine: "current-gnhf-cwfp"
+      implementationEngine: "current-gnhf-cwfp",
     });
     const claim = approveAndClaim(db, "implementation");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
@@ -454,11 +457,11 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       targetScope: "step",
       stepRunId: "implementation",
       evidence: "route_config_invalid",
-      resolvedAt: null
+      resolvedAt: null,
     });
     expect(gates[0]?.reason).toContain("current-gnhf-cwfp");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
@@ -484,16 +487,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const second = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 2
+      now: NOW + 2,
     });
 
     expect(second.status).toBe(
-      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
     expect(countInvocations(db, RUN_ID)).toBe(1);
     const rounds = db
       .prepare(
-        "SELECT COUNT(*) AS n FROM executor_rounds WHERE workflow_run_id = ?"
+        "SELECT COUNT(*) AS n FROM executor_rounds WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { n: number };
     expect(rounds.n).toBe(1);
@@ -506,18 +509,18 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     // Force preflight to resolve to a family with a dedicated daemon adapter.
     db.prepare(
       `UPDATE step_definitions SET executor = 'external-apply'
-         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
-      "preflight"
+      "preflight",
     );
     const claim = approveAndClaim(db, "preflight");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
@@ -543,45 +546,45 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     db.prepare(
       `UPDATE workflow_runs
          SET workflow_definition_key = NULL, workflow_definition_version = NULL
-       WHERE id = ?`
+       WHERE id = ?`,
     ).run(RUN_ID);
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
     expect(gates[0]?.gateType).toBe("manual_recovery_required");
-    expect(getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery).toBe(
-      true
-    );
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
   });
 
-  it("routes an unknown executor family (corrupt step definition) to manual recovery", () => {
+  it("routes an invalid executor name (corrupt step definition) to manual recovery", () => {
     const db = openSeededDb();
-    // The step definition's `executor` column holds a value that is not a known
-    // WorkflowExecutorFamily (corrupt or legacy durable state). Claiming does not
-    // read `step_definitions`, so the corrupt value only bites at dispatch.
+    // The step definition's `executor` column does not hold a valid stable
+    // executor name (corrupt or legacy durable state). Claiming does
+    // not read `step_definitions`, so the corrupt value only bites at dispatch.
     db.prepare(
-      `UPDATE step_definitions SET executor = 'definitely-not-a-family'
-         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+      `UPDATE step_definitions SET executor = 'Invalid Executor Name'
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
-      "preflight"
+      "preflight",
     );
     const claim = approveAndClaim(db, "preflight");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
@@ -595,13 +598,13 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       targetScope: "step",
       stepRunId: "preflight",
       evidence: "unknown_executor_family",
-      resolvedAt: null
+      resolvedAt: null,
     });
-    expect(gates[0]?.reason).toContain("definitely-not-a-family");
+    expect(gates[0]?.reason).toContain("Invalid Executor Name");
 
     // Durable park + released lease + no half scaffold + step not advanced.
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
@@ -615,17 +618,17 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     // step can no longer be resolved to an executor family.
     db.prepare(
       `DELETE FROM step_definitions
-         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
-      "preflight"
+      "preflight",
     );
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
@@ -636,11 +639,11 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       targetScope: "step",
       stepRunId: "preflight",
       evidence: "step_definition_not_found",
-      resolvedAt: null
+      resolvedAt: null,
     });
     expect(gates[0]?.reason).toContain("preflight");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
@@ -650,15 +653,15 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
   it("routes corrupt native coding route overrides to manual recovery", () => {
     const db = openNativeCodingDbWithRoute({
       steps: {
-        preflight: { model: "opus" }
-      }
+        preflight: { model: "opus" },
+      },
     });
     const claim = approveAndClaim(db, "implementation");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
@@ -669,11 +672,11 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       targetScope: "step",
       stepRunId: "implementation",
       evidence: "route_config_invalid",
-      resolvedAt: null
+      resolvedAt: null,
     });
     expect(gates[0]?.reason).toContain("preflight");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
@@ -695,7 +698,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
@@ -721,17 +724,17 @@ describe("executeWorkflowStepDispatch — safety", () => {
     // Another worker advanced the step out of `approved` between claim and
     // dispatch: the dispatcher must not create a half scaffold.
     db.prepare(
-      "UPDATE workflow_steps SET state = 'running' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'running' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, "preflight");
 
     const result = executeWorkflowStepDispatch(claim, {
       db,
       workerId: WORKER,
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     expect(result.status).toBe(
-      WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable
+      WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
     );
     expect(countInvocations(db, RUN_ID)).toBe(0);
     // The dispatch lease is released so the run is not held busy on a no-op.

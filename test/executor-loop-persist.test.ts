@@ -11,7 +11,7 @@ import type {
   ExecutorDefinitionRecord,
   ExecutorFindingRecord,
   ExecutorInvocationRecord,
-  ExecutorRoundRecord
+  ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import {
   ExecutorEvidenceConflictError,
@@ -40,7 +40,7 @@ import {
   loadExecutorRound,
   persistExecutorDefinition,
   updateExecutorInvocationState,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 
 const tempRoots: string[] = [];
@@ -68,14 +68,14 @@ function openTempDb(): MomentumDb {
 function seedRunAndStep(
   db: MomentumDb,
   runId = "run-1",
-  stepId = "step-1"
+  stepId = "step-1",
 ): void {
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', 1, 1)",
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES (?, ?, 'implementation', 0, 1, 1)`
+       VALUES (?, ?, 'implementation', 0, 1, 1)`,
   ).run(runId, stepId);
 }
 
@@ -105,7 +105,7 @@ function openEvidenceDb(): MomentumDb {
 function interceptNextUpdate(
   db: MomentumDb,
   table: string,
-  beforeRun: () => void
+  beforeRun: () => void,
 ): MomentumDb {
   let intercepted = false;
   return new Proxy(db, {
@@ -123,7 +123,7 @@ function interceptNextUpdate(
                 return Reflect.get(
                   statementTarget,
                   statementProp,
-                  statementReceiver
+                  statementReceiver,
                 );
               }
               return (...args: unknown[]) => {
@@ -132,17 +132,17 @@ function interceptNextUpdate(
                   statementTarget.run as (...runArgs: unknown[]) => unknown
                 )(...args);
               };
-            }
+            },
           });
         }
         return statement;
       };
-    }
+    },
   }) as MomentumDb;
 }
 
 function makeDefinition(
-  overrides: Partial<ExecutorDefinitionRecord> = {}
+  overrides: Partial<ExecutorDefinitionRecord> = {},
 ): ExecutorDefinitionRecord {
   return {
     executorKey: "coding-goal-loop",
@@ -153,12 +153,12 @@ function makeDefinition(
     timeoutMs: 1_800_000,
     maxRounds: 12,
     policyEnvelope: "delegated:standard",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeInvocation(
-  overrides: Partial<ExecutorInvocationRecord> = {}
+  overrides: Partial<ExecutorInvocationRecord> = {},
 ): ExecutorInvocationRecord {
   return {
     invocationId: "inv-1",
@@ -171,12 +171,12 @@ function makeInvocation(
     startedAt: null,
     heartbeatAt: null,
     finishedAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeRound(
-  overrides: Partial<ExecutorRoundRecord> = {}
+  overrides: Partial<ExecutorRoundRecord> = {},
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
@@ -208,12 +208,12 @@ function makeRound(
     commitSha: null,
     recoveryCode: null,
     humanGate: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeArtifact(
-  overrides: Partial<ExecutorArtifactRecord> = {}
+  overrides: Partial<ExecutorArtifactRecord> = {},
 ): ExecutorArtifactRecord {
   return {
     artifactId: "artifact-1",
@@ -222,12 +222,12 @@ function makeArtifact(
     path: "/runs/round-1/result.json",
     digest: "sha256:abc",
     description: "normalized result document",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeCheckpoint(
-  overrides: Partial<ExecutorCheckpointRecord> = {}
+  overrides: Partial<ExecutorCheckpointRecord> = {},
 ): ExecutorCheckpointRecord {
   return {
     checkpointId: "checkpoint-1",
@@ -235,12 +235,12 @@ function makeCheckpoint(
     sequence: 0,
     stage: "prepare",
     detail: "resolved agent/model/leases",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeFinding(
-  overrides: Partial<ExecutorFindingRecord> = {}
+  overrides: Partial<ExecutorFindingRecord> = {},
 ): ExecutorFindingRecord {
   return {
     findingId: "finding-1",
@@ -250,12 +250,12 @@ function makeFinding(
     detail: "no coverage for the recovery path",
     selected: true,
     externalRef: "nomistakes:F-1",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeDecision(
-  overrides: Partial<ExecutorDecisionRecord> = {}
+  overrides: Partial<ExecutorDecisionRecord> = {},
 ): ExecutorDecisionRecord {
   return {
     decisionId: "decision-1",
@@ -265,7 +265,7 @@ function makeDecision(
     recommendedAction: "hold",
     chosenAction: "hold",
     resolution: "delegated:within-envelope",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -275,7 +275,10 @@ describe("persistExecutorDefinition", () => {
     try {
       const record = makeDefinition();
       const summary = persistExecutorDefinition(db, record, { now: 1000 });
-      expect(summary).toEqual({ executorKey: "coding-goal-loop", inserted: true });
+      expect(summary).toEqual({
+        executorKey: "coding-goal-loop",
+        inserted: true,
+      });
       expect(loadExecutorDefinition(db, "coding-goal-loop")).toEqual(record);
     } finally {
       db.close();
@@ -292,7 +295,7 @@ describe("persistExecutorDefinition", () => {
         effort: null,
         timeoutMs: null,
         maxRounds: null,
-        policyEnvelope: null
+        policyEnvelope: null,
       });
       persistExecutorDefinition(db, record, { now: 1000 });
       expect(loadExecutorDefinition(db, "bare")).toEqual(record);
@@ -308,20 +311,20 @@ describe("persistExecutorDefinition", () => {
       const second = persistExecutorDefinition(
         db,
         makeDefinition({ model: "claude-sonnet-4-6" }),
-        { now: 2000 }
+        { now: 2000 },
       );
       expect(second.inserted).toBe(false);
 
       const rows = db
         .prepare(
-          "SELECT count(*) AS c FROM executor_definitions WHERE executor_key = ?"
+          "SELECT count(*) AS c FROM executor_definitions WHERE executor_key = ?",
         )
         .get("coding-goal-loop") as { c: number };
       expect(rows.c).toBe(1);
 
       const row = db
         .prepare(
-          "SELECT created_at, updated_at, model FROM executor_definitions WHERE executor_key = ?"
+          "SELECT created_at, updated_at, model FROM executor_definitions WHERE executor_key = ?",
         )
         .get("coding-goal-loop") as {
         created_at: number;
@@ -345,14 +348,14 @@ describe("persistExecutorDefinition", () => {
     }
   });
 
-  it("rejects an unknown executor family before writing", () => {
+  it("rejects an invalid executor identity before writing", () => {
     const db = openTempDb();
     try {
       const bad = makeDefinition({
-        family: "not-a-family" as ExecutorDefinitionRecord["family"]
+        family: "NOT A VALID EXECUTOR" as ExecutorDefinitionRecord["family"],
       });
       expect(() => persistExecutorDefinition(db, bad)).toThrow(
-        InvalidExecutorRecordError
+        InvalidExecutorRecordError,
       );
       expect(loadExecutorDefinition(db, "coding-goal-loop")).toBeUndefined();
     } finally {
@@ -368,7 +371,7 @@ describe("executor invocations", () => {
       const record = makeInvocation({
         state: "running",
         startedAt: 500,
-        heartbeatAt: 600
+        heartbeatAt: 600,
       });
       insertExecutorInvocation(db, record, { now: 1000 });
       expect(loadExecutorInvocation(db, "inv-1")).toEqual(record);
@@ -381,12 +384,12 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       insertExecutorInvocation(db, makeInvocation({ state: "preparing" }), {
-        now: 1000
+        now: 1000,
       });
       expect(() =>
         insertExecutorInvocation(db, makeInvocation({ state: "running" }), {
-          now: 2000
-        })
+          now: 2000,
+        }),
       ).toThrow(ExecutorInvocationConflictError);
       expect(loadExecutorInvocation(db, "inv-1")?.state).toBe("preparing");
     } finally {
@@ -398,10 +401,10 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       const bad = makeInvocation({
-        state: "bogus" as ExecutorInvocationRecord["state"]
+        state: "bogus" as ExecutorInvocationRecord["state"],
       });
       expect(() => insertExecutorInvocation(db, bad)).toThrow(
-        InvalidExecutorRecordError
+        InvalidExecutorRecordError,
       );
       expect(loadExecutorInvocation(db, "inv-1")).toBeUndefined();
     } finally {
@@ -415,7 +418,7 @@ describe("executor invocations", () => {
       insertExecutorInvocation(db, makeInvocation(), { now: 1000 });
       updateExecutorInvocationState(db, "inv-1", "preparing", {
         now: 1100,
-        heartbeatAt: 1100
+        heartbeatAt: 1100,
       });
       const loaded = loadExecutorInvocation(db, "inv-1");
       expect(loaded?.state).toBe("preparing");
@@ -429,22 +432,18 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       insertExecutorInvocation(db, makeInvocation({ state: "running" }), {
-        now: 1000
+        now: 1000,
       });
-      const guardedDb = interceptNextUpdate(
-        db,
-        "executor_invocations",
-        () => {
-          db.prepare(
-            "UPDATE executor_invocations SET heartbeat_at = 1099, updated_at = 1099 WHERE invocation_id = 'inv-1'"
-          ).run();
-        }
-      );
+      const guardedDb = interceptNextUpdate(db, "executor_invocations", () => {
+        db.prepare(
+          "UPDATE executor_invocations SET heartbeat_at = 1099, updated_at = 1099 WHERE invocation_id = 'inv-1'",
+        ).run();
+      });
       expect(() =>
         updateExecutorInvocationState(guardedDb, "inv-1", "running", {
           now: 1100,
-          heartbeatAt: 1100
-        })
+          heartbeatAt: 1100,
+        }),
       ).toThrow(ExecutorInvocationTransitionError);
       expect(loadExecutorInvocation(db, "inv-1")?.heartbeatAt).toBe(1099);
     } finally {
@@ -457,7 +456,7 @@ describe("executor invocations", () => {
     try {
       insertExecutorInvocation(db, makeInvocation(), { now: 1000 });
       expect(() =>
-        updateExecutorInvocationState(db, "inv-1", "succeeded", { now: 1100 })
+        updateExecutorInvocationState(db, "inv-1", "succeeded", { now: 1100 }),
       ).toThrow(ExecutorInvocationTransitionError);
       expect(loadExecutorInvocation(db, "inv-1")?.state).toBe("pending");
     } finally {
@@ -469,7 +468,7 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       expect(() =>
-        updateExecutorInvocationState(db, "ghost", "preparing")
+        updateExecutorInvocationState(db, "ghost", "preparing"),
       ).toThrow(ExecutorInvocationNotFoundError);
     } finally {
       db.close();
@@ -500,7 +499,7 @@ describe("executor rounds", () => {
         verificationStatus: "passed",
         commitSha: "deadbeef",
         recoveryCode: null,
-        humanGate: null
+        humanGate: null,
       });
       insertExecutorRound(db, record, { now: 1000 });
       expect(loadExecutorRound(db, "round-1")).toEqual(record);
@@ -514,7 +513,7 @@ describe("executor rounds", () => {
     try {
       insertExecutorRound(db, makeRound(), { now: 1000 });
       expect(() => insertExecutorRound(db, makeRound(), { now: 2000 })).toThrow(
-        ExecutorRoundConflictError
+        ExecutorRoundConflictError,
       );
     } finally {
       db.close();
@@ -524,15 +523,19 @@ describe("executor rounds", () => {
   it("refuses two rounds with the same index in one invocation", () => {
     const db = openRoundDb();
     try {
-      insertExecutorRound(db, makeRound({ roundId: "round-a", roundIndex: 0 }), {
-        now: 1000
-      });
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "round-a", roundIndex: 0 }),
+        {
+          now: 1000,
+        },
+      );
       expect(() =>
         insertExecutorRound(
           db,
           makeRound({ roundId: "round-b", roundIndex: 0 }),
-          { now: 2000 }
-        )
+          { now: 2000 },
+        ),
       ).toThrow(ExecutorRoundConflictError);
     } finally {
       db.close();
@@ -545,23 +548,23 @@ describe("executor rounds", () => {
       insertExecutorRound(
         db,
         makeRound({ roundId: "round-2", roundIndex: 2 }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "round-0", roundIndex: 0 }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "round-1", roundIndex: 1 }),
-        { now: 1000 }
+        { now: 1000 },
       );
       const rounds = listExecutorRoundsForInvocation(db, "inv-1");
       expect(rounds.map((r) => r.roundId)).toEqual([
         "round-0",
         "round-1",
-        "round-2"
+        "round-2",
       ]);
     } finally {
       db.close();
@@ -575,26 +578,26 @@ describe("executor rounds", () => {
       // has to aggregate rounds the invocation-scoped reader would never join.
       db.prepare(
         `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-           VALUES ('run-1', 'step-2', 'preflight', 1, 1, 1)`
+           VALUES ('run-1', 'step-2', 'preflight', 1, 1, 1)`,
       ).run();
       insertExecutorInvocation(
         db,
         makeInvocation({
           invocationId: "inv-2",
           stepRunId: "step-2",
-          stepKey: "preflight"
+          stepKey: "preflight",
         }),
-        { now: 1 }
+        { now: 1 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "round-impl-b", roundIndex: 1 }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "round-impl-a", roundIndex: 0 }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorRound(
         db,
@@ -603,16 +606,16 @@ describe("executor rounds", () => {
           roundIndex: 0,
           invocationId: "inv-2",
           stepRunId: "step-2",
-          stepKey: "preflight"
+          stepKey: "preflight",
         }),
-        { now: 1000 }
+        { now: 1000 },
       );
 
       const rounds = listExecutorRoundsForRun(db, "run-1");
       expect(rounds.map((r) => r.roundId)).toEqual([
         "round-impl-a",
         "round-impl-b",
-        "round-pre"
+        "round-pre",
       ]);
 
       expect(listExecutorRoundsForRun(db, "missing-run")).toEqual([]);
@@ -628,19 +631,19 @@ describe("executor rounds", () => {
         db,
         makeInvocation({
           invocationId: "inv-2",
-          attempt: 2
+          attempt: 2,
         }),
-        { now: 2000 }
+        { now: 2000 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "attempt-1-round-0", roundIndex: 0 }),
-        { now: 1100 }
+        { now: 1100 },
       );
       insertExecutorRound(
         db,
         makeRound({ roundId: "attempt-1-round-1", roundIndex: 1 }),
-        { now: 1200 }
+        { now: 1200 },
       );
       insertExecutorRound(
         db,
@@ -648,9 +651,9 @@ describe("executor rounds", () => {
           roundId: "attempt-2-round-0",
           invocationId: "inv-2",
           attempt: 2,
-          roundIndex: 0
+          roundIndex: 0,
         }),
-        { now: 2100 }
+        { now: 2100 },
       );
       insertExecutorRound(
         db,
@@ -658,18 +661,18 @@ describe("executor rounds", () => {
           roundId: "attempt-2-round-1",
           invocationId: "inv-2",
           attempt: 2,
-          roundIndex: 1
+          roundIndex: 1,
         }),
-        { now: 2200 }
+        { now: 2200 },
       );
 
       expect(
-        listExecutorRoundsForRun(db, "run-1").map((r) => r.roundId)
+        listExecutorRoundsForRun(db, "run-1").map((r) => r.roundId),
       ).toEqual([
         "attempt-1-round-0",
         "attempt-1-round-1",
         "attempt-2-round-0",
-        "attempt-2-round-1"
+        "attempt-2-round-1",
       ]);
     } finally {
       db.close();
@@ -687,9 +690,9 @@ describe("executor rounds", () => {
           state: "succeeded",
           classification: "complete",
           summary: "complete",
-          commitSha: "abc123"
+          commitSha: "abc123",
         }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorRound(
         db,
@@ -699,9 +702,9 @@ describe("executor rounds", () => {
           state: "running",
           inputDigest: "sha256:input-1",
           artifactRoot: "/runs/interrupted-round",
-          logPaths: ["/runs/interrupted-round/stdout.log"]
+          logPaths: ["/runs/interrupted-round/stdout.log"],
         }),
-        { now: 1100 }
+        { now: 1100 },
       );
       insertExecutorRound(
         db,
@@ -709,9 +712,9 @@ describe("executor rounds", () => {
           roundId: "paused-round",
           roundIndex: 2,
           state: "waiting_operator",
-          humanGate: "operator_decision_required"
+          humanGate: "operator_decision_required",
         }),
-        { now: 1200 }
+        { now: 1200 },
       );
 
       const completedBefore = loadExecutorRound(db, "completed-round");
@@ -719,11 +722,11 @@ describe("executor rounds", () => {
 
       expect(incomplete.map((round) => round.roundId)).toEqual([
         "interrupted-round",
-        "paused-round"
+        "paused-round",
       ]);
       expect(incomplete.map((round) => round.state)).toEqual([
         "running",
-        "waiting_operator"
+        "waiting_operator",
       ]);
       expect(loadExecutorRound(db, "completed-round")).toEqual(completedBefore);
     } finally {
@@ -747,9 +750,9 @@ describe("executor rounds", () => {
           changedFiles: ["src/x.ts"],
           verificationStatus: "passed",
           resultDigest: "res-1",
-          heartbeatAt: 1200
+          heartbeatAt: 1200,
         },
-        { now: 1200 }
+        { now: 1200 },
       );
       const loaded = loadExecutorRound(db, "round-1");
       expect(loaded?.state).toBe("capturing_result");
@@ -771,7 +774,7 @@ describe("executor rounds", () => {
       insertExecutorRound(db, makeRound({ state: "running" }), { now: 1000 });
       const guardedDb = interceptNextUpdate(db, "executor_rounds", () => {
         db.prepare(
-          "UPDATE executor_rounds SET summary = 'fresh result', heartbeat_at = 1099, updated_at = 1099 WHERE round_id = 'round-1'"
+          "UPDATE executor_rounds SET summary = 'fresh result', heartbeat_at = 1099, updated_at = 1099 WHERE round_id = 'round-1'",
         ).run();
       });
       expect(() =>
@@ -781,10 +784,10 @@ describe("executor rounds", () => {
           {
             toState: "running",
             summary: "stale result",
-            heartbeatAt: 1100
+            heartbeatAt: 1100,
           },
-          { now: 1100 }
-        )
+          { now: 1100 },
+        ),
       ).toThrow(ExecutorRoundTransitionError);
       const loaded = loadExecutorRound(db, "round-1");
       expect(loaded?.summary).toBe("fresh result");
@@ -800,7 +803,7 @@ describe("executor rounds", () => {
       insertExecutorRound(db, makeRound({ state: "running" }), { now: 1000 });
       const guardedDb = interceptNextUpdate(db, "executor_rounds", () => {
         db.prepare(
-          "UPDATE executor_rounds SET state = 'capturing_result', updated_at = 1099 WHERE round_id = 'round-1'"
+          "UPDATE executor_rounds SET state = 'capturing_result', updated_at = 1099 WHERE round_id = 'round-1'",
         ).run();
       });
       expect(() =>
@@ -810,10 +813,10 @@ describe("executor rounds", () => {
           {
             toState: "capturing_result",
             summary: "wanted result",
-            resultDigest: "digest-1"
+            resultDigest: "digest-1",
           },
-          { now: 1100 }
-        )
+          { now: 1100 },
+        ),
       ).toThrow(ExecutorRoundTransitionError);
       const loaded = loadExecutorRound(db, "round-1");
       expect(loaded?.state).toBe("capturing_result");
@@ -829,7 +832,12 @@ describe("executor rounds", () => {
     try {
       insertExecutorRound(db, makeRound({ state: "running" }), { now: 1000 });
       expect(() =>
-        updateExecutorRound(db, "round-1", { toState: "succeeded" }, { now: 1200 })
+        updateExecutorRound(
+          db,
+          "round-1",
+          { toState: "succeeded" },
+          { now: 1200 },
+        ),
       ).toThrow(ExecutorRoundTransitionError);
       expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     } finally {
@@ -841,7 +849,7 @@ describe("executor rounds", () => {
     const db = openRoundDb();
     try {
       expect(() =>
-        updateExecutorRound(db, "ghost", { toState: "running" })
+        updateExecutorRound(db, "ghost", { toState: "running" }),
       ).toThrow(ExecutorRoundNotFoundError);
     } finally {
       db.close();
@@ -852,11 +860,10 @@ describe("executor rounds", () => {
     const db = openRoundDb();
     try {
       const bad = makeRound({
-        classification:
-          "maybe" as ExecutorRoundRecord["classification"]
+        classification: "maybe" as ExecutorRoundRecord["classification"],
       });
       expect(() => insertExecutorRound(db, bad)).toThrow(
-        InvalidExecutorRecordError
+        InvalidExecutorRecordError,
       );
       expect(loadExecutorRound(db, "round-1")).toBeUndefined();
     } finally {
@@ -885,7 +892,7 @@ describe("executor artifacts", () => {
         artifactClass: "logs",
         path: "/runs/round-1/stdout.log",
         digest: null,
-        description: null
+        description: null,
       });
       insertExecutorArtifact(db, record, { now: 1000 });
       expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([record]);
@@ -898,16 +905,16 @@ describe("executor artifacts", () => {
     const db = openEvidenceDb();
     try {
       insertExecutorArtifact(db, makeArtifact({ artifactId: "a-late" }), {
-        now: 3000
+        now: 3000,
       });
       insertExecutorArtifact(db, makeArtifact({ artifactId: "a-early" }), {
-        now: 1000
+        now: 1000,
       });
       insertExecutorArtifact(db, makeArtifact({ artifactId: "a-mid" }), {
-        now: 2000
+        now: 2000,
       });
       expect(
-        listExecutorArtifactsForRound(db, "round-1").map((a) => a.artifactId)
+        listExecutorArtifactsForRound(db, "round-1").map((a) => a.artifactId),
       ).toEqual(["a-early", "a-mid", "a-late"]);
     } finally {
       db.close();
@@ -918,12 +925,12 @@ describe("executor artifacts", () => {
     const db = openEvidenceDb();
     try {
       insertExecutorArtifact(db, makeArtifact({ path: "/first" }), {
-        now: 1000
+        now: 1000,
       });
       expect(() =>
         insertExecutorArtifact(db, makeArtifact({ path: "/second" }), {
-          now: 2000
-        })
+          now: 2000,
+        }),
       ).toThrow(ExecutorEvidenceConflictError);
       const rows = listExecutorArtifactsForRound(db, "round-1");
       expect(rows).toHaveLength(1);
@@ -937,11 +944,10 @@ describe("executor artifacts", () => {
     const db = openEvidenceDb();
     try {
       const bad = makeArtifact({
-        artifactClass:
-          "screenshot" as ExecutorArtifactRecord["artifactClass"]
+        artifactClass: "screenshot" as ExecutorArtifactRecord["artifactClass"],
       });
       expect(() => insertExecutorArtifact(db, bad)).toThrow(
-        InvalidExecutorRecordError
+        InvalidExecutorRecordError,
       );
       expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
     } finally {
@@ -980,20 +986,20 @@ describe("executor checkpoints", () => {
       insertExecutorCheckpoint(
         db,
         makeCheckpoint({ checkpointId: "c-2", sequence: 2, stage: "finalize" }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorCheckpoint(
         db,
         makeCheckpoint({ checkpointId: "c-0", sequence: 0, stage: "prepare" }),
-        { now: 1000 }
+        { now: 1000 },
       );
       insertExecutorCheckpoint(
         db,
         makeCheckpoint({ checkpointId: "c-1", sequence: 1, stage: "run" }),
-        { now: 1000 }
+        { now: 1000 },
       );
       expect(
-        listExecutorCheckpointsForRound(db, "round-1").map((c) => c.stage)
+        listExecutorCheckpointsForRound(db, "round-1").map((c) => c.stage),
       ).toEqual(["prepare", "run", "finalize"]);
     } finally {
       db.close();
@@ -1005,7 +1011,7 @@ describe("executor checkpoints", () => {
     try {
       insertExecutorCheckpoint(db, makeCheckpoint(), { now: 1000 });
       expect(() =>
-        insertExecutorCheckpoint(db, makeCheckpoint(), { now: 2000 })
+        insertExecutorCheckpoint(db, makeCheckpoint(), { now: 2000 }),
       ).toThrow(ExecutorEvidenceConflictError);
     } finally {
       db.close();
@@ -1016,12 +1022,12 @@ describe("executor checkpoints", () => {
     const db = openEvidenceDb();
     try {
       insertExecutorCheckpoint(db, makeCheckpoint({ checkpointId: "c-a" }), {
-        now: 1000
+        now: 1000,
       });
       expect(() =>
         insertExecutorCheckpoint(db, makeCheckpoint({ checkpointId: "c-b" }), {
-          now: 2000
-        })
+          now: 2000,
+        }),
       ).toThrow(ExecutorEvidenceConflictError);
     } finally {
       db.close();
@@ -1049,7 +1055,7 @@ describe("executor findings", () => {
         severity: null,
         detail: null,
         selected: false,
-        externalRef: null
+        externalRef: null,
       });
       insertExecutorFinding(db, record, { now: 1000 });
       expect(listExecutorFindingsForRound(db, "round-1")).toEqual([record]);
@@ -1062,13 +1068,13 @@ describe("executor findings", () => {
     const db = openEvidenceDb();
     try {
       insertExecutorFinding(db, makeFinding({ findingId: "f-late" }), {
-        now: 2000
+        now: 2000,
       });
       insertExecutorFinding(db, makeFinding({ findingId: "f-early" }), {
-        now: 1000
+        now: 1000,
       });
       expect(
-        listExecutorFindingsForRound(db, "round-1").map((f) => f.findingId)
+        listExecutorFindingsForRound(db, "round-1").map((f) => f.findingId),
       ).toEqual(["f-early", "f-late"]);
     } finally {
       db.close();
@@ -1080,7 +1086,7 @@ describe("executor findings", () => {
     try {
       insertExecutorFinding(db, makeFinding(), { now: 1000 });
       expect(() =>
-        insertExecutorFinding(db, makeFinding(), { now: 2000 })
+        insertExecutorFinding(db, makeFinding(), { now: 2000 }),
       ).toThrow(ExecutorEvidenceConflictError);
     } finally {
       db.close();
@@ -1119,7 +1125,7 @@ describe("executor decisions", () => {
         allowedActions: [],
         recommendedAction: null,
         chosenAction: null,
-        resolution: null
+        resolution: null,
       });
       insertExecutorDecision(db, record, { now: 1000 });
       expect(listExecutorDecisionsForRound(db, "round-1")).toEqual([record]);
@@ -1132,13 +1138,13 @@ describe("executor decisions", () => {
     const db = openEvidenceDb();
     try {
       insertExecutorDecision(db, makeDecision({ decisionId: "d-late" }), {
-        now: 2000
+        now: 2000,
       });
       insertExecutorDecision(db, makeDecision({ decisionId: "d-early" }), {
-        now: 1000
+        now: 1000,
       });
       expect(
-        listExecutorDecisionsForRound(db, "round-1").map((d) => d.decisionId)
+        listExecutorDecisionsForRound(db, "round-1").map((d) => d.decisionId),
       ).toEqual(["d-early", "d-late"]);
     } finally {
       db.close();
@@ -1150,7 +1156,7 @@ describe("executor decisions", () => {
     try {
       insertExecutorDecision(db, makeDecision(), { now: 1000 });
       expect(() =>
-        insertExecutorDecision(db, makeDecision(), { now: 2000 })
+        insertExecutorDecision(db, makeDecision(), { now: 2000 }),
       ).toThrow(ExecutorEvidenceConflictError);
     } finally {
       db.close();
@@ -1173,9 +1179,13 @@ describe("executor-loop evidence integration", () => {
       expect(listExecutorDecisionsForRound(db, "round-1")).toHaveLength(1);
 
       // A different round shares none of the first round's evidence.
-      insertExecutorRound(db, makeRound({ roundId: "round-2", roundIndex: 1 }), {
-        now: 1
-      });
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "round-2", roundIndex: 1 }),
+        {
+          now: 1,
+        },
+      );
       expect(listExecutorArtifactsForRound(db, "round-2")).toEqual([]);
       expect(listExecutorCheckpointsForRound(db, "round-2")).toEqual([]);
       expect(listExecutorFindingsForRound(db, "round-2")).toEqual([]);

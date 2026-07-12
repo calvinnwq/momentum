@@ -17,7 +17,7 @@
  *
  * Live execution itself (spawning the engine, lease/heartbeat persistence,
  * result capture, the verification/commit transaction) stays owned by the
- * coding-workflow-pipeline skill and the live-wrapper dispatch / executor-run
+ * coding-workflow-pipeline skill and the registered SDK dispatch
  * lanes; this module is the gate, not the runner.
  *
  * Safety posture (mirrors the read smoke, per
@@ -37,25 +37,29 @@
 
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowExecutorFamily
+  isWorkflowExecutorFamily,
+  type WorkflowExecutorFamily,
 } from "../../workflow/definition/definition.js";
 import {
   parseLiveWrapperProfile,
   resolveLiveWrapper,
   type LiveWrapperCwd,
-  type LiveWrapperProbeConfig
+  type LiveWrapperProbeConfig,
 } from "../../../adapters/live-wrapper-registry.js";
 import {
   WORKFLOW_STEP_KINDS,
-  type WorkflowStepKind
+  type WorkflowStepKind,
 } from "../../workflow/run/reducer.js";
 
 /** Master opt-in switch. The real coding-workflow harness smoke skips unless truthy. */
-export const REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR = "MOMENTUM_REAL_SMOKE_WORKFLOW";
+export const REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_WORKFLOW";
 /** Selects which workflow step kind's live wrapper to smoke (e.g. "no-mistakes"). */
-export const REAL_SMOKE_WORKFLOW_KIND_ENV_VAR = "MOMENTUM_REAL_SMOKE_WORKFLOW_KIND";
+export const REAL_SMOKE_WORKFLOW_KIND_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_WORKFLOW_KIND";
 /** Opts into spawning the full harness; default is the safe probe-only dry-run. */
-export const REAL_SMOKE_WORKFLOW_FULL_ENV_VAR = "MOMENTUM_REAL_SMOKE_WORKFLOW_FULL";
+export const REAL_SMOKE_WORKFLOW_FULL_ENV_VAR =
+  "MOMENTUM_REAL_SMOKE_WORKFLOW_FULL";
 /** Separate write-policy opt-in required to smoke an external-write wrapper. */
 export const REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR =
   "MOMENTUM_REAL_SMOKE_WORKFLOW_ALLOW_WRITE";
@@ -85,7 +89,9 @@ export type WorkflowHarnessSmokePlan =
       probe: LiveWrapperProbeConfig | null;
     };
 
-const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
+const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_STEP_KINDS,
+);
 
 /**
  * Decide whether the opt-in real coding-workflow harness smoke may run, and with
@@ -95,13 +101,13 @@ const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS)
  */
 export function planWorkflowHarnessSmoke(
   env: Record<string, string | undefined>,
-  rawProfile: unknown
+  rawProfile: unknown,
 ): WorkflowHarnessSmokePlan {
   if (!isEnvFlagEnabled(env[REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR])) {
     return {
       mode: "skip",
       reason: "not_opted_in",
-      detail: `${REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR} is not set; the real coding-workflow harness smoke stays off by default and never spawns an agent in CI.`
+      detail: `${REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR} is not set; the real coding-workflow harness smoke stays off by default and never spawns an agent in CI.`,
     };
   }
 
@@ -110,7 +116,7 @@ export function planWorkflowHarnessSmoke(
     return {
       mode: "skip",
       reason: "profile_unavailable",
-      detail: `A valid live-wrapper profile is required to resolve the harness command: ${parsedProfile.error}`
+      detail: `A valid live-wrapper profile is required to resolve the harness command: ${parsedProfile.error}`,
     };
   }
 
@@ -119,14 +125,14 @@ export function planWorkflowHarnessSmoke(
     return {
       mode: "skip",
       reason: "kind_missing",
-      detail: `${REAL_SMOKE_WORKFLOW_KIND_ENV_VAR} must name the workflow step kind to smoke; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`
+      detail: `${REAL_SMOKE_WORKFLOW_KIND_ENV_VAR} must name the workflow step kind to smoke; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
   if (!WORKFLOW_STEP_KIND_SET.has(kind)) {
     return {
       mode: "skip",
       reason: "unsupported_kind",
-      detail: `${REAL_SMOKE_WORKFLOW_KIND_ENV_VAR}="${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`
+      detail: `${REAL_SMOKE_WORKFLOW_KIND_ENV_VAR}="${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
 
@@ -135,18 +141,21 @@ export function planWorkflowHarnessSmoke(
     return {
       mode: "skip",
       reason: "not_configured",
-      detail: resolved.error
+      detail: resolved.error,
     };
   }
   const config = resolved.config;
 
   const family = resolveStepKindExecutorFamily(resolved.kind);
   const isExternalWrite = family === "external-apply";
-  if (isExternalWrite && !isEnvFlagEnabled(env[REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR])) {
+  if (
+    isExternalWrite &&
+    !isEnvFlagEnabled(env[REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR])
+  ) {
     return {
       mode: "skip",
       reason: "write_policy_closed",
-      detail: `Step kind "${resolved.kind}" resolves to the external-write family "${family}"; set ${REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR} to explicitly open the separate write policy before smoking a real external write.`
+      detail: `Step kind "${resolved.kind}" resolves to the external-write family "${family}"; set ${REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR} to explicitly open the separate write policy before smoking a real external write.`,
     };
   }
 
@@ -155,7 +164,7 @@ export function planWorkflowHarnessSmoke(
     return {
       mode: "skip",
       reason: "probe_unavailable",
-      detail: `The default probe-only dry-run needs a configured \`probe\` for step kind "${resolved.kind}"; configure one or set ${REAL_SMOKE_WORKFLOW_FULL_ENV_VAR} to opt into a full harness run.`
+      detail: `The default probe-only dry-run needs a configured \`probe\` for step kind "${resolved.kind}"; configure one or set ${REAL_SMOKE_WORKFLOW_FULL_ENV_VAR} to opt into a full harness run.`,
     };
   }
 
@@ -170,7 +179,7 @@ export function planWorkflowHarnessSmoke(
     cwd: config.cwd,
     timeoutSec: config.timeoutSec,
     envAllow: config.envAllow,
-    probe: config.probe ?? null
+    probe: config.probe ?? null,
   };
 }
 
@@ -208,7 +217,7 @@ export type WorkflowHarnessSmokeOutcome =
  * failure-mode taxonomy. Pure: inspects only the supplied raw outcome.
  */
 export function classifyWorkflowHarnessOutcome(
-  raw: WorkflowHarnessRawOutcome
+  raw: WorkflowHarnessRawOutcome,
 ): WorkflowHarnessSmokeOutcome {
   switch (raw.kind) {
     case "exited": {
@@ -219,7 +228,12 @@ export function classifyWorkflowHarnessOutcome(
         raw.signal !== null
           ? `harness process terminated by signal ${raw.signal}`
           : `harness process exited with code ${raw.exitCode}`;
-      return { ok: false, mode: "command_failed", code: "harness_exit", detail };
+      return {
+        ok: false,
+        mode: "command_failed",
+        code: "harness_exit",
+        detail,
+      };
     }
     case "spawn_error": {
       const code = raw.code ?? "";
@@ -228,14 +242,14 @@ export function classifyWorkflowHarnessOutcome(
           ok: false,
           mode: "tool_unavailable",
           code: "harness_spawn_error",
-          detail: `harness command is unavailable: ${raw.message}`
+          detail: `harness command is unavailable: ${raw.message}`,
         };
       }
       return {
         ok: false,
         mode: "harness_error",
         code: "harness_spawn_error",
-        detail: raw.message
+        detail: raw.message,
       };
     }
     case "timed_out":
@@ -243,21 +257,21 @@ export function classifyWorkflowHarnessOutcome(
         ok: false,
         mode: "timeout",
         code: "harness_timeout",
-        detail: `harness exceeded its ${raw.timeoutSec}s timeout`
+        detail: `harness exceeded its ${raw.timeoutSec}s timeout`,
       };
     case "result_missing":
       return {
         ok: false,
         mode: "result_missing",
         code: "harness_result_missing",
-        detail: `harness produced no result document at ${raw.path}`
+        detail: `harness produced no result document at ${raw.path}`,
       };
     case "result_invalid":
       return {
         ok: false,
         mode: "result_invalid",
         code: "harness_result_invalid",
-        detail: `harness result document at ${raw.path} is invalid: ${raw.reason}`
+        detail: `harness result document at ${raw.path} is invalid: ${raw.reason}`,
       };
   }
 }
@@ -283,7 +297,7 @@ export type ProbeSpawnResult = {
  */
 export function classifyProbeSpawnResult(
   result: ProbeSpawnResult,
-  probe: { timeoutSec: number }
+  probe: { timeoutSec: number },
 ): WorkflowHarnessRawOutcome {
   if (result.error !== null) {
     const code = result.error.code ?? null;
@@ -296,10 +310,14 @@ export function classifyProbeSpawnResult(
 }
 
 function resolveStepKindExecutorFamily(
-  kind: WorkflowStepKind
+  kind: WorkflowStepKind,
 ): WorkflowExecutorFamily | null {
-  const step = CODING_WORKFLOW_DEFINITION.steps.find((entry) => entry.kind === kind);
-  return step ? step.executor : null;
+  const step = CODING_WORKFLOW_DEFINITION.steps.find(
+    (entry) => entry.kind === kind,
+  );
+  return step !== undefined && isWorkflowExecutorFamily(step.executor)
+    ? step.executor
+    : null;
 }
 
 function isEnvFlagEnabled(value: string | undefined): boolean {

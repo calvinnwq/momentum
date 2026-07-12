@@ -74,6 +74,11 @@ import {
 } from "../../core/daemon/workflow-dispatch.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../../core/workflow/live-wrapper/daemon-profile.js";
 import {
+  DAEMON_EXECUTOR_CONFIG_ENV_VAR,
+  resolveDaemonExecutorRegistry,
+} from "../../core/executors/sdk/daemon-config.js";
+import type { ExecutorRegistry } from "../../core/executors/sdk/registry.js";
+import {
   runWorkflowSchedulerOnceAsync,
   type RecoverStaleWorkflowLeasesResult,
 } from "../../core/workflow/dispatch/scheduler.js";
@@ -125,6 +130,7 @@ import {
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRouteStepsJson,
   preflightCodingWorkflowRunStartInput,
+  preflightWorkflowExecutorConfigs,
   type StructuralPreflightEvidence,
 } from "../../core/workflow/preflight/structural.js";
 import {
@@ -400,7 +406,7 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
  * {@link persistWorkflowRunStart}. The retired goal-first lane no longer has a
  * CLI start surface; durable Goal rows remain readable compatibility state.
  */
-function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
+function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run start",
     coding: false,
@@ -434,7 +440,10 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  * The ordinary `workflow run start` path shares the structural route-profile and
  * run-shape checks, while imported CWFP read/compat paths are left as they were.
  */
-function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
+function workflowRunStartCoding(
+  parsed: ParsedFlags,
+  io: CliIo,
+): Promise<number> {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run start-coding",
     coding: true,
@@ -454,7 +463,10 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * is a pure projection of the version-pinned built-in definition plus inputs, so
  * the durable run a later `start-coding` persists matches it exactly.
  */
-function workflowRunPreviewCoding(parsed: ParsedFlags, io: CliIo): number {
+function workflowRunPreviewCoding(
+  parsed: ParsedFlags,
+  io: CliIo,
+): Promise<number> {
   return runWorkflowStartCommand(parsed, io, {
     command: "workflow run preview-coding",
     coding: true,
@@ -501,11 +513,11 @@ function buildCodingRequiredInputPreflightEvidence(
   );
 }
 
-function runWorkflowStartCommand(
+async function runWorkflowStartCommand(
   parsed: ParsedFlags,
   io: CliIo,
   options: WorkflowStartCommandOptions,
-): number {
+): Promise<number> {
   const { command } = options;
   const positional = parsed.args.slice(3);
   if (positional.length > 0) {
@@ -682,6 +694,35 @@ function runWorkflowStartCommand(
     });
   }
 
+  let configuredExecutorRegistry: ExecutorRegistry = new Map();
+  const executorRegistryResolution = resolveDaemonExecutorRegistry(
+    io.env ?? process.env,
+  );
+  if (executorRegistryResolution.status === "invalid") {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      command,
+      code: "executor_config_invalid",
+      message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} (${executorRegistryResolution.source}): ${executorRegistryResolution.message}`,
+      dataDir,
+      runId,
+    });
+  }
+  if (executorRegistryResolution.status === "configured") {
+    const loaded = await executorRegistryResolution.load();
+    if (!loaded.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "executor_config_invalid",
+        message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} modules: ${loaded.diagnostics
+          .map((item) => `${item.code}: ${item.message}`)
+          .join("; ")}`,
+        dataDir,
+        runId,
+      });
+    }
+    configuredExecutorRegistry = loaded.registry;
+  }
+
   // Preserve repo policy loading: a present-but-malformed MOMENTUM.md refuses
   // the start rather than being silently ignored.
   const policy = loadMomentumPolicy(repoPath);
@@ -715,6 +756,23 @@ function runWorkflowStartCommand(
       });
     }
     codingDefinition = structuralPreflight.definition;
+    if (executorRegistryResolution.status === "configured") {
+      const executorPreflight = preflightWorkflowExecutorConfigs(
+        codingDefinition,
+        configuredExecutorRegistry,
+        { allowUnregisteredBuiltIns: true },
+      );
+      if (!executorPreflight.ok) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          command,
+          code: "executor_config_invalid",
+          message: "Workflow executor config failed structural preflight.",
+          dataDir,
+          runId,
+          preflightEvidence: executorPreflight.evidence,
+        });
+      }
+    }
   }
 
   let preflightedCodingInput: WorkflowRunStartInput | undefined;
@@ -812,6 +870,24 @@ function runWorkflowStartCommand(
         dataDir,
         runId,
       });
+    }
+
+    if (!options.coding && executorRegistryResolution.status === "configured") {
+      const executorPreflight = preflightWorkflowExecutorConfigs(
+        definition,
+        configuredExecutorRegistry,
+        { allowUnregisteredBuiltIns: true },
+      );
+      if (!executorPreflight.ok) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          command,
+          code: "executor_config_invalid",
+          message: "Workflow executor config failed structural preflight.",
+          dataDir,
+          runId,
+          preflightEvidence: executorPreflight.evidence,
+        });
+      }
     }
 
     const input =

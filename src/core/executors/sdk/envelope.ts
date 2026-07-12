@@ -65,6 +65,8 @@ export type CreateDurableExecutorEnvelopeInput = {
   db: MomentumDb;
   invocationId: string;
   now?: () => number;
+  /** Optional daemon-owned fencing check run inside every write transaction. */
+  authorizeWrite?: () => void;
 };
 
 export type ApplyExecutorDaemonDecisionOptions =
@@ -97,12 +99,14 @@ export class DurableExecutorEnvelope {
   readonly #db: MomentumDb;
   readonly #invocationId: string;
   readonly #now: () => number;
+  readonly #authorizeWrite: () => void;
   readonly facade: ExecutorEnvelope;
 
   constructor(input: CreateDurableExecutorEnvelopeInput) {
     this.#db = input.db;
     this.#invocationId = input.invocationId;
     this.#now = input.now ?? Date.now;
+    this.#authorizeWrite = input.authorizeWrite ?? (() => undefined);
     this.#loadInvocation();
     const facade: ExecutorEnvelope = {
       snapshot: () => this.snapshot(),
@@ -156,6 +160,7 @@ export class DurableExecutorEnvelope {
       const previous = rounds.at(-1);
       if (
         previous !== undefined &&
+        previous.attempt === record.attempt &&
         !isTerminalExecutorRoundState(previous.state)
       ) {
         throw new ExecutorEnvelopeAccessError(
@@ -332,6 +337,7 @@ export class DurableExecutorEnvelope {
     options: ApplyExecutorDaemonDecisionOptions,
   ): AppliedExecutorDaemonDecision {
     return withSqliteTransaction(this.#db, "write", () => {
+      this.#authorizeWrite();
       assertDaemonDecisionInput(decision);
       const currentInvocation = this.#loadInvocation();
       this.#assertInvocationUnsettled(
@@ -481,6 +487,7 @@ export class DurableExecutorEnvelope {
     invocation: ExecutorInvocationRecord,
     operation: string,
   ): void {
+    this.#authorizeWrite();
     if (isTerminalExecutorInvocationState(invocation.state)) {
       throw new ExecutorEnvelopeAccessError(
         `Cannot ${operation}: invocation ${this.#invocationId} is terminal (${invocation.state}).`,

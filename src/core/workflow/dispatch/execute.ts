@@ -61,8 +61,8 @@ import {
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorInvocationRecord,
+  ExecutorName,
   ExecutorRoundRecord,
-  WorkflowExecutorFamily,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
 import {
@@ -162,6 +162,7 @@ export function executeWorkflowStepDispatch(
     plan.executorFamily,
     now,
     selection.selection,
+    context.executorOwnsRounds === true,
   );
 }
 
@@ -173,13 +174,20 @@ export function executeWorkflowStepDispatch(
 function dispatchExecutorScaffold(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
-  family: WorkflowExecutorFamily,
+  family: ExecutorName,
   now: number,
   selection: CodingStepExecutorSelection,
+  executorOwnsRounds: boolean,
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
-    const reopened = dispatchRetryScaffold(db, claim, now, selection);
+    const reopened = dispatchRetryScaffold(
+      db,
+      claim,
+      now,
+      selection,
+      executorOwnsRounds,
+    );
     if (reopened.reopened) {
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
@@ -216,11 +224,13 @@ function dispatchExecutorScaffold(
       buildInvocationScaffold(claim, family, invocationId, now),
       { now },
     );
-    insertExecutorRound(
-      db,
-      buildRoundScaffold(claim, family, invocationId, now, selection),
-      { now },
-    );
+    if (!executorOwnsRounds) {
+      insertExecutorRound(
+        db,
+        buildRoundScaffold(claim, family, invocationId, now, selection),
+        { now },
+      );
+    }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
   } catch (error) {
@@ -239,6 +249,7 @@ function dispatchRetryScaffold(
   claim: ClaimedWorkflowStep,
   now: number,
   selection: CodingStepExecutorSelection,
+  executorOwnsRounds: boolean,
 ): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -257,6 +268,7 @@ function dispatchRetryScaffold(
       now,
       stepState: "running",
       selection,
+      executorOwnsRounds,
     });
     if (!reopened.reopened) {
       db.exec("ROLLBACK");
@@ -334,7 +346,7 @@ function failClosedDispatch(
 
 function buildInvocationScaffold(
   claim: ClaimedWorkflowStep,
-  family: WorkflowExecutorFamily,
+  family: ExecutorName,
   invocationId: string,
   now: number,
 ): ExecutorInvocationRecord {
@@ -354,7 +366,7 @@ function buildInvocationScaffold(
 
 function buildRoundScaffold(
   claim: ClaimedWorkflowStep,
-  family: WorkflowExecutorFamily,
+  family: ExecutorName,
   invocationId: string,
   _now: number,
   selection: CodingStepExecutorSelection,

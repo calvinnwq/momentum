@@ -185,6 +185,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
     now: number;
     stepState?: RetryableStepState;
     selection?: RetryRoundSelection;
+    executorOwnsRounds?: boolean;
   },
 ): ReopenRetryableDispatchInvocationResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
@@ -220,16 +221,18 @@ export function reopenRetryableDispatchInvocationForAttempt(
     );
   if (Number(updated.changes) === 0) return { reopened: false };
 
-  insertExecutorRound(
-    db,
-    buildRetryRound(
-      retryable,
-      nextAttempt,
-      nextRoundIndex,
-      input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
-    ),
-    { now: input.now },
-  );
+  if (input.executorOwnsRounds !== true) {
+    insertExecutorRound(
+      db,
+      buildRetryRound(
+        retryable,
+        nextAttempt,
+        nextRoundIndex,
+        input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
+      ),
+      { now: input.now },
+    );
+  }
 
   return {
     reopened: true,

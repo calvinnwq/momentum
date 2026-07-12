@@ -9,7 +9,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -17,28 +17,28 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   listExecutorRoundsForInvocation,
-  loadExecutorInvocation
+  loadExecutorInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import {
   executeAndReconcileDispatchedExternalApplyStep,
-  type DispatchedExternalApplyRunner
+  type DispatchedExternalApplyRunner,
 } from "../src/core/workflow/dispatch/external-apply-run.js";
 import {
   executeExternalApply,
-  LINEAR_API_KEY_ENV_VAR
+  LINEAR_API_KEY_ENV_VAR,
 } from "../src/core/intent/apply-execute.js";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import type {
   LinearExternalUpdateClient,
   LinearExternalUpdateInput,
   LinearExternalUpdateResult,
-  LinearExternalUpdateSuccess
+  LinearExternalUpdateSuccess,
 } from "../src/adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
 import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
@@ -99,7 +99,7 @@ function makeTempDir(prefix = "momentum-xa-m6-"): string {
 function makeWritableEvidence(root = makeTempDir("momentum-xa-m6-evidence-")) {
   return {
     executorLogPath: path.join(root, "nested", "external-apply.log"),
-    resultJsonPath: path.join(root, "nested", "external-apply.json")
+    resultJsonPath: path.join(root, "nested", "external-apply.json"),
   };
 }
 
@@ -112,7 +112,7 @@ function openSeededDb(): MomentumDb {
     runId: RUN_ID,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-496 M6 integration",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -125,14 +125,14 @@ function openSeededDb(): MomentumDb {
  */
 function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(RUN_ID, STEP_ID);
   const claim = claimRunnableWorkflowStep(db, {
     runId: RUN_ID,
     stepId: STEP_ID,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -142,10 +142,18 @@ function dispatchStep(db: MomentumDb): void {
   db.prepare(
     `UPDATE step_definitions
         SET executor = 'external-apply'
-      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
-  ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, STEP_ID);
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
+  ).run(
+    CODING_WORKFLOW_DEFINITION.key,
+    CODING_WORKFLOW_DEFINITION.version,
+    STEP_ID,
+  );
   const claim = approveAndClaim(db);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
 }
 
 function stepState(db: MomentumDb): string {
@@ -157,7 +165,7 @@ function stepState(db: MomentumDb): string {
 function dispatchRounds(db: MomentumDb) {
   return listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, STEP_ID)
+    deriveDispatchInvocationId(RUN_ID, STEP_ID),
   );
 }
 
@@ -165,13 +173,13 @@ function dispatchRounds(db: MomentumDb) {
 
 function externalApplyAllowedPolicy(): string {
   return ["---", "intent_apply_policy: external_apply_allowed", "---", ""].join(
-    "\n"
+    "\n",
   );
 }
 
 function createIntentsOnlyPolicy(): string {
   return ["---", "intent_apply_policy: create_intents_only", "---", ""].join(
-    "\n"
+    "\n",
   );
 }
 
@@ -191,11 +199,11 @@ function seedPendingIntent(db: MomentumDb): { idempotencyMarker: string } {
     `INSERT INTO source_items
        (id, adapter_kind, external_id, external_key, url, title, status,
         metadata_json, last_observed_at, goal_id, created_at, updated_at)
-     VALUES (?, 'linear', ?, 'NGX-1001', ?, 'Happy issue', NULL, '{}', 1, NULL, 1, 1)`
+     VALUES (?, 'linear', ?, 'NGX-1001', ?, 'Happy issue', NULL, '{}', 1, NULL, 1, 1)`,
   ).run(
     SOURCE_ITEM_ID,
     EXTERNAL_ID,
-    "https://linear.app/example/issue/NGX-1001"
+    "https://linear.app/example/issue/NGX-1001",
   );
   db.prepare(
     `INSERT INTO update_intents
@@ -203,20 +211,20 @@ function seedPendingIntent(db: MomentumDb): { idempotencyMarker: string } {
         reason, source_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
      VALUES (?, 'linear', ?, 'source_satisfied', ?, 'evidence shows goal complete',
-             ?, 'pending', ?, 1, 1, NULL, NULL, NULL, NULL)`
+             ?, 'pending', ?, 1, 1, NULL, NULL, NULL, NULL)`,
   ).run(
     INTENT_ID,
     EXTERNAL_ID,
     JSON.stringify(INTENT_PAYLOAD),
     SOURCE_ITEM_ID,
-    `idemp:${INTENT_ID}`
+    `idemp:${INTENT_ID}`,
   );
   return {
     idempotencyMarker: buildIdempotencyMarker({
       adapterKind: "linear",
       intentId: INTENT_ID,
-      payload: INTENT_PAYLOAD
-    })
+      payload: INTENT_PAYLOAD,
+    }),
   };
 }
 
@@ -233,8 +241,8 @@ function makeApplySpy(outcome: LinearExternalUpdateResult): ApplySpy {
       async apply(input) {
         calls.push(input);
         return outcome;
-      }
-    }
+      },
+    },
   };
 }
 
@@ -248,20 +256,20 @@ function makeSuccessOutcome(args: {
     issue: {
       id: EXTERNAL_ID,
       key: "NGX-1001",
-      url: "https://linear.app/example/issue/NGX-1001"
+      url: "https://linear.app/example/issue/NGX-1001",
     },
     comment: {
       id: "comment_1",
-      url: "https://linear.app/example/comment/1"
+      url: "https://linear.app/example/comment/1",
     },
     status: {
       transitioned: false,
       previousStateId: "state_started",
       previousStateName: "In Progress",
       nextStateId: null,
-      nextStateName: null
+      nextStateName: null,
     },
-    idempotencyMarker: args.idempotencyMarker
+    idempotencyMarker: args.idempotencyMarker,
   };
 }
 
@@ -276,17 +284,17 @@ function makeRefreshClient(marker: string): LinearIssueRefreshClient {
           title: "Happy issue",
           url: "https://linear.app/example/issue/NGX-1001",
           updatedAt: "2026-05-21T00:00:00.000Z",
-          state: { id: "state-done", name: "Done" }
+          state: { id: "state-done", name: "Done" },
         },
         comments: [
           {
             id: "comment_1",
             body: `Momentum applied ${marker}`,
-            url: "https://linear.app/example/comment/1"
-          }
-        ]
+            url: "https://linear.app/example/comment/1",
+          },
+        ],
       };
-    }
+    },
   };
 }
 
@@ -299,7 +307,7 @@ function realM6Runner(
   db: MomentumDb,
   repoPath: string,
   spy: ApplySpy,
-  marker: string
+  marker: string,
 ): DispatchedExternalApplyRunner {
   return () =>
     executeExternalApply({
@@ -311,8 +319,8 @@ function realM6Runner(
       deps: {
         buildLinearClient: () => spy.client,
         buildLinearRefreshClient: () => makeRefreshClient(marker),
-        now: () => 1000
-      }
+        now: () => 1000,
+      },
     });
 }
 
@@ -331,15 +339,15 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
       stepId: STEP_ID,
       runExternalApply: realM6Runner(db, repoPath, spy, idempotencyMarker),
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(true);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
     // The real M6 path reached the (mock) Linear write exactly once — proof the
@@ -353,7 +361,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     // The dispatch scaffold carries the real M6 outcome as terminal evidence.
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("succeeded");
     const round = dispatchRounds(db)[0];
@@ -361,7 +369,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(round?.summary).toContain(INTENT_ID);
     expect(round?.logPaths).toEqual([
       evidence.executorLogPath,
-      evidence.resultJsonPath
+      evidence.resultJsonPath,
     ]);
     expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
     expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
@@ -387,10 +395,10 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
       stepId: STEP_ID,
       runExternalApply,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     expect(first.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(spy.calls).toHaveLength(1);
 
@@ -402,14 +410,14 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
       stepId: STEP_ID,
       runExternalApply,
       evidence,
-      now: EXECUTE_AT + 100
+      now: EXECUTE_AT + 100,
     });
     expect(second.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
     );
     expect(spy.calls).toHaveLength(1);
     expect(second.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     expect(dispatchRounds(db)).toHaveLength(1);
     expect(stepState(db)).toBe("succeeded");
@@ -432,15 +440,15 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
       stepId: STEP_ID,
       runExternalApply: realM6Runner(db, repoPath, spy, idempotencyMarker),
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(false);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
     // M6's policy gate refused before the write: the mock Linear client was
@@ -452,7 +460,7 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
     // M6 cause preserved for the operator — not a fabricated clean terminal.
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
@@ -460,14 +468,14 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
     expect(round?.summary).toContain("policy_denied");
 
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: STEP_ID
+      stepRunId: STEP_ID,
     });
   });
 });

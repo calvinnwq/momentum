@@ -53,6 +53,9 @@ export const WORKFLOW_EXECUTOR_FAMILIES = [
 export type WorkflowExecutorFamily =
   (typeof WORKFLOW_EXECUTOR_FAMILIES)[number];
 
+/** Durable registration identity used by step definitions and executor rows. */
+export type ExecutorName = string;
+
 const EXECUTOR_FAMILY_SET: ReadonlySet<string> = new Set(
   WORKFLOW_EXECUTOR_FAMILIES,
 );
@@ -61,6 +64,14 @@ export function isWorkflowExecutorFamily(
   value: string,
 ): value is WorkflowExecutorFamily {
   return EXECUTOR_FAMILY_SET.has(value);
+}
+
+export function isExecutorName(value: unknown): value is ExecutorName {
+  return (
+    typeof value === "string" &&
+    value.trim() === value &&
+    /^[a-z0-9][a-z0-9._/-]*$/u.test(value)
+  );
 }
 
 /**
@@ -82,7 +93,7 @@ export function isWorkflowExecutorFamily(
 export type StepDefinition = {
   key: string;
   kind: WorkflowStepKind;
-  executor: WorkflowExecutorFamily;
+  executor: ExecutorName;
   config?: Record<string, unknown>;
   order: number;
   required: boolean;
@@ -254,13 +265,10 @@ function validateSteps(
       });
     }
 
-    if (
-      typeof rawStep["executor"] !== "string" ||
-      !isWorkflowExecutorFamily(rawStep["executor"])
-    ) {
+    if (!isExecutorName(rawStep["executor"])) {
       errors.push({
         code: "step_executor_invalid",
-        message: `Step ${index} executor must be one of: ${WORKFLOW_EXECUTOR_FAMILIES.join(", ")}.`,
+        message: `Step ${index} executor must be a non-empty stable identifier.`,
         path: `${at}.executor`,
       });
     }

@@ -17,7 +17,7 @@ were left in place; importers still reference the concrete modules below.
 
 | Concern                        | Modules                                                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`                                                                          |
+| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/driver.ts`              |
 | Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                       |
 | Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts`      |
 | Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
@@ -79,8 +79,8 @@ The comparison is intentionally strict; large ignored trees and concurrent cache
 New single-shot dispatches insert their invocation, initial running round, and
 hashed dispatch-binding checkpoint in one transaction after resolving runtime
 inputs, so reattach never inherits a new invocation without its complete binding.
-Registration/discovery and structural-preflight schema validation remain separate
-wiring.
+Registration/discovery and structural-preflight schema validation are now wired
+as separate runtime concerns.
 Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
 Malformed JavaScript or casted returns leave only the atomically materialized invocation, running round, and dispatch-binding checkpoint for recovery.
 Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
@@ -104,9 +104,9 @@ The retired live-step direct-finalize lane (`live-step/advance.ts`,
 execution-lane decision: the dispatch reconciliation seam
 (`dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`) owns finalizing
 dispatched workflow steps from durable terminal executor evidence in
-production, while `dispatch/executor-run.ts` calls this shared verify -> commit /
-reset seam before terminalizing successful live-wrapper results as durable
-executor evidence.
+production, while `live-step/sdk-executor.ts` calls this shared verify -> commit /
+reset seam before recording durable mechanism completion for daemon
+classification.
 That superseded the staged live-step composition lane.
 The remaining `live-step/executor.ts` is the production live-wrapper step
 executor consumed by the real-adapter registry.

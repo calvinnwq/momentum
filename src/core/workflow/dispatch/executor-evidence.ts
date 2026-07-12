@@ -1,5 +1,5 @@
 /**
- * Dispatched executor-evidence terminalization seam.
+ * Dispatched executor-evidence settlement seam.
  *
  * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the
@@ -51,13 +51,13 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
-  type ExecutorRoundRecord
+  type ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   updateExecutorInvocationState,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../../executors/loop/persist.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
@@ -97,7 +97,7 @@ export type DispatchedExecutorTerminalizationPlan =
  * result that needs operator inspection.
  */
 export function planDispatchedExecutorTerminalization(
-  result: WorkflowStepExecutorDispatchResult
+  result: WorkflowStepExecutorDispatchResult,
 ): DispatchedExecutorTerminalizationPlan {
   if (!result.ok) {
     // A process-level executor failure — including the honest `runtime_unavailable`
@@ -110,14 +110,14 @@ export function planDispatchedExecutorTerminalization(
         outcome: "clean_terminal",
         invocationState: "succeeded",
         roundState: "succeeded",
-        classification: "complete"
+        classification: "complete",
       };
     case "failed":
       return {
         outcome: "clean_terminal",
         invocationState: "failed",
         roundState: "failed",
-        classification: "failed"
+        classification: "failed",
       };
     case "skipped":
       // A dispatched step is never finalized to `skipped` (skip is a pre-dispatch
@@ -128,19 +128,19 @@ export function planDispatchedExecutorTerminalization(
 }
 
 function manualRecoveryPlan(
-  recoveryCode: string
+  recoveryCode: string,
 ): DispatchedExecutorTerminalizationPlan {
   return {
     outcome: "manual_recovery",
     invocationState: "manual_recovery_required",
     roundState: "manual_recovery_required",
     classification: "manual_recovery_required",
-    recoveryCode
+    recoveryCode,
   };
 }
 
 function readExecutorRecoveryCode(
-  result: Extract<WorkflowStepExecutorDispatchResult, { ok: false }>
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: false }>,
 ): string {
   const precise = (result as { liveRecoveryCode?: unknown }).liveRecoveryCode;
   return typeof precise === "string" && precise.length > 0
@@ -158,7 +158,7 @@ export const WORKFLOW_EXECUTOR_TERMINALIZE_STATUS = {
   /** The dispatch invocation + round were recorded to a terminal state. */
   terminalized: "terminalize_recorded",
   /** The dispatch invocation was already terminal; the record was preserved. */
-  alreadyTerminal: "terminalize_already_terminal"
+  alreadyTerminal: "terminalize_already_terminal",
 } as const;
 
 export type WorkflowExecutorTerminalizeStatus =
@@ -191,43 +191,46 @@ export type TerminalizeDispatchedExecutorResult = {
  * remains the single owner of step finalization (`executor-loop.md` Core Boundary).
  */
 export function terminalizeDispatchedExecutorInvocation(
-  input: TerminalizeDispatchedExecutorInput
+  input: TerminalizeDispatchedExecutorInput,
 ): TerminalizeDispatchedExecutorResult {
   const { db, runId, stepId, result, now } = input;
   const invocationId = deriveDispatchInvocationId(runId, stepId);
-  const invocation = loadExecutorInvocation(db, invocationId);
-  if (invocation === undefined) {
-    // No phase-1 dispatch invocation: this step was never dispatched through the
-    // executor-loop lane. The seam owns only dispatched scaffolds, so it writes nothing.
-    return {
-      status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
-      detail: invocationId
-    };
-  }
-  if (isTerminalExecutorInvocationState(invocation.state)) {
-    // Idempotent re-entry: the bounded session already recorded its terminal
-    // evidence. The immutable record is preserved; never overwrite it.
-    return {
-      status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
-      detail: invocation.state
-    };
-  }
-
   const plan = planDispatchedExecutorTerminalization(result);
   const evidence = extractEvidence(result);
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    const invocation = loadExecutorInvocation(db, invocationId);
+    if (invocation === undefined) {
+      // No phase-1 dispatch invocation: this step was never dispatched through the
+      // executor-loop lane. The seam owns only dispatched scaffolds, so it writes nothing.
+      db.exec("COMMIT");
+      return {
+        status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
+        detail: invocationId,
+      };
+    }
+    if (isTerminalExecutorInvocationState(invocation.state)) {
+      // Re-read under the write lock so concurrent settlement cannot overwrite
+      // immutable terminal evidence with a stale pre-transaction snapshot.
+      db.exec("COMMIT");
+      return {
+        status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
+        detail: invocation.state,
+      };
+    }
+
     const rounds = listExecutorRoundsForInvocation(db, invocationId);
     const round =
-      rounds.find((candidate) => !isTerminalExecutorRoundState(candidate.state)) ??
-      rounds[0];
+      rounds.find(
+        (candidate) => !isTerminalExecutorRoundState(candidate.state),
+      ) ?? rounds[0];
     if (round !== undefined) {
       terminalizeRound(db, round, plan, evidence, now);
     }
     updateExecutorInvocationState(db, invocationId, plan.invocationState, {
       now,
-      finishedAt: now
+      finishedAt: now,
     });
     db.exec("COMMIT");
   } catch (error) {
@@ -237,7 +240,7 @@ export function terminalizeDispatchedExecutorInvocation(
 
   return {
     status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized,
-    detail: plan.invocationState
+    detail: plan.invocationState,
   };
 }
 
@@ -248,17 +251,17 @@ type TerminalizeEvidence = {
 };
 
 function extractEvidence(
-  result: WorkflowStepExecutorDispatchResult
+  result: WorkflowStepExecutorDispatchResult,
 ): TerminalizeEvidence {
   if (result.ok) {
     return {
       summary: result.result.summary,
       logPaths: result.result.artifacts.map((artifact) => artifact.path),
-      resultDigest: result.result.resultDigest
+      resultDigest: result.result.resultDigest,
     };
   }
   const logPaths = [result.executorLogPath, result.resultJsonPath].filter(
-    (value): value is string => typeof value === "string" && value.length > 0
+    (value): value is string => typeof value === "string" && value.length > 0,
   );
   return { summary: result.error, logPaths, resultDigest: null };
 }
@@ -276,7 +279,7 @@ function terminalizeRound(
   round: ExecutorRoundRecord,
   plan: DispatchedExecutorTerminalizationPlan,
   evidence: TerminalizeEvidence,
-  now: number
+  now: number,
 ): void {
   if (isTerminalExecutorRoundState(round.state)) return;
   const roundId = round.roundId;
@@ -292,14 +295,19 @@ function terminalizeRound(
         summary: evidence.summary,
         logPaths: evidence.logPaths,
         startedAt: now,
-        finishedAt: now
+        finishedAt: now,
       },
-      { now }
+      { now },
     );
     return;
   }
 
-  updateExecutorRound(db, roundId, { toState: "running", startedAt: now }, { now });
+  updateExecutorRound(
+    db,
+    roundId,
+    { toState: "running", startedAt: now },
+    { now },
+  );
   updateExecutorRound(db, roundId, { toState: "capturing_result" }, { now });
   updateExecutorRound(
     db,
@@ -310,9 +318,9 @@ function terminalizeRound(
       summary: evidence.summary,
       logPaths: evidence.logPaths,
       resultDigest: evidence.resultDigest,
-      finishedAt: now
+      finishedAt: now,
     },
-    { now }
+    { now },
   );
 }
 

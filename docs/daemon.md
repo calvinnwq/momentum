@@ -145,8 +145,8 @@ with `unsupported_platform`, and preserves the refused round for recovery.
 When the variable is unset or blank, supported live-wrapper-owned steps
 get the durable start scaffold only, while unconfigured wrapper kinds fail
 honestly with `runtime_unavailable` if a profile is configured but omits that
-step kind. If a claimed step cannot be resolved or uses an executor family the
-daemon cannot dispatch yet, the dispatcher parks the run behind a
+step kind. If a claimed step cannot be resolved or carries an invalid executor
+identity, the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
 if the run row vanished before that gate can be written, it still releases the
 dispatch lease so no claim is stranded. Register-only `daemon start` exits before
@@ -535,3 +535,11 @@ JSON envelope shape (active run with no stop request or error):
   "observedAt": 1731500000000
 }
 ```
+Third-party SDK executors are registered through the JSON file named by
+`MOMENTUM_EXECUTOR_CONFIG`. Its `executors` object maps each durable executor
+name to an npm package or local module path. Local relative paths resolve from
+the config file's directory. The daemon imports and validates the modules before
+using the registered SDK dispatch lane; invalid config, an import failure, or an
+invalid executor export fails closed with a precise diagnostic. Registered
+executors are driven one bounded tick per daemon scheduler pass, and a
+`continue` recommendation leaves the invocation resumable for the next pass.

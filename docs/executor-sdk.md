@@ -4,7 +4,30 @@ Momentum executors run below workflow steps inside the same durable invocation a
 
 The source contract is `src/core/executors/sdk/types.ts`. Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`. The current `one-shot` and `script` built-ins prove the contract through `src/core/executors/single-shot/sdk.ts`.
 
-Module registration, discovery, and structural-preflight validation are not exposed by the CLI yet. This page documents the shipped implementation interface so built-ins and future registered modules converge on one boundary rather than accumulating private hooks.
+Module registration, discovery, declared-schema preflight, and daemon dispatch use this interface for both built-ins and third-party executors.
+
+## Registration and discovery
+
+Set `MOMENTUM_EXECUTOR_CONFIG` to a JSON file that maps durable executor names to npm module specifiers or local module paths:
+
+```json
+{
+  "executors": {
+    "review-supervisor": "@example/momentum-review-supervisor",
+    "local-check": "./executors/local-check.mjs"
+  }
+}
+```
+
+Relative paths resolve from the config file's directory. A module exports one executor as its default export or named `executor` export. The export's `name` must exactly match the configured name and it must expose a valid strict object `configSchema` plus a callable `tick(context)` method. An unreadable module or contract-invalid export fails registry loading with an `executor_module_unavailable` or `executor_module_invalid` diagnostic; it is never silently skipped.
+
+An explicitly configured module supersedes a same-named built-in. The selected
+module still passes through the identical registration and schema guards, so
+preflight and daemon dispatch resolve the same implementation.
+
+Executor names are permanent durable identities. Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them. At dispatch, a missing registration settles the attempt with the honest `runtime_unavailable` recovery class.
+
+When executor config is present, `workflow run start`, `workflow run start-coding`, and `workflow run preview-coding` load the registry and validate third-party step config before any workflow-run rows are written. The resulting `preflightEvidence` identifies the executor, step config path, and schema violation. Built-in steps continue through their existing built-in structural checks unless that built-in name is explicitly supplied by the registry.
 
 ## The core interface
 
@@ -161,7 +184,7 @@ Both top-level schemas and the nested `agent` object reject unknown properties.
 
 `ExecutorConfigSchema` is a JSON-Schema-shaped declaration subset rather than a general JSON Schema dialect.
 It supports string schemas with `enum`, `minLength`, and `pattern`; integer or number schemas with `minimum`, `maximum`, and `multipleOf`; boolean schemas; array schemas with `items` and `minItems`; and strict nested object schemas with `properties`, `required`, and `additionalProperties: false`.
-Module registration and structural preflight are responsible for applying the declaration before a tick.
+Registration and structural preflight apply the declaration before a tick.
 
 Looping lifecycle schemas may add an opt-in round cap when they ship.
 Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings.

@@ -11,7 +11,7 @@
  *
  * The durable dispatch lane already has two reusable seams:
  *
- *   - `dispatch/executor-terminalize.ts` records a finished
+ *   - `dispatch/executor-evidence.ts` records a finished
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
  *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
@@ -46,7 +46,7 @@
 import type {
   ExecuteExternalApplyFailure,
   ExecuteExternalApplyResult,
-  ExecuteExternalApplySuccess
+  ExecuteExternalApplySuccess,
 } from "../../intent/apply-execute.js";
 import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
 
@@ -73,7 +73,7 @@ export type ExternalApplyExecutorEvidence = {
  */
 export function mapExternalApplyResultToExecutorResult(
   result: ExecuteExternalApplyResult,
-  evidence: ExternalApplyExecutorEvidence
+  evidence: ExternalApplyExecutorEvidence,
 ): WorkflowStepExecutorDispatchResult {
   if (result.ok) {
     return {
@@ -84,7 +84,7 @@ export function mapExternalApplyResultToExecutorResult(
         checkpoints: [],
         artifacts: [
           { kind: "executor-log", path: evidence.executorLogPath },
-          { kind: "external-apply-result", path: evidence.resultJsonPath }
+          { kind: "external-apply-result", path: evidence.resultJsonPath },
         ],
         // The idempotency marker is the stable digest tying this terminal
         // evidence to the durable external write (and to any future replay).
@@ -92,10 +92,10 @@ export function mapExternalApplyResultToExecutorResult(
         errorCode: null,
         errorMessage: null,
         retryHint: null,
-        recoveryHint: null
+        recoveryHint: null,
       },
       executorLogPath: evidence.executorLogPath,
-      resultJsonPath: evidence.resultJsonPath
+      resultJsonPath: evidence.resultJsonPath,
     };
   }
   return {
@@ -103,7 +103,7 @@ export function mapExternalApplyResultToExecutorResult(
     code: "manual_recovery_required",
     error: buildRefusedError(result),
     executorLogPath: evidence.executorLogPath,
-    resultJsonPath: evidence.resultJsonPath
+    resultJsonPath: evidence.resultJsonPath,
   };
 }
 
@@ -115,9 +115,10 @@ function buildAppliedSummary(result: ExecuteExternalApplySuccess): string {
     context.target.externalKey ??
     context.target.externalId ??
     "unknown";
-  const verb = result.resultCode === "already_applied"
-    ? "replayed (already applied)"
-    : "applied";
+  const verb =
+    result.resultCode === "already_applied"
+      ? "replayed (already applied)"
+      : "applied";
   const comment = external.commentUrl ?? external.commentId ?? "n/a";
   return (
     `External apply ${verb} for intent ${context.intentId} on ` +

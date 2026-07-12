@@ -9,7 +9,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -17,22 +17,22 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
-  listExecutorRoundsForInvocation
+  listExecutorRoundsForInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
-  WORKFLOW_RECONCILE_RESULT_STATUS
+  WORKFLOW_RECONCILE_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import type { WorkflowStepExecutorDispatchResult } from "../src/core/workflow/step/executor.js";
 import {
   planDispatchedExecutorTerminalization,
   terminalizeDispatchedExecutorInvocation,
-  WORKFLOW_EXECUTOR_TERMINALIZE_STATUS
-} from "../src/core/workflow/dispatch/executor-terminalize.js";
+  WORKFLOW_EXECUTOR_TERMINALIZE_STATUS,
+} from "../src/core/workflow/dispatch/executor-evidence.js";
 
 /**
  * NGX-492 (RC-5b) — the production seam that drives a dispatched step's
@@ -69,7 +69,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-workflow-terminalize-")
+    path.join(os.tmpdir(), "momentum-workflow-terminalize-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -84,7 +84,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-492",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -92,17 +92,17 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -116,11 +116,15 @@ function approveAndClaim(
  */
 function dispatchStep(db: MomentumDb, stepId: string): void {
   const claim = approveAndClaim(db, stepId);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
 }
 
 function successResult(
-  summary = "preflight passed"
+  summary = "preflight passed",
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: true,
@@ -130,16 +134,16 @@ function successResult(
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: EXECUTOR_LOG },
-        { kind: "runner-result", path: RESULT_JSON }
+        { kind: "runner-result", path: RESULT_JSON },
       ],
       resultDigest: "sha256:abc123",
       errorCode: null,
       errorMessage: null,
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     },
     executorLogPath: EXECUTOR_LOG,
-    resultJsonPath: RESULT_JSON
+    resultJsonPath: RESULT_JSON,
   };
 }
 
@@ -155,10 +159,10 @@ function failedResult(): WorkflowStepExecutorDispatchResult {
       errorCode: "command_failed",
       errorMessage: "live step runner reported success=false",
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     },
     executorLogPath: EXECUTOR_LOG,
-    resultJsonPath: RESULT_JSON
+    resultJsonPath: RESULT_JSON,
   };
 }
 
@@ -169,17 +173,19 @@ function unconfiguredResult(): WorkflowStepExecutorDispatchResult {
     error:
       'No live workflow-step wrapper is configured for step kind "preflight".',
     executorLogPath: EXECUTOR_LOG,
-    resultJsonPath: RESULT_JSON
+    resultJsonPath: RESULT_JSON,
   };
 }
 
 function dispatchRound(db: MomentumDb, stepId: string) {
   const rounds = listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId)
+    deriveDispatchInvocationId(RUN_ID, stepId),
   );
   if (rounds.length !== 1) {
-    throw new Error(`expected exactly one scaffold round, got ${rounds.length}`);
+    throw new Error(
+      `expected exactly one scaffold round, got ${rounds.length}`,
+    );
   }
   return rounds[0]!;
 }
@@ -196,7 +202,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
       outcome: "clean_terminal",
       invocationState: "succeeded",
       roundState: "succeeded",
-      classification: "complete"
+      classification: "complete",
     });
   });
 
@@ -205,18 +211,20 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
       outcome: "clean_terminal",
       invocationState: "failed",
       roundState: "failed",
-      classification: "failed"
+      classification: "failed",
     });
   });
 
   it("routes an unconfigured runtime_unavailable error to manual recovery, never a fake success", () => {
-    expect(planDispatchedExecutorTerminalization(unconfiguredResult())).toEqual({
-      outcome: "manual_recovery",
-      invocationState: "manual_recovery_required",
-      roundState: "manual_recovery_required",
-      classification: "manual_recovery_required",
-      recoveryCode: "runtime_unavailable"
-    });
+    expect(planDispatchedExecutorTerminalization(unconfiguredResult())).toEqual(
+      {
+        outcome: "manual_recovery",
+        invocationState: "manual_recovery_required",
+        roundState: "manual_recovery_required",
+        classification: "manual_recovery_required",
+        recoveryCode: "runtime_unavailable",
+      },
+    );
   });
 
   it("preserves the precise process-level error code on the manual-recovery plan", () => {
@@ -225,11 +233,11 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
       code: "command_timed_out",
       error: "preflight wrapper timed out",
       executorLogPath: EXECUTOR_LOG,
-      resultJsonPath: RESULT_JSON
+      resultJsonPath: RESULT_JSON,
     });
     expect(plan).toMatchObject({
       outcome: "manual_recovery",
-      recoveryCode: "command_timed_out"
+      recoveryCode: "command_timed_out",
     });
   });
 
@@ -245,10 +253,10 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
         errorCode: null,
         errorMessage: null,
         retryHint: null,
-        recoveryHint: null
+        recoveryHint: null,
       },
       executorLogPath: EXECUTOR_LOG,
-      resultJsonPath: RESULT_JSON
+      resultJsonPath: RESULT_JSON,
     });
     expect(plan.outcome).toBe("manual_recovery");
     expect(plan.invocationState).toBe("manual_recovery_required");
@@ -265,16 +273,16 @@ describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
       runId: RUN_ID,
       stepId: "preflight",
       result: successResult(),
-      now: TERMINALIZE_AT
+      now: TERMINALIZE_AT,
     });
     expect(terminalize.status).toBe(
-      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized
+      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized,
     );
 
     // The dispatch invocation is now a clean terminal the RC-2 decider maps.
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("succeeded");
     expect(invocation?.finishedAt).toBe(TERMINALIZE_AT);
@@ -296,7 +304,7 @@ describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     expect(reconciled.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
     expect(stepState(db, "preflight")).toBe("succeeded");
@@ -314,12 +322,14 @@ describe("terminalizeDispatchedExecutorInvocation — failed", () => {
       runId: RUN_ID,
       stepId: "preflight",
       result: failedResult(),
-      now: TERMINALIZE_AT
+      now: TERMINALIZE_AT,
     });
 
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, "preflight"))
-        ?.state
+      loadExecutorInvocation(
+        db,
+        deriveDispatchInvocationId(RUN_ID, "preflight"),
+      )?.state,
     ).toBe("failed");
     const round = dispatchRound(db, "preflight");
     expect(round.state).toBe("failed");
@@ -329,7 +339,7 @@ describe("terminalizeDispatchedExecutorInvocation — failed", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     expect(reconciled.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
     expect(stepState(db, "preflight")).toBe("failed");
@@ -346,12 +356,12 @@ describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestl
       runId: RUN_ID,
       stepId: "preflight",
       result: unconfiguredResult(),
-      now: TERMINALIZE_AT
+      now: TERMINALIZE_AT,
     });
 
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const round = dispatchRound(db, "preflight");
@@ -362,21 +372,21 @@ describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestl
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     expect(reconciled.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     // Honest failure: the run is parked, NOT fabricated to a clean terminal.
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db, "preflight")).toBe("running");
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: "preflight"
+      stepRunId: "preflight",
     });
   });
 });
@@ -391,10 +401,10 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
       runId: RUN_ID,
       stepId: "preflight",
       result: successResult(),
-      now: TERMINALIZE_AT
+      now: TERMINALIZE_AT,
     });
     expect(first.status).toBe(
-      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized
+      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized,
     );
 
     // A second terminalize (e.g. a re-entered dispatch tick) recognises the
@@ -404,15 +414,15 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
       runId: RUN_ID,
       stepId: "preflight",
       result: successResult("a different summary that must not overwrite"),
-      now: TERMINALIZE_AT + 100
+      now: TERMINALIZE_AT + 100,
     });
     expect(second.status).toBe(
-      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal
+      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
     );
 
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight")
+      deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
     expect(invocation?.state).toBe("succeeded");
     expect(invocation?.finishedAt).toBe(TERMINALIZE_AT);
@@ -424,7 +434,7 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
       db,
       runId: RUN_ID,
       stepId: "preflight",
-      now: RECONCILE_AT
+      now: RECONCILE_AT,
     });
     expect(reconciled.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
     expect(stepState(db, "preflight")).toBe("succeeded");
@@ -440,13 +450,16 @@ describe("terminalizeDispatchedExecutorInvocation — boundary", () => {
       runId: RUN_ID,
       stepId: "preflight",
       result: successResult(),
-      now: TERMINALIZE_AT
+      now: TERMINALIZE_AT,
     });
     expect(result.status).toBe(
-      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched
+      WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
     );
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, "preflight"))
+      loadExecutorInvocation(
+        db,
+        deriveDispatchInvocationId(RUN_ID, "preflight"),
+      ),
     ).toBeUndefined();
   });
 });

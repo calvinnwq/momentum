@@ -40,12 +40,12 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
-  isWorkflowExecutorFamily
+  isExecutorName,
 } from "../definition/definition.js";
 import {
   planWorkflowStepDispatch,
   type WorkflowStepDispatchPlan,
-  type WorkflowStepDispatchResolution
+  type WorkflowStepDispatchResolution,
 } from "./dispatch.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../run/start.js";
 
@@ -69,6 +69,86 @@ type StepDefinitionExecutorRow = {
   executor: string;
 };
 
+type StepDefinitionRuntimeRow = StepDefinitionExecutorRow & {
+  config_json: string | null;
+};
+
+export type WorkflowStepExecutorRuntimeResolution =
+  | {
+      ok: true;
+      executorName: string;
+      config: Readonly<Record<string, unknown>>;
+    }
+  | { ok: false; reason: string };
+
+/** Resolve the permanent executor name and portable config for one claimed step. */
+export function resolveWorkflowStepExecutorRuntime(
+  db: MomentumDb,
+  target: WorkflowStepDispatchTarget,
+): WorkflowStepExecutorRuntimeResolution {
+  const run = db
+    .prepare(
+      `SELECT source, workflow_definition_key, workflow_definition_version
+         FROM workflow_runs
+        WHERE id = ?`,
+    )
+    .get(target.runId) as WorkflowRunDefinitionLinkRow | undefined;
+  if (run === undefined) return { ok: false, reason: "workflow_run_not_found" };
+  const key = run.workflow_definition_key;
+  const version = run.workflow_definition_version;
+  if (key === null || key === "" || version === null) {
+    return { ok: false, reason: "workflow_definition_unlinked" };
+  }
+  if (
+    run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    key === CODING_WORKFLOW_DEFINITION_KEY
+  ) {
+    const step = getBuiltInWorkflowDefinition(key, version)?.steps.find(
+      (item) => item.key === target.stepId,
+    );
+    return step === undefined
+      ? { ok: false, reason: "step_definition_not_found" }
+      : { ok: true, executorName: step.executor, config: step.config ?? {} };
+  }
+  const row = db
+    .prepare(
+      `SELECT executor, config_json
+         FROM step_definitions
+        WHERE definition_key = ?
+          AND definition_version = ?
+          AND step_key = ?`,
+    )
+    .get(key, version, target.stepId) as StepDefinitionRuntimeRow | undefined;
+  if (row === undefined)
+    return { ok: false, reason: "step_definition_not_found" };
+  if (!isExecutorName(row.executor)) {
+    return { ok: false, reason: `executor_name_invalid: ${row.executor}` };
+  }
+  if (row.config_json === null) {
+    return { ok: true, executorName: row.executor, config: {} };
+  }
+  try {
+    const config = JSON.parse(row.config_json) as unknown;
+    if (
+      config === null ||
+      typeof config !== "object" ||
+      Array.isArray(config)
+    ) {
+      return { ok: false, reason: "executor_config_not_object" };
+    }
+    return {
+      ok: true,
+      executorName: row.executor,
+      config: config as Record<string, unknown>,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `executor_config_invalid_json: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 /**
  * Resolve a claimed step's executor family from durable run / definition / step
  * state, or a typed {@link WorkflowStepResolutionFailure} when the durable state
@@ -78,13 +158,13 @@ type StepDefinitionExecutorRow = {
  */
 export function resolveClaimedWorkflowStepFamily(
   db: MomentumDb,
-  target: WorkflowStepDispatchTarget
+  target: WorkflowStepDispatchTarget,
 ): WorkflowStepDispatchResolution {
   const run = db
     .prepare(
       `SELECT source, workflow_definition_key, workflow_definition_version
          FROM workflow_runs
-        WHERE id = ?`
+        WHERE id = ?`,
     )
     .get(target.runId) as WorkflowRunDefinitionLinkRow | undefined;
 
@@ -110,17 +190,17 @@ export function resolveClaimedWorkflowStepFamily(
   ) {
     const builtIn = getBuiltInWorkflowDefinition(
       definitionKey,
-      definitionVersion
+      definitionVersion,
     );
     if (builtIn !== undefined) {
       const builtInStep = builtIn.steps.find(
-        (step) => step.key === target.stepId
+        (step) => step.key === target.stepId,
       );
       if (builtInStep === undefined) {
         return {
           ok: false,
           failure: "step_definition_not_found",
-          detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`
+          detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`,
         };
       }
       return { ok: true, executorFamily: builtInStep.executor };
@@ -128,7 +208,7 @@ export function resolveClaimedWorkflowStepFamily(
     return {
       ok: false,
       failure: "step_definition_not_found",
-      detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`
+      detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`,
     };
   }
 
@@ -138,26 +218,25 @@ export function resolveClaimedWorkflowStepFamily(
          FROM step_definitions
         WHERE definition_key = ?
           AND definition_version = ?
-          AND step_key = ?`
+          AND step_key = ?`,
     )
     .get(definitionKey, definitionVersion, target.stepId) as
-    | StepDefinitionExecutorRow
-    | undefined;
+    StepDefinitionExecutorRow | undefined;
 
   if (stepDefinition === undefined) {
     return {
       ok: false,
       failure: "step_definition_not_found",
-      detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`
+      detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`,
     };
   }
 
   const executor = stepDefinition.executor;
-  if (!isWorkflowExecutorFamily(executor)) {
+  if (!isExecutorName(executor)) {
     return { ok: false, failure: "unknown_executor_family", detail: executor };
   }
 
-  // The type guard has narrowed `executor` to a known WorkflowExecutorFamily.
+  // The type guard has narrowed `executor` to a durable executor identity.
   return { ok: true, executorFamily: executor };
 }
 
@@ -170,9 +249,7 @@ export function resolveClaimedWorkflowStepFamily(
  */
 export function resolveWorkflowStepDispatchPlan(
   db: MomentumDb,
-  target: WorkflowStepDispatchTarget
+  target: WorkflowStepDispatchTarget,
 ): WorkflowStepDispatchPlan {
-  return planWorkflowStepDispatch(
-    resolveClaimedWorkflowStepFamily(db, target)
-  );
+  return planWorkflowStepDispatch(resolveClaimedWorkflowStepFamily(db, target));
 }

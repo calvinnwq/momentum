@@ -8,32 +8,32 @@ import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/defi
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import {
   persistWorkflowRunStart,
-  WorkflowRunStartConflictError
+  WorkflowRunStartConflictError,
 } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import {
   getWorkflowRunManualRecoveryState,
-  markWorkflowRunNeedsManualRecovery
+  markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   listExecutorRoundsForInvocation,
-  loadExecutorInvocation
+  loadExecutorInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import {
   executeAndReconcileDispatchedSubworkflowStep,
-  type DispatchedSubworkflowChildRunner
+  type DispatchedSubworkflowChildRunner,
 } from "../src/core/workflow/dispatch/subworkflow-run.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
@@ -113,10 +113,12 @@ function makeTempDir(prefix = "momentum-sub-child-"): string {
   return fs.realpathSync(dir);
 }
 
-function makeWritableEvidence(root = makeTempDir("momentum-sub-child-evidence-")) {
+function makeWritableEvidence(
+  root = makeTempDir("momentum-sub-child-evidence-"),
+) {
   return {
     executorLogPath: path.join(root, "nested", "subworkflow.log"),
-    resultJsonPath: path.join(root, "nested", "subworkflow.json")
+    resultJsonPath: path.join(root, "nested", "subworkflow.json"),
   };
 }
 
@@ -129,21 +131,21 @@ function openSeededDb(): MomentumDb {
     runId: RUN_ID,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-497 child-run integration",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
 
 function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(RUN_ID, STEP_ID);
   const claim = claimRunnableWorkflowStep(db, {
     runId: RUN_ID,
     stepId: STEP_ID,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -158,9 +160,13 @@ function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
  */
 function dispatchStep(db: MomentumDb): void {
   const claim = approveAndClaim(db);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
   db.prepare(
-    "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+    "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
   ).run(deriveDispatchInvocationId(RUN_ID, STEP_ID));
 }
 
@@ -173,7 +179,7 @@ function stepState(db: MomentumDb): string {
 function dispatchRounds(db: MomentumDb) {
   return listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, STEP_ID)
+    deriveDispatchInvocationId(RUN_ID, STEP_ID),
   );
 }
 
@@ -192,10 +198,10 @@ function countRuns(db: MomentumDb): number {
 function finalizeChildRun(
   db: MomentumDb,
   childRunId: string,
-  state: WorkflowRunState
+  state: WorkflowRunState,
 ): void {
   db.prepare(
-    "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?"
+    "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?",
   ).run(state, NOW + 5, childRunId);
 }
 
@@ -213,7 +219,7 @@ function finalizeChildRun(
 function realChildRunner(
   db: MomentumDb,
   childRunId: string,
-  childRepoPath: string
+  childRepoPath: string,
 ): {
   run: DispatchedSubworkflowChildRunner;
   starts: () => number;
@@ -229,7 +235,7 @@ function realChildRunner(
           runId: childRunId,
           repoPath: childRepoPath,
           objective: "RC-4 child workflow run",
-          now: NOW
+          now: NOW,
         });
         starts += 1;
       } catch (error) {
@@ -247,11 +253,11 @@ function realChildRunner(
         childRunId,
         childState: detail.run.state,
         childNeedsManualRecovery: detail.run.needsManualRecovery,
-        childManualRecoveryReason: detail.run.manualRecoveryReason
+        childManualRecoveryReason: detail.run.manualRecoveryReason,
       };
     },
     starts: () => starts,
-    attaches: () => attaches
+    attaches: () => attaches,
   };
 }
 
@@ -272,7 +278,7 @@ describe("subworkflow producer × real child run — start-or-attach + defer", (
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
@@ -290,7 +296,7 @@ describe("subworkflow producer × real child run — start-or-attach + defer", (
     // the dispatch lease stays held for a later tick to re-check the child.
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
@@ -314,7 +320,7 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     expect(tick1.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
     expect(runner.starts()).toBe(1);
@@ -330,15 +336,15 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 50
+      now: EXECUTE_AT + 50,
     });
 
     expect(tick2.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(tick2.executorResult?.ok).toBe(true);
     expect(tick2.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
     // The child run was started once and attached to once — never duplicated.
@@ -348,7 +354,7 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
 
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("succeeded");
     const round = dispatchRounds(db)[0];
@@ -358,18 +364,20 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
     expect(round?.resultDigest).toBe(CHILD_RUN_ID);
     expect(round?.logPaths).toEqual([
       evidence.executorLogPath,
-      evidence.resultJsonPath
+      evidence.resultJsonPath,
     ]);
     expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
     expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
 
     expect(stepState(db)).toBe("succeeded");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     // Finalizing the parent does not disturb the child run's own terminal state.
-    expect(loadWorkflowRunDetail(db, CHILD_RUN_ID)?.run.state).toBe("succeeded");
+    expect(loadWorkflowRunDetail(db, CHILD_RUN_ID)?.run.state).toBe(
+      "succeeded",
+    );
   });
 });
 
@@ -387,7 +395,7 @@ describe("subworkflow producer × real child run — idempotent re-entry", () =>
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     finalizeChildRun(db, CHILD_RUN_ID, "succeeded");
     const mirrored = await executeAndReconcileDispatchedSubworkflowStep({
@@ -396,10 +404,10 @@ describe("subworkflow producer × real child run — idempotent re-entry", () =>
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 50
+      now: EXECUTE_AT + 50,
     });
     expect(mirrored.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.starts()).toBe(1);
     expect(runner.attaches()).toBe(1);
@@ -412,13 +420,13 @@ describe("subworkflow producer × real child run — idempotent re-entry", () =>
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 100
+      now: EXECUTE_AT + 100,
     });
     expect(reentry.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
     );
     expect(reentry.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     expect(runner.starts()).toBe(1);
     expect(runner.attaches()).toBe(1);
@@ -442,17 +450,18 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
-    const childRecoveryReason = "child run entered recovery while still running";
+    const childRecoveryReason =
+      "child run entered recovery while still running";
     const marked = markWorkflowRunNeedsManualRecovery(db, {
       runId: CHILD_RUN_ID,
       reason: childRecoveryReason,
-      now: EXECUTE_AT + 25
+      now: EXECUTE_AT + 25,
     });
     expect(marked.ok).toBe(true);
     db.prepare("UPDATE workflow_runs SET state = 'running' WHERE id = ?").run(
-      CHILD_RUN_ID
+      CHILD_RUN_ID,
     );
 
     const out = await executeAndReconcileDispatchedSubworkflowStep({
@@ -461,23 +470,23 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 50
+      now: EXECUTE_AT + 50,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(false);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(childRecoveryReason);
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
     expect(runner.starts()).toBe(1);
@@ -499,7 +508,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     // The child run reaches an ambiguous terminal it cannot self-resolve.
     finalizeChildRun(db, CHILD_RUN_ID, "canceled");
@@ -510,20 +519,20 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 50
+      now: EXECUTE_AT + 50,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(false);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
@@ -531,7 +540,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
     expect(round?.summary).toContain("canceled");
 
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     // The parent step is parked, not fabricated terminal: it stays running with an
     // operator-visible recovery gate.
@@ -540,7 +549,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: STEP_ID
+      stepRunId: STEP_ID,
     });
 
     // The child run is started once, attached once — never duplicated even on the

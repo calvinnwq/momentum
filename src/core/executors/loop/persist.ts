@@ -71,9 +71,9 @@ import {
   type ExecutorRoundTransitionErrorCode,
   type ExecutorRoundVerificationResult,
   isTerminalExecutorRoundState,
-  type WorkflowExecutorFamily,
+  type ExecutorName,
 } from "./reducer.js";
-import { isWorkflowExecutorFamily } from "../../workflow/definition/definition.js";
+import { isExecutorName } from "../../workflow/definition/definition.js";
 
 const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
   EXECUTOR_INVOCATION_STATES,
@@ -308,7 +308,7 @@ export function loadExecutorDefinition(
   if (row === undefined) return undefined;
   return {
     executorKey: row.executor_key,
-    family: row.family as WorkflowExecutorFamily,
+    family: row.family as ExecutorName,
     agentProvider: row.agent_provider,
     model: row.model,
     effort: row.effort,
@@ -1144,7 +1144,7 @@ function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
-    executorFamily: row.executor_family as WorkflowExecutorFamily,
+    executorFamily: row.executor_family as ExecutorName,
     state: row.state as ExecutorInvocationState,
     attempt: row.attempt,
     startedAt: row.started_at,
@@ -1163,7 +1163,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
-    executorFamily: row.executor_family as WorkflowExecutorFamily,
+    executorFamily: row.executor_family as ExecutorName,
     attempt: row.attempt,
     roundIndex: row.round_index,
     state: row.state as ExecutorRoundState,
@@ -1247,7 +1247,7 @@ function validateDefinitionRecord(
   record: ExecutorDefinitionRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isWorkflowExecutorFamily(record.family)) {
+  if (!isExecutorName(record.family)) {
     errors.push({
       code: "executor_definition_unknown_family",
       message: `unknown executor family: ${String(record.family)}`,
@@ -1260,7 +1260,7 @@ function validateInvocationRecord(
   record: ExecutorInvocationRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isWorkflowExecutorFamily(record.executorFamily)) {
+  if (!isExecutorName(record.executorFamily)) {
     errors.push({
       code: "executor_invocation_unknown_family",
       message: `unknown executor family: ${String(record.executorFamily)}`,
@@ -1279,7 +1279,7 @@ function validateRoundRecord(
   record: ExecutorRoundRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isWorkflowExecutorFamily(record.executorFamily)) {
+  if (!isExecutorName(record.executorFamily)) {
     errors.push({
       code: "executor_round_unknown_family",
       message: `unknown executor family: ${String(record.executorFamily)}`,

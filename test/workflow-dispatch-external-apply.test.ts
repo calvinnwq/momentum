@@ -6,11 +6,11 @@ import {
   type ExecuteExternalApplyErrorCode,
   type ExecuteExternalApplyExternalResult,
   type ExecuteExternalApplyFailure,
-  type ExecuteExternalApplySuccess
+  type ExecuteExternalApplySuccess,
 } from "../src/core/intent/apply-execute.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
-import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dispatch/external-apply.js";
 
 /**
@@ -32,7 +32,7 @@ import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dis
 
 const EVIDENCE = {
   executorLogPath: "/tmp/run/external-apply.log",
-  resultJsonPath: "/tmp/run/external-apply.json"
+  resultJsonPath: "/tmp/run/external-apply.json",
 } as const;
 
 const IDEMPOTENCY_MARKER = "momentum-apply:intent-001:abc123";
@@ -43,12 +43,12 @@ function makeTarget(): ExecuteExternalApplyContext["target"] {
     externalId: "ext-1",
     externalKey: "NGX-1",
     url: "https://linear.app/ngxcalvin/issue/NGX-1",
-    title: "Some issue"
+    title: "Some issue",
   };
 }
 
 function makeContext(
-  overrides: Partial<ExecuteExternalApplyContext> = {}
+  overrides: Partial<ExecuteExternalApplyContext> = {},
 ): ExecuteExternalApplyContext {
   return {
     intentId: "intent-001",
@@ -61,12 +61,12 @@ function makeContext(
     mutationKind: "comment",
     auditId: "audit-001",
     reconcile: { status: "pending", warning: null },
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeExternal(
-  overrides: Partial<ExecuteExternalApplyExternalResult> = {}
+  overrides: Partial<ExecuteExternalApplyExternalResult> = {},
 ): ExecuteExternalApplyExternalResult {
   return {
     alreadyApplied: false,
@@ -79,7 +79,7 @@ function makeExternal(
     nextStateId: null,
     nextStateName: null,
     idempotencyMarker: IDEMPOTENCY_MARKER,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -103,7 +103,7 @@ function makeIntent(): UpdateIntent {
     updatedAt: 2,
     appliedAt: 3,
     skippedAt: null,
-    canceledAt: null
+    canceledAt: null,
   };
 }
 
@@ -117,7 +117,7 @@ function makeAudit(): IntentApplyAudit {
       externalId: "ext-1",
       externalKey: "NGX-1",
       url: "https://linear.app/ngxcalvin/issue/NGX-1",
-      title: "Some issue"
+      title: "Some issue",
     },
     requestedAt: 1,
     finishedAt: 2,
@@ -135,33 +135,34 @@ function makeAudit(): IntentApplyAudit {
     externalRefs: {
       commentId: "comment-1",
       commentUrl: "https://linear.app/ngxcalvin/issue/NGX-1#comment-1",
-      stateTransitionId: null
+      stateTransitionId: null,
     },
     reconcile: { status: "pending", warning: null },
     createdAt: 1,
-    updatedAt: 2
+    updatedAt: 2,
   };
 }
 
 function makeSuccess(
-  externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {}
+  externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {},
 ): ExecuteExternalApplySuccess {
   const external = makeExternal(externalOverrides);
   return {
     ok: true,
-    resultCode: external.alreadyApplied && !external.statusTransitioned
-      ? "already_applied"
-      : "applied",
+    resultCode:
+      external.alreadyApplied && !external.statusTransitioned
+        ? "already_applied"
+        : "applied",
     context: makeContext({ intentStatus: "applied" }),
     intent: makeIntent(),
     audit: makeAudit(),
-    external
+    external,
   };
 }
 
 function makeFailure(
   code: ExecuteExternalApplyErrorCode,
-  message = `simulated ${code}`
+  message = `simulated ${code}`,
 ): ExecuteExternalApplyFailure {
   return {
     ok: false,
@@ -170,7 +171,7 @@ function makeFailure(
     context: makeContext(),
     intent: null,
     audit: null,
-    external: null
+    external: null,
   };
 }
 
@@ -178,7 +179,7 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
   it("maps a fresh applied outcome to a clean succeeded executor result", () => {
     const mapped = mapExternalApplyResultToExecutorResult(
       makeSuccess(),
-      EVIDENCE
+      EVIDENCE,
     );
     expect(mapped.ok).toBe(true);
     if (!mapped.ok) throw new Error("expected ok result");
@@ -190,7 +191,7 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
     expect(mapped.result.checkpoints).toEqual([]);
     expect(mapped.result.artifacts).toEqual([
       { kind: "executor-log", path: EVIDENCE.executorLogPath },
-      { kind: "external-apply-result", path: EVIDENCE.resultJsonPath }
+      { kind: "external-apply-result", path: EVIDENCE.resultJsonPath },
     ]);
     // The idempotency marker is the stable digest tying the evidence to the
     // external write.
@@ -205,7 +206,7 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
   it("maps an idempotent already-applied replay to a clean succeeded executor result", () => {
     const mapped = mapExternalApplyResultToExecutorResult(
       makeSuccess({ alreadyApplied: true }),
-      EVIDENCE
+      EVIDENCE,
     );
     expect(mapped.ok).toBe(true);
     if (!mapped.ok) throw new Error("expected ok result");
@@ -219,9 +220,9 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
         alreadyApplied: true,
         statusTransitioned: true,
         nextStateId: "state-done",
-        nextStateName: "Done"
+        nextStateName: "Done",
       }),
-      EVIDENCE
+      EVIDENCE,
     );
     expect(mapped.ok).toBe(true);
     if (!mapped.ok) throw new Error("expected ok result");
@@ -234,7 +235,7 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
     for (const code of EXECUTE_EXTERNAL_APPLY_ERROR_CODES) {
       const mapped = mapExternalApplyResultToExecutorResult(
         makeFailure(code),
-        EVIDENCE
+        EVIDENCE,
       );
       expect(mapped.ok, `failure code ${code} must not map to ok`).toBe(false);
       if (mapped.ok) throw new Error("expected error result");
@@ -250,12 +251,17 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
 
   it("preserves the operator-facing M6 message on the manual-recovery result", () => {
     const mapped = mapExternalApplyResultToExecutorResult(
-      makeFailure("policy_denied", "intent_apply_policy is create_intents_only"),
-      EVIDENCE
+      makeFailure(
+        "policy_denied",
+        "intent_apply_policy is create_intents_only",
+      ),
+      EVIDENCE,
     );
     if (mapped.ok) throw new Error("expected error result");
     expect(mapped.error).toContain("policy_denied");
-    expect(mapped.error).toContain("intent_apply_policy is create_intents_only");
+    expect(mapped.error).toContain(
+      "intent_apply_policy is create_intents_only",
+    );
   });
 });
 
@@ -263,20 +269,20 @@ describe("mapExternalApplyResultToExecutorResult — composes with the terminali
   it("produces evidence the terminalize decider routes to a clean succeeded terminal", () => {
     const mapped = mapExternalApplyResultToExecutorResult(
       makeSuccess(),
-      EVIDENCE
+      EVIDENCE,
     );
     expect(planDispatchedExecutorTerminalization(mapped)).toEqual({
       outcome: "clean_terminal",
       invocationState: "succeeded",
       roundState: "succeeded",
-      classification: "complete"
+      classification: "complete",
     });
   });
 
   it("produces evidence the terminalize decider routes to manual recovery for a refused apply", () => {
     const mapped = mapExternalApplyResultToExecutorResult(
       makeFailure("auth_unavailable"),
-      EVIDENCE
+      EVIDENCE,
     );
     const plan = planDispatchedExecutorTerminalization(mapped);
     expect(plan.outcome).toBe("manual_recovery");
