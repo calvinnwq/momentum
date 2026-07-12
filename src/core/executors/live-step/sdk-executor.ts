@@ -229,7 +229,7 @@ function decisionForResult(
       recommendation: "failed",
       recommendedRoundState: "failed",
       recommendedInvocationState: "failed",
-      recoveryCode: null,
+      recoveryCode: result.result.errorCode ?? "command_failed",
       humanGate: null,
       reason: result.result.errorMessage ?? result.result.summary,
     };

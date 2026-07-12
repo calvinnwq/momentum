@@ -186,7 +186,7 @@ describe("executor registration and SDK dispatch", () => {
     const registry = await fixtureRegistry();
     const definition = fixtureDefinition({
       message: "long synchronous turn completed",
-      blockMs: 250,
+      blockMs: 1_250,
     });
     const db = openDb(tempDir());
     persistWorkflowDefinition(db, definition, { now: NOW });
@@ -204,7 +204,7 @@ describe("executor registration and SDK dispatch", () => {
       runId: "blocking-fixture-run",
       stepId: "preflight",
       holder: "blocking-worker",
-      leaseExpiresAt: NOW + 120,
+      leaseExpiresAt: NOW + 500,
       now: NOW,
     });
     if (!claim.ok) throw new Error(claim.reason);
@@ -518,6 +518,96 @@ describe("executor registration and SDK dispatch", () => {
     ).toEqual({ recovery_code: "executor_contract_invalid" });
     db.close();
   });
+
+  it.each([
+    {
+      errorCode: "command_timed_out" as const,
+      expectedRecoveryCode: "command_timed_out",
+    },
+    { errorCode: null, expectedRecoveryCode: "command_failed" },
+  ])(
+    "classifies a profile-backed built-in failure as $expectedRecoveryCode",
+    async ({ errorCode, expectedRecoveryCode }) => {
+      const db = openDb(tempDir());
+      const runId = `failed-live-sdk-run-${expectedRecoveryCode}`;
+      const invocationId = `failed-live-sdk-invocation-${expectedRecoveryCode}`;
+      const definition: WorkflowDefinition = {
+        key: "failed-live-sdk-workflow",
+        title: "Failed Live SDK Workflow",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "one-shot",
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath: "/repos/fixture",
+        objective: "Classify a built-in failure",
+        now: NOW,
+      });
+      insertExecutorInvocation(
+        db,
+        {
+          invocationId,
+          workflowRunId: runId,
+          stepRunId: "preflight",
+          stepKey: "preflight",
+          executorFamily: "one-shot",
+          state: "running",
+          attempt: 1,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+
+      const result = await driveExecutorTicks({
+        db,
+        invocationId,
+        executor: new LiveStepSdkExecutor(
+          "one-shot",
+          liveStepBuiltInConfigSchema("one-shot"),
+        ),
+        config: {},
+        hostBindings: {
+          repoPath: "/repos/fixture",
+          run: () => ({
+            ok: true,
+            result: {
+              state: "failed",
+              summary: "bounded work failed",
+              checkpoints: [],
+              artifacts: [],
+              resultDigest: "sha256:failed-result",
+              errorCode,
+              errorMessage: "verification failed",
+              retryHint: null,
+              recoveryHint: null,
+            },
+            executorLogPath: "/tmp/executor.log",
+            resultJsonPath: "/tmp/result.json",
+          }),
+        },
+        now: () => NOW + 1,
+      });
+
+      expect(result.invocation.state).toBe("failed");
+      expect(result.lastRound).toMatchObject({
+        state: "failed",
+        recoveryCode: expectedRecoveryCode,
+      });
+      db.close();
+    },
+  );
 
   it("retains repo ownership when completion checkpoint persistence is refused", async () => {
     const db = openDb(tempDir());
