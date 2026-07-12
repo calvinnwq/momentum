@@ -12,6 +12,8 @@
  * `RunnerResult` document). Given a resolved `LiveWrapperConfig` plus the
  * step's execution context, it:
  *
+ *   - refuses native Windows execution with `unsupported_platform` before any
+ *     supervised command or probe is spawned;
  *   - refuses to spawn when an absolute `command` runtime is missing
  *     (`runtime_unavailable`), so a missing runtime never runs the step;
  *   - runs the optional pre-flight `probe`, mapping a missing/timed-out probe
@@ -95,9 +97,11 @@ const POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS =
   POSIX_PROCESS_QUERY_TIMEOUT_MS + 1_000;
 const PROCESS_TREE_CLEANUP_MARGIN_MS = 200;
 
+/** Stable operator-facing detail for the native Windows refusal. */
 export const NATIVE_WINDOWS_UNSUPPORTED_MESSAGE =
   "native Windows process execution is unsupported; run Momentum on Linux or macOS";
 
+/** Return the pre-spawn process-execution refusal for an unsupported host. */
 export function processExecutionPlatformError(
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ErrnoException | undefined {
@@ -1057,7 +1061,8 @@ type ProcessGroupMeta = {
  * Synchronously run a command under a tiny supervisor that owns process-group
  * cleanup. The child receives explicit argv/env/cwd, stdout and stderr are
  * bounded separately by `maxBuffer`, and timeout or overflow kills the whole
- * process group before returning a `SpawnSyncReturns`-shaped result.
+ * process group before returning a `SpawnSyncReturns`-shaped result. Native
+ * Windows returns `UNSUPPORTED_PLATFORM` before validation or spawn.
  */
 export function runProcessGroupSync(
   command: string,
@@ -1188,6 +1193,8 @@ export function runProcessGroupSync(
  * the anchored group and every discovered token-owned descendant before the
  * promise settles. Captured stdout/stderr remain available through cleanup, and
  * streaming decoders preserve UTF-8 characters split across pipe chunks.
+ * Native Windows resolves with `UNSUPPORTED_PLATFORM` before validation or
+ * spawn.
  *
  * POSIX cleanup is portable userland containment, not a sandbox. A hostile
  * descendant that escapes between ancestry samples and strips its ownership

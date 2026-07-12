@@ -236,6 +236,10 @@ sharing a whole-worktree commit boundary.
 Unsafe result, verification, git, commit/reset, or lease-ownership outcomes
 preserve precise recovery codes and run-scoped recovery guidance instead of
 collapsing into generic step failure.
+An `unsupported_platform` refusal means no supervised command was launched.
+The dispatched live-wrapper lane parks the run for manual recovery, and clearing
+that recovery on Linux or macOS prepares the same step for a new attempt and
+round regardless of step kind.
 
 Workflow-level preflight validates structural setup before runtime work begins:
 definition resolution, approval boundary, route config, wrapper/profile schema,

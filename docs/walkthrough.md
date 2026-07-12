@@ -2,6 +2,9 @@
 
 This page documents a disposable end-to-end run that exercises Momentum's workflow-first path: start a durable workflow run, let a bounded daemon cycle run the workflow scheduler lane, and inspect the run through the read-only workflow surfaces.
 It can be run from any clone of this repo with a scratch repository and a scratch `--data-dir`, and it writes nothing outside those scratch directories.
+Run process-backed portions of the walkthrough on Linux or macOS.
+Native Windows can use the read-only surfaces, but executable workflow steps
+refuse with `unsupported_platform` before a supervised command is spawned.
 
 See also:
 

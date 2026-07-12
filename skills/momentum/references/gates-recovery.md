@@ -60,6 +60,10 @@ For the older goal compatibility surface:
 
 If evidence is missing or ambiguous, report the recovery reason and the
 inspection command instead of clearing recovery.
+For `unsupported_platform`, move the workflow to Linux or macOS, confirm from
+the executor log and worktree that no process ran and no edits were made, then
+clear recovery on that supported host so Momentum can prepare the step's next
+attempt.
 
 ## Manual Step Repair
 

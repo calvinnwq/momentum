@@ -7,6 +7,8 @@
  * succeeds from exit code plus log evidence without writing a result document.
  * Abort-aware runs preserve output captured through cancellation and decode
  * streaming UTF-8 safely before propagating the cancellation reason.
+ * Both mechanisms refuse native Windows with `unsupported_platform` before a
+ * supervised command is spawned.
  *
  * Both mechanisms enforce repo-safety at the boundary. `read-only` snapshots
  * require a clean repo before and after the command. `finalize` requires the
