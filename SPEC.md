@@ -119,7 +119,8 @@ the same deterministic invocation reopens with an incremented attempt.
 The daemon SDK driver applies one bounded tick per scheduler pass and rechecks
 non-terminal invocations, so single-round and multi-round executors share one
 driving loop.
-Approval and operator-decision ticks must include an unresolved durable decision.
+Approval and operator-decision ticks must include an unresolved durable decision
+with unique canonical non-blank actions and any recommendation inside that set.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
 gate resolution records the chosen action and makes the invocation
 scheduler-resumable.

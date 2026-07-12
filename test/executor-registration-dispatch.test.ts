@@ -907,6 +907,52 @@ describe("executor registration and SDK dispatch", () => {
     expect(repaired.registry.has("commonjs-executor")).toBe(true);
   });
 
+  it("reloads a repaired CommonJS package through a node_modules symlink", async () => {
+    const root = tempDir();
+    const packageDir = path.join(root, "store", "repairable-package");
+    const nodeModules = path.join(root, "node_modules");
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.mkdirSync(nodeModules, { recursive: true });
+    fs.writeFileSync(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({
+        name: "repairable-package",
+        main: "./index.cjs",
+      }),
+    );
+    const modulePath = path.join(packageDir, "index.cjs");
+    fs.writeFileSync(
+      modulePath,
+      'module.exports = { name: "commonjs-executor" };\n',
+    );
+    fs.symlinkSync(
+      packageDir,
+      path.join(nodeModules, "repairable-package"),
+      "dir",
+    );
+    const config = {
+      executors: { "commonjs-executor": "repairable-package" },
+    };
+    const invalid = await loadExecutorRegistry({
+      config,
+      configDir: root,
+      importCacheKey: "before-package-repair",
+    });
+    expect(invalid.ok).toBe(false);
+
+    fs.writeFileSync(
+      modulePath,
+      'module.exports = { name: "commonjs-executor", configSchema: { type: "object", properties: {}, additionalProperties: false }, tick() {} };\n',
+    );
+    const repaired = await loadExecutorRegistry({
+      config,
+      configDir: root,
+      importCacheKey: "after-package-repair",
+    });
+    expect(repaired.ok).toBe(true);
+    expect(repaired.registry.has("commonjs-executor")).toBe(true);
+  });
+
   it("resolves npm package specifiers from the executor config directory", async () => {
     const root = tempDir();
     const packageDir = path.join(root, "node_modules", "fixture-package");

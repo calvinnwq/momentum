@@ -260,16 +260,39 @@ function validateExecutorTickResult(
   if (
     (recommendation === "approval_required" ||
       recommendation === "operator_decision_required") &&
-    !state.currentRound?.decisions.some(
-      (decision) =>
-        decision.chosenAction === null && decision.allowedActions.length > 0,
-    )
+    !hasResolvableCurrentExecutorDecision(state)
   ) {
     throw new ExecutorTickContractError(
-      "Executor gate recommendations require an unresolved durable decision with allowed actions.",
+      "Executor gate recommendations require an unresolved durable decision with canonical allowed actions and a valid recommendation.",
     );
   }
   return value as ExecutorTickResult;
+}
+
+function hasResolvableCurrentExecutorDecision(
+  state: ReturnType<
+    ReturnType<typeof createDurableExecutorEnvelope>["snapshot"]
+  >,
+): boolean {
+  const decision = state.currentRound?.decisions
+    .filter((candidate) => candidate.chosenAction === null)
+    .at(-1);
+  if (decision === undefined || decision.allowedActions.length === 0) {
+    return false;
+  }
+  const canonicalActions = decision.allowedActions.every(
+    (action) => action.length > 0 && action.trim() === action,
+  );
+  if (
+    !canonicalActions ||
+    new Set(decision.allowedActions).size !== decision.allowedActions.length
+  ) {
+    return false;
+  }
+  return (
+    decision.recommendedAction === null ||
+    decision.allowedActions.includes(decision.recommendedAction)
+  );
 }
 
 function includes<T extends string>(

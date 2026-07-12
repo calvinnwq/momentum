@@ -207,7 +207,13 @@ function withFreshImportIdentity(
   if (importCacheKey === undefined) return specifier;
   const url = new URL(specifier);
   if (url.protocol !== "file:") return specifier;
-  delete moduleRequire.cache[fileURLToPath(url)];
+  const modulePath = fileURLToPath(url);
+  delete moduleRequire.cache[modulePath];
+  try {
+    delete moduleRequire.cache[fs.realpathSync(modulePath)];
+  } catch {
+    // Import produces the precise missing/unreadable-module diagnostic below.
+  }
   url.searchParams.set("momentumExecutorRegistryLoad", importCacheKey);
   return url.href;
 }

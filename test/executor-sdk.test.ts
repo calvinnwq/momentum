@@ -25,6 +25,7 @@ import type {
 } from "../src/core/executors/loop/reducer.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
+import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import type {
   Executor,
   ExecutorConfigSchema,
@@ -189,6 +190,67 @@ class PollingSupervisor implements Executor<
 }
 
 describe("executor SDK core contract", () => {
+  it.each([
+    {
+      label: "blank allowed actions",
+      allowedActions: [" "],
+      recommendedAction: null,
+    },
+    {
+      label: "a recommendation outside the allowed actions",
+      allowedActions: ["apply"],
+      recommendedAction: "ignore",
+    },
+  ])(
+    "settles a human gate with $label as executor_contract_invalid",
+    async ({ allowedActions, recommendedAction }) => {
+      const { db, invocation } = openExecutorDb("one-shot");
+      const result = await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor: {
+          name: "one-shot",
+          configSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          tick(context) {
+            const round = emptyRound(invocation, "mirroring_external_state");
+            context.envelope.startRound(roundStartForSdk(round));
+            context.envelope.recordDecision(round.roundId, {
+              decisionId: `${round.roundId}-decision`,
+              summary: "Choose how to continue",
+              allowedActions,
+              recommendedAction,
+              chosenAction: null,
+              resolution: null,
+              externalRef: null,
+            });
+            return {
+              roundId: round.roundId,
+              recommendation: "operator_decision_required",
+              recommendedRoundState: "waiting_operator",
+              recommendedInvocationState: "waiting_operator",
+              recoveryCode: null,
+              humanGate: "operator_decision_required",
+              reason: "An operator decision is required.",
+            };
+          },
+        },
+        config: {},
+        hostBindings: {},
+        now: () => 20,
+      });
+
+      expect(result.invocation.state).toBe("manual_recovery_required");
+      expect(result.lastRound).toMatchObject({
+        state: "manual_recovery_required",
+        recoveryCode: "executor_contract_invalid",
+      });
+    },
+  );
+
   it("fits a poll-per-tick supervisor using only the durable envelope facade", () => {
     const { db, invocation } = openExecutorDb("no-mistakes");
     const envelope = createDurableExecutorEnvelope({
