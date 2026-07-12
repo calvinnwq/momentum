@@ -6,10 +6,11 @@ import {
   type WorkflowExecutorFamily,
 } from "../definition/definition.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
-import type { WorkflowStepKind } from "../run/reducer.js";
+import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 
 const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
+  "unsupported_platform",
   "runtime_unavailable",
 ]);
 
@@ -76,7 +77,7 @@ export function findRetryableDispatchedStepRecovery(
   }>;
 
   for (const step of rows) {
-    if (!isRetryableDispatchStepKind(step.kind)) continue;
+    if (!isWorkflowStepKind(step.kind)) continue;
     const invocationId = deriveDispatchRetryInvocationId(
       input.runId,
       step.step_id,
@@ -249,7 +250,7 @@ function parseRetryableDispatchRow(
   row: RetryableDispatchRow | undefined,
 ): RetryableDispatchedStepRecovery | undefined {
   if (row === undefined) return undefined;
-  if (!isRetryableDispatchStepKind(row.kind)) return undefined;
+  if (!isWorkflowStepKind(row.kind)) return undefined;
   if (row.invocation_state !== "manual_recovery_required") return undefined;
   if (!isWorkflowExecutorFamily(row.executor_family)) return undefined;
   if (
@@ -261,7 +262,7 @@ function parseRetryableDispatchRow(
   if (
     row.round_index === null ||
     row.recovery_code === null ||
-    !RETRYABLE_DISPATCH_RECOVERY_CODES.has(row.recovery_code)
+    !isRetryableDispatchRecovery(row.kind, row.recovery_code)
   ) {
     return undefined;
   }
@@ -348,6 +349,15 @@ function buildRetryRound(
   };
 }
 
-function isRetryableDispatchStepKind(value: string): value is WorkflowStepKind {
-  return value === "no-mistakes" || value === "merge-cleanup";
+function isWorkflowStepKind(value: string): value is WorkflowStepKind {
+  return WORKFLOW_STEP_KINDS.includes(value as WorkflowStepKind);
+}
+
+function isRetryableDispatchRecovery(
+  kind: WorkflowStepKind,
+  recoveryCode: string,
+): boolean {
+  if (!RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return false;
+  if (recoveryCode === "unsupported_platform") return true;
+  return kind === "no-mistakes" || kind === "merge-cleanup";
 }

@@ -9,7 +9,7 @@ import {
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
   transitionExecutorInvocation,
-  type WorkflowExecutorFamily
+  type WorkflowExecutorFamily,
 } from "../src/core/executors/loop/reducer.js";
 import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
 import {
@@ -32,14 +32,14 @@ import {
   singleShotRoundId,
   type SingleShotInvocationOutcome,
   type SingleShotRoundArtifacts,
-  type SingleShotRoundSelection
+  type SingleShotRoundSelection,
 } from "../src/core/executors/single-shot/executor.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
 const INVOCATION_TERMINAL_SET = new Set<string>(
-  EXECUTOR_INVOCATION_TERMINAL_STATES
+  EXECUTOR_INVOCATION_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
@@ -47,7 +47,7 @@ describe("single-shot executor families", () => {
   it("serves exactly the one-shot and script executor families", () => {
     expect([...SINGLE_SHOT_EXECUTOR_FAMILIES].sort()).toEqual([
       "one-shot",
-      "script"
+      "script",
     ]);
   });
 
@@ -77,18 +77,19 @@ describe("single-shot recovery taxonomy", () => {
       const memberships = [
         blocked.has(code),
         failed.has(code),
-        manual.has(code)
+        manual.has(code),
       ].filter(Boolean).length;
       expect(memberships).toBe(1);
     }
 
     expect(blocked.size + failed.size + manual.size).toBe(
-      SINGLE_SHOT_RECOVERY_CODES.length
+      SINGLE_SHOT_RECOVERY_CODES.length,
     );
   });
 
   it("reuses the live-wrapper execution codes and the unsafe-finalize codes", () => {
     // Execution-time codes mirror the M9 live step wrapper taxonomy.
+    expect(SINGLE_SHOT_RECOVERY_CODES).toContain("unsupported_platform");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("runtime_unavailable");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("auth_unavailable");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("command_failed");
@@ -121,7 +122,7 @@ describe("decideSingleShotInvocation — blocked outcomes", () => {
   it("treats a missing runtime as a recoverable block, not a failure", () => {
     const decision = decideSingleShotInvocation({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
@@ -133,7 +134,7 @@ describe("decideSingleShotInvocation — blocked outcomes", () => {
   it("raises a credential gate when auth is unavailable", () => {
     const decision = decideSingleShotInvocation({
       ok: false,
-      recoveryCode: "auth_unavailable"
+      recoveryCode: "auth_unavailable",
     });
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
@@ -148,7 +149,7 @@ describe("decideSingleShotInvocation — execution failures", () => {
     "command_timed_out",
     "output_overflow",
     "result_missing",
-    "result_invalid"
+    "result_invalid",
   ] as const)("classifies %s as a terminal failure", (recoveryCode) => {
     const decision = decideSingleShotInvocation({ ok: false, recoveryCode });
     expect(decision.classification).toBe("failed");
@@ -166,7 +167,7 @@ describe("decideSingleShotInvocation — manual recovery", () => {
     "reset_failed",
     "commit_failed",
     "git_failed",
-    "invalid_input"
+    "invalid_input",
   ] as const)(
     "routes the unsafe finalize outcome %s to manual recovery",
     (recoveryCode) => {
@@ -176,7 +177,7 @@ describe("decideSingleShotInvocation — manual recovery", () => {
       expect(decision.invocationState).toBe("manual_recovery_required");
       expect(decision.recoveryCode).toBe(recoveryCode);
       expect(decision.humanGate).toBe("manual_recovery_required");
-    }
+    },
   );
 });
 
@@ -203,7 +204,7 @@ describe("decideSingleShotInvocation — totality", () => {
   it("throws on an unknown recovery code rather than guessing a classification", () => {
     const outcome = {
       ok: false,
-      recoveryCode: "not_a_real_code"
+      recoveryCode: "not_a_real_code",
     } as unknown as SingleShotInvocationOutcome;
     expect(() => decideSingleShotInvocation(outcome)).toThrow(/recovery code/i);
   });
@@ -212,10 +213,10 @@ describe("decideSingleShotInvocation — totality", () => {
 describe("singleShotInvocationId / singleShotRoundId", () => {
   it("embeds the step-run identity, family, and attempt", () => {
     expect(singleShotInvocationId("run1", "step1", "one-shot", 0)).toBe(
-      "run1::step1::one-shot::0"
+      "run1::step1::one-shot::0",
     );
     expect(singleShotInvocationId("run1", "step1", "script", 2)).toBe(
-      "run1::step1::script::2"
+      "run1::step1::script::2",
     );
   });
 
@@ -243,10 +244,10 @@ describe("planSingleShotInvocation", () => {
       stepRunId: "step1",
       stepKey: "preflight",
       attempt: 0,
-      startedAt: 1000
+      startedAt: 1000,
     });
     expect(invocation.invocationId).toBe(
-      singleShotInvocationId("run1", "step1", "one-shot", 0)
+      singleShotInvocationId("run1", "step1", "one-shot", 0),
     );
     expect(invocation.workflowRunId).toBe("run1");
     expect(invocation.stepRunId).toBe("step1");
@@ -266,12 +267,12 @@ describe("planSingleShotInvocation", () => {
       stepRunId: "step9",
       stepKey: "merge-cleanup",
       attempt: 3,
-      startedAt: 50
+      startedAt: 50,
     });
     expect(invocation.executorFamily).toBe("script");
     expect(invocation.attempt).toBe(3);
     expect(invocation.invocationId).toBe(
-      singleShotInvocationId("run9", "step9", "script", 3)
+      singleShotInvocationId("run9", "step9", "script", 3),
     );
   });
 
@@ -282,16 +283,16 @@ describe("planSingleShotInvocation", () => {
       stepRunId: "step1",
       stepKey: "merge-cleanup",
       attempt: 0,
-      startedAt: 1
+      startedAt: 1,
     });
     const decision = decideSingleShotInvocation({ ok: true });
     const transition = transitionExecutorInvocation(
       invocation.state,
-      decision.invocationState
+      decision.invocationState,
     );
     expect(transition.ok).toBe(true);
     expect(isTerminalExecutorInvocationState(decision.invocationState)).toBe(
-      true
+      true,
     );
     expect(isTerminalExecutorRoundState(decision.roundState)).toBe(true);
   });
@@ -308,8 +309,8 @@ const ONE_SHOT_SELECTION: SingleShotRoundSelection = {
     model: "step_definition",
     effort: "step_definition",
     timeoutMs: "step_definition",
-    policyEnvelope: "step_definition"
-  }
+    policyEnvelope: "step_definition",
+  },
 };
 
 const SCRIPT_SELECTION: SingleShotRoundSelection = {
@@ -323,8 +324,8 @@ const SCRIPT_SELECTION: SingleShotRoundSelection = {
     model: "momentum_global_default",
     effort: "momentum_global_default",
     timeoutMs: "momentum_global_default",
-    policyEnvelope: "momentum_global_default"
-  }
+    policyEnvelope: "momentum_global_default",
+  },
 };
 
 describe("planSingleShotRoundStart", () => {
@@ -341,7 +342,7 @@ describe("planSingleShotRoundStart", () => {
       inputDigest: "sha256:abc",
       artifactRoot: "/tmp/run1/step1",
       logPaths: ["/tmp/run1/step1/exec.log"],
-      startedAt: 1000
+      startedAt: 1000,
     });
 
     expect(round.roundId).toBe("r0");
@@ -389,7 +390,7 @@ describe("planSingleShotRoundStart", () => {
       selection: SCRIPT_SELECTION,
       inputDigest: null,
       artifactRoot: null,
-      startedAt: 5
+      startedAt: 5,
     });
 
     expect(round.executorFamily).toBe("script");
@@ -413,7 +414,7 @@ describe("planSingleShotRoundStartForInvocation", () => {
       stepRunId: "step1",
       stepKey: "preflight",
       attempt: 0,
-      startedAt: 1000
+      startedAt: 1000,
     });
 
     const start = planSingleShotRoundStartForInvocation({
@@ -422,9 +423,9 @@ describe("planSingleShotRoundStartForInvocation", () => {
       runtime: {
         inputDigest: "sha256:abc",
         artifactRoot: "/tmp/x",
-        logPaths: ["/tmp/x/exec.log"]
+        logPaths: ["/tmp/x/exec.log"],
       },
-      startedAt: 2000
+      startedAt: 2000,
     });
 
     expect(start.roundId).toBe(singleShotRoundId(invocation.invocationId));
@@ -448,14 +449,14 @@ describe("planSingleShotRoundStartForInvocation", () => {
       stepRunId: "step9",
       stepKey: "merge-cleanup",
       attempt: 1,
-      startedAt: 1
+      startedAt: 1,
     });
 
     const start = planSingleShotRoundStartForInvocation({
       invocation,
       selection: SCRIPT_SELECTION,
       runtime: { inputDigest: null, artifactRoot: null },
-      startedAt: 10
+      startedAt: 10,
     });
     const round = planSingleShotRoundStart(start);
 
@@ -477,14 +478,14 @@ describe("planSingleShotRoundStartForInvocation", () => {
       stepRunId: "s",
       stepKey: "preflight",
       attempt: 0,
-      startedAt: 1
+      startedAt: 1,
     });
 
     const start = planSingleShotRoundStartForInvocation({
       invocation,
       selection: ONE_SHOT_SELECTION,
       runtime: { inputDigest: null, artifactRoot: null },
-      startedAt: 2
+      startedAt: 2,
     });
 
     expect("logPaths" in start).toBe(false);
@@ -498,9 +499,9 @@ describe("planSingleShotRoundStartForInvocation", () => {
         stepRunId: "step1",
         stepKey: "implementation",
         attempt: 0,
-        startedAt: 1
+        startedAt: 1,
       }),
-      executorFamily: "goal-loop" as WorkflowExecutorFamily
+      executorFamily: "goal-loop" as WorkflowExecutorFamily,
     };
 
     expect(() =>
@@ -508,8 +509,8 @@ describe("planSingleShotRoundStartForInvocation", () => {
         invocation,
         selection: ONE_SHOT_SELECTION,
         runtime: { inputDigest: null, artifactRoot: null },
-        startedAt: 2
-      })
+        startedAt: 2,
+      }),
     ).toThrow(/single-shot/i);
   });
 });
@@ -522,8 +523,8 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
         model: "claude-opus-4-8",
         effort: "high",
         timeoutMs: 600_000,
-        policyEnvelope: "delegated:standard"
-      }
+        policyEnvelope: "delegated:standard",
+      },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.model).toBe("claude-opus-4-8");
@@ -535,13 +536,13 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       model: "step_definition",
       effort: "step_definition",
       timeoutMs: "step_definition",
-      policyEnvelope: "step_definition"
+      policyEnvelope: "step_definition",
     });
   });
 
   it("resolves no round budget — a single shot owns exactly one round", () => {
     const selection = resolveSingleShotRoundSelection({
-      stepConfig: { agentProvider: "claude" }
+      stepConfig: { agentProvider: "claude" },
     });
     // Unlike the goal-loop selection, there is no maxRounds field at all: a single
     // shot has no loop budget to resolve.
@@ -552,7 +553,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
   it("falls back to workflow defaults for fields the step config omits", () => {
     const selection = resolveSingleShotRoundSelection({
       stepConfig: { agentProvider: "claude" },
-      workflowConfig: { model: "claude-sonnet-4-6", effort: "medium" }
+      workflowConfig: { model: "claude-sonnet-4-6", effort: "medium" },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.source.agentProvider).toBe("step_definition");
@@ -565,7 +566,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
   it("falls back to repository policy below the workflow defaults", () => {
     const selection = resolveSingleShotRoundSelection({
       workflowConfig: { agentProvider: "claude" },
-      repositoryPolicy: { effort: "medium", timeoutMs: 120_000 }
+      repositoryPolicy: { effort: "medium", timeoutMs: 120_000 },
     });
     expect(selection.effort).toBe("medium");
     expect(selection.source.effort).toBe("repository_policy");
@@ -576,7 +577,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
   it("falls back to the executor family default below repository policy", () => {
     const selection = resolveSingleShotRoundSelection({
       repositoryPolicy: { agentProvider: "claude" },
-      familyDefault: { effort: "high", policyEnvelope: "script:bounded" }
+      familyDefault: { effort: "high", policyEnvelope: "script:bounded" },
     });
     expect(selection.effort).toBe("high");
     expect(selection.source.effort).toBe("executor_family_default");
@@ -602,14 +603,14 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       workflowConfig: { model: "claude-sonnet-4-6" },
       repositoryPolicy: { effort: "medium" },
       familyDefault: { timeoutMs: 300_000 },
-      globalDefault: { policyEnvelope: "default" }
+      globalDefault: { policyEnvelope: "default" },
     });
     expect(selection.source).toEqual({
       agentProvider: "step_definition",
       model: "workflow_definition",
       effort: "repository_policy",
       timeoutMs: "executor_family_default",
-      policyEnvelope: "momentum_global_default"
+      policyEnvelope: "momentum_global_default",
     });
     expect(selection.timeoutMs).toBe(300_000);
     expect(selection.policyEnvelope).toBe("default");
@@ -618,7 +619,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
   it("treats an explicit null at a higher level as a deliberate override", () => {
     const selection = resolveSingleShotRoundSelection({
       stepConfig: { model: null },
-      workflowConfig: { model: "claude-sonnet-4-6" }
+      workflowConfig: { model: "claude-sonnet-4-6" },
     });
     expect(selection.model).toBeNull();
     expect(selection.source.model).toBe("step_definition");
@@ -626,7 +627,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
 
   it("lets an explicit global default override the built-in null floor", () => {
     const selection = resolveSingleShotRoundSelection({
-      globalDefault: { agentProvider: "claude", timeoutMs: 90_000 }
+      globalDefault: { agentProvider: "claude", timeoutMs: 90_000 },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.source.agentProvider).toBe("momentum_global_default");
@@ -639,7 +640,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       model: null,
       effort: null,
       timeoutMs: null,
-      policyEnvelope: null
+      policyEnvelope: null,
     });
   });
 
@@ -648,8 +649,8 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       stepConfig: {
         agentProvider: "claude",
         model: "claude-opus-4-8",
-        effort: "high"
-      }
+        effort: "high",
+      },
     });
     const round = planSingleShotRoundStart({
       roundId: "r0",
@@ -662,7 +663,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       selection,
       inputDigest: null,
       artifactRoot: null,
-      startedAt: 1
+      startedAt: 1,
     });
     // The resolver's agent/model/effort are the ones frozen into the round-start
     // record; timeout/policy/source ride on the selection for the invocation.
@@ -679,22 +680,25 @@ describe("planSingleShotRoundArtifacts", () => {
     return {
       resultDocument: {
         path: "/artifacts/round-0/result.json",
-        digest: "sha256:r"
+        digest: "sha256:r",
       },
       checkpointStream: { path: "/artifacts/round-0/checkpoints.ndjson" },
       verificationOutput: {
         path: "/artifacts/round-0/verify.log",
-        description: "pnpm test"
+        description: "pnpm test",
       },
       commitOrResetEvidence: { path: "/artifacts/round-0/commit.txt" },
-      recoveryNote: { path: "/artifacts/round-0/recovery.md" }
+      recoveryNote: { path: "/artifacts/round-0/recovery.md" },
     };
   }
 
   it("derives one logs artifact per bounded log path, in order", () => {
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
-      logPaths: ["/artifacts/round-0/stdout.log", "/artifacts/round-0/stderr.log"]
+      logPaths: [
+        "/artifacts/round-0/stdout.log",
+        "/artifacts/round-0/stderr.log",
+      ],
     });
     expect(records).toEqual([
       {
@@ -703,7 +707,7 @@ describe("planSingleShotRoundArtifacts", () => {
         artifactClass: "logs",
         path: "/artifacts/round-0/stdout.log",
         digest: null,
-        description: null
+        description: null,
       },
       {
         artifactId: "round-0-logs-1",
@@ -711,8 +715,8 @@ describe("planSingleShotRoundArtifacts", () => {
         artifactClass: "logs",
         path: "/artifacts/round-0/stderr.log",
         digest: null,
-        description: null
-      }
+        description: null,
+      },
     ]);
   });
 
@@ -720,7 +724,7 @@ describe("planSingleShotRoundArtifacts", () => {
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
       logPaths: [],
-      artifacts: fullArtifacts()
+      artifacts: fullArtifacts(),
     });
     const byClass = new Map(records.map((r) => [r.artifactClass, r]));
     expect(byClass.get("result_document")).toEqual({
@@ -729,17 +733,17 @@ describe("planSingleShotRoundArtifacts", () => {
       artifactClass: "result_document",
       path: "/artifacts/round-0/result.json",
       digest: "sha256:r",
-      description: null
+      description: null,
     });
     expect(byClass.get("checkpoint_stream")?.artifactId).toBe(
-      "round-0-checkpoint_stream"
+      "round-0-checkpoint_stream",
     );
     expect(byClass.get("verification_output")?.description).toBe("pnpm test");
     expect(byClass.get("commit_or_reset_evidence")?.path).toBe(
-      "/artifacts/round-0/commit.txt"
+      "/artifacts/round-0/commit.txt",
     );
     expect(byClass.get("recovery_note")?.path).toBe(
-      "/artifacts/round-0/recovery.md"
+      "/artifacts/round-0/recovery.md",
     );
     for (const record of records) {
       expect(ARTIFACT_CLASS_SET.has(record.artifactClass)).toBe(true);
@@ -750,7 +754,7 @@ describe("planSingleShotRoundArtifacts", () => {
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
       logPaths: ["/artifacts/round-0/stdout.log"],
-      artifacts: fullArtifacts()
+      artifacts: fullArtifacts(),
     });
     expect(records.map((r) => r.artifactClass)).toEqual([
       "result_document",
@@ -758,7 +762,7 @@ describe("planSingleShotRoundArtifacts", () => {
       "checkpoint_stream",
       "verification_output",
       "commit_or_reset_evidence",
-      "recovery_note"
+      "recovery_note",
     ]);
   });
 
@@ -768,15 +772,15 @@ describe("planSingleShotRoundArtifacts", () => {
       logPaths: [],
       artifacts: {
         resultDocument: { path: "/artifacts/round-0/result.json" },
-        recoveryNote: null
-      }
+        recoveryNote: null,
+      },
     });
     expect(records.map((r) => r.artifactClass)).toEqual(["result_document"]);
   });
 
   it("records no artifacts when no logs and no pointers are present", () => {
     expect(
-      planSingleShotRoundArtifacts({ roundId: "round-0", logPaths: [] })
+      planSingleShotRoundArtifacts({ roundId: "round-0", logPaths: [] }),
     ).toEqual([]);
   });
 
@@ -784,7 +788,7 @@ describe("planSingleShotRoundArtifacts", () => {
     const [record] = planSingleShotRoundArtifacts({
       roundId: "round-0",
       logPaths: [],
-      artifacts: { resultDocument: { path: "/artifacts/round-0/result.json" } }
+      artifacts: { resultDocument: { path: "/artifacts/round-0/result.json" } },
     });
     expect(record?.digest).toBeNull();
     expect(record?.description).toBeNull();
@@ -799,10 +803,10 @@ describe("planSingleShotRoundArtifacts", () => {
       artifacts: {
         resultDocument: {
           path: "/artifacts/round-0/result.json",
-          digest: "sha256:result"
+          digest: "sha256:result",
         },
-        verificationOutput: { path: "/artifacts/round-0/verify.log" }
-      }
+        verificationOutput: { path: "/artifacts/round-0/verify.log" },
+      },
     });
     const result = records.find((r) => r.artifactClass === "result_document");
     expect(result?.path).toBe("/artifacts/round-0/result.json");
@@ -817,22 +821,25 @@ describe("planSingleShotRoundArtifacts", () => {
     // result_document row.
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
-      logPaths: ["/artifacts/round-0/stdout.log", "/artifacts/round-0/stderr.log"],
+      logPaths: [
+        "/artifacts/round-0/stdout.log",
+        "/artifacts/round-0/stderr.log",
+      ],
       artifacts: {
-        commitOrResetEvidence: { path: "/artifacts/round-0/commit.txt" }
-      }
+        commitOrResetEvidence: { path: "/artifacts/round-0/commit.txt" },
+      },
     });
     expect(records.some((r) => r.artifactClass === "result_document")).toBe(
-      false
+      false,
     );
     expect(
-      records.filter((r) => r.artifactClass === "logs").map((r) => r.path)
+      records.filter((r) => r.artifactClass === "logs").map((r) => r.path),
     ).toEqual([
       "/artifacts/round-0/stdout.log",
-      "/artifacts/round-0/stderr.log"
+      "/artifacts/round-0/stderr.log",
     ]);
     expect(
-      records.some((r) => r.artifactClass === "commit_or_reset_evidence")
+      records.some((r) => r.artifactClass === "commit_or_reset_evidence"),
     ).toBe(true);
   });
 });
@@ -843,7 +850,7 @@ describe("planSingleShotRoundCheckpoints", () => {
       roundId: "round-0",
       outcome: { ok: true },
       capturedResult: true,
-      classification: "complete"
+      classification: "complete",
     });
     expect(records).toEqual([
       {
@@ -851,29 +858,29 @@ describe("planSingleShotRoundCheckpoints", () => {
         roundId: "round-0",
         sequence: 0,
         stage: "round_started",
-        detail: null
+        detail: null,
       },
       {
         checkpointId: "round-0-checkpoint-1",
         roundId: "round-0",
         sequence: 1,
         stage: "mechanism_completed",
-        detail: "invocation outcome: ok"
+        detail: "invocation outcome: ok",
       },
       {
         checkpointId: "round-0-checkpoint-2",
         roundId: "round-0",
         sequence: 2,
         stage: "result_captured",
-        detail: null
+        detail: null,
       },
       {
         checkpointId: "round-0-checkpoint-3",
         roundId: "round-0",
         sequence: 3,
         stage: "classified",
-        detail: "classification: complete"
-      }
+        detail: "classification: complete",
+      },
     ]);
   });
 
@@ -884,12 +891,12 @@ describe("planSingleShotRoundCheckpoints", () => {
       roundId: "round-0",
       outcome: { ok: true },
       capturedResult: false,
-      classification: "complete"
+      classification: "complete",
     });
     expect(records.map((c) => c.stage)).toEqual([
       "round_started",
       "mechanism_completed",
-      "classified"
+      "classified",
     ]);
     expect(records[1]?.detail).toBe("invocation outcome: ok");
     expect(records[2]?.detail).toBe("classification: complete");
@@ -903,12 +910,12 @@ describe("planSingleShotRoundCheckpoints", () => {
       roundId: "round-0",
       outcome: { ok: false, recoveryCode: "command_failed" },
       capturedResult: false,
-      classification: "failed"
+      classification: "failed",
     });
     expect(records.map((c) => c.stage)).toEqual([
       "round_started",
       "mechanism_completed",
-      "classified"
+      "classified",
     ]);
     expect(records[1]?.detail).toBe("invocation outcome: command_failed");
     expect(records[2]?.detail).toBe("classification: failed");
@@ -919,7 +926,7 @@ describe("planSingleShotRoundCheckpoints", () => {
       roundId: "round-7",
       outcome: { ok: false, recoveryCode: "head_mismatch" },
       capturedResult: false,
-      classification: "manual_recovery_required"
+      classification: "manual_recovery_required",
     });
     expect(records.map((c) => c.sequence)).toEqual([0, 1, 2]);
     // (round_id, sequence) is unique per the schema; the ids embed both so a
@@ -928,7 +935,7 @@ describe("planSingleShotRoundCheckpoints", () => {
     expect(records.map((c) => c.checkpointId)).toEqual([
       "round-7-checkpoint-0",
       "round-7-checkpoint-1",
-      "round-7-checkpoint-2"
+      "round-7-checkpoint-2",
     ]);
   });
 });
@@ -946,8 +953,8 @@ describe("planSingleShotRoundPersistence", () => {
       scope: "single-shot",
       subject: "one-shot pass",
       body: "",
-      breaking: false
-    }
+      breaking: false,
+    },
   };
 
   it("captures the normalized result then settles a one-shot success", () => {
@@ -958,8 +965,8 @@ describe("planSingleShotRoundPersistence", () => {
       evidence: {
         verificationStatus: "passed",
         commitSha: "a".repeat(40),
-        changedFiles: ["src/x.ts"]
-      }
+        changedFiles: ["src/x.ts"],
+      },
     });
     expect(plan.captureUpdate).toEqual({
       toState: "capturing_result",
@@ -967,7 +974,7 @@ describe("planSingleShotRoundPersistence", () => {
       keyChanges: ["approved the bounded change"],
       keyLearnings: [],
       remainingWork: [],
-      resultDigest: "sha256:result"
+      resultDigest: "sha256:result",
     });
     expect(plan.terminalUpdate).toEqual({
       toState: "succeeded",
@@ -976,7 +983,7 @@ describe("planSingleShotRoundPersistence", () => {
       humanGate: null,
       verificationStatus: "passed",
       commitSha: "a".repeat(40),
-      changedFiles: ["src/x.ts"]
+      changedFiles: ["src/x.ts"],
     });
     // The plan composes decideSingleShotInvocation; the decision can never disagree
     // with the patches because both derive from the one outcome.
@@ -994,7 +1001,7 @@ describe("planSingleShotRoundPersistence", () => {
       toState: "succeeded",
       classification: "complete",
       recoveryCode: null,
-      humanGate: null
+      humanGate: null,
     });
   });
 
@@ -1002,55 +1009,55 @@ describe("planSingleShotRoundPersistence", () => {
     expect(() =>
       planSingleShotRoundPersistence({
         outcome: { ok: true },
-        result: { ...oneShotResult, success: false }
-      })
+        result: { ...oneShotResult, success: false },
+      }),
     ).toThrow("successful result document");
   });
 
   it("does not stamp a result digest when no result document was captured", () => {
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: true },
-      resultDigest: "sha256:result"
+      resultDigest: "sha256:result",
     });
     expect(plan.captureUpdate).toEqual({ toState: "capturing_result" });
   });
 
   it("routes an execution failure from running straight to failed with no capture", () => {
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "command_failed" }
+      outcome: { ok: false, recoveryCode: "command_failed" },
     });
     expect(plan.captureUpdate).toBeNull();
     expect(plan.terminalUpdate).toEqual({
       toState: "failed",
       classification: "failed",
       recoveryCode: "command_failed",
-      humanGate: null
+      humanGate: null,
     });
   });
 
   it("blocks on a missing credential and raises the credential gate", () => {
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "auth_unavailable" }
+      outcome: { ok: false, recoveryCode: "auth_unavailable" },
     });
     expect(plan.captureUpdate).toBeNull();
     expect(plan.terminalUpdate).toEqual({
       toState: "blocked",
       classification: "blocked",
       recoveryCode: "auth_unavailable",
-      humanGate: "credential_required"
+      humanGate: "credential_required",
     });
   });
 
   it("routes an unsafe finalize outcome to manual recovery and preserves the code", () => {
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "head_mismatch" }
+      outcome: { ok: false, recoveryCode: "head_mismatch" },
     });
     expect(plan.captureUpdate).toBeNull();
     expect(plan.terminalUpdate).toEqual({
       toState: "manual_recovery_required",
       classification: "manual_recovery_required",
       recoveryCode: "head_mismatch",
-      humanGate: "manual_recovery_required"
+      humanGate: "manual_recovery_required",
     });
   });
 
@@ -1060,15 +1067,15 @@ describe("planSingleShotRoundPersistence", () => {
       evidence: {
         verificationStatus: "failed",
         commitSha: "a".repeat(40),
-        changedFiles: ["src/x.ts"]
-      }
+        changedFiles: ["src/x.ts"],
+      },
     });
     expect(plan.terminalUpdate).toEqual({
       toState: "manual_recovery_required",
       classification: "manual_recovery_required",
       recoveryCode: "head_mismatch",
       humanGate: "manual_recovery_required",
-      verificationStatus: "failed"
+      verificationStatus: "failed",
     });
   });
 
@@ -1076,8 +1083,8 @@ describe("planSingleShotRoundPersistence", () => {
     expect(() =>
       planSingleShotRoundPersistence({
         outcome: { ok: true },
-        evidence: { changedFiles: ["src/x.ts"] }
-      })
+        evidence: { changedFiles: ["src/x.ts"] },
+      }),
     ).toThrow("changedFiles requires commitSha");
   });
 
@@ -1086,8 +1093,8 @@ describe("planSingleShotRoundPersistence", () => {
       expect(() =>
         planSingleShotRoundPersistence({
           outcome: { ok: true },
-          evidence: { commitSha }
-        })
+          evidence: { commitSha },
+        }),
       ).toThrow("commitSha must be a 40-character hex SHA");
     }
   });
@@ -1096,8 +1103,8 @@ describe("planSingleShotRoundPersistence", () => {
     expect(() =>
       planSingleShotRoundPersistence({
         outcome: { ok: false, recoveryCode: "command_failed" },
-        evidence: { verificationStatus: "oops" as never }
-      })
+        evidence: { verificationStatus: "oops" as never },
+      }),
     ).toThrow("verificationStatus");
   });
 
@@ -1105,8 +1112,8 @@ describe("planSingleShotRoundPersistence", () => {
     expect(() =>
       planSingleShotRoundPersistence({
         outcome: { ok: true },
-        evidence: { verificationStatus: "failed" }
-      })
+        evidence: { verificationStatus: "failed" },
+      }),
     ).toThrow("successful outcomes");
   });
 
@@ -1114,7 +1121,7 @@ describe("planSingleShotRoundPersistence", () => {
     // No evidence: the terminal patch carries no verification / commit / changed-file
     // keys, so `coalesce` keeps the round-start record's nulls / empties in place.
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "command_timed_out" }
+      outcome: { ok: false, recoveryCode: "command_timed_out" },
     });
     expect(plan.terminalUpdate).not.toHaveProperty("verificationStatus");
     expect(plan.terminalUpdate).not.toHaveProperty("commitSha");

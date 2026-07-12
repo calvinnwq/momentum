@@ -44,13 +44,13 @@ import {
   runLiveStepWrapper,
   type LiveStepWrapperInput,
   type LiveStepWrapperRecoveryCode,
-  type LiveStepWrapperResult
+  type LiveStepWrapperResult,
 } from "../../../adapters/live-step-wrapper.js";
 import {
   listConfiguredLiveWrapperKinds,
   resolveLiveWrapper,
   type LiveWrapperConfig,
-  type LiveWrapperProfile
+  type LiveWrapperProfile,
 } from "../../../adapters/live-wrapper-registry.js";
 import type { WorkflowStepKind } from "../../workflow/run/reducer.js";
 import type {
@@ -59,7 +59,7 @@ import type {
   WorkflowStepExecutorErrorCode,
   WorkflowStepExecutorInput,
   WorkflowStepExecutorResult,
-  WorkflowStepExecutorSuccess
+  WorkflowStepExecutorSuccess,
 } from "../../workflow/step/executor.js";
 
 /**
@@ -69,6 +69,7 @@ import type {
  * dispatch code while the precise cause is retained separately on
  * `LiveStepExecutorError.liveRecoveryCode`:
  *
+ *   - `unsupported_platform` remains distinct so operators know to move hosts.
  *   - `auth_unavailable` → `runtime_unavailable` (a prerequisite-missing class).
  *   - `output_overflow`  → `command_failed` (the command ran but breached the
  *     output cap).
@@ -77,13 +78,14 @@ export const LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE: Record<
   LiveStepWrapperRecoveryCode,
   WorkflowStepExecutorErrorCode
 > = {
+  unsupported_platform: "unsupported_platform",
   runtime_unavailable: "runtime_unavailable",
   auth_unavailable: "runtime_unavailable",
   command_failed: "command_failed",
   command_timed_out: "command_timed_out",
   output_overflow: "command_failed",
   result_missing: "result_missing",
-  result_invalid: "result_invalid"
+  result_invalid: "result_invalid",
 };
 
 /**
@@ -97,8 +99,7 @@ export type LiveStepExecutorError = WorkflowStepExecutorError & {
 };
 
 export type LiveStepExecutorDispatchResult =
-  | WorkflowStepExecutorSuccess
-  | LiveStepExecutorError;
+  WorkflowStepExecutorSuccess | LiveStepExecutorError;
 
 export type LiveStepExecutorOptions = {
   /** Per-stream output cap forwarded to the live wrapper. */
@@ -114,7 +115,7 @@ export type LiveStepExecutorOptions = {
 export function buildLiveStepWrapperInput(
   input: WorkflowStepExecutorInput,
   config: LiveWrapperConfig,
-  options?: LiveStepExecutorOptions
+  options?: LiveStepExecutorOptions,
 ): LiveStepWrapperInput {
   return {
     kind: input.kind,
@@ -134,7 +135,7 @@ export function buildLiveStepWrapperInput(
     ...(input.env !== undefined ? { env: input.env } : {}),
     ...(options?.outputMaxBytes !== undefined
       ? { outputMaxBytes: options.outputMaxBytes }
-      : {})
+      : {}),
   };
 }
 
@@ -148,7 +149,7 @@ export function buildLiveStepWrapperInput(
  * `liveRecoveryCode`.
  */
 export function mapLiveStepWrapperResult(
-  result: LiveStepWrapperResult
+  result: LiveStepWrapperResult,
 ): LiveStepExecutorDispatchResult {
   if (result.ok) {
     const runnerSucceeded = result.result.success;
@@ -158,7 +159,7 @@ export function mapLiveStepWrapperResult(
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: result.executorLogPath },
-        { kind: "runner-result", path: result.resultJsonPath }
+        { kind: "runner-result", path: result.resultJsonPath },
       ],
       resultDigest: null,
       errorCode: runnerSucceeded ? null : "command_failed",
@@ -166,7 +167,7 @@ export function mapLiveStepWrapperResult(
         ? null
         : `live step runner reported success=false: ${result.result.summary}`,
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     };
     return {
       ok: true,
@@ -183,8 +184,8 @@ export function mapLiveStepWrapperResult(
         durationMs: result.diagnostics.durationMs,
         probed: result.diagnostics.probed,
         runnerSuccess: result.result.success,
-        goalComplete: result.result.goal_complete
-      }
+        goalComplete: result.result.goal_complete,
+      },
     };
   }
 
@@ -194,7 +195,7 @@ export function mapLiveStepWrapperResult(
     error: result.error,
     executorLogPath: result.executorLogPath,
     resultJsonPath: result.resultJsonPath,
-    liveRecoveryCode: result.code
+    liveRecoveryCode: result.code,
   };
 }
 
@@ -206,15 +207,15 @@ export function mapLiveStepWrapperResult(
 export function createLiveWorkflowStepExecutor(
   kind: WorkflowStepKind,
   config: LiveWrapperConfig,
-  options?: LiveStepExecutorOptions
+  options?: LiveStepExecutorOptions,
 ): WorkflowStepExecutor {
   return {
     kind,
     executes: true,
     execute: (input) =>
       mapLiveStepWrapperResult(
-        runLiveStepWrapper(buildLiveStepWrapperInput(input, config, options))
-      )
+        runLiveStepWrapper(buildLiveStepWrapperInput(input, config, options)),
+      ),
   };
 }
 
@@ -225,7 +226,7 @@ export function createLiveWorkflowStepExecutor(
  */
 export function createLiveWorkflowStepExecutorsFromProfile(
   profile: LiveWrapperProfile,
-  options?: LiveStepExecutorOptions
+  options?: LiveStepExecutorOptions,
 ): Map<WorkflowStepKind, WorkflowStepExecutor> {
   const executors = new Map<WorkflowStepKind, WorkflowStepExecutor>();
   for (const kind of listConfiguredLiveWrapperKinds(profile)) {
@@ -233,7 +234,7 @@ export function createLiveWorkflowStepExecutorsFromProfile(
     if (!resolved.ok) continue;
     executors.set(
       kind,
-      createLiveWorkflowStepExecutor(kind, resolved.config, options)
+      createLiveWorkflowStepExecutor(kind, resolved.config, options),
     );
   }
   return executors;

@@ -26,7 +26,7 @@ import {
   WORKFLOW_MONITOR_RECOVERY_CODES,
   type WorkflowMonitorNextAction,
   type WorkflowMonitorRecovery,
-  type WorkflowMonitorRecoveryCode
+  type WorkflowMonitorRecoveryCode,
 } from "../monitor/state.js";
 
 /**
@@ -49,7 +49,8 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
  * unsafe `commit_failed`, `invalid_input`), result-document checks during
  * finalization or process dispatch (`result_missing` / `result_invalid`), live
- * wrapper process dispatch failures (`runtime_unavailable`, `auth_unavailable`,
+ * wrapper process dispatch failures (`unsupported_platform`,
+ * `runtime_unavailable`, `auth_unavailable`,
  * `command_failed`, `command_timed_out`, `output_overflow`), trapped executor
  * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
  * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
@@ -67,13 +68,14 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "git_failed",
   "commit_failed",
   "invalid_input",
+  "unsupported_platform",
   "runtime_unavailable",
   "auth_unavailable",
   "command_failed",
   "command_timed_out",
   "output_overflow",
   "executor_threw",
-  "manual_recovery_required"
+  "manual_recovery_required",
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
@@ -86,8 +88,7 @@ export type WorkflowLiveRunRecoveryCode =
  * lease requires operator action, so it needs no separate live-only code here.
  */
 export type WorkflowRecoveryClassification =
-  | WorkflowMonitorRecoveryCode
-  | WorkflowLiveRunRecoveryCode;
+  WorkflowMonitorRecoveryCode | WorkflowLiveRunRecoveryCode;
 
 export const WORKFLOW_RECOVERY_CLASSIFICATIONS: readonly WorkflowRecoveryClassification[] =
   [...WORKFLOW_MONITOR_RECOVERY_CODES, ...WORKFLOW_LIVE_RUN_RECOVERY_CODES];
@@ -113,7 +114,7 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
 export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
   "Recovery never auto-clears from elapsed time alone; an operator must explicitly clear it once the blocking state is resolved.",
   "Momentum does not kill processes or perform automatic repair; resolve the underlying cause manually before clearing recovery.",
-  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived, live-run, or scheduler-lane recovery source is unchanged by this artifact."
+  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived, live-run, or scheduler-lane recovery source is unchanged by this artifact.",
 ];
 
 const SAFE_NEXT_STEPS: Record<
@@ -123,108 +124,113 @@ const SAFE_NEXT_STEPS: Record<
   manual_recovery_lease: [
     "Inspect the outstanding manual-recovery-required lease with `momentum workflow status <run-id>`.",
     "Resolve or release the blocking lease before clearing recovery.",
-    "Do not force a step transition or approval while the lease is unresolved."
+    "Do not force a step transition or approval while the lease is unresolved.",
   ],
   ghost_active_no_lease: [
     "Inspect the `.agent-workflows/<run-id>/` run directory; no dispatch lease was ever recorded for the running step.",
     "Confirm no managed child is still running before clearing recovery.",
-    "Decide whether to re-dispatch the step or cancel the run."
+    "Decide whether to re-dispatch the step or cancel the run.",
   ],
   stale_running_step: [
     "Inspect the stale dispatch lease and the run directory for partial progress.",
     "Confirm the managed child has actually exited before clearing recovery.",
-    "Decide whether to resume, re-dispatch, or cancel the running step."
+    "Decide whether to resume, re-dispatch, or cancel the running step.",
   ],
   monitor_drift_stale: [
     "Re-import the run with `momentum workflow import` to refresh the monitor advisory snapshot.",
     "Treat the durable substrate state as authoritative; the monitor snapshot may be stale.",
-    "Confirm no other recovery condition applies before clearing recovery."
+    "Confirm no other recovery condition applies before clearing recovery.",
   ],
   failed_required_step: [
     "Inspect the failed required step's executor log and artifact tree.",
     "Decide whether to retry the step or keep the run blocked for manual handling.",
-    "Do not approve past the failed step until the failure is understood."
+    "Do not approve past the failed step until the failure is understood.",
   ],
   failed_external_side_effect_step: [
     "Verify the external side effects the tail step may have already landed: the pushed branch, the merged pull request, and the tracker / Linear intent state.",
     "Reconcile from that external success evidence rather than re-running the step; a blind re-run could double-merge the pull request or re-write the tracker.",
-    "Clear recovery with `momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>` only once the external state is confirmed consistent."
+    "Clear recovery with `momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>` only once the external state is confirmed consistent.",
   ],
   head_mismatch: [
     "Inspect the unexpected HEAD against the recorded base SHA with `git -C <repo> log`.",
     "Momentum refused a destructive reset: a non-Momentum commit on HEAD must be preserved, not discarded.",
-    "Decide manually whether to keep, amend, or roll back the unexpected commit before clearing recovery."
+    "Decide manually whether to keep, amend, or roll back the unexpected commit before clearing recovery.",
   ],
   result_missing: [
     "Inspect the live step's normalized result file path; the runner exited without writing it.",
     "Confirm the step's true outcome from its executor log before retrying — the result is unknown, so Momentum did not commit or reset.",
-    "Re-dispatch the step or cancel the run once the missing result is understood."
+    "Re-dispatch the step or cancel the run once the missing result is understood.",
   ],
   result_invalid: [
     "Inspect the malformed live step result document; it is not a valid normalized runner result.",
     "Confirm the step's true outcome from its executor log before retrying — the result cannot be trusted, so Momentum did not commit or reset.",
-    "Re-dispatch the step or cancel the run once the invalid result is understood."
+    "Re-dispatch the step or cancel the run once the invalid result is understood.",
   ],
   reset_failed: [
     "Inspect the worktree and reset error before approving any later step.",
     "Confirm whether live-step edits are still present; Momentum could not restore the recorded base automatically.",
-    "Clean up or preserve the worktree manually before clearing recovery."
+    "Clean up or preserve the worktree manually before clearing recovery.",
   ],
   repo_lock_lost: [
     "Inspect the active repo lock owner and the worktree before approving any later step.",
     "Confirm no other Momentum process is still mutating the repository.",
-    "Re-establish repo ownership or clean up manually before clearing recovery."
+    "Re-establish repo ownership or clean up manually before clearing recovery.",
   ],
   git_failed: [
     "Inspect the git error and current worktree state before approving any later step.",
     "Confirm whether live-step edits are still present; Momentum could not prove the repository state.",
-    "Restore or preserve the worktree manually before clearing recovery."
+    "Restore or preserve the worktree manually before clearing recovery.",
   ],
   commit_failed: [
     "Inspect the commit failure and current worktree state before approving any later step.",
     "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
-    "Commit, reset, or preserve the worktree manually before clearing recovery."
+    "Commit, reset, or preserve the worktree manually before clearing recovery.",
   ],
   invalid_input: [
     "Inspect the live-step finalization inputs and run directory before approving any later step.",
     "Confirm whether live-step edits are present; Momentum refused to commit or reset with invalid inputs.",
-    "Correct the invalid inputs and clean up or preserve the worktree manually before clearing recovery."
+    "Correct the invalid inputs and clean up or preserve the worktree manually before clearing recovery.",
+  ],
+  unsupported_platform: [
+    "Move the workflow to a supported Linux or macOS host.",
+    "Confirm that no process was launched and no worktree edits were made.",
+    "Clear recovery on the supported host, then re-dispatch the prepared step.",
   ],
   runtime_unavailable: [
     "Inspect the live step executor log and runtime configuration.",
     "Confirm whether the wrapper made worktree edits before the runtime failure.",
-    "Clean up or preserve any partial worktree changes before clearing recovery."
+    "Clean up or preserve any partial worktree changes before clearing recovery.",
   ],
   auth_unavailable: [
     "Inspect the live step executor log and authentication setup.",
     "Confirm whether the wrapper made worktree edits before authentication failed.",
-    "Clean up or preserve any partial worktree changes before clearing recovery."
+    "Clean up or preserve any partial worktree changes before clearing recovery.",
   ],
   command_failed: [
     "Inspect the live step executor log for the failed command.",
     "Confirm whether partial worktree edits should be kept, reset, or retried.",
-    "Resolve the worktree state manually before clearing recovery."
+    "Resolve the worktree state manually before clearing recovery.",
   ],
   command_timed_out: [
     "Inspect the live step executor log and confirm the command is no longer running.",
     "Confirm whether the timeout left partial worktree edits behind.",
-    "Clean up or preserve any partial worktree changes before clearing recovery."
+    "Clean up or preserve any partial worktree changes before clearing recovery.",
   ],
   output_overflow: [
     "Inspect the live step executor log size and truncation boundary.",
     "Confirm whether the wrapper left partial worktree edits before output capture stopped.",
-    "Clean up or preserve any partial worktree changes before clearing recovery."
+    "Clean up or preserve any partial worktree changes before clearing recovery.",
   ],
   executor_threw: [
     "Inspect the executor error and run directory.",
     "Confirm whether the executor left partial worktree edits before throwing.",
-    "Clean up or preserve any partial worktree changes before clearing recovery."
+    "Clean up or preserve any partial worktree changes before clearing recovery.",
   ],
   manual_recovery_required: [
     "Inspect the live step executor log and run directory for the manual recovery request.",
     "Confirm whether partial worktree edits should be kept, reset, or retried.",
-    "Resolve the worktree state manually before clearing recovery."
-  ]
+    "Resolve the worktree state manually before clearing recovery.",
+  ],
 };
 
 /**
@@ -232,7 +238,7 @@ const SAFE_NEXT_STEPS: Record<
  * path and future surfaces can reuse the same guidance the artifact renders.
  */
 export function workflowRecoverySafeNextSteps(
-  code: WorkflowRecoveryClassification
+  code: WorkflowRecoveryClassification,
 ): readonly string[] {
   return SAFE_NEXT_STEPS[code] ?? [];
 }
@@ -295,7 +301,7 @@ export type BuildWorkflowRecoveryArtifactInput = {
  * of truth for the recovery code, message, and recommended next action.
  */
 export function buildWorkflowRecoveryArtifactInput(
-  options: BuildWorkflowRecoveryArtifactInput
+  options: BuildWorkflowRecoveryArtifactInput,
 ): WorkflowRecoveryArtifactInput {
   const input: WorkflowRecoveryArtifactInput = {
     runId: options.runId,
@@ -305,11 +311,11 @@ export function buildWorkflowRecoveryArtifactInput(
     recommendedNextAction: {
       code: options.nextAction.code,
       detail: options.nextAction.detail,
-      stepId: options.nextAction.stepId
+      stepId: options.nextAction.stepId,
     },
     evidencePointers: options.evidencePointers ?? [],
     repoPath: options.repoPath ?? null,
-    classifiedAt: options.classifiedAt
+    classifiedAt: options.classifiedAt,
   };
   if (options.schemaVersion !== undefined) {
     input.schemaVersion = options.schemaVersion;
@@ -325,11 +331,11 @@ export function buildWorkflowRecoveryArtifactInput(
  */
 export function resolveWorkflowRecoveryArtifactPath(
   agentWorkflowsDir: string,
-  runId: string
+  runId: string,
 ): string {
   if (typeof agentWorkflowsDir !== "string" || agentWorkflowsDir.length === 0) {
     throw new Error(
-      "resolveWorkflowRecoveryArtifactPath: agentWorkflowsDir is required"
+      "resolveWorkflowRecoveryArtifactPath: agentWorkflowsDir is required",
     );
   }
   if (typeof runId !== "string" || runId.length === 0) {
@@ -337,25 +343,29 @@ export function resolveWorkflowRecoveryArtifactPath(
   }
   if (!isSafeWorkflowRunPathSegment(runId)) {
     throw new Error(
-      "resolveWorkflowRecoveryArtifactPath: runId must be a safe path segment"
+      "resolveWorkflowRecoveryArtifactPath: runId must be a safe path segment",
     );
   }
-  return path.join(agentWorkflowsDir, runId, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
+  return path.join(
+    agentWorkflowsDir,
+    runId,
+    WORKFLOW_RECOVERY_ARTIFACT_FILENAME,
+  );
 }
 
 export function resolveWorkflowRecoveryArtifactPathInRunDir(
-  runDir: string
+  runDir: string,
 ): string {
   if (typeof runDir !== "string" || runDir.length === 0) {
     throw new Error(
-      "resolveWorkflowRecoveryArtifactPathInRunDir: runDir is required"
+      "resolveWorkflowRecoveryArtifactPathInRunDir: runDir is required",
     );
   }
   return path.join(runDir, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
 }
 
 export function buildWorkflowRecoveryMarkdown(
-  input: WorkflowRecoveryArtifactInput
+  input: WorkflowRecoveryArtifactInput,
 ): string {
   validateInput(input);
 
@@ -398,7 +408,7 @@ export function buildWorkflowRecoveryMarkdown(
   lines.push("## Safe next steps");
   if (safeNextSteps.length === 0) {
     lines.push(
-      "- No automatic next steps suggested. Inspect the run directory and decide manually."
+      "- No automatic next steps suggested. Inspect the run directory and decide manually.",
     );
   } else {
     safeNextSteps.forEach((step, index) => {
@@ -437,19 +447,19 @@ export type WriteWorkflowRecoveryArtifactResult = {
  * operators.
  */
 export function writeWorkflowRecoveryArtifact(
-  options: WriteWorkflowRecoveryArtifactInput
+  options: WriteWorkflowRecoveryArtifactInput,
 ): WriteWorkflowRecoveryArtifactResult {
   const body = buildWorkflowRecoveryMarkdown(options.input);
   const target = resolveWorkflowRecoveryArtifactPath(
     options.agentWorkflowsDir,
-    options.input.runId
+    options.input.runId,
   );
   writeFileReplacingTarget(target, body);
   return { path: target };
 }
 
 export function writeWorkflowRecoveryArtifactInRunDir(
-  options: WriteWorkflowRecoveryArtifactInRunDirInput
+  options: WriteWorkflowRecoveryArtifactInRunDirInput,
 ): WriteWorkflowRecoveryArtifactResult {
   const body = buildWorkflowRecoveryMarkdown(options.input);
   const target = resolveWorkflowRecoveryArtifactPathInRunDir(options.runDir);
@@ -465,14 +475,14 @@ function writeFileReplacingTarget(target: string, body: string): void {
     targetDir,
     `.${path.basename(target)}.${process.pid}.${Date.now()}.${Math.random()
       .toString(16)
-      .slice(2)}.tmp`
+      .slice(2)}.tmp`,
   );
   let fd: number | undefined;
   try {
     fd = fs.openSync(
       temp,
       fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
-      0o600
+      0o600,
     );
     fs.writeFileSync(fd, body, "utf-8");
     fs.closeSync(fd);
@@ -482,8 +492,7 @@ function writeFileReplacingTarget(target: string, body: string): void {
     if (fd !== undefined) {
       try {
         fs.closeSync(fd);
-      } catch {
-      }
+      } catch {}
     }
     fs.rmSync(temp, { force: true });
     throw err;
@@ -496,13 +505,13 @@ function validateInput(input: WorkflowRecoveryArtifactInput): void {
   }
   if (
     !(WORKFLOW_RECOVERY_CLASSIFICATIONS as readonly string[]).includes(
-      input.classification
+      input.classification,
     )
   ) {
     throw new Error(
       `buildWorkflowRecoveryMarkdown: unknown recovery classification ${String(
-        input.classification
-      )}`
+        input.classification,
+      )}`,
     );
   }
   if (typeof input.reason !== "string" || input.reason.length === 0) {
@@ -513,12 +522,12 @@ function validateInput(input: WorkflowRecoveryArtifactInput): void {
     input.recommendedNextAction.code.length === 0
   ) {
     throw new Error(
-      "buildWorkflowRecoveryMarkdown: recommendedNextAction.code is required"
+      "buildWorkflowRecoveryMarkdown: recommendedNextAction.code is required",
     );
   }
   if (!Number.isFinite(input.classifiedAt)) {
     throw new Error(
-      "buildWorkflowRecoveryMarkdown: classifiedAt must be a finite epoch millisecond"
+      "buildWorkflowRecoveryMarkdown: classifiedAt must be a finite epoch millisecond",
     );
   }
 }

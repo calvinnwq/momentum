@@ -7,6 +7,8 @@
  * succeeds from exit code plus log evidence without writing a result document.
  * Abort-aware runs preserve output captured through cancellation and decode
  * streaming UTF-8 safely before propagating the cancellation reason.
+ * Both mechanisms refuse native Windows with `unsupported_platform` before a
+ * supervised command is spawned.
  *
  * Both mechanisms enforce repo-safety at the boundary. `read-only` snapshots
  * require a clean repo before and after the command. `finalize` requires the
@@ -31,6 +33,7 @@ import {
 } from "../shared/step-finalize.js";
 import {
   LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
+  processExecutionPlatformError,
   runProcessGroup,
   runLiveStepWrapper,
   runLiveStepWrapperAsync,
@@ -181,6 +184,14 @@ export function createOneShotLiveWrapperRoundRunner(
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput(
         "one-shot live wrapper rounds require an absolute log path",
+      );
+    }
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      return unsupportedPlatformRecovery(
+        logPath,
+        "one-shot",
+        platformError.message,
       );
     }
     if (options.repoSafety.mode === "finalize") {
@@ -404,6 +415,14 @@ export function createScriptCommandRoundRunner(
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
     }
+    const platformError = processExecutionPlatformError();
+    if (platformError !== undefined) {
+      return unsupportedPlatformRecovery(
+        logPath,
+        "script",
+        platformError.message,
+      );
+    }
     if (config.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
         config.cwd,
@@ -587,6 +606,18 @@ function classifyScriptProcess(
       readOnlySnapshot,
     );
   }
+  if (errnoCode(result.error) === "UNSUPPORTED_PLATFORM") {
+    writeLine(
+      logHandle,
+      `[single-shot-script] unsupported_platform: ${result.error?.message}`,
+    );
+    return finalizeScriptResult(
+      config,
+      false,
+      "unsupported_platform",
+      readOnlySnapshot,
+    );
+  }
   if (result.error !== undefined) {
     writeLine(
       logHandle,
@@ -670,6 +701,27 @@ function readOnlyRecovery(
   recoveryCode: SingleShotRecoveryCode,
 ): SingleShotRoundMechanismResult {
   return { outcome: { ok: false, recoveryCode } };
+}
+
+function unsupportedPlatformRecovery(
+  logPath: string,
+  family: "one-shot" | "script",
+  detail: string,
+): SingleShotRoundMechanismResult {
+  const logHandle = openScriptLog(logPath);
+  if (logHandle === null) {
+    return invalidInput(`${family} runner could not open refusal log path`);
+  }
+  try {
+    writeLine(
+      logHandle,
+      `[single-shot-${family}] unsupported_platform: ${detail}`,
+    );
+    writeLine(logHandle, `[single-shot-${family}] result: blocked`);
+  } finally {
+    closeLog(logHandle);
+  }
+  return readOnlyRecovery("unsupported_platform");
 }
 
 function liveRecoveryCode(

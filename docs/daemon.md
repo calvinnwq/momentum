@@ -139,6 +139,9 @@ If the live-wrapper run directory resolves inside the repo, it must be ignored
 by git before the wrapper starts; otherwise the daemon parks the step with
 `invalid_input` so result, log, verification, or recovery artifacts cannot be
 committed as work.
+Process-backed live-wrapper dispatch is supported on Linux and macOS.
+On native Windows, the wrapper launches no supervised command, parks the run
+with `unsupported_platform`, and preserves the refused round for recovery.
 When the variable is unset or blank, supported live-wrapper-owned steps
 get the durable start scaffold only, while unconfigured wrapper kinds fail
 honestly with `runtime_unavailable` if a profile is configured but omits that
@@ -345,6 +348,8 @@ remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
 runner state.
+An `unsupported_platform` refusal is separately retryable for every dispatched
+step after the workflow moves to Linux or macOS and recovery is cleared there.
 The coding-workflow wrapper also treats known no-mistakes runner lifecycle
 failures as recovery setup failures rather than ordinary failed runner evidence:
 missing external branch-start state, current no-mistakes run status or outcome

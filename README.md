@@ -31,6 +31,11 @@ your agent's skills root. The skill resolves the CLI via `MOMENTUM_CLI`,
 [`docs/agent-skill.md`](docs/agent-skill.md) for the resolver and operating
 contract.
 
+Momentum supports process-backed workflow execution on Linux and macOS. Native
+Windows hosts fail closed with the structured `unsupported_platform` recovery
+code before a supervised command is spawned. General path parsing remains
+portable, but native Windows execution is not a supported runtime lane.
+
 ## Quick Start
 
 Start a workflow run and inspect it:

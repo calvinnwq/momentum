@@ -258,10 +258,11 @@ function failedResult(
 
 function wrapperBootstrapFailure(
   input: WorkflowStepExecutorInput,
+  code: "runtime_unavailable" | "unsupported_platform" = "runtime_unavailable",
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: false,
-    code: "runtime_unavailable",
+    code,
     error: `live step runtime is unavailable: ${input.kind} wrapper dist path is stale`,
     executorLogPath: input.executorLogPath,
     resultJsonPath: input.resultJsonPath,
@@ -1065,6 +1066,38 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(rounds[1]?.logPaths[0]).toContain("attempt-2/executor.log");
     expect(rounds[1]?.logPaths[0]).not.toBe(rounds[0]?.logPaths[0]);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+  });
+
+  it("prepares an unsupported-platform step for retry when recovery is cleared on a supported host", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { registry } = countingRegistry((input) =>
+      wrapperBootstrapFailure(input, "unsupported_platform"),
+    );
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) },
+    );
+
+    dispatch(claim, tickContext(db, TICK_AT));
+
+    expect(stepState(db, "preflight")).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
+
+    const cleared = clearWorkflowRunManualRecoveryGuarded(db, {
+      runId: RUN_ID,
+      now: TICK_AT + 100,
+    });
+
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) throw new Error("clear failed");
+    expect(cleared.retryPrepared).toEqual({
+      stepId: "preflight",
+      recoveryCode: "unsupported_platform",
+    });
+    expect(stepState(db, "preflight")).toBe("approved");
   });
 
   it("preserves persisted route selection when retrying merge-cleanup after clearing recovery", () => {

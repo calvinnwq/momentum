@@ -32,6 +32,10 @@ shape documented below.
 Useful as a first sanity check after install, as a quick orchestrator-health
 probe before a bounded daemon scheduling session, and as a way to validate a
 repo's policy file in isolation.
+The reported platform is diagnostic only.
+Native Windows is not a supported or CI-proven host. Process-backed workflow
+execution refuses with `unsupported_platform` before a supervised command is
+spawned; run Momentum workflows on Linux or macOS.
 
 ## Daemon-readiness JSON envelope
 

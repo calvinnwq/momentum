@@ -31,11 +31,13 @@
  *   - A successful invocation is `complete`. A single shot has no further round,
  *     so success terminates the step toward success directly (subject to final
  *     workflow checks the daemon still owns).
- *   - `runtime_unavailable` / `auth_unavailable` are `blocked`: "a durable
+ *   - `unsupported_platform` / `runtime_unavailable` / `auth_unavailable` are
+ *     `blocked`: "a durable
  *     non-terminal blockage that may be resolved by changing input, policy,
  *     credentials, or external state." A missing runtime or failed credential
  *     check is fixed by changing the environment, not by failing the step; the
- *     workflow can recover by starting a fresh invocation once it clears.
+ *     workflow can recover by starting a fresh invocation once it clears or
+ *     moves to a supported host.
  *     `auth_unavailable` additionally raises a durable `credential_required`
  *     gate so the operator surface names the blocker.
  *   - `command_failed` / `command_timed_out` / `output_overflow` /
@@ -110,6 +112,7 @@ export function isSingleShotExecutorFamily(
  * step's fault, so the step blocks rather than fails.
  */
 export const SINGLE_SHOT_BLOCKED_RECOVERY_CODES = [
+  "unsupported_platform",
   "runtime_unavailable",
   "auth_unavailable",
 ] as const;

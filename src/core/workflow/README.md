@@ -112,10 +112,11 @@ injection, heartbeating the dispatch lease through verification / git
 finalization, and leaving the reconciliation seam the single workflow-row
 finalization owner. `dispatch/retry.ts`
 keeps the retry path explicit for stale live-wrapper bootstrap failures: after
-guarded recovery clear prepares a retryable `no-mistakes` or `merge-cleanup`
-step, the next dispatch reopens the same deterministic invocation id with the
-next attempt / round while `dispatch/live-wrapper.ts` scopes attempt > 1 evidence
-paths under `attempt-<n>/`.
+guarded recovery clear prepares either an `unsupported_platform` refusal for any
+dispatched step or another retryable setup failure for `no-mistakes` or
+`merge-cleanup`, the next dispatch reopens the same deterministic invocation id
+with the next attempt / round while `dispatch/live-wrapper.ts` scopes attempt >
+1 evidence paths under `attempt-<n>/`.
 `live-wrapper/daemon-exec-context.ts` has since added that per-step exec-context
 **deriver**: a pure resolver (plus its injected run-row loader) that maps a run's
 provenance to the bounded session's working directory — a native run runs under

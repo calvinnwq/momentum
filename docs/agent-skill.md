@@ -6,6 +6,9 @@ The skill is for agents that need to resolve the Momentum CLI, inspect workflow 
 Momentum is still pre-release and not published to npm.
 Install the skill folder from a source checkout with any skill installer that accepts a repository path, or place `skills/momentum/` in the agent host's skills root.
 The package payload allowlist includes `skills/momentum/`, so dry-run package checks prove the same skill will ship with package artifacts once publishing is enabled.
+Native Windows is not a supported or CI-proven Momentum host. Platform-portable
+parsing and resolution remain available to integrators, while process-backed
+execution refuses with `unsupported_platform` before spawn.
 
 ## Contents
 

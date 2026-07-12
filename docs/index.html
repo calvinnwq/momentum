@@ -109,6 +109,10 @@ node dist/index.js workflow status demo-1 --json
 node dist/index.js workflow run logs demo-1 --json
 node dist/index.js workflow handoff demo-1 --json</code></pre>
             <p>
+              Process-backed workflow execution is supported on Linux and macOS.
+              Native Windows is not a supported or CI-proven host; platform-portable parsing remains available, while executable steps refuse with <code>unsupported_platform</code> before a supervised command is spawned.
+            </p>
+            <p>
               For a copy-paste workflow smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
               For the native workflow contract, start with <a href="workflow-commands.html">workflow commands</a>.
             </p>
