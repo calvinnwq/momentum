@@ -15,21 +15,74 @@ were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern                        | Modules                                                                                               |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                  |
-| Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
-| Single-shot executor           | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                  |
-| Live-step executor             | `live-step/executor.ts` (production live-wrapper lane)                                                |
-| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                     |
-| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                            |
-| Runner support                 | `runner/profile.ts`                                                                                   |
-| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                   |
-| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                 |
+| Concern                        | Modules                                                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`                                                                          |
+| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                       |
+| Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts`      |
+| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
+| Live-step executor             | `live-step/executor.ts` (production live-wrapper lane)                                                     |
+| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                          |
+| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                 |
+| Runner support                 | `runner/profile.ts`                                                                                        |
+| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                        |
+| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                      |
 
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
 families build on `loop/reducer` / `loop/persist`.
+`sdk/types.ts` is the dependency-free third-party contract: one bounded `tick`,
+a declared portable config schema, a durable snapshot, and an envelope facade
+that can record observations/evidence but cannot classify terminal state.
+`sdk/envelope.ts` is Momentum's SQLite-backed host implementation; its
+daemon-only controller owns a separate frozen facade passed to executor code.
+Facade writes are available only while the invocation is `running`; an operator
+wait or any other non-running state revokes executor write access.
+Classification, its checkpoint, and invocation settlement commit atomically on
+the controller after a tick returns.
+The controller also rejects classification decisions whose invocation or round
+state is inconsistent with the classification before writing any settlement.
+`single-shot/sdk.ts` is the first built-in proof: the current `one-shot` and
+`script` families implement the same `Executor` interface and accept a runner
+adapter as their narrower lifecycle extension point. The built-in runner
+mechanisms supervise process groups asynchronously below a crash-surviving
+anchor/watchdog, terminate them on tick cancellation or daemon loss, require a
+fresh per-run ownership-token proof before signalling POSIX PIDs, require host
+repo-ownership proof before resetting mutations, and
+only then let the host atomically persist the cancelled classification. Missing
+ownership proof or cleanup failure preserves the durable in-flight state for
+recovery rather than claiming terminal cancellation.
+When the anchor cannot confirm cleanup, the ownership-checked POSIX or Windows
+fallback receives its own bounded cleanup budget. A verified fallback preserves
+the known timeout, cancellation, or command-exit outcome; only an unverified
+fallback changes that outcome to `SUPERVISOR_FAILED`.
+The POSIX budget begins after its ownership preflight; an already-exited anchor
+must have reported entering cleanup before fallback may preserve the outcome.
+Windows fallback retains bounded anchor and command start/exit identities, while
+the synchronous helper preserves command status only as diagnostics when cleanup
+proof fails.
+Captured stdout and stderr remain in the executor log through cancellation, and
+streaming UTF-8 decoding preserves characters split across pipe chunks.
+POSIX supervision is portable userland containment, not a sandbox: it proves
+cleanup for the anchored group and sampled descendants that retain the ownership
+token. Fallback also requires two consecutive snapshots with no live member of
+the retained process group, so a token-stripped same-group descendant cannot be
+mistaken for successful cleanup. A hostile descendant that escapes between
+ancestry samples and strips the token requires kernel-backed containment outside
+this implementation.
+Detected escapes or lost cleanup proof fail closed with `SUPERVISOR_FAILED`.
+Both read-only and finalizing built-ins require clean tracked/untracked status plus a captured ignored-path baseline before launch.
+Ignored-worktree comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants.
+Directory-only mode or timestamp mutations therefore remain residue.
+The comparison is intentionally strict; large ignored trees and concurrent cache churn remain operational risks, so mutable caches should live outside the supervised worktree when practical.
+New single-shot dispatches insert their invocation, initial running round, and
+hashed dispatch-binding checkpoint in one transaction after resolving runtime
+inputs, so reattach never inherits a new invocation without its complete binding.
+Registration/discovery and structural-preflight schema validation remain separate
+wiring.
+Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
+Malformed JavaScript or casted returns leave only the atomically materialized invocation, running round, and dispatch-binding checkpoint for recovery.
+Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
@@ -65,21 +118,20 @@ and `src/adapters/no-mistakes-orchestrator.ts` — stays under `src/adapters/`
 because it drives the external no-mistakes tool. The
 `test/cli-import-boundaries.test.ts` adapter-ownership list pins that split.
 
-Known reverse dependencies (adapter → core runtime), preserved unchanged because
-ARCH-04 is a mechanical move with no adapter rewrite:
+Every current adapter → executor-core edge has an explicit SDK disposition:
 
-- `src/adapters/no-mistakes-executor.ts` and `no-mistakes-orchestrator.ts` import
-  `loop/reducer` / `loop/persist`.
-- `src/adapters/real-workflow-probe.ts` imports `smoke/workflow-harness`.
-- `src/adapters/live-step-wrapper.ts` imports the `parseRunnerResult` parser
-  from `runner/result`; the `RunnerResult` shapes it also consumes are type-only
-  imports from `runner/types.ts`. This runtime edge moved from the former root
-  `src/runner-result.ts`.
+| Adapter edge                                                                                        | Disposition                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                   | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                   |
+| `git-transaction.ts` → `runner/types.ts`                                                            | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                              |
+| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts` | Temporary, explicitly re-justified: the current mirror predates the SDK. It dissolves when supervision moves into the core `delegate-supervisor` lifecycle and the adapter shrinks to a tool adapter. |
+| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                              | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                     |
+| `runner/profile.ts`                                                                                 | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                   |
 
-These edges predate ARCH-04 (and, for the runner-result parser, ARCH-06).
-Tightening them (so adapters depend on core types only) is deferred; it would
-require an interface decision that the mechanical ARCH slices explicitly decline
-to make.
+`test/executor-sdk-import-boundaries.test.ts` pins this exact allowlist so no
+new adapter reverse dependency can appear without a named disposition. The end
+state is adapters importing only SDK contract modules/types or lifecycle
+adapter interfaces, never executor persistence.
 
 ## Boundaries
 
@@ -89,7 +141,7 @@ to make.
 
 ## Deferred
 
-- Exported executor types stay beside their behavior in their owning module. The
+- Exported family-specific executor types stay beside their behavior in their owning module. The
   shared runner-result shapes now live at `src/core/executors/runner/types.ts`
   (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `RunnerResult`, and the
   `RunnerResult{Error,Success,Parse}` envelopes), with their parser

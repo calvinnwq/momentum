@@ -9,10 +9,12 @@ import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../src/shared/process-limits.js";
 import {
   createOneShotLiveWrapperRoundRunner,
-  createScriptCommandRoundRunner
+  createScriptCommandRoundRunner,
 } from "../src/core/executors/single-shot/mechanism.js";
+import type { SingleShotRoundRunnerContext } from "../src/core/executors/single-shot/sdk.js";
 
 const tempRoots: string[] = [];
 
@@ -29,7 +31,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-single-shot-mech-")
+    path.join(os.tmpdir(), "momentum-single-shot-mech-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -38,7 +40,7 @@ function makeTempDir(): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -54,7 +56,29 @@ function initRepo(): { repoPath: string; baseHead: string } {
   return { repoPath, baseHead: runGit(repoPath, ["rev-parse", "HEAD"]).trim() };
 }
 
-function round(overrides: Partial<ExecutorRoundRecord> = {}): ExecutorRoundRecord {
+function ignorePath(repoPath: string, ignoredPath: string): void {
+  fs.writeFileSync(path.join(repoPath, ".gitignore"), `${ignoredPath}\n`);
+  runGit(repoPath, ["add", ".gitignore"]);
+  runGit(repoPath, ["commit", "-m", "ignore fixture", "--quiet"]);
+}
+
+async function waitUntil(
+  predicate: () => boolean,
+  description: string,
+  timeoutMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for ${description}.`);
+    }
+    await waitMs(20);
+  }
+}
+
+function round(
+  overrides: Partial<ExecutorRoundRecord> = {},
+): ExecutorRoundRecord {
   const artifactRoot = overrides.artifactRoot ?? makeTempDir();
   return {
     roundId: "round-1",
@@ -86,7 +110,7 @@ function round(overrides: Partial<ExecutorRoundRecord> = {}): ExecutorRoundRecor
     commitSha: null,
     recoveryCode: null,
     humanGate: null,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -103,8 +127,8 @@ function runnerResult(): RunnerResult {
       scope: "single-shot",
       subject: "complete one shot",
       body: "",
-      breaking: false
-    }
+      breaking: false,
+    },
   };
 }
 
@@ -113,6 +137,640 @@ function resultJson(value: RunnerResult): string {
 }
 
 describe("single-shot concrete mechanisms", () => {
+  it("preserves a settled script result when cancellation arrives afterward", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const abort = new AbortController();
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runProcessGroup: async () => {
+            abort.abort();
+            return {
+              pid: 123,
+              status: 0,
+              signal: null,
+              stdout: "completed\n",
+              stderr: "",
+              output: [null, "completed\n", ""],
+            };
+          },
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: process.execPath,
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = await mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      {
+        config: { command: path.basename(process.execPath) },
+        hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+        signal: abort.signal,
+      },
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("preserves a settled one-shot result when cancellation arrives afterward", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const abort = new AbortController();
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runLiveStepWrapperAsync: async (input: { iterationDir: string }) => {
+            const resultJsonPath = path.join(input.iterationDir, "result.json");
+            fs.writeFileSync(resultJsonPath, resultJson(runnerResult()));
+            abort.abort();
+            return {
+              ok: true as const,
+              result: runnerResult(),
+              executorLogPath: path.join(input.iterationDir, "executor.log"),
+              resultJsonPath,
+            };
+          },
+        };
+      },
+    );
+    const {
+      createOneShotLiveWrapperRoundRunner:
+        createMockedOneShotLiveWrapperRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedOneShotLiveWrapperRoundRunner(
+      {
+        command: process.execPath,
+        args: [],
+        cwd: "iteration",
+        timeoutSec: 5,
+        envAllow: [],
+        resultFile: "result.json",
+        probe: undefined,
+      },
+      {
+        repoPath,
+        kind: "preflight",
+        repoSafety: { mode: "read-only" },
+      },
+    );
+
+    const result = await mechanism(round({ artifactRoot }), {
+      config: {},
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    });
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(result.result).toEqual(runnerResult());
+  });
+
+  it("persists script output when async process supervision fails", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const logPath = path.join(artifactRoot, "script.log");
+    vi.resetModules();
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runProcessGroup: async () => {
+            const error = Object.assign(new Error("supervisor failed"), {
+              code: "SUPERVISOR_FAILED",
+              stdout: "script-supervisor-stdout\n",
+              stderr: "script-supervisor-stderr\n",
+            });
+            throw error;
+          },
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: process.execPath,
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: path.basename(process.execPath) },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    await expect(
+      mechanism(
+        round({
+          artifactRoot,
+          executorFamily: "script",
+          logPaths: [logPath],
+        }),
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "SUPERVISOR_FAILED" });
+
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "[single-shot-script] stdout:\nscript-supervisor-stdout",
+    );
+    expect(fs.readFileSync(logPath, "utf-8")).toContain(
+      "[single-shot-script] stderr:\nscript-supervisor-stderr",
+    );
+  });
+
+  it("kills an in-flight script process group when the SDK signal aborts", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "should-not-exist.txt");
+    const args = [
+      "-c",
+      'printf dirty > "$CANCEL_MARKER"; sleep 5; printf late > "$CANCEL_MARKER"',
+    ];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      env: { CANCEL_MARKER: marker },
+      repoSafety: {
+        mode: "read-only",
+        beforeGitMutation: () => ({ ok: true }),
+      },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(() => fs.existsSync(marker), "script cancellation marker");
+    abort.abort();
+
+    await expect(running).rejects.toThrow(/aborted/i);
+    await waitMs(100);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("kills an in-flight one-shot wrapper when the SDK signal aborts", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const config: LiveWrapperConfig = {
+      command: "/bin/sh",
+      args: [
+        "-c",
+        'printf one-shot-before-cancel; printf one-shot-stderr-before-cancel >&2; printf dirty > "$MOMENTUM_REPO_PATH/cancelled-one-shot.txt"; sleep 5; printf \'{"success":true}\' > "$MOMENTUM_RESULT_PATH"',
+      ],
+      cwd: "iteration",
+      timeoutSec: 10,
+      envAllow: [],
+      resultFile: "result.json",
+      probe: undefined,
+    };
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      repoSafety: {
+        mode: "read-only",
+        beforeGitMutation: () => ({ ok: true }),
+      },
+    });
+    const abort = new AbortController();
+    const abortReason = Object.assign(
+      new Error("caller requested cancellation"),
+      { code: "SUPERVISOR_FAILED" },
+    );
+    const context: SingleShotRoundRunnerContext = {
+      config: {},
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const logPath = path.join(artifactRoot, "one-shot.log");
+    const running = mechanism(
+      round({
+        artifactRoot,
+        logPaths: [logPath],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt")),
+      "one-shot cancellation marker",
+    );
+    abort.abort(abortReason);
+
+    await expect(running).rejects.toThrow("caller requested cancellation");
+    await waitMs(100);
+    expect(fs.existsSync(path.join(artifactRoot, "result.json"))).toBe(false);
+    expect(fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt"))).toBe(
+      false,
+    );
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+    const cancellationLog = fs.readFileSync(logPath, "utf-8");
+    expect(cancellationLog).toContain(
+      "[live-step] stdout:\none-shot-before-cancel",
+    );
+    expect(cancellationLog).toContain(
+      "[live-step] stderr:\none-shot-stderr-before-cancel",
+    );
+  });
+
+  it("preserves cancelled read-only mutations without repo ownership proof", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "preserved-for-recovery.txt");
+    const args = ["-c", 'printf dirty > "$MARKER"; sleep 5'];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      env: { MARKER: marker },
+      repoSafety: { mode: "read-only" },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(() => fs.existsSync(marker), "read-only mutation");
+    expect(fs.readFileSync(marker, "utf-8")).toBe("dirty");
+    abort.abort();
+
+    await expect(running).rejects.toThrow("repo ownership proof");
+    expect(fs.readFileSync(marker, "utf-8")).toBe("dirty");
+  });
+
+  it("refuses cancellation when git cleanup leaves nested-repo residue", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const nestedRepo = path.join(repoPath, "nested");
+    const args = [
+      "-c",
+      "mkdir nested; git -C nested init -q; touch nested/.git/momentum-ready; sleep 5",
+    ];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+      repoSafety: {
+        mode: "read-only",
+        beforeGitMutation: () => ({ ok: true }),
+      },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.existsSync(path.join(nestedRepo, ".git", "momentum-ready")),
+      "nested repository mutation",
+    );
+    expect(fs.existsSync(path.join(nestedRepo, ".git"))).toBe(true);
+    abort.abort();
+
+    await expect(running).rejects.toThrow("repository residue");
+    expect(fs.existsSync(path.join(nestedRepo, ".git"))).toBe(true);
+  });
+
+  it("refuses cancellation when an ignored file differs from its baseline", async () => {
+    const { repoPath } = initRepo();
+    fs.writeFileSync(path.join(repoPath, ".gitignore"), "ignored.txt\n");
+    runGit(repoPath, ["add", ".gitignore"]);
+    runGit(repoPath, ["commit", "-qm", "ignore local file"]);
+    const ignoredPath = path.join(repoPath, "ignored.txt");
+    fs.writeFileSync(ignoredPath, "baseline\n");
+    const artifactRoot = makeTempDir();
+    const args = ["-c", "printf changed-content > ignored.txt; sleep 5"];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      repoSafety: {
+        mode: "read-only",
+        beforeGitMutation: () => ({ ok: true }),
+      },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.readFileSync(ignoredPath, "utf-8") === "changed-content",
+      "ignored-file mutation",
+    );
+    expect(fs.readFileSync(ignoredPath, "utf-8")).toBe("changed-content");
+    abort.abort();
+
+    await expect(running).rejects.toThrow("repository residue");
+    expect(fs.readFileSync(ignoredPath, "utf-8")).toBe("changed-content");
+  });
+
+  it("resets finalizing script mutations before propagating cancellation", async () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const verificationLogPath = path.join(artifactRoot, "verify.log");
+    const args = [
+      "-c",
+      "printf script-before-cancel; printf script-stderr-before-cancel >&2; printf dirty > cancelled.txt; sleep 5",
+    ];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "single-shot",
+          subject: "cancelled script",
+          body: "",
+          breaking: false,
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath,
+        beforeGitMutation: () => ({ ok: true }),
+      },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args, timeoutMs: 10_000 },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const logPath = path.join(artifactRoot, "script.log");
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [logPath],
+      }),
+      context,
+    );
+    await waitUntil(
+      () => fs.existsSync(path.join(repoPath, "cancelled.txt")),
+      "finalizing script cancellation marker",
+    );
+    abort.abort();
+
+    await expect(running).rejects.toThrow(/aborted/i);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+    const cancellationLog = fs.readFileSync(logPath, "utf-8");
+    expect(cancellationLog).toContain(
+      "[single-shot-script] stdout:\nscript-before-cancel",
+    );
+    expect(cancellationLog).toContain(
+      "[single-shot-script] stderr:\nscript-stderr-before-cancel",
+    );
+  });
+
+  it("re-checks cancellation triggered by the finalization ownership hook", async () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const abort = new AbortController();
+    const args = ["-c", "printf dirty > cancelled-in-finalizer.txt"];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "single-shot",
+          subject: "cancelled during finalization",
+          body: "",
+          breaking: false,
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+        beforeGitMutation: () => {
+          abort.abort();
+          return { ok: true };
+        },
+      },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args, timeoutMs: 10_000 },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+
+    await expect(
+      mechanism(
+        round({
+          artifactRoot,
+          executorFamily: "script",
+          logPaths: [path.join(artifactRoot, "script.log")],
+        }),
+        context,
+      ),
+    ).rejects.toThrow(/aborted/i);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("rejects and preserves an initially dirty read-only baseline", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const preexisting = path.join(repoPath, "preexisting.txt");
+    fs.writeFileSync(preexisting, "user work\n");
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: repoPath,
+      timeoutSec: 10,
+      repoSafety: { mode: "read-only" },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args: ["-c", "exit 0"] },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    const result = await mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed",
+    });
+    expect(fs.readFileSync(preexisting, "utf-8")).toBe("user work\n");
+  });
+
+  it("preserves cancelled finalizing mutations without repo ownership proof", async () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "finalizing-recovery.txt");
+    const args = ["-c", 'printf dirty > "$MARKER"; sleep 5'];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 10,
+      env: { MARKER: marker },
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "single-shot",
+          subject: "cancelled script",
+          body: "",
+          breaking: false,
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
+    });
+    const abort = new AbortController();
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "sh", args, timeoutMs: 10_000 },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: abort.signal,
+    };
+    const running = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+      context,
+    );
+    await waitUntil(() => fs.existsSync(marker), "finalizing mutation");
+    expect(fs.readFileSync(marker, "utf-8")).toBe("dirty");
+    abort.abort();
+
+    await expect(running).rejects.toThrow("repo ownership proof");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(fs.readFileSync(marker, "utf-8")).toBe("dirty");
+  });
+
+  it("rejects one-shot portable timeout and agent host mismatches before launch", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "should-not-launch.txt");
+    const config: LiveWrapperConfig = {
+      command: "/bin/sh",
+      args: ["-c", `printf launched > ${JSON.stringify(marker)}`],
+      cwd: "iteration",
+      timeoutSec: 10,
+      envAllow: [],
+      resultFile: "result.json",
+      probe: undefined,
+    };
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      hostIdentity: { agent: { harness: "codex" } },
+      repoSafety: { mode: "read-only" },
+    });
+    const baseContext = {
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    for (const portableConfig of [
+      { timeoutMs: 1_000 },
+      { agent: { harness: "claude" } },
+    ]) {
+      const result = await mechanism(round({ artifactRoot }), {
+        ...baseContext,
+        config: portableConfig,
+      });
+      expect(result.outcome).toEqual({
+        ok: false,
+        recoveryCode: "invalid_input",
+      });
+    }
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
   it("runs a one-shot live wrapper, finalizes the repo, and captures the normalized result document", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
@@ -122,13 +780,13 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/one-shot.txt', 'changed\\n')"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/one-shot.txt', 'changed\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: ["RESULT_JSON"],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
@@ -140,27 +798,29 @@ describe("single-shot concrete mechanisms", () => {
         baseHead,
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath
-      }
+        verificationLogPath,
+      },
     });
     const result = mechanism(round({ artifactRoot }));
 
     expect(result.outcome).toEqual({ ok: true });
     expect(result.result).toEqual(runnerResult());
     expect(result.resultDigest).toBe(
-      `sha256:${crypto.createHash("sha256").update(json).digest("hex")}`
+      `sha256:${crypto.createHash("sha256").update(json).digest("hex")}`,
     );
     expect(result.artifacts?.resultDocument?.path).toBe(
-      path.join(artifactRoot, "result.json")
+      path.join(artifactRoot, "result.json"),
     );
     expect(result.artifacts?.resultDocument?.digest).toBe(result.resultDigest);
     expect(result.evidence?.verificationStatus).toBe("skipped");
     expect(result.evidence?.commitSha).toMatch(/^[0-9a-f]{40}$/);
     expect(result.evidence?.changedFiles).toEqual(["one-shot.txt"]);
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
-      result.evidence?.commitSha
+      result.evidence?.commitSha,
     );
-    expect(result.artifacts?.verificationOutput?.path).toBe(verificationLogPath);
+    expect(result.artifacts?.verificationOutput?.path).toBe(
+      verificationLogPath,
+    );
   });
 
   it("resets finalize one-shot command failures that dirty the repo", () => {
@@ -171,13 +831,13 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-failure.txt', 'dirty\n');process.exit(7)"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-failure.txt', 'dirty\n');process.exit(7)",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: [],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
@@ -188,15 +848,15 @@ describe("single-shot concrete mechanisms", () => {
         baseHead,
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath
-      }
+        verificationLogPath,
+      },
     });
 
     const result = mechanism(round({ artifactRoot }));
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "command_failed"
+      recoveryCode: "command_failed",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -211,13 +871,13 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\\n')"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: ["RESULT_JSON"],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
@@ -229,22 +889,22 @@ describe("single-shot concrete mechanisms", () => {
         baseHead,
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(round({ artifactRoot }));
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "git_failed"
+      recoveryCode: "git_failed",
     });
     expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
-      false
+      false,
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"])).toContain(
-      "preexisting.txt"
+      "preexisting.txt",
     );
   });
 
@@ -255,31 +915,31 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\n')"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: [],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
       repoPath,
       kind: "preflight",
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
-      round({ artifactRoot, logPaths: ["relative-one-shot.log"] })
+      round({ artifactRoot, logPaths: ["relative-one-shot.log"] }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input"
+      recoveryCode: "invalid_input",
     });
     expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
-      false
+      false,
     );
   });
 
@@ -295,25 +955,25 @@ describe("single-shot concrete mechanisms", () => {
       timeoutSec: 5,
       envAllow: [],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
       repoPath,
       kind: "preflight",
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
-        logPaths: [path.join(blockedParent, "executor.log")]
-      })
+        logPaths: [path.join(blockedParent, "executor.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
   });
 
@@ -324,30 +984,32 @@ describe("single-shot concrete mechanisms", () => {
     const json = resultJson(runnerResult());
     const originalWriteSync = fs.writeSync;
     let thrown = false;
-    vi.spyOn(fs, "writeSync").mockImplementation(
-      ((fd: number, data: string | NodeJS.ArrayBufferView, ...args: unknown[]) => {
-        if (!thrown && typeof data === "string" && data.includes(marker)) {
-          thrown = true;
-          throw new Error("log write failed after child mutation");
-        }
-        return (originalWriteSync as (...input: unknown[]) => number)(
-          fd,
-          data,
-          ...args
-        );
-      }) as typeof fs.writeSync
-    );
+    vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      data: string | NodeJS.ArrayBufferView,
+      ...args: unknown[]
+    ) => {
+      if (!thrown && typeof data === "string" && data.includes(marker)) {
+        thrown = true;
+        throw new Error("log write failed after child mutation");
+      }
+      return (originalWriteSync as (...input: unknown[]) => number)(
+        fd,
+        data,
+        ...args,
+      );
+    }) as typeof fs.writeSync);
     const config: LiveWrapperConfig = {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-throw.txt', 'dirty\\n');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);process.stdout.write(process.env.THROW_MARKER)"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-throw.txt', 'dirty\\n');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);process.stdout.write(process.env.THROW_MARKER)",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: ["RESULT_JSON", "THROW_MARKER"],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
@@ -359,15 +1021,15 @@ describe("single-shot concrete mechanisms", () => {
         baseHead,
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(round({ artifactRoot }));
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -391,12 +1053,12 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath
-      }
+        verificationLogPath,
+      },
     });
 
     const result = mechanism(
@@ -405,8 +1067,8 @@ describe("single-shot concrete mechanisms", () => {
         executorFamily: "script",
         agentProvider: null,
         model: null,
-        logPaths: [logPath]
-      })
+        logPaths: [logPath],
+      }),
     );
 
     expect(result.outcome).toEqual({ ok: true });
@@ -415,10 +1077,194 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.evidence?.commitSha).toMatch(/^[0-9a-f]{40}$/);
     expect(result.evidence?.changedFiles).toEqual(["script.txt"]);
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
-      result.evidence?.commitSha
+      result.evidence?.commitSha,
     );
-    expect(result.artifacts?.verificationOutput?.path).toBe(verificationLogPath);
+    expect(result.artifacts?.verificationOutput?.path).toBe(
+      verificationLogPath,
+    );
     expect(fs.readFileSync(logPath, "utf-8")).toContain("script ok");
+  });
+
+  it("handles ignored worktrees whose full status exceeds the child process buffer", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    const ignoredRoot = path.join(
+      repoPath,
+      "ignored",
+      "x".repeat(190),
+      "y".repeat(190),
+    );
+    fs.mkdirSync(ignoredRoot, { recursive: true });
+    for (let index = 0; index < 2_700; index += 1) {
+      fs.writeFileSync(
+        path.join(ignoredRoot, `${String(index).padStart(4, "0")}-fixture`),
+        "",
+      );
+    }
+    const fullIgnoredStatus = execFileSync(
+      "git",
+      [
+        "-C",
+        repoPath,
+        "status",
+        "--ignored",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "-z",
+      ],
+      { encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 },
+    );
+    expect(Buffer.byteLength(fullIgnoredStatus)).toBeGreaterThan(1024 * 1024);
+
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("normalizes trailing separators before checking ignored path containment", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    fs.mkdirSync(path.join(repoPath, "ignored"));
+    fs.writeFileSync(path.join(repoPath, "ignored", "fixture.txt"), "ignored");
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: `${repoPath}${path.sep}`,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({ ok: true });
+  });
+
+  it("rejects read-only success that changes ignored directory metadata", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    ignorePath(repoPath, "ignored");
+    const ignoredRoot = path.join(repoPath, "ignored");
+    fs.mkdirSync(ignoredRoot);
+    fs.writeFileSync(path.join(ignoredRoot, "fixture.txt"), "ignored");
+    fs.chmodSync(ignoredRoot, 0o755);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "chmod 700 ignored"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed",
+    });
+    expect(fs.statSync(ignoredRoot).mode & 0o777).toBe(0o700);
+  });
+
+  it("rejects oversized script host timeouts before sync or SDK launch", async () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = path.join(repoPath, "oversized-timeout-launched.txt");
+    const args = ["-c", `printf launched > ${JSON.stringify(marker)}`];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: MAX_BUILT_IN_PROCESS_TIMEOUT_SEC + 1,
+      repoSafety: { mode: "read-only" },
+    });
+    const scriptRound = round({
+      artifactRoot,
+      executorFamily: "script",
+      logPaths: [path.join(artifactRoot, "script.log")],
+    });
+
+    const syncResult = mechanism(scriptRound);
+    const sdkResult = await mechanism(scriptRound, {
+      config: { command: "sh", args },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    });
+
+    for (const result of [syncResult, sdkResult]) {
+      expect(result.outcome).toEqual({
+        ok: false,
+        recoveryCode: "invalid_input",
+      });
+    }
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it("rejects a portable script command that does not match its host resolution", async () => {
+    const repoPath = makeTempDir();
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "exit 0"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: { command: "node", args: ["--version"] },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    const result = await mechanism(
+      round({ executorFamily: "script" }),
+      context,
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "invalid_input",
+    });
+  });
+
+  it("rejects a portable script policy that does not match its host resolution", async () => {
+    const { repoPath } = initRepo();
+    const marker = path.join(repoPath, "policy-mismatch-launched.txt");
+    const args = ["-c", `printf launched > ${JSON.stringify(marker)}`];
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args,
+      cwd: repoPath,
+      timeoutSec: 5,
+      policyEnvelopeIdentity: "host-restricted",
+      repoSafety: { mode: "read-only" },
+    });
+    const context: SingleShotRoundRunnerContext = {
+      config: {
+        command: "sh",
+        args,
+        policyEnvelope: "portable-unrestricted",
+      },
+      hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
+      signal: new AbortController().signal,
+    };
+
+    const result = await mechanism(
+      round({ executorFamily: "script" }),
+      context,
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "invalid_input",
+    });
+    expect(fs.existsSync(marker)).toBe(false);
   });
 
   it("maps non-zero script exits to command_failed after reset", () => {
@@ -437,19 +1283,19 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     expect(
-      mechanism(round({ artifactRoot, executorFamily: "script" })).outcome
+      mechanism(round({ artifactRoot, executorFamily: "script" })).outcome,
     ).toEqual({
       ok: false,
-      recoveryCode: "command_failed"
+      recoveryCode: "command_failed",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -475,28 +1321,28 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "head_mismatch"
+      recoveryCode: "head_mismatch",
     });
     expect(fs.existsSync(path.join(repoPath, "launched-script.txt"))).toBe(
-      false
+      false,
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(movedHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -510,7 +1356,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: [
         "-c",
-        `nohup /bin/sh -c 'sleep 2; touch ${sentinelPath}' >/dev/null 2>&1 & sleep 10`
+        `nohup /bin/sh -c 'sleep 2; touch ${sentinelPath}' >/dev/null 2>&1 & sleep 10`,
       ],
       cwd: repoPath,
       timeoutSec: 1,
@@ -522,24 +1368,24 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "command_timed_out"
+      recoveryCode: "command_timed_out",
     });
 
     waitMs(2_500);
@@ -553,19 +1399,19 @@ describe("single-shot concrete mechanisms", () => {
       args: ["-c", "printf 'should not run' > launched.txt"],
       cwd: repoPath,
       timeoutSec: 5,
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
       round({
         executorFamily: "script",
-        logPaths: ["relative-script.log"]
-      })
+        logPaths: ["relative-script.log"],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input"
+      recoveryCode: "invalid_input",
     });
     expect(fs.existsSync(path.join(repoPath, "launched.txt"))).toBe(false);
   });
@@ -580,20 +1426,20 @@ describe("single-shot concrete mechanisms", () => {
       cwd: repoPath,
       timeoutSec: 5,
       env: { BAD_ENV: 1n } as unknown as NodeJS.ProcessEnv,
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [logPath]
-      })
+        logPaths: [logPath],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(fs.readFileSync(logPath, "utf-8")).toContain("spawn_error");
   });
@@ -611,15 +1457,15 @@ describe("single-shot concrete mechanisms", () => {
       args: ["-c", "printf 'script ok'"],
       cwd: repoPath,
       timeoutSec: 5,
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({ ok: true });
@@ -632,22 +1478,27 @@ describe("single-shot concrete mechanisms", () => {
     const marker = "SCRIPT_LOG_WRITE_FAILURE";
     const originalWriteSync = fs.writeSync;
     let thrown = false;
-    vi.spyOn(fs, "writeSync").mockImplementation(
-      ((fd: number, data: string | NodeJS.ArrayBufferView, ...args: unknown[]) => {
-        if (!thrown && typeof data === "string" && data.includes(marker)) {
-          thrown = true;
-          throw new Error("script log write failed");
-        }
-        return (originalWriteSync as (...input: unknown[]) => number)(
-          fd,
-          data,
-          ...args
-        );
-      }) as typeof fs.writeSync
-    );
+    vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      data: string | NodeJS.ArrayBufferView,
+      ...args: unknown[]
+    ) => {
+      if (!thrown && typeof data === "string" && data.includes(marker)) {
+        thrown = true;
+        throw new Error("script log write failed");
+      }
+      return (originalWriteSync as (...input: unknown[]) => number)(
+        fd,
+        data,
+        ...args,
+      );
+    }) as typeof fs.writeSync);
     const mechanism = createScriptCommandRoundRunner({
       command: "/bin/sh",
-      args: ["-c", "printf 'dirty\\n' > dirty-log.txt; printf \"$THROW_MARKER\""],
+      args: [
+        "-c",
+        "printf 'dirty\\n' > dirty-log.txt; printf \"$THROW_MARKER\"",
+      ],
       cwd: repoPath,
       timeoutSec: 5,
       env: { THROW_MARKER: marker },
@@ -659,25 +1510,25 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -687,29 +1538,40 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     vi.resetModules();
-    vi.doMock("../src/adapters/live-step-wrapper.js", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("../src/adapters/live-step-wrapper.js")>();
-      return {
-        ...actual,
-        runProcessGroupSync: () => {
-          fs.writeFileSync(path.join(repoPath, "dirty-supervisor.txt"), "dirty\n");
-          const error = new Error("supervisor failed") as NodeJS.ErrnoException;
-          error.code = "SUPERVISOR_FAILED";
-          return {
-            pid: 123,
-            output: [null, "", ""],
-            stdout: "",
-            stderr: "",
-            status: null,
-            signal: null,
-            error
-          };
-        }
-      };
-    });
-    const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
-      await import("../src/core/executors/single-shot/mechanism.js");
+    vi.doMock(
+      "../src/adapters/live-step-wrapper.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/adapters/live-step-wrapper.js")
+          >();
+        return {
+          ...actual,
+          runProcessGroupSync: () => {
+            fs.writeFileSync(
+              path.join(repoPath, "dirty-supervisor.txt"),
+              "dirty\n",
+            );
+            const error = new Error(
+              "supervisor failed",
+            ) as NodeJS.ErrnoException;
+            error.code = "SUPERVISOR_FAILED";
+            return {
+              pid: 123,
+              output: [null, "", ""],
+              stdout: "",
+              stderr: "",
+              status: null,
+              signal: null,
+              error,
+            };
+          },
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
     const mechanism = createMockedScriptCommandRoundRunner({
       command: "/bin/sh",
       args: ["-c", "printf 'unused'"],
@@ -723,25 +1585,25 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "runtime_unavailable"
+      recoveryCode: "runtime_unavailable",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
@@ -763,25 +1625,25 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "command_failed"
+      recoveryCode: "command_failed",
     });
     expect(result.evidence?.verificationStatus).toBe("skipped");
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
@@ -810,25 +1672,25 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "command_failed"
+      recoveryCode: "command_failed",
     });
     expect(result.evidence?.verificationStatus).toBe("skipped");
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
@@ -838,29 +1700,35 @@ describe("single-shot concrete mechanisms", () => {
   it("preserves reset_failed when commit-failure cleanup fails", async () => {
     const artifactRoot = makeTempDir();
     vi.resetModules();
-    vi.doMock("../src/core/executors/shared/step-finalize.js", async (importOriginal) => {
-      const actual =
-        await importOriginal<typeof import("../src/core/executors/shared/step-finalize.js")>();
-      return {
-        ...actual,
-        finalizeWorkflowStep: () => ({
-          outcome: "commit_failed",
-          verification: { ok: true, results: [] },
-          commit: {
-            ok: false,
-            code: "git_failed",
-            error: "git commit failed"
-          },
-          reset: {
-            ok: false,
-            code: "git_failed",
-            error: "git reset failed after commit failure"
-          }
-        })
-      };
-    });
-    const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
-      await import("../src/core/executors/single-shot/mechanism.js");
+    vi.doMock(
+      "../src/core/executors/shared/step-finalize.js",
+      async (importOriginal) => {
+        const actual =
+          await importOriginal<
+            typeof import("../src/core/executors/shared/step-finalize.js")
+          >();
+        return {
+          ...actual,
+          finalizeWorkflowStep: () => ({
+            outcome: "commit_failed",
+            verification: { ok: true, results: [] },
+            commit: {
+              ok: false,
+              code: "git_failed",
+              error: "git commit failed",
+            },
+            reset: {
+              ok: false,
+              code: "git_failed",
+              error: "git reset failed after commit failure",
+            },
+          }),
+        };
+      },
+    );
+    const {
+      createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner,
+    } = await import("../src/core/executors/single-shot/mechanism.js");
     const { repoPath, baseHead } = initRepo();
     const mechanism = createMockedScriptCommandRoundRunner({
       command: "/bin/sh",
@@ -875,25 +1743,25 @@ describe("single-shot concrete mechanisms", () => {
           scope: "script",
           subject: "run script",
           body: "",
-          breaking: false
+          breaking: false,
         },
         verificationCommands: [],
         verificationTimeoutSec: 5,
-        verificationLogPath: path.join(artifactRoot, "verify.log")
-      }
+        verificationLogPath: path.join(artifactRoot, "verify.log"),
+      },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "reset_failed"
+      recoveryCode: "reset_failed",
     });
     expect(result.evidence?.verificationStatus).toBe("skipped");
   });
@@ -906,25 +1774,84 @@ describe("single-shot concrete mechanisms", () => {
       args: ["-c", "printf 'dirty\n' > dirty.txt"],
       cwd: repoPath,
       timeoutSec: 5,
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(
       round({
         artifactRoot,
         executorFamily: "script",
-        logPaths: [path.join(artifactRoot, "script.log")]
-      })
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "git_failed"
+      recoveryCode: "git_failed",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toContain(
-      "dirty.txt"
+      "dirty.txt",
     );
+  });
+
+  it("excludes repo-local host artifacts from ignored residue checks", () => {
+    const { repoPath } = initRepo();
+    fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-runs/\n");
+    runGit(repoPath, ["add", ".gitignore"]);
+    runGit(repoPath, ["commit", "-m", "ignore agent runs", "--quiet"]);
+    const artifactRoot = path.join(repoPath, ".agent-runs", "round-1");
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'clean command'"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("rejects metadata changes above excluded repo-local host artifacts", () => {
+    const { repoPath } = initRepo();
+    fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-runs/\n");
+    runGit(repoPath, ["add", ".gitignore"]);
+    runGit(repoPath, ["commit", "-m", "ignore agent runs", "--quiet"]);
+    const ignoredRoot = path.join(repoPath, ".agent-runs");
+    const artifactRoot = path.join(ignoredRoot, "round-1");
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    fs.chmodSync(ignoredRoot, 0o755);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "chmod 700 .agent-runs"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")],
+      }),
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed",
+    });
+    expect(fs.statSync(ignoredRoot).mode & 0o777).toBe(0o700);
   });
 
   it("rejects read-only one-shot success that dirties the repo", () => {
@@ -935,31 +1862,31 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-one-shot.txt', 'dirty\\n')"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-one-shot.txt', 'dirty\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
       envAllow: ["RESULT_JSON"],
       resultFile: "result.json",
-      probe: undefined
+      probe: undefined,
     };
 
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
       repoPath,
       kind: "preflight",
       env: { RESULT_JSON: json },
-      repoSafety: { mode: "read-only" }
+      repoSafety: { mode: "read-only" },
     });
 
     const result = mechanism(round({ artifactRoot }));
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "git_failed"
+      recoveryCode: "git_failed",
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toContain(
-      "dirty-one-shot.txt"
+      "dirty-one-shot.txt",
     );
   });
 });

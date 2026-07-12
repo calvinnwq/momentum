@@ -8,7 +8,7 @@ import {
   classifyProbeSpawnResult,
   classifyWorkflowHarnessOutcome,
   planWorkflowHarnessSmoke,
-  type ProbeSpawnResult
+  type ProbeSpawnResult,
 } from "../src/core/executors/smoke/workflow-harness.js";
 
 /**
@@ -34,26 +34,26 @@ function wrapper(overrides: RawWrapper = {}): RawWrapper {
     env_allow: ["PATH"],
     result_file: "result.json",
     probe: { command: "/usr/bin/true", args: ["--version"], timeout_sec: 10 },
-    ...overrides
+    ...overrides,
   };
 }
 
 function profile(
   wrappers: Record<string, RawWrapper> = {
     "no-mistakes": wrapper(),
-    "linear-refresh": wrapper()
-  }
+    "linear-refresh": wrapper(),
+  },
 ): unknown {
   return { name: "smoke", wrappers };
 }
 
 function optedInEnv(
-  overrides: Record<string, string | undefined> = {}
+  overrides: Record<string, string | undefined> = {},
 ): Record<string, string | undefined> {
   return {
     [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1",
     [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -61,7 +61,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with not_opted_in when the opt-in flag is unset", () => {
     const plan = planWorkflowHarnessSmoke(
       { [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes" },
-      profile()
+      profile(),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -72,7 +72,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     for (const value of ["0", "false", "no", "off", ""]) {
       const plan = planWorkflowHarnessSmoke(
         optedInEnv({ [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: value }),
-        profile()
+        profile(),
       );
       expect(plan.mode, `value=${JSON.stringify(value)}`).toBe("skip");
       if (plan.mode !== "skip") throw new Error("expected skip");
@@ -90,7 +90,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with profile_unavailable when the profile is invalid", () => {
     const plan = planWorkflowHarnessSmoke(optedInEnv(), {
       name: "",
-      wrappers: {}
+      wrappers: {},
     });
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -100,7 +100,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with kind_missing when no step kind is requested", () => {
     const plan = planWorkflowHarnessSmoke(
       { [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1" },
-      profile()
+      profile(),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -110,7 +110,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with unsupported_kind when the requested kind is not a workflow step kind", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "frobnicate" }),
-      profile()
+      profile(),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -120,7 +120,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with not_configured when the kind is valid but absent from the profile", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "postflight" }),
-      profile({ "no-mistakes": wrapper() })
+      profile({ "no-mistakes": wrapper() }),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -132,7 +132,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
     expect(plan.kind).toBe("no-mistakes");
-    expect(plan.family).toBe("no-mistakes");
+    expect(plan.family).toBe("delegate-supervisor");
     expect(plan.isExternalWrite).toBe(false);
     expect(plan.probeOnly).toBe(true);
     expect(plan.command).toBe("/usr/bin/true");
@@ -141,14 +141,14 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     expect(plan.probe).toEqual({
       command: "/usr/bin/true",
       args: ["--version"],
-      timeoutSec: 10
+      timeoutSec: 10,
     });
   });
 
   it("skips with probe_unavailable when probe-only is requested but no probe is configured", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv(),
-      profile({ "no-mistakes": wrapper({ probe: undefined }) })
+      profile({ "no-mistakes": wrapper({ probe: undefined }) }),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -158,7 +158,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("plans a full harness run without a probe when the full flag is set", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_FULL_ENV_VAR]: "1" }),
-      profile({ "no-mistakes": wrapper({ probe: undefined }) })
+      profile({ "no-mistakes": wrapper({ probe: undefined }) }),
     );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
@@ -169,7 +169,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("keeps the external-write family closed without the write opt-in", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "linear-refresh" }),
-      profile()
+      profile(),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -180,9 +180,9 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({
         [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "linear-refresh",
-        [REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR]: "1"
+        [REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR]: "1",
       }),
-      profile()
+      profile(),
     );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
@@ -195,7 +195,11 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
 describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
   it("reports ok when the process exits zero with no signal", () => {
     expect(
-      classifyWorkflowHarnessOutcome({ kind: "exited", exitCode: 0, signal: null })
+      classifyWorkflowHarnessOutcome({
+        kind: "exited",
+        exitCode: 0,
+        signal: null,
+      }),
     ).toEqual({ ok: true });
   });
 
@@ -203,7 +207,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "exited",
       exitCode: 2,
-      signal: null
+      signal: null,
     });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected failure");
@@ -214,7 +218,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "exited",
       exitCode: null,
-      signal: "SIGKILL"
+      signal: "SIGKILL",
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("command_failed");
@@ -224,7 +228,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "spawn_error",
       code: "ENOENT",
-      message: "spawn /usr/bin/gnhf ENOENT"
+      message: "spawn /usr/bin/gnhf ENOENT",
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("tool_unavailable");
@@ -234,7 +238,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "spawn_error",
       code: "EPIPE",
-      message: "write EPIPE"
+      message: "write EPIPE",
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("harness_error");
@@ -243,7 +247,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
   it("classifies a timeout as timeout", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "timed_out",
-      timeoutSec: 60
+      timeoutSec: 60,
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("timeout");
@@ -252,7 +256,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
   it("classifies a missing result document as result_missing", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "result_missing",
-      path: "result.json"
+      path: "result.json",
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("result_missing");
@@ -262,7 +266,7 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     const outcome = classifyWorkflowHarnessOutcome({
       kind: "result_invalid",
       path: "result.json",
-      reason: "not valid JSON"
+      reason: "not valid JSON",
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("result_invalid");
@@ -275,7 +279,7 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
   it("maps a clean zero exit to an exited outcome", () => {
     const raw = classifyProbeSpawnResult(
       { error: null, status: 0, signal: null },
-      probe
+      probe,
     );
     expect(raw).toEqual({ kind: "exited", exitCode: 0, signal: null });
     // ...and the existing classifier treats a clean exit as success.
@@ -285,7 +289,7 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
   it("threads a non-zero exit code through as an exited outcome", () => {
     const raw = classifyProbeSpawnResult(
       { error: null, status: 7, signal: null },
-      probe
+      probe,
     );
     expect(raw).toEqual({ kind: "exited", exitCode: 7, signal: null });
     const outcome = classifyWorkflowHarnessOutcome(raw);
@@ -296,7 +300,7 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
   it("threads a terminating signal through as an exited outcome", () => {
     const raw = classifyProbeSpawnResult(
       { error: null, status: null, signal: "SIGKILL" },
-      probe
+      probe,
     );
     expect(raw).toEqual({ kind: "exited", exitCode: null, signal: "SIGKILL" });
     const outcome = classifyWorkflowHarnessOutcome(raw);
@@ -307,10 +311,10 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
   it("maps an ETIMEDOUT spawn error to timed_out using the probe timeout", () => {
     const result: ProbeSpawnResult = {
       error: Object.assign(new Error("spawnSync /bin/sleep ETIMEDOUT"), {
-        code: "ETIMEDOUT"
+        code: "ETIMEDOUT",
       }),
       status: null,
-      signal: "SIGTERM"
+      signal: "SIGTERM",
     };
     const raw = classifyProbeSpawnResult(result, { timeoutSec: 45 });
     expect(raw).toEqual({ kind: "timed_out", timeoutSec: 45 });
@@ -322,16 +326,16 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
   it("maps an ENOENT spawn error to a spawn_error outcome", () => {
     const result: ProbeSpawnResult = {
       error: Object.assign(new Error("spawn /usr/bin/gnhf ENOENT"), {
-        code: "ENOENT"
+        code: "ENOENT",
       }),
       status: null,
-      signal: null
+      signal: null,
     };
     const raw = classifyProbeSpawnResult(result, probe);
     expect(raw).toEqual({
       kind: "spawn_error",
       code: "ENOENT",
-      message: "spawn /usr/bin/gnhf ENOENT"
+      message: "spawn /usr/bin/gnhf ENOENT",
     });
     const outcome = classifyWorkflowHarnessOutcome(raw);
     if (outcome.ok) throw new Error("expected failure");
@@ -342,13 +346,13 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
     const result: ProbeSpawnResult = {
       error: Object.assign(new Error("spawn EACCES"), { code: "EACCES" }),
       status: null,
-      signal: null
+      signal: null,
     };
     const raw = classifyProbeSpawnResult(result, probe);
     expect(raw).toEqual({
       kind: "spawn_error",
       code: "EACCES",
-      message: "spawn EACCES"
+      message: "spawn EACCES",
     });
     const outcome = classifyWorkflowHarnessOutcome(raw);
     if (outcome.ok) throw new Error("expected failure");
@@ -359,13 +363,13 @@ describe("classifyProbeSpawnResult (NGX-372)", () => {
     const result: ProbeSpawnResult = {
       error: new Error("opaque spawn failure"),
       status: null,
-      signal: null
+      signal: null,
     };
     const raw = classifyProbeSpawnResult(result, probe);
     expect(raw).toEqual({
       kind: "spawn_error",
       code: null,
-      message: "opaque spawn failure"
+      message: "opaque spawn failure",
     });
   });
 });

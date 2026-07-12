@@ -30,11 +30,17 @@
       ]
     },
     {
+      title: "Extend",
+      items: [
+        { n: "12", t: "Executor SDK", h: "executor-sdk.html" }
+      ]
+    },
+    {
       title: "Goal-lane compatibility",
       items: [
-        { n: "12", t: "Goal spec", h: "goal-spec.html" },
-        { n: "13", t: "Runners", h: "runners.html" },
-        { n: "14", t: "Failure and reset", h: "failure-reset.html" }
+        { n: "13", t: "Goal spec", h: "goal-spec.html" },
+        { n: "14", t: "Runners", h: "runners.html" },
+        { n: "15", t: "Failure and reset", h: "failure-reset.html" }
       ]
     }
   ];

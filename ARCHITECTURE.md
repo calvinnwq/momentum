@@ -45,6 +45,7 @@ Use these docs for detailed behavior:
 - [SPEC.md](SPEC.md): compact current runtime, workflow, external-apply,
   source-adapter, coding-workflow ownership, runtime-consolidation, and
   adapter-test contracts.
+- [docs/executor-sdk.md](docs/executor-sdk.md): public executor tick, durable envelope, portable config, lifecycle adapter, and process-supervision contracts.
 - The personal wiki `/Workspaces/Momentum`: long-form internal plans, contracts,
   milestone provenance, roadmap sequencing, dogfood evidence, readiness notes,
   and migration rationale.
@@ -140,6 +141,8 @@ The enforced import boundaries are:
   commands, adapters, persistence, mutation modules, or state-mutating shared helpers stay forbidden.
 - External adapters stay behind domain or command boundaries with explicit
   policy checks.
+- Adapters may import the dependency-free executor SDK contract and official runner-result types, parsers, and normalizers.
+  Any adapter dependency on executor persistence or lifecycle internals requires an explicit disposition in `src/core/executors/README.md` and the executor SDK import-boundary guard.
 - Test fixtures may read source files for structural guards, but production code
   must not depend on filesystem source scanning.
 

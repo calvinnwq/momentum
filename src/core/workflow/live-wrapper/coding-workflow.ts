@@ -21,6 +21,7 @@ import path from "node:path";
 import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
+import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
 import type {
   CommitIntent,
@@ -3224,6 +3225,12 @@ function readPositiveInteger(
   if (value === undefined || value === null)
     return { ok: true, value: fallback };
   if (Number.isInteger(value) && typeof value === "number" && value > 0) {
+    if (value > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+      return {
+        ok: false,
+        error: `Wrapper config \`timeout_sec\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
+      };
+    }
     return { ok: true, value };
   }
   return {

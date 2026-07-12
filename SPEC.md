@@ -38,6 +38,132 @@ bounded progress. Executors own bounded work and may recommend `continue`,
 `blocked`, `failed`, `cancelled`, or `complete`. The daemon decides state
 transitions from durable evidence.
 
+## Executor SDK Contract
+
+The executor-loop layer is the executor SDK boundary. `Executor.tick` receives a
+read-only durable invocation/round snapshot, machine-portable step config,
+machine-local host bindings, a cancellation signal, and an `ExecutorEnvelope`.
+One tick performs at most one bounded turn and returns an
+`ExecutorTickResult` recommendation. Recommended round/invocation states,
+classification, recovery code, and gate remain advisory; only the daemon-side
+envelope controller can apply terminal classification and state transitions.
+The controller and executor facade are different runtime objects, so an executor
+cannot recover daemon authority with a type cast.
+Before settlement, the controller validates that the classification maps to its
+required invocation state, permits the requested round state, and carries a
+classification-compatible recovery code and human gate; an inconsistent daemon
+decision writes no round, invocation, or classification-checkpoint change.
+The envelope clock owns round start and heartbeat timestamps as well as durable
+observations and terminal settlement after awaited runner work, so executor input
+cannot forge liveness and asynchronous rounds cannot finish before their bounded
+work in the persisted timeline.
+Cancellation terminalizes only when it happens before bounded work starts or the
+runner propagates the signal reason after verified cleanup. A normal runner
+return wins a simultaneous post-run abort rather than creating an unverified
+cancelled classification.
+Built-in asynchronous process adapters preserve captured stdout and stderr in
+the executor log during cancellation and decode streaming UTF-8 across split
+pipe chunks without replacement-character corruption.
+
+`ExecutorEnvelope` is bound to one durable invocation. It can start the next
+round, record non-terminal round observations, heartbeat, and append artifacts,
+checkpoints, findings, and decisions. It exposes no SQLite handle and rejects
+cross-invocation evidence, overlapping or non-sequential rounds, and evidence
+mutation after either the round or invocation becomes terminal. State-dependent
+writes and coherent snapshots use SQLite transactions so concurrent ticks cannot
+cross those guards. Every public envelope write validates its complete runtime
+payload, and an explicit observation-field whitelist prevents JavaScript or
+casted inputs from restoring terminal authority.
+Daemon-allocated classification checkpoint identity is chosen inside the same
+write transaction as terminal settlement. Its snapshots include all durable child
+evidence so a later tick can resume without terminal scrollback or
+executor-private state.
+Executor facade writes are allowed only while the invocation is `running`;
+`waiting_operator` and every other non-running invocation state revoke all
+executor writes, including heartbeat.
+Result-capture observations and their completion checkpoints commit atomically.
+When `mechanism_completed` is durable but daemon classification is not, the
+single-shot daemon entrypoint reattaches the matching non-terminal invocation,
+reconstructs the outcome from that checkpoint, and resumes only classification;
+it never reruns the completed mechanism.
+New single-shot dispatches materialize the invocation, initial running round,
+and hashed `round_started` dispatch-binding checkpoint in one transaction after
+resolving runtime inputs, so the first durable owner always has its complete
+reattach binding.
+
+Every executor declares a strict object config schema. The schema describes only
+portable workflow intent: agent harness/model/effort, tool or command identity,
+timeouts, opt-in `maxRounds`, and policy. Executable paths, cwd, environment,
+credentials, stdin policy, and other machine-local values are host bindings.
+Structural preflight validation and module registration are separate runtime
+wiring; the SDK contract does not make either a private executor hook. The
+single-shot compatibility host also enforces its declared family-specific schema
+at runtime before it creates a durable round.
+
+Lifecycle classes layer narrower adapter extension points over the same core
+contract. The shipped agent-once and script lifecycle uses an asynchronous runner
+adapter. Its built-in process adapters run work below a separate process-group
+anchor and watchdog. The anchor's parent-liveness pipe provides crash cleanup,
+and every process inherits a cryptographically random ownership token that
+POSIX cleanup freshly verifies before signalling an individual PID. Windows
+cleanup uses the live anchor as its retained ownership root. They terminate the
+owned tree when the tick's cancellation
+signal aborts, the command times out, its leader exits, or the daemon disappears.
+The runner then resets
+owned repository mutations to the captured base only after a host-provided
+repo-ownership proof succeeds, before the host records the cancelled round,
+invocation, and classification checkpoint atomically. Missing ownership proof or
+failed process-tree cleanup, reset residue, or other failed cleanup leaves the
+durable in-flight state for recovery instead of recording a false terminal
+cancellation.
+Read-only runners require clean tracked/untracked status plus a captured ignored-path baseline before launch, so cancellation cleanup never erases pre-existing worktree changes.
+Host-owned repo-local log and result paths are excluded from the ignored-path baseline so durable evidence is not mistaken for runner residue.
+Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
+Directory-only mode or timestamp mutations therefore cannot evade the baseline.
+Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
+Agent-loop will repeat bounded runner rounds, and
+delegate-supervisor will poll a tool adapter across ticks when those lifecycle
+classes land. The single-shot lifecycle (`one-shot` and `script` in the current
+schema) implements `Executor` directly and is driven through the durable
+envelope before its host accepts or refines the recommendation. Looping
+executors have no default iteration cap: requirements are the stop condition;
+only an explicitly configured cap may raise the durable `quota_exhausted` gate.
+The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
+Malformed JavaScript or casted returns are rejected with only the atomically materialized invocation, running round, and dispatch-binding checkpoint left for recovery.
+Successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
+
+If the anchor cannot confirm termination, the ownership-checked POSIX or Windows
+fallback receives its own bounded cleanup budget. The POSIX budget starts only
+after blocking ownership and escaped-descendant preflight completes. POSIX
+fallback succeeds only after two consecutive snapshots find neither a
+token-owned process nor a live member of the retained process group; an empty
+token scan alone is not cleanup proof. Once its
+anchor has exited, POSIX fallback can preserve a known outcome only if the anchor
+first reported entering cleanup; an abrupt unreported exit fails closed. Every
+Windows descendant-discovery path binds cleanup to retained anchor and command
+start/exit identities and accepts direct children of an exited command only when
+their creation times fall between the command's retained creation and exit
+times. The synchronous helper retains command status and signal for diagnostics
+when cleanup proof fails without accepting that outcome. Successful fallback
+cleanup preserves the known timeout, cancellation, or command-exit outcome; an
+unverified fallback changes that outcome to `SUPERVISOR_FAILED` without invoking
+an unverified broad `taskkill` fallback.
+
+Portable POSIX process supervision is userland containment.
+It can prove cleanup for the anchored group and sampled descendants that retain
+the ownership token, but a hostile descendant that escapes between ancestry
+samples and strips the token requires kernel-backed containment outside this
+implementation.
+Detected escaped descendants, lost ownership visibility, or any other inability
+to prove cleanup fails closed with `SUPERVISOR_FAILED` and preserves the durable
+in-flight state for recovery.
+
+The dependency-free `RunnerResult` shapes in
+`src/core/executors/runner/types.ts` and parser/normalizers in
+`src/core/executors/runner/result.ts` are official SDK contract surface. Runner
+and process adapters may import them at runtime without acquiring persistence or
+daemon ownership.
+
 ## Native Goal-Loop Contract
 
 The native `goal-loop` is Momentum's autonomous implementation flywheel below a workflow step.

@@ -11,11 +11,11 @@ import {
   reconcileLinearSource,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
-  type LinearReconciliationFetchPageResult
+  type LinearReconciliationFetchPageResult,
 } from "../src/core/source/reconciliation.js";
 import {
   listSourceItems,
-  listSourceSnapshotsForItem
+  listSourceSnapshotsForItem,
 } from "../src/core/source/items.js";
 import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
@@ -24,34 +24,34 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 import {
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
-  loadExecutorRound
+  loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import {
   resolveSingleShotRoundSelection,
   singleShotInvocationId,
   singleShotRoundId,
-  type SingleShotRoundRuntimeInputs
+  type SingleShotRoundRuntimeInputs,
 } from "../src/core/executors/single-shot/executor.js";
 import { runSingleShotStep } from "../src/core/executors/single-shot/orchestrator.js";
 import {
   goalLoopInvocationId,
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
-  type GoalLoopRoundRuntimeInputs
+  type GoalLoopRoundRuntimeInputs,
 } from "../src/core/executors/goal-loop/executor.js";
 import { runGoalLoopStep } from "../src/core/executors/goal-loop/orchestrator.js";
 import {
   noMistakesInvocationId,
   noMistakesRoundId,
   type NoMistakesExternalState,
-  type NoMistakesRoundRuntimeInputs
+  type NoMistakesRoundRuntimeInputs,
 } from "../src/adapters/no-mistakes-executor.js";
 import { runNoMistakesMirrorStep } from "../src/adapters/no-mistakes-orchestrator.js";
 import type { WorkflowApprovalBoundary } from "../src/core/workflow/run/reducer.js";
@@ -120,7 +120,7 @@ const CODING_WORKFLOW_STEP_IDS = [
   "postflight",
   "no-mistakes",
   "merge-cleanup",
-  "linear-refresh"
+  "linear-refresh",
 ] as const;
 
 const tempRoots: string[] = [];
@@ -139,7 +139,7 @@ function makeTempDir(prefix = "momentum-ngx-372-e2e-"): string {
 }
 
 function makeLinearIssue(
-  overrides: Record<string, unknown> = {}
+  overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     id: overrides["id"] ?? "issue-ngx-372",
@@ -152,22 +152,22 @@ function makeLinearIssue(
     project: overrides["project"] ?? {
       id: "momentum-project",
       key: "NGX",
-      name: "Momentum"
+      name: "Momentum",
     },
     projectMilestone: overrides["projectMilestone"] ?? {
       id: "adapter-test-coverage",
-      name: "Adapter Test Coverage"
+      name: "Adapter Test Coverage",
     },
     labels: overrides["labels"] ?? { nodes: [] },
     assignee: overrides["assignee"] ?? null,
     priority: overrides["priority"] ?? 0,
     updatedAt: overrides["updatedAt"] ?? "2026-06-11T00:00:00.000Z",
-    ...overrides
+    ...overrides,
   };
 }
 
 function fakeLinearClient(
-  pages: readonly LinearReconciliationFetchPageResult[]
+  pages: readonly LinearReconciliationFetchPageResult[],
 ): LinearReconciliationClient & {
   readonly requests: LinearReconciliationFetchPageInput[];
 } {
@@ -176,13 +176,13 @@ function fakeLinearClient(
   return {
     requests,
     fetchPage(
-      input: LinearReconciliationFetchPageInput
+      input: LinearReconciliationFetchPageInput,
     ): LinearReconciliationFetchPageResult {
       requests.push(input);
       const page = pages[pageIndex];
       pageIndex += 1;
       return page ?? { ok: true, page: { issues: [], nextCursor: null } };
-    }
+    },
   };
 }
 
@@ -193,7 +193,7 @@ function seedCodingWorkflowRun(
     repoPath: string;
     objective: string;
     approvalBoundary?: WorkflowApprovalBoundary;
-  }
+  },
 ): void {
   persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
@@ -204,7 +204,7 @@ function seedCodingWorkflowRun(
     now: NOW,
     ...(input.approvalBoundary !== undefined
       ? { approvalBoundary: input.approvalBoundary }
-      : {})
+      : {}),
   });
 }
 
@@ -212,10 +212,10 @@ function setStepState(
   db: MomentumDb,
   runId: string,
   stepId: string,
-  state: string
+  state: string,
 ): void {
   db.prepare(
-    "UPDATE workflow_steps SET state = ? WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = ? WHERE run_id = ? AND step_id = ?",
   ).run(state, runId, stepId);
 }
 
@@ -239,9 +239,9 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
       scope: "adapter",
       subject: "full adapter e2e proof",
       body: "",
-      breaking: false
+      breaking: false,
     },
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -255,7 +255,7 @@ function roundInputs(artifactRoot: string): SingleShotRoundRuntimeInputs {
   return {
     inputDigest: "sha256:postflight-input",
     artifactRoot,
-    logPaths: [path.join(artifactRoot, "stdout.log")]
+    logPaths: [path.join(artifactRoot, "stdout.log")],
   };
 }
 
@@ -278,28 +278,28 @@ const GOAL_LOOP_COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
         signal: null,
         duration_ms: 12,
         timed_out: false,
-        succeeded: true
-      }
-    ]
+        succeeded: true,
+      },
+    ],
   },
   commit: {
     ok: true,
     commitSha: SHA,
     parentSha: PARENT_SHA,
-    message: "feat(adapter): implementation round commit"
+    message: "feat(adapter): implementation round commit",
   },
-  head: SHA
+  head: SHA,
 };
 
 function goalLoopRoundInputs(
   artifactRoot: string,
-  roundIndex: number
+  roundIndex: number,
 ): GoalLoopRoundRuntimeInputs {
   const root = path.join(artifactRoot, `round-${roundIndex}`);
   return {
     inputDigest: `sha256:implementation-input-${roundIndex}`,
     artifactRoot: root,
-    logPaths: [path.join(root, "stdout.log")]
+    logPaths: [path.join(root, "stdout.log")],
   };
 }
 
@@ -313,7 +313,7 @@ function goalLoopRoundInputs(
 const NO_MISTAKES_IDENTITY = {
   externalRunId: "nm-run-ngx-372",
   branch: "feat/ngx-372",
-  headSha: SHA
+  headSha: SHA,
 } as const;
 
 function noMistakesCompletedState(): NoMistakesExternalState {
@@ -327,18 +327,18 @@ function noMistakesCompletedState(): NoMistakesExternalState {
     selectedFindingIds: [],
     decisions: [],
     prUrl: null,
-    ciState: "passed"
+    ciState: "passed",
   };
 }
 
 function noMistakesRoundInputs(
-  artifactRoot: string
+  artifactRoot: string,
 ): NoMistakesRoundRuntimeInputs {
   const root = path.join(artifactRoot, "no-mistakes");
   return {
     inputDigest: "sha256:no-mistakes-start",
     artifactRoot: root,
-    logPaths: [path.join(root, "state.json")]
+    logPaths: [path.join(root, "state.json")],
   };
 }
 
@@ -353,7 +353,7 @@ function noMistakesRoundInputs(
 function recordCompositionEvidence(
   fallbackDir: string,
   label: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): string {
   const baseDir =
     process.env["MOMENTUM_E2E_EVIDENCE_DIR"]?.trim() || fallbackDir;
@@ -379,30 +379,30 @@ describe("NGX-372 full adapter E2E proof", () => {
               makeLinearIssue({
                 id: "issue-ngx-372",
                 identifier: "NGX-372",
-                updatedAt: 1_700_000_001_000
-              })
+                updatedAt: 1_700_000_001_000,
+              }),
             ],
-            nextCursor: null
-          }
-        }
+            nextCursor: null,
+          },
+        },
       ]);
 
       const reconciliation = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "momentum-project" } },
-        { now: () => NOW + 2 }
+        { now: () => NOW + 2 },
       );
 
       // The adapter exposed only a read-shaped page request (no write surface).
       expect(client.requests).toEqual([
-        { cursor: null, filters: { projectId: "momentum-project" } }
+        { cursor: null, filters: { projectId: "momentum-project" } },
       ]);
       expect(reconciliation.run.state).toBe("succeeded");
       expect(reconciliation.counts).toMatchObject({
         pages: 1,
         itemsObserved: 1,
         itemsCreated: 1,
-        itemsErrored: 0
+        itemsErrored: 0,
       });
 
       const sourceItems = listSourceItems(db, { adapterKind: "linear" });
@@ -411,13 +411,13 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(sourceItem).toMatchObject({
         externalId: "issue-ngx-372",
         externalKey: "NGX-372",
-        status: "Todo"
+        status: "Todo",
       });
+      expect(listSourceSnapshotsForItem(db, sourceItem?.id ?? "")).toHaveLength(
+        1,
+      );
       expect(
-        listSourceSnapshotsForItem(db, sourceItem?.id ?? "")
-      ).toHaveLength(1);
-      expect(
-        listSourceReconciliationRuns(db, { adapterKind: "linear" })
+        listSourceReconciliationRuns(db, { adapterKind: "linear" }),
       ).toHaveLength(1);
 
       // --- Layer 2: workflow run start, objective threaded from the source read ---
@@ -425,7 +425,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: production dispatch seam -> phase-1 executor start scaffold ---
@@ -437,25 +437,29 @@ describe("NGX-372 full adapter E2E proof", () => {
         stepId: "preflight",
         holder: WORKER,
         leaseExpiresAt: NOW + 30_000,
-        now: NOW + 1
+        now: NOW + 1,
       });
       expect(claim.ok).toBe(true);
-      if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
+      if (!claim.ok)
+        throw new Error(`test setup: claim failed (${claim.reason})`);
 
       const dispatch = executeWorkflowStepDispatch(claim.claim, {
         db,
         workerId: WORKER,
-        now: NOW + 3
+        now: NOW + 3,
       });
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
       const scaffoldInvocationId = `${runId}::preflight::dispatch`;
-      const scaffoldInvocation = loadExecutorInvocation(db, scaffoldInvocationId);
+      const scaffoldInvocation = loadExecutorInvocation(
+        db,
+        scaffoldInvocationId,
+      );
       expect(scaffoldInvocation?.executorFamily).toBe("one-shot");
       expect(scaffoldInvocation?.state).toBe("running");
       const scaffoldRound = loadExecutorRound(
         db,
-        `${scaffoldInvocationId}::round-1`
+        `${scaffoldInvocationId}::round-1`,
       );
       expect(scaffoldRound?.state).toBe("pending");
       // The scaffold carries no fabricated evidence before the mechanism runs.
@@ -465,7 +469,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // --- Layer 4: landed executor adapter -> terminal finalization + verification ---
       // postflight is also one-shot; the landed adapter drives it to a terminal
       // `succeeded` with a passing verification gate and a recorded commit.
-      const finalize = runSingleShotStep({
+      const finalize = await runSingleShotStep({
         db,
         family: "one-shot",
         workflowRunId: runId,
@@ -476,8 +480,8 @@ describe("NGX-372 full adapter E2E proof", () => {
           stepConfig: {
             agentProvider: "claude",
             model: "claude-opus-4-8",
-            effort: "high"
-          }
+            effort: "high",
+          },
         }),
         resolveRoundInputs: () => roundInputs(artifactRoot),
         now: monotonicClock(NOW + 100),
@@ -489,15 +493,15 @@ describe("NGX-372 full adapter E2E proof", () => {
             resultDocument: { path: path.join(artifactRoot, "result.json") },
             verificationOutput: { path: path.join(artifactRoot, "verify.log") },
             commitOrResetEvidence: {
-              path: path.join(artifactRoot, "commit.txt")
-            }
+              path: path.join(artifactRoot, "commit.txt"),
+            },
           },
           evidence: {
             verificationStatus: "passed",
             commitSha: SHA,
-            changedFiles: ["src/feature.ts"]
-          }
-        })
+            changedFiles: ["src/feature.ts"],
+          },
+        }),
       });
 
       // The invocation + round settled terminal with the verification gate passed.
@@ -514,32 +518,34 @@ describe("NGX-372 full adapter E2E proof", () => {
         runId,
         "postflight",
         "one-shot",
-        1
+        1,
       );
       expect(finalize.invocation.invocationId).toBe(finalizeInvocationId);
       expect(loadExecutorInvocation(db, finalizeInvocationId)).toEqual(
-        finalize.invocation
+        finalize.invocation,
       );
       const finalizeRoundId = singleShotRoundId(finalizeInvocationId);
       expect(
         listExecutorRoundsForInvocation(db, finalizeInvocationId).map(
-          (r) => r.state
-        )
+          (r) => r.state,
+        ),
       ).toEqual(["succeeded"]);
       // The verification-bearing capture is durable in the checkpoint stream and
       // the verification_output artifact row.
       expect(
-        listExecutorCheckpointsForRound(db, finalizeRoundId).map((c) => c.stage)
+        listExecutorCheckpointsForRound(db, finalizeRoundId).map(
+          (c) => c.stage,
+        ),
       ).toEqual([
         "round_started",
         "mechanism_completed",
         "result_captured",
-        "classified"
+        "classified",
       ]);
       expect(
         listExecutorArtifactsForRound(db, finalizeRoundId).map(
-          (a) => a.artifactClass
-        )
+          (a) => a.artifactClass,
+        ),
       ).toContain("verification_output");
 
       // --- Composition evidence (acceptance criterion: the proof records it) ---
@@ -550,35 +556,35 @@ describe("NGX-372 full adapter E2E proof", () => {
           runState: reconciliation.run.state,
           itemsObserved: reconciliation.counts.itemsObserved,
           itemsPersisted: sourceItems.length,
-          externalKey: sourceItem?.externalKey ?? null
+          externalKey: sourceItem?.externalKey ?? null,
         },
         localPersistence: {
           sourceItems: countRows(db, "source_items"),
           sourceSnapshots: countRows(db, "source_snapshots"),
-          sourceReconciliationRuns: countRows(db, "source_reconciliation_runs")
+          sourceReconciliationRuns: countRows(db, "source_reconciliation_runs"),
         },
         workflow: {
           runId,
-          definition: CODING_WORKFLOW_DEFINITION.key
+          definition: CODING_WORKFLOW_DEFINITION.key,
         },
         dispatchScaffold: {
           invocationId: scaffoldInvocationId,
           executorFamily: scaffoldInvocation?.executorFamily ?? null,
           invocationState: scaffoldInvocation?.state ?? null,
-          roundState: scaffoldRound?.state ?? null
+          roundState: scaffoldRound?.state ?? null,
         },
         finalization: {
           invocationId: finalizeInvocationId,
           invocationState: finalize.invocation.state,
           roundState: finalize.round.round.state,
           verificationStatus: finalize.round.round.verificationStatus,
-          commitSha: finalize.round.round.commitSha
-        }
+          commitSha: finalize.round.round.commitSha,
+        },
       };
       const evidencePath = recordCompositionEvidence(
         dataDir,
         "happy-path",
-        evidence
+        evidence,
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         source: { itemsPersisted: number };
@@ -603,15 +609,15 @@ describe("NGX-372 full adapter E2E proof", () => {
           ok: true,
           page: {
             issues: [makeLinearIssue({ updatedAt: 1_700_000_001_000 })],
-            nextCursor: null
-          }
-        }
+            nextCursor: null,
+          },
+        },
       ]);
 
       const reconciliation = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "momentum-project" } },
-        { now: () => NOW + 2 }
+        { now: () => NOW + 2 },
       );
       expect(reconciliation.run.state).toBe("succeeded");
       const sourceItems = listSourceItems(db, { adapterKind: "linear" });
@@ -623,7 +629,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
@@ -647,8 +653,8 @@ describe("NGX-372 full adapter E2E proof", () => {
             agentProvider: "claude",
             model: "claude-opus-4-8",
             effort: "high",
-            maxRounds: 3
-          }
+            maxRounds: 3,
+          },
         }),
         resolveRoundInputs: (roundIndex) =>
           goalLoopRoundInputs(artifactRoot, roundIndex),
@@ -659,19 +665,19 @@ describe("NGX-372 full adapter E2E proof", () => {
                 result: runnerResult({
                   summary: "implementation round: progress committed",
                   goal_complete: false,
-                  remaining_work: ["finish the implementation"]
+                  remaining_work: ["finish the implementation"],
                 }),
                 finalize: GOAL_LOOP_COMMITTED,
-                changedFiles: ["src/feature.ts"]
+                changedFiles: ["src/feature.ts"],
               }
             : {
                 result: runnerResult({
                   summary: "implementation round: goal complete",
-                  goal_complete: true
+                  goal_complete: true,
                 }),
                 finalize: GOAL_LOOP_COMMITTED,
-                changedFiles: ["src/feature.ts", "test/feature.test.ts"]
-              }
+                changedFiles: ["src/feature.ts", "test/feature.test.ts"],
+              },
       });
 
       // The invocation is the goal-loop family and terminalized succeeded.
@@ -683,7 +689,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(result.rounds.map((r) => r.round.roundIndex)).toEqual([0, 1]);
       expect(result.rounds.map((r) => r.round.classification)).toEqual([
         "continue",
-        "complete"
+        "complete",
       ]);
       const lastRound = result.rounds[1]?.round;
       expect(lastRound?.state).toBe("succeeded");
@@ -691,7 +697,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(lastRound?.commitSha).toBe(SHA);
       expect(lastRound?.changedFiles).toEqual([
         "src/feature.ts",
-        "test/feature.test.ts"
+        "test/feature.test.ts",
       ]);
 
       // Durable + reattachable below the StepRun: a deterministic invocation id
@@ -699,16 +705,16 @@ describe("NGX-372 full adapter E2E proof", () => {
       const invocationId = goalLoopInvocationId(runId, "implementation", 1);
       expect(result.invocation.invocationId).toBe(invocationId);
       expect(loadExecutorInvocation(db, invocationId)).toEqual(
-        result.invocation
+        result.invocation,
       );
       const durableRounds = listExecutorRoundsForInvocation(db, invocationId);
       expect(durableRounds.map((r) => r.roundId)).toEqual([
         goalLoopRoundId(invocationId, 0),
-        goalLoopRoundId(invocationId, 1)
+        goalLoopRoundId(invocationId, 1),
       ]);
       expect(durableRounds.map((r) => r.state)).toEqual([
         "succeeded",
-        "succeeded"
+        "succeeded",
       ]);
 
       // The terminal round's verification-bearing capture is durable in its
@@ -716,13 +722,13 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(
         listExecutorCheckpointsForRound(
           db,
-          goalLoopRoundId(invocationId, 1)
-        ).map((c) => c.stage)
+          goalLoopRoundId(invocationId, 1),
+        ).map((c) => c.stage),
       ).toEqual([
         "round_started",
         "mechanism_completed",
         "result_captured",
-        "classified"
+        "classified",
       ]);
 
       // --- Composition evidence (acceptance criterion: the proof records it) ---
@@ -731,7 +737,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         proof: "full-adapter-e2e-goal-loop",
         source: {
           runState: reconciliation.run.state,
-          externalKey: sourceItem?.externalKey ?? null
+          externalKey: sourceItem?.externalKey ?? null,
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         goalLoopFinalization: {
@@ -740,13 +746,13 @@ describe("NGX-372 full adapter E2E proof", () => {
           invocationState: result.invocation.state,
           rounds: result.rounds.map((r) => r.round.classification),
           lastRoundVerification: lastRound?.verificationStatus ?? null,
-          lastRoundCommitSha: lastRound?.commitSha ?? null
-        }
+          lastRoundCommitSha: lastRound?.commitSha ?? null,
+        },
       };
       const evidencePath = recordCompositionEvidence(
         dataDir,
         "goal-loop",
-        evidence
+        evidence,
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         goalLoopFinalization: { invocationState: string; rounds: string[] };
@@ -754,7 +760,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(recorded.goalLoopFinalization.invocationState).toBe("succeeded");
       expect(recorded.goalLoopFinalization.rounds).toEqual([
         "continue",
-        "complete"
+        "complete",
       ]);
     } finally {
       db.close();
@@ -773,15 +779,15 @@ describe("NGX-372 full adapter E2E proof", () => {
           ok: true,
           page: {
             issues: [makeLinearIssue({ updatedAt: 1_700_000_001_000 })],
-            nextCursor: null
-          }
-        }
+            nextCursor: null,
+          },
+        },
       ]);
 
       const reconciliation = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "momentum-project" } },
-        { now: () => NOW + 2 }
+        { now: () => NOW + 2 },
       );
       expect(reconciliation.run.state).toBe("succeeded");
       const sourceItems = listSourceItems(db, { adapterKind: "linear" });
@@ -793,7 +799,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
       });
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
@@ -819,11 +825,11 @@ describe("NGX-372 full adapter E2E proof", () => {
         read: () => ({
           ok: true,
           value: noMistakesCompletedState(),
-          digest: "sha256:no-mistakes-poll"
+          digest: "sha256:no-mistakes-poll",
         }),
         expectedExternalIdentity: NO_MISTAKES_IDENTITY,
         resolveRoundInputs: () => noMistakesRoundInputs(artifactRoot),
-        now: monotonicClock(NOW + 100)
+        now: monotonicClock(NOW + 100),
       });
 
       // The invocation is the no-mistakes family and terminalized succeeded.
@@ -846,18 +852,18 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(result.invocation.invocationId).toBe(invocationId);
       expect(invocationId).not.toBe(`${runId}::no-mistakes::dispatch`);
       expect(loadExecutorInvocation(db, invocationId)).toEqual(
-        result.invocation
+        result.invocation,
       );
       const roundId = noMistakesRoundId(invocationId);
       expect(result.round.round.roundId).toBe(roundId);
       expect(
-        listExecutorRoundsForInvocation(db, invocationId).map((r) => r.state)
+        listExecutorRoundsForInvocation(db, invocationId).map((r) => r.state),
       ).toEqual(["succeeded"]);
 
       // The mirror's durable evidence: the expected identity pinned at start, then
       // the corroborated external state mirrored into a durable checkpoint.
       expect(
-        listExecutorCheckpointsForRound(db, roundId).map((c) => c.stage)
+        listExecutorCheckpointsForRound(db, roundId).map((c) => c.stage),
       ).toEqual(["expected_external_identity", "external_state_mirrored"]);
 
       // --- Composition evidence (acceptance criterion: the proof records it) ---
@@ -866,7 +872,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         proof: "full-adapter-e2e-no-mistakes",
         source: {
           runState: reconciliation.run.state,
-          externalKey: sourceItem?.externalKey ?? null
+          externalKey: sourceItem?.externalKey ?? null,
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         noMistakesFinalization: {
@@ -875,13 +881,13 @@ describe("NGX-372 full adapter E2E proof", () => {
           invocationState: result.invocation.state,
           roundState: result.round.round.state,
           classification: result.round.decision.classification,
-          mirroredDigest: result.round.round.inputDigest
-        }
+          mirroredDigest: result.round.round.inputDigest,
+        },
       };
       const evidencePath = recordCompositionEvidence(
         dataDir,
         "no-mistakes",
-        evidence
+        evidence,
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         noMistakesFinalization: {
@@ -905,7 +911,8 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: "Prove the external-write step scaffolds without a policy-gated write"
+        objective:
+          "Prove the external-write step scaffolds without a policy-gated write",
       });
 
       // Advance every step before `linear-refresh` to terminal success so the real
@@ -925,16 +932,17 @@ describe("NGX-372 full adapter E2E proof", () => {
         stepId: "linear-refresh",
         holder: WORKER,
         leaseExpiresAt: NOW + 30_000,
-        now: NOW + 1
+        now: NOW + 1,
       });
       expect(claim.ok).toBe(true);
-      if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
+      if (!claim.ok)
+        throw new Error(`test setup: claim failed (${claim.reason})`);
       expect(claim.claim.kind).toBe("linear-refresh");
 
       const dispatch = executeWorkflowStepDispatch(claim.claim, {
         db,
         workerId: WORKER,
-        now: NOW + 3
+        now: NOW + 3,
       });
 
       // The base dispatcher now scaffolds the external-apply family for its
@@ -948,7 +956,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       const gates = listWorkflowGatesForRun(db, runId);
       expect(gates).toHaveLength(0);
       expect(
-        getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery
+        getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery,
       ).toBe(false);
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
 
@@ -966,15 +974,15 @@ describe("NGX-372 full adapter E2E proof", () => {
           gateType: gates[0]?.gateType ?? null,
           needsManualRecovery:
             getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery ??
-            null
-        }
+            null,
+        },
       });
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         externalWriteStep: { executorRows: number; dispatchStatus: string };
       };
       expect(recorded.externalWriteStep.executorRows).toBe(2);
       expect(recorded.externalWriteStep.dispatchStatus).toBe(
-        WORKFLOW_DISPATCH_RESULT_STATUS.dispatched
+        WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
       );
     } finally {
       db.close();

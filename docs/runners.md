@@ -47,6 +47,7 @@ Stored iteration artifacts and job error rows from either profile may carry the 
 ## Normalized `RunnerResult` schema
 
 This schema is still live: workflow live wrappers (see [`docs/daemon.md`](daemon.md)) and native workflow `goal-loop` executors write and consume the same normalized result document, and stored iteration `result.json` files from the retired lane use it too.
+The dependency-free `RunnerResult` types plus their parser and normalizers under `src/core/executors/runner/` are official [executor SDK](executor-sdk.md) contract surface; runner and process adapters may import them at runtime without acquiring persistence or daemon ownership.
 For live-wrapper-owned dispatched steps, the document is not terminal evidence by itself: after a successful wrapper process, Momentum parses the result, runs repo-safety finalization, verifies, commits or resets, and only then terminalizes the executor round for reconciliation.
 The result JSON is written at `$MOMENTUM_RESULT_PATH`:
 

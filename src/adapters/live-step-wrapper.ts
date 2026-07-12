@@ -27,9 +27,9 @@
  *     missing file to `result_missing` and an unreadable/invalid document to
  *     `result_invalid`.
  *
- * The execution model is synchronous (`spawnSync`), mirroring the
- * `trusted-shell` / `acp` runners and the synchronous `WorkflowStepExecutor`
- * boundary. Real-time heartbeating is therefore a caller-side concern.
+ * `runLiveStepWrapper` retains the synchronous compatibility path.
+ * `runLiveStepWrapperAsync` is the abort-aware SDK runner path and uses the
+ * asynchronous process-group supervisor below.
  *
  * This module stays scoped to process execution and recovery classification.
  * Caller layers resolve registry entries, adapt from `WorkflowStepExecutorInput`,
@@ -40,18 +40,25 @@
  * to distinct stable recovery codes rather than generic failure text.
  */
 
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 
 import type {
   LiveWrapperConfig,
-  LiveWrapperProbeConfig
+  LiveWrapperProbeConfig,
 } from "./live-wrapper-registry.js";
 import { parseRunnerResult } from "../core/executors/runner/result.js";
 import type { RunnerResult } from "../core/executors/runner/types.js";
 import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
+import {
+  MAX_BUILT_IN_PROCESS_TIMEOUT_MS,
+  MAX_BUILT_IN_PROCESS_TIMEOUT_SEC,
+} from "../shared/process-limits.js";
 
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the
@@ -68,7 +75,7 @@ export const LIVE_STEP_WRAPPER_RECOVERY_CODES = [
   "command_timed_out",
   "output_overflow",
   "result_missing",
-  "result_invalid"
+  "result_invalid",
 ] as const;
 
 export type LiveStepWrapperRecoveryCode =
@@ -80,6 +87,13 @@ export const LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES = 256 * 1024 * 1024;
 export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
 const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
   "MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable";
+const PROCESS_TREE_TOKEN_ENV = "MOMENTUM_PROCESS_TREE_TOKEN";
+const PROCESS_TREE_FALLBACK_DELAY_MS = 3_800;
+const POSIX_PROCESS_QUERY_TIMEOUT_MS = 2_000;
+const POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS =
+  POSIX_PROCESS_QUERY_TIMEOUT_MS + 1_000;
+const WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS = 3_800;
+const PROCESS_TREE_CLEANUP_MARGIN_MS = 200;
 
 /**
  * Workflow-context env vars injected into every live step process. Live
@@ -98,7 +112,7 @@ export const LIVE_STEP_WRAPPER_ENV_VARS = {
   REPO_PATH: "MOMENTUM_REPO_PATH",
   ITERATION_DIR: "MOMENTUM_ITERATION_DIR",
   PROMPT_PATH: "MOMENTUM_PROMPT_PATH",
-  RESULT_PATH: "MOMENTUM_RESULT_PATH"
+  RESULT_PATH: "MOMENTUM_RESULT_PATH",
 } as const;
 
 export type LiveStepWrapperInput = {
@@ -152,11 +166,10 @@ export type LiveStepWrapperError = {
 };
 
 export type LiveStepWrapperResult =
-  | LiveStepWrapperSuccess
-  | LiveStepWrapperError;
+  LiveStepWrapperSuccess | LiveStepWrapperError;
 
 export function runLiveStepWrapper(
-  input: LiveStepWrapperInput
+  input: LiveStepWrapperInput,
 ): LiveStepWrapperResult {
   const pathValidation = validateInputPaths(input);
   if (!pathValidation.ok) {
@@ -164,7 +177,7 @@ export function runLiveStepWrapper(
       input.executorLogPath,
       undefined,
       "runtime_unavailable",
-      pathValidation.error
+      pathValidation.error,
     );
   }
 
@@ -174,7 +187,7 @@ export function runLiveStepWrapper(
 
   const resultJsonPathResult = resolveResultJsonPath(
     input.iterationDir,
-    config.resultFile
+    config.resultFile,
   );
   const executorLogPath = input.executorLogPath;
 
@@ -191,47 +204,47 @@ export function runLiveStepWrapper(
     if (!resultJsonPathResult.ok) {
       writeLine(
         logHandle,
-        `[live-step] result_invalid: ${resultJsonPathResult.error}`
+        `[live-step] result_invalid: ${resultJsonPathResult.error}`,
       );
       writeLine(logHandle, "[live-step] summary: result file invalid");
       return wrapperError(
         executorLogPath,
         undefined,
         "result_invalid",
-        resultJsonPathResult.error
+        resultJsonPathResult.error,
       );
     }
 
     const resultJsonPath = resultJsonPathResult.path;
     const resultPathSafety = validateResultPathContainment(
       input.iterationDir,
-      resultJsonPath
+      resultJsonPath,
     );
     if (!resultPathSafety.ok) {
       writeLine(
         logHandle,
-        `[live-step] result_invalid: ${resultPathSafety.error}`
+        `[live-step] result_invalid: ${resultPathSafety.error}`,
       );
       writeLine(logHandle, "[live-step] summary: result file invalid");
       return wrapperError(
         executorLogPath,
         resultJsonPath,
         "result_invalid",
-        resultPathSafety.error
+        resultPathSafety.error,
       );
     }
     const timeoutValidation = validateRuntimeTimeouts(config);
     if (!timeoutValidation.ok) {
       writeLine(
         logHandle,
-        `[live-step] runtime_unavailable: ${timeoutValidation.error}`
+        `[live-step] runtime_unavailable: ${timeoutValidation.error}`,
       );
       writeLine(logHandle, "[live-step] summary: runtime not available");
       return wrapperError(
         executorLogPath,
         resultJsonPath,
         "runtime_unavailable",
-        timeoutValidation.error
+        timeoutValidation.error,
       );
     }
 
@@ -239,14 +252,14 @@ export function runLiveStepWrapper(
     if (!availability.ok) {
       writeLine(
         logHandle,
-        `[live-step] runtime_unavailable: ${availability.error}`
+        `[live-step] runtime_unavailable: ${availability.error}`,
       );
       writeLine(logHandle, "[live-step] summary: runtime not available");
       return wrapperError(
         executorLogPath,
         resultJsonPath,
         "runtime_unavailable",
-        availability.error
+        availability.error,
       );
     }
 
@@ -259,14 +272,14 @@ export function runLiveStepWrapper(
         config.probe,
         cwd,
         env,
-        outputMaxBytes
+        outputMaxBytes,
       );
       if (!probeResult.ok) {
         return wrapperError(
           executorLogPath,
           resultJsonPath,
           probeResult.code,
-          probeResult.error
+          probeResult.error,
         );
       }
     }
@@ -279,14 +292,14 @@ export function runLiveStepWrapper(
     const cleared = clearResultFile(
       logHandle,
       resultJsonPath,
-      input.iterationDir
+      input.iterationDir,
     );
     if (!cleared.ok) {
       return wrapperError(
         executorLogPath,
         resultJsonPath,
         "result_invalid",
-        cleared.error
+        cleared.error,
       );
     }
 
@@ -297,7 +310,7 @@ export function runLiveStepWrapper(
         cwd,
         env,
         timeoutMs: config.timeoutSec * 1000,
-        maxBuffer: outputMaxBytes
+        maxBuffer: outputMaxBytes,
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "unknown error";
@@ -307,153 +320,22 @@ export function runLiveStepWrapper(
         executorLogPath,
         resultJsonPath,
         "runtime_unavailable",
-        `live step runtime ${config.command} could not be launched: ${detail}`
+        `live step runtime ${config.command} could not be launched: ${detail}`,
       );
     }
     const durationMs = Date.now() - start;
 
-    writeLog(logHandle, "stdout", spawn.stdout);
-    writeLog(logHandle, "stderr", spawn.stderr);
-
-    if (errnoCode(spawn.error) === "ENOBUFS") {
-      writeLine(
-        logHandle,
-        `[live-step] output_overflow: stdout/stderr exceeded ${outputMaxBytes} bytes`
-      );
-      writeLine(logHandle, "[live-step] summary: output overflow");
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        "output_overflow",
-        `live step command produced more than ${outputMaxBytes} bytes on stdout or stderr.`
-      );
-    }
-
-    const timedOut = errnoCode(spawn.error) === "ETIMEDOUT";
-
-    if (timedOut) {
-      writeLine(logHandle, `[live-step] signal: ${spawn.signal}`);
-      writeLine(logHandle, `[live-step] duration_ms: ${durationMs}`);
-      writeLine(logHandle, "[live-step] result: timed_out");
-      writeLine(
-        logHandle,
-        `[live-step] summary: command timed out after ${config.timeoutSec}s`
-      );
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        "command_timed_out",
-        `live step command timed out after ${config.timeoutSec}s: ${config.command}`
-      );
-    }
-
-    if (spawn.error !== undefined) {
-      // ENOENT, EACCES, or any other launch error: the configured runtime
-      // could not be executed.
-      writeLine(logHandle, `[live-step] spawn_error: ${spawn.error.message}`);
-      writeLine(logHandle, "[live-step] summary: runtime not available");
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        "runtime_unavailable",
-        `live step runtime ${config.command} could not be executed: ${spawn.error.message}`
-      );
-    }
-
-    const exitCode = spawn.status;
-    const signal = spawn.signal ?? null;
-
-    writeLine(
+    return finishLiveStepWrapperProcess({
+      input,
+      config,
+      outputMaxBytes,
       logHandle,
-      `[live-step] exit_code: ${exitCode === null ? "null" : String(exitCode)}`
-    );
-    if (signal !== null) {
-      writeLine(logHandle, `[live-step] signal: ${signal}`);
-    }
-    writeLine(logHandle, `[live-step] duration_ms: ${durationMs}`);
-
-    if (exitCode === null || exitCode !== 0) {
-      writeLine(logHandle, "[live-step] result: nonzero_exit");
-      writeLine(
-        logHandle,
-        `[live-step] summary: command exited with code ${exitCode === null ? "null" : String(exitCode)}`
-      );
-      if (isNodeBootstrapModuleFailure(spawn.stderr, config, cwd)) {
-        writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
-        return wrapperError(
-          executorLogPath,
-          resultJsonPath,
-          "runtime_unavailable",
-          `live step wrapper bootstrap failed before runner evidence was produced: ${config.command}`
-        );
-      }
-      if (
-        isCodingWorkflowWrapperInvocation(config) &&
-        spawn.stderr.includes(CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER)
-      ) {
-        writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
-        return wrapperError(
-          executorLogPath,
-          resultJsonPath,
-          "runtime_unavailable",
-          `live step wrapper reported a retryable setup failure before runner evidence was produced: ${config.command}`
-        );
-      }
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        "command_failed",
-        `live step command exited with code ${exitCode === null ? "null" : String(exitCode)}: ${config.command}`
-      );
-    }
-
-    const read = readResultFile(logHandle, resultJsonPath, input.iterationDir);
-    if (!read.ok) {
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        read.code,
-        read.error
-      );
-    }
-
-    const parsed = parseRunnerResult(read.raw);
-    if (!parsed.ok) {
-      writeLine(logHandle, `[live-step] result_invalid: ${parsed.error}`);
-      writeLine(logHandle, "[live-step] summary: result JSON invalid");
-      return wrapperError(
-        executorLogPath,
-        resultJsonPath,
-        "result_invalid",
-        `live step result JSON is invalid: ${parsed.error}`
-      );
-    }
-
-    writeLine(
-      logHandle,
-      `[live-step] runner_success: ${parsed.value.success}`
-    );
-    writeLine(
-      logHandle,
-      `[live-step] goal_complete: ${parsed.value.goal_complete}`
-    );
-    writeLine(logHandle, "[live-step] done");
-
-    return {
-      ok: true,
-      result: parsed.value,
-      resultJsonPath,
       executorLogPath,
-      diagnostics: {
-        command: config.command,
-        args: [...config.args],
-        cwd,
-        exitCode,
-        signal,
-        durationMs,
-        probed: config.probe !== undefined
-      }
-    };
+      resultJsonPath,
+      cwd,
+      spawn,
+      durationMs,
+    });
   } finally {
     try {
       fs.closeSync(logHandle);
@@ -461,6 +343,336 @@ export function runLiveStepWrapper(
       // ignore close failures
     }
   }
+}
+
+/** Abort-aware counterpart used by SDK runner adapters. */
+export async function runLiveStepWrapperAsync(
+  input: LiveStepWrapperInput,
+  signal: AbortSignal,
+): Promise<LiveStepWrapperResult> {
+  signal.throwIfAborted();
+  const pathValidation = validateInputPaths(input);
+  if (!pathValidation.ok) {
+    return wrapperError(
+      input.executorLogPath,
+      undefined,
+      "runtime_unavailable",
+      pathValidation.error,
+    );
+  }
+
+  const config = input.config;
+  const outputMaxBytes =
+    input.outputMaxBytes ?? LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES;
+  const resultJsonPathResult = resolveResultJsonPath(
+    input.iterationDir,
+    config.resultFile,
+  );
+  const executorLogPath = input.executorLogPath;
+  fs.mkdirSync(path.dirname(executorLogPath), { recursive: true });
+  const logHandle = fs.openSync(executorLogPath, "w");
+
+  try {
+    writeLine(logHandle, "[live-step] start");
+    writeLine(logHandle, `[live-step] kind: ${input.kind}`);
+    writeLine(logHandle, `[live-step] run_id: ${input.runId}`);
+    writeLine(logHandle, `[live-step] step_id: ${input.stepId}`);
+    writeLine(logHandle, `[live-step] attempt: ${input.attempt}`);
+
+    if (!resultJsonPathResult.ok) {
+      writeLine(
+        logHandle,
+        `[live-step] result_invalid: ${resultJsonPathResult.error}`,
+      );
+      writeLine(logHandle, "[live-step] summary: result file invalid");
+      return wrapperError(
+        executorLogPath,
+        undefined,
+        "result_invalid",
+        resultJsonPathResult.error,
+      );
+    }
+
+    const resultJsonPath = resultJsonPathResult.path;
+    const resultPathSafety = validateResultPathContainment(
+      input.iterationDir,
+      resultJsonPath,
+    );
+    if (!resultPathSafety.ok) {
+      writeLine(
+        logHandle,
+        `[live-step] result_invalid: ${resultPathSafety.error}`,
+      );
+      writeLine(logHandle, "[live-step] summary: result file invalid");
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "result_invalid",
+        resultPathSafety.error,
+      );
+    }
+    const timeoutValidation = validateRuntimeTimeouts(config);
+    if (!timeoutValidation.ok) {
+      writeLine(
+        logHandle,
+        `[live-step] runtime_unavailable: ${timeoutValidation.error}`,
+      );
+      writeLine(logHandle, "[live-step] summary: runtime not available");
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "runtime_unavailable",
+        timeoutValidation.error,
+      );
+    }
+    const availability = checkRuntimeAvailability(config.command);
+    if (!availability.ok) {
+      writeLine(
+        logHandle,
+        `[live-step] runtime_unavailable: ${availability.error}`,
+      );
+      writeLine(logHandle, "[live-step] summary: runtime not available");
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "runtime_unavailable",
+        availability.error,
+      );
+    }
+
+    const cwd = resolveCwd(config, input);
+    const env = resolveEnv(config, input, resultJsonPath);
+    if (config.probe !== undefined) {
+      const probeResult = await runProbeAsync(
+        logHandle,
+        config.probe,
+        cwd,
+        env,
+        outputMaxBytes,
+        signal,
+      );
+      if (!probeResult.ok) {
+        return wrapperError(
+          executorLogPath,
+          resultJsonPath,
+          probeResult.code,
+          probeResult.error,
+        );
+      }
+    }
+
+    writeLine(logHandle, `[live-step] command: ${formatCommand(config)}`);
+    writeLine(logHandle, `[live-step] cwd: ${cwd}`);
+    writeLine(logHandle, `[live-step] timeout_sec: ${config.timeoutSec}`);
+    writeLine(logHandle, `[live-step] result_path: ${resultJsonPath}`);
+    const cleared = clearResultFile(
+      logHandle,
+      resultJsonPath,
+      input.iterationDir,
+    );
+    if (!cleared.ok) {
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "result_invalid",
+        cleared.error,
+      );
+    }
+
+    const start = Date.now();
+    let processResult: SpawnSyncReturns<string>;
+    try {
+      processResult = await runProcessGroup(config.command, [...config.args], {
+        cwd,
+        env,
+        timeoutMs: config.timeoutSec * 1000,
+        maxBuffer: outputMaxBytes,
+        signal,
+      });
+    } catch (error) {
+      writeSupervisorFailureOutput(logHandle, error, "stdout", "stderr");
+      throw error;
+    }
+    if (errnoCode(processResult.error) === "ABORT_ERR") {
+      writeLog(logHandle, "stdout", processResult.stdout);
+      writeLog(logHandle, "stderr", processResult.stderr);
+      throwProcessCancellation(processResult, signal);
+    }
+    return finishLiveStepWrapperProcess({
+      input,
+      config,
+      outputMaxBytes,
+      logHandle,
+      executorLogPath,
+      resultJsonPath,
+      cwd,
+      spawn: processResult,
+      durationMs: Date.now() - start,
+    });
+  } finally {
+    try {
+      fs.closeSync(logHandle);
+    } catch {
+      // ignore close failures
+    }
+  }
+}
+
+function finishLiveStepWrapperProcess(input: {
+  input: LiveStepWrapperInput;
+  config: LiveWrapperConfig;
+  outputMaxBytes: number;
+  logHandle: number;
+  executorLogPath: string;
+  resultJsonPath: string;
+  cwd: string;
+  spawn: SpawnSyncReturns<string>;
+  durationMs: number;
+}): LiveStepWrapperResult {
+  const {
+    config,
+    outputMaxBytes,
+    logHandle,
+    executorLogPath,
+    resultJsonPath,
+    cwd,
+    spawn: processResult,
+    durationMs,
+  } = input;
+  writeLog(logHandle, "stdout", processResult.stdout);
+  writeLog(logHandle, "stderr", processResult.stderr);
+
+  if (errnoCode(processResult.error) === "ENOBUFS") {
+    writeLine(
+      logHandle,
+      `[live-step] output_overflow: stdout/stderr exceeded ${outputMaxBytes} bytes`,
+    );
+    writeLine(logHandle, "[live-step] summary: output overflow");
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "output_overflow",
+      `live step command produced more than ${outputMaxBytes} bytes on stdout or stderr.`,
+    );
+  }
+
+  if (errnoCode(processResult.error) === "ETIMEDOUT") {
+    writeLine(logHandle, `[live-step] signal: ${processResult.signal}`);
+    writeLine(logHandle, `[live-step] duration_ms: ${durationMs}`);
+    writeLine(logHandle, "[live-step] result: timed_out");
+    writeLine(
+      logHandle,
+      `[live-step] summary: command timed out after ${config.timeoutSec}s`,
+    );
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "command_timed_out",
+      `live step command timed out after ${config.timeoutSec}s: ${config.command}`,
+    );
+  }
+
+  if (processResult.error !== undefined) {
+    writeLine(
+      logHandle,
+      `[live-step] spawn_error: ${processResult.error.message}`,
+    );
+    writeLine(logHandle, "[live-step] summary: runtime not available");
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "runtime_unavailable",
+      `live step runtime ${config.command} could not be executed: ${processResult.error.message}`,
+    );
+  }
+
+  const exitCode = processResult.status;
+  const signal = processResult.signal ?? null;
+  writeLine(
+    logHandle,
+    `[live-step] exit_code: ${exitCode === null ? "null" : String(exitCode)}`,
+  );
+  if (signal !== null) writeLine(logHandle, `[live-step] signal: ${signal}`);
+  writeLine(logHandle, `[live-step] duration_ms: ${durationMs}`);
+
+  if (exitCode === null || exitCode !== 0) {
+    writeLine(logHandle, "[live-step] result: nonzero_exit");
+    writeLine(
+      logHandle,
+      `[live-step] summary: command exited with code ${exitCode === null ? "null" : String(exitCode)}`,
+    );
+    if (isNodeBootstrapModuleFailure(processResult.stderr, config, cwd)) {
+      writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "runtime_unavailable",
+        `live step wrapper bootstrap failed before runner evidence was produced: ${config.command}`,
+      );
+    }
+    if (
+      isCodingWorkflowWrapperInvocation(config) &&
+      processResult.stderr.includes(
+        CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER,
+      )
+    ) {
+      writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
+      return wrapperError(
+        executorLogPath,
+        resultJsonPath,
+        "runtime_unavailable",
+        `live step wrapper reported a retryable setup failure before runner evidence was produced: ${config.command}`,
+      );
+    }
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "command_failed",
+      `live step command exited with code ${exitCode === null ? "null" : String(exitCode)}: ${config.command}`,
+    );
+  }
+
+  const read = readResultFile(
+    logHandle,
+    resultJsonPath,
+    input.input.iterationDir,
+  );
+  if (!read.ok) {
+    return wrapperError(executorLogPath, resultJsonPath, read.code, read.error);
+  }
+  const parsed = parseRunnerResult(read.raw);
+  if (!parsed.ok) {
+    writeLine(logHandle, `[live-step] result_invalid: ${parsed.error}`);
+    writeLine(logHandle, "[live-step] summary: result JSON invalid");
+    return wrapperError(
+      executorLogPath,
+      resultJsonPath,
+      "result_invalid",
+      `live step result JSON is invalid: ${parsed.error}`,
+    );
+  }
+
+  writeLine(logHandle, `[live-step] runner_success: ${parsed.value.success}`);
+  writeLine(
+    logHandle,
+    `[live-step] goal_complete: ${parsed.value.goal_complete}`,
+  );
+  writeLine(logHandle, "[live-step] done");
+  return {
+    ok: true,
+    result: parsed.value,
+    resultJsonPath,
+    executorLogPath,
+    diagnostics: {
+      command: config.command,
+      args: [...config.args],
+      cwd,
+      exitCode,
+      signal,
+      durationMs,
+      probed: config.probe !== undefined,
+    },
+  };
 }
 
 type ProbeOutcome =
@@ -479,20 +691,27 @@ function runProbe(
   probe: LiveWrapperProbeConfig,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  outputMaxBytes: number
+  outputMaxBytes: number,
 ): ProbeOutcome {
   writeLine(logHandle, "[live-step] probe start");
-  writeLine(logHandle, `[live-step] probe command: ${formatProbeCommand(probe)}`);
+  writeLine(
+    logHandle,
+    `[live-step] probe command: ${formatProbeCommand(probe)}`,
+  );
   writeLine(logHandle, `[live-step] probe timeout_sec: ${probe.timeoutSec}`);
 
   const availability = checkRuntimeAvailability(probe.command);
   if (!availability.ok) {
     writeLine(
       logHandle,
-      `[live-step] probe runtime_unavailable: ${availability.error}`
+      `[live-step] probe runtime_unavailable: ${availability.error}`,
     );
     writeLine(logHandle, "[live-step] summary: runtime not available");
-    return { ok: false, code: "runtime_unavailable", error: availability.error };
+    return {
+      ok: false,
+      code: "runtime_unavailable",
+      error: availability.error,
+    };
   }
 
   let spawn: SpawnSyncReturns<string>;
@@ -501,7 +720,7 @@ function runProbe(
       cwd,
       env,
       timeoutMs: probe.timeoutSec * 1000,
-      maxBuffer: outputMaxBytes
+      maxBuffer: outputMaxBytes,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
@@ -510,99 +729,152 @@ function runProbe(
     return {
       ok: false,
       code: "runtime_unavailable",
-      error: `live step probe ${probe.command} could not be launched: ${detail}`
+      error: `live step probe ${probe.command} could not be launched: ${detail}`,
     };
   }
 
-  writeLog(logHandle, "probe stdout", spawn.stdout);
-  writeLog(logHandle, "probe stderr", spawn.stderr);
+  return finishProbe(logHandle, probe, spawn, outputMaxBytes);
+}
 
-  if (errnoCode(spawn.error) === "ENOBUFS") {
+async function runProbeAsync(
+  logHandle: number,
+  probe: LiveWrapperProbeConfig,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  outputMaxBytes: number,
+  signal: AbortSignal,
+): Promise<ProbeOutcome> {
+  writeLine(logHandle, "[live-step] probe start");
+  writeLine(
+    logHandle,
+    `[live-step] probe command: ${formatProbeCommand(probe)}`,
+  );
+  writeLine(logHandle, `[live-step] probe timeout_sec: ${probe.timeoutSec}`);
+  const availability = checkRuntimeAvailability(probe.command);
+  if (!availability.ok) {
     writeLine(
       logHandle,
-      `[live-step] probe output_overflow: stdout/stderr exceeded ${outputMaxBytes} bytes`
+      `[live-step] probe runtime_unavailable: ${availability.error}`,
+    );
+    writeLine(logHandle, "[live-step] summary: runtime not available");
+    return {
+      ok: false,
+      code: "runtime_unavailable",
+      error: availability.error,
+    };
+  }
+
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = await runProcessGroup(probe.command, [...probe.args], {
+      cwd,
+      env,
+      timeoutMs: probe.timeoutSec * 1000,
+      maxBuffer: outputMaxBytes,
+      signal,
+    });
+  } catch (error) {
+    writeSupervisorFailureOutput(
+      logHandle,
+      error,
+      "probe stdout",
+      "probe stderr",
+    );
+    throw error;
+  }
+  if (errnoCode(result.error) === "ABORT_ERR") {
+    writeLog(logHandle, "probe stdout", result.stdout);
+    writeLog(logHandle, "probe stderr", result.stderr);
+    throwProcessCancellation(result, signal);
+  }
+  return finishProbe(logHandle, probe, result, outputMaxBytes);
+}
+
+function finishProbe(
+  logHandle: number,
+  probe: LiveWrapperProbeConfig,
+  result: SpawnSyncReturns<string>,
+  outputMaxBytes: number,
+): ProbeOutcome {
+  writeLog(logHandle, "probe stdout", result.stdout);
+  writeLog(logHandle, "probe stderr", result.stderr);
+
+  if (errnoCode(result.error) === "ENOBUFS") {
+    writeLine(
+      logHandle,
+      `[live-step] probe output_overflow: stdout/stderr exceeded ${outputMaxBytes} bytes`,
     );
     writeLine(logHandle, "[live-step] summary: output overflow");
     return {
       ok: false,
       code: "output_overflow",
-      error: `live step probe ${probe.command} produced more than ${outputMaxBytes} bytes on stdout or stderr.`
+      error: `live step probe ${probe.command} produced more than ${outputMaxBytes} bytes on stdout or stderr.`,
     };
   }
-
-  const timedOut = errnoCode(spawn.error) === "ETIMEDOUT";
-  if (timedOut) {
+  if (errnoCode(result.error) === "ETIMEDOUT") {
     writeLine(
       logHandle,
-      `[live-step] probe result: timed_out after ${probe.timeoutSec}s`
+      `[live-step] probe result: timed_out after ${probe.timeoutSec}s`,
     );
     writeLine(logHandle, "[live-step] summary: runtime not available");
     return {
       ok: false,
       code: "runtime_unavailable",
-      error: `live step probe ${probe.command} timed out after ${probe.timeoutSec}s; treating runtime as unavailable.`
+      error: `live step probe ${probe.command} timed out after ${probe.timeoutSec}s; treating runtime as unavailable.`,
     };
   }
-
-  if (spawn.error !== undefined) {
-    writeLine(logHandle, `[live-step] probe spawn_error: ${spawn.error.message}`);
+  if (result.error !== undefined) {
+    writeLine(
+      logHandle,
+      `[live-step] probe spawn_error: ${result.error.message}`,
+    );
     writeLine(logHandle, "[live-step] summary: runtime not available");
     return {
       ok: false,
       code: "runtime_unavailable",
-      error: `live step probe runtime ${probe.command} is not available: ${spawn.error.message}`
+      error: `live step probe runtime ${probe.command} is not available: ${result.error.message}`,
     };
   }
 
-  const exitCode = spawn.status;
+  const exitCode = result.status;
   writeLine(
     logHandle,
-    `[live-step] probe exit_code: ${exitCode === null ? "null" : String(exitCode)}`
+    `[live-step] probe exit_code: ${exitCode === null ? "null" : String(exitCode)}`,
   );
-  if (spawn.signal !== undefined && spawn.signal !== null) {
-    writeLine(logHandle, `[live-step] probe signal: ${spawn.signal}`);
+  if (result.signal !== undefined && result.signal !== null) {
+    writeLine(logHandle, `[live-step] probe signal: ${result.signal}`);
   }
-
   if (exitCode === null) {
-    // Killed by a signal (not the timeout handled above): abnormal
-    // termination, treat the runtime as unavailable rather than an auth fault.
     writeLine(logHandle, "[live-step] probe result: terminated");
     writeLine(logHandle, "[live-step] summary: runtime not available");
     return {
       ok: false,
       code: "runtime_unavailable",
-      error: `live step probe ${probe.command} terminated abnormally; treating runtime as unavailable.`
+      error: `live step probe ${probe.command} terminated abnormally; treating runtime as unavailable.`,
     };
   }
-
   if (exitCode !== 0) {
-    // The probe ran to completion and reported failure: the runtime is present
-    // but its auth / credential check did not pass.
     writeLine(logHandle, "[live-step] probe result: auth_unavailable");
     writeLine(logHandle, "[live-step] summary: auth not available");
     return {
       ok: false,
       code: "auth_unavailable",
-      error: `live step probe ${probe.command} exited with code ${exitCode}; treating auth/credentials as unavailable.`
+      error: `live step probe ${probe.command} exited with code ${exitCode}; treating auth/credentials as unavailable.`,
     };
   }
-
   writeLine(logHandle, "[live-step] probe ok");
   return { ok: true };
 }
 
 function validateRuntimeTimeouts(
-  config: LiveWrapperConfig
+  config: LiveWrapperConfig,
 ): { ok: true } | { ok: false; error: string } {
-  const timeout = validatePositiveTimeoutSec(
-    config.timeoutSec,
-    "timeout_sec"
-  );
+  const timeout = validatePositiveTimeoutSec(config.timeoutSec, "timeout_sec");
   if (!timeout.ok) return timeout;
   if (config.probe !== undefined) {
     return validatePositiveTimeoutSec(
       config.probe.timeoutSec,
-      "probe.timeout_sec"
+      "probe.timeout_sec",
     );
   }
   return { ok: true };
@@ -611,7 +883,7 @@ function validateRuntimeTimeouts(
 function isNodeBootstrapModuleFailure(
   stderr: string,
   config: LiveWrapperConfig,
-  cwd: string
+  cwd: string,
 ): boolean {
   if (
     !/\b(?:ERR_)?MODULE_NOT_FOUND\b/.test(stderr) &&
@@ -657,24 +929,24 @@ function firstNodeScriptArg(args: readonly string[]): string | null {
 }
 
 function validateInputPaths(
-  input: LiveStepWrapperInput
+  input: LiveStepWrapperInput,
 ): { ok: true } | { ok: false; error: string } {
   for (const [field, value] of [
     ["repoPath", input.repoPath],
     ["iterationDir", input.iterationDir],
-    ["executorLogPath", input.executorLogPath]
+    ["executorLogPath", input.executorLogPath],
   ] as const) {
     if (!path.isAbsolute(value)) {
       return {
         ok: false,
-        error: `live step ${field} must be an absolute path.`
+        error: `live step ${field} must be an absolute path.`,
       };
     }
   }
   if (input.promptPath !== undefined && !path.isAbsolute(input.promptPath)) {
     return {
       ok: false,
-      error: "live step promptPath must be an absolute path."
+      error: "live step promptPath must be an absolute path.",
     };
   }
   return { ok: true };
@@ -682,12 +954,18 @@ function validateInputPaths(
 
 function validatePositiveTimeoutSec(
   value: number,
-  field: "timeout_sec" | "probe.timeout_sec"
+  field: "timeout_sec" | "probe.timeout_sec",
 ): { ok: true } | { ok: false; error: string } {
   if (!Number.isInteger(value) || !Number.isFinite(value) || value <= 0) {
     return {
       ok: false,
-      error: `live step ${field} must be a positive integer (seconds).`
+      error: `live step ${field} must be a positive integer (seconds).`,
+    };
+  }
+  if (value > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
+    return {
+      ok: false,
+      error: `live step ${field} must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
     };
   }
   return { ok: true };
@@ -704,12 +982,24 @@ export type ProcessGroupOptions = {
   maxBuffer: number;
 };
 
+export type AsyncProcessGroupOptions = ProcessGroupOptions & {
+  /** Cooperative cancellation that requests verified owned-tree cleanup. */
+  signal?: AbortSignal;
+};
+
 type ProcessGroupMeta = {
   pid?: number;
+  commandCreationTicks?: string;
+  commandStartedAtMs?: number;
+  commandExitedAtMs?: number;
+  commandExited?: boolean;
   status: number | null;
   signal: NodeJS.Signals | null;
   errorCode?: string;
   errorMessage?: string;
+  unsafeDetachedDescendant?: boolean;
+  cleanupOnly?: boolean;
+  cleanupSucceeded?: boolean;
 };
 
 /**
@@ -721,15 +1011,26 @@ type ProcessGroupMeta = {
 export function runProcessGroupSync(
   command: string,
   args: string[],
-  options: ProcessGroupOptions
+  options: ProcessGroupOptions,
 ): SpawnSyncReturns<string> {
+  const optionsError = processGroupOptionsError(options);
+  if (optionsError !== undefined) {
+    return spawnReturn({
+      status: null,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      error: optionsError,
+    });
+  }
   const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-live-step-spawn-")
+    path.join(os.tmpdir(), "momentum-live-step-spawn-"),
   );
   const requestPath = path.join(tempDir, "request.json");
   const metaPath = path.join(tempDir, "meta.json");
   const stdoutPath = path.join(tempDir, "stdout.txt");
   const stderrPath = path.join(tempDir, "stderr.txt");
+  const processTreeToken = crypto.randomUUID();
 
   try {
     fs.writeFileSync(stdoutPath, "");
@@ -740,10 +1041,10 @@ export function runProcessGroupSync(
         command,
         args,
         cwd: options.cwd,
-        env: options.env,
+        env: { ...options.env, [PROCESS_TREE_TOKEN_ENV]: processTreeToken },
         timeoutMs: options.timeoutMs,
-        maxBuffer: options.maxBuffer
-      })
+        maxBuffer: options.maxBuffer,
+      }),
     );
 
     const helper = spawnSync(
@@ -754,15 +1055,15 @@ export function runProcessGroupSync(
         requestPath,
         metaPath,
         stdoutPath,
-        stderrPath
+        stderrPath,
       ],
       {
         encoding: "utf-8",
         timeout: options.timeoutMs + 30_000,
         killSignal: "SIGKILL",
         maxBuffer: 1024 * 1024,
-        stdio: ["ignore", "pipe", "pipe"]
-      }
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
 
     const stdout = readOptionalFile(stdoutPath);
@@ -779,7 +1080,7 @@ export function runProcessGroupSync(
         stdout,
         stderr,
         ...(meta.pid !== undefined ? { pid: meta.pid } : {}),
-        ...(metaError !== undefined ? { error: metaError } : {})
+        ...(metaError !== undefined ? { error: metaError } : {}),
       });
     }
 
@@ -792,8 +1093,8 @@ export function runProcessGroupSync(
         stderr,
         error: spawnError(
           "ETIMEDOUT",
-          `live step process supervisor timed out after ${options.timeoutMs}ms`
-        )
+          `live step process supervisor timed out after ${options.timeoutMs}ms`,
+        ),
       });
     }
     if (helper.error !== undefined) {
@@ -802,7 +1103,7 @@ export function runProcessGroupSync(
         signal: helper.signal ?? null,
         stdout,
         stderr,
-        error: helper.error
+        error: helper.error,
       });
     }
     return spawnReturn({
@@ -812,12 +1113,869 @@ export function runProcessGroupSync(
       stderr: stderr.length > 0 ? stderr : helper.stderr,
       error: spawnError(
         "SUPERVISOR_FAILED",
-        `live step process supervisor exited without metadata: ${helper.stderr}`
-      )
+        `live step process supervisor exited without metadata: ${helper.stderr}`,
+      ),
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Asynchronously run a bounded process below a detached anchor. Timeout, output
+ * overflow, normal leader exit, and caller cancellation all trigger cleanup of
+ * the anchored group and every discovered token-owned descendant before the
+ * promise settles. Captured stdout/stderr remain available through cleanup, and
+ * streaming decoders preserve UTF-8 characters split across pipe chunks.
+ *
+ * POSIX cleanup is portable userland containment, not a sandbox. A hostile
+ * descendant that escapes between ancestry samples and strips its ownership
+ * token requires kernel-backed containment; detected escapes or any lost cleanup
+ * proof reject with `SUPERVISOR_FAILED` rather than claiming success.
+ * If the anchor cannot confirm cleanup, a verified ownership-checked fallback
+ * preserves the known timeout, cancellation, or command-exit outcome. POSIX
+ * starts the fallback deadline after ownership preflight and, once the anchor
+ * exits, requires its prior cleanup-attempt report. Every Windows cleanup path
+ * retains anchor and command start/exit identities and limits direct command
+ * descendants to the command's creation-to-exit interval. It never substitutes
+ * an unverified broad tree kill. Any fallback that cannot prove cleanup replaces
+ * the known outcome with `SUPERVISOR_FAILED`.
+ */
+export function runProcessGroup(
+  command: string,
+  args: string[],
+  options: AsyncProcessGroupOptions,
+): Promise<SpawnSyncReturns<string>> {
+  const optionsError = processGroupOptionsError(options);
+  if (optionsError !== undefined) {
+    return Promise.resolve(
+      spawnReturn({
+        status: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: optionsError,
+      }),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    if (options.signal?.aborted === true) {
+      resolve(
+        spawnReturn({
+          status: null,
+          signal: null,
+          stdout: "",
+          stderr: "",
+          error: spawnError("ABORT_ERR", "process cancelled before launch"),
+        }),
+      );
+      return;
+    }
+
+    let stdout = "";
+    let stderr = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    let outputFlushed = false;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let terminalError: Error | undefined;
+    let commandPid: number | undefined;
+    let commandCreationTicks: string | undefined;
+    let commandStartedAtMs: number | undefined;
+    let commandExitedAtMs: number | undefined;
+    let commandExited = false;
+    let commandStatus: number | null | undefined;
+    let commandSignal: NodeJS.Signals | null | undefined;
+    let settled = false;
+    let child: ReturnType<typeof spawn>;
+    let executionTimeout: ReturnType<typeof setTimeout> | undefined;
+    let closeDeadline: ReturnType<typeof setTimeout> | undefined;
+    let treeTermination: Promise<boolean> | undefined;
+    let anchorCleanupSucceeded = false;
+    let anchorCleanupReported = false;
+    let terminationStatus: number | null = null;
+    let terminationSignal: NodeJS.Signals | null = null;
+    const processTreeToken = crypto.randomUUID();
+
+    const armCloseDeadline = (delayMs: number): void => {
+      if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+      closeDeadline = setTimeout(() => {
+        terminalError = spawnError(
+          "SUPERVISOR_FAILED",
+          "process tree did not terminate within the cleanup deadline",
+        );
+        void killTree();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(terminationStatus, terminationSignal);
+      }, delayMs);
+    };
+
+    const killTree = (): Promise<boolean> => {
+      if (treeTermination !== undefined) return treeTermination;
+      if (child.pid !== undefined) {
+        const groupLeaderPid = child.pid;
+        treeTermination = new Promise((resolveTermination) => {
+          let finished = false;
+          let fallbackStarted = false;
+          const finish = (success: boolean): void => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(deadline);
+            resolveTermination(success);
+          };
+          const runFallback = (): void => {
+            if (fallbackStarted) return;
+            fallbackStarted = true;
+            let fallback: Promise<boolean>;
+            if (process.platform === "win32") {
+              if (commandPid !== undefined) {
+                fallback =
+                  commandStartedAtMs === undefined
+                    ? Promise.resolve(false)
+                    : killWindowsProcessTree(groupLeaderPid, processTreeToken, {
+                        pid: commandPid,
+                        ...(commandCreationTicks !== undefined
+                          ? { creationTicks: commandCreationTicks }
+                          : {}),
+                        startedAtMs: commandStartedAtMs,
+                        ...(commandExitedAtMs !== undefined
+                          ? { exitedAtMs: commandExitedAtMs }
+                          : {}),
+                        exited: commandExited,
+                      });
+              } else {
+                fallback = killWindowsProcessTree(
+                  groupLeaderPid,
+                  processTreeToken,
+                );
+              }
+              armCloseDeadline(
+                WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
+                  PROCESS_TREE_CLEANUP_MARGIN_MS,
+              );
+            } else {
+              if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+              closeDeadline = undefined;
+              fallback = terminateOwnedPosixTree(
+                groupLeaderPid,
+                child,
+                processTreeToken,
+                POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS,
+                () => anchorCleanupReported,
+                () =>
+                  armCloseDeadline(
+                    POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS +
+                      PROCESS_TREE_CLEANUP_MARGIN_MS,
+                  ),
+              );
+            }
+            void fallback.then(finish);
+          };
+          const controlEnded = (): void => {
+            if (anchorCleanupSucceeded && !fallbackStarted) finish(true);
+            else runFallback();
+          };
+          const controlStream = child.stdio[3] as Readable | null | undefined;
+          if (controlStream !== null && controlStream !== undefined) {
+            if (controlStream.readableEnded || controlStream.destroyed) {
+              controlEnded();
+            } else {
+              controlStream.once("end", controlEnded);
+            }
+          } else {
+            child.once("exit", controlEnded);
+          }
+          const deadline = setTimeout(
+            runFallback,
+            PROCESS_TREE_FALLBACK_DELAY_MS,
+          );
+          try {
+            child.stdin?.write("kill\n", (error) => {
+              if (error !== null && error !== undefined) runFallback();
+            });
+          } catch {
+            runFallback();
+          }
+        });
+        return treeTermination;
+      }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The direct child may already have exited.
+      }
+      treeTermination ??= Promise.resolve(true);
+      return treeTermination;
+    };
+
+    const settle = (
+      status: number | null,
+      signal: NodeJS.Signals | null,
+    ): void => {
+      if (settled) return;
+      settled = true;
+      if (!outputFlushed) {
+        outputFlushed = true;
+        stdout += stdoutDecoder.end();
+        stderr += stderrDecoder.end();
+      }
+      if (executionTimeout !== undefined) clearTimeout(executionTimeout);
+      if (closeDeadline !== undefined) clearTimeout(closeDeadline);
+      options.signal?.removeEventListener("abort", abort);
+      if (errnoCode(terminalError) === "SUPERVISOR_FAILED") {
+        reject(attachProcessOutput(terminalError, stdout, stderr));
+        return;
+      }
+      resolve(
+        spawnReturn({
+          ...(commandPid !== undefined
+            ? { pid: commandPid }
+            : child.pid !== undefined
+              ? { pid: child.pid }
+              : {}),
+          status,
+          signal,
+          stdout,
+          stderr,
+          ...(terminalError !== undefined ? { error: terminalError } : {}),
+        }),
+      );
+    };
+
+    const requestTermination = (
+      status: number | null = null,
+      signal: NodeJS.Signals | null = null,
+    ): void => {
+      if (closeDeadline === undefined) {
+        terminationStatus = status;
+        terminationSignal = signal;
+        armCloseDeadline(
+          PROCESS_TREE_FALLBACK_DELAY_MS +
+            (process.platform === "win32"
+              ? WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS
+              : POSIX_PROCESS_TREE_FALLBACK_TIMEOUT_MS) +
+            PROCESS_TREE_CLEANUP_MARGIN_MS,
+        );
+      }
+      const termination = killTree();
+      void termination.then((terminated) => {
+        if (terminated || settled) return;
+        terminalError = spawnError(
+          "SUPERVISOR_FAILED",
+          "process-tree cleanup helpers failed",
+        );
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        settle(status, signal);
+      });
+    };
+
+    const abort = (): void => {
+      terminalError ??= spawnError("ABORT_ERR", "process cancelled");
+      requestTermination();
+    };
+
+    let serializedRequest: string;
+    try {
+      serializedRequest = JSON.stringify({
+        command,
+        args,
+        cwd: options.cwd,
+        env: { ...options.env, [PROCESS_TREE_TOKEN_ENV]: processTreeToken },
+        timeoutMs: options.timeoutMs,
+      });
+    } catch (error) {
+      resolve(
+        spawnReturn({
+          status: null,
+          signal: null,
+          stdout,
+          stderr,
+          error: error instanceof Error ? error : new Error(String(error)),
+        }),
+      );
+      return;
+    }
+
+    try {
+      child = spawn(
+        process.execPath,
+        ["-e", LIVE_STEP_ASYNC_GROUP_ANCHOR, processTreeToken],
+        {
+          cwd: options.cwd,
+          env: processAnchorEnvironment(processTreeToken),
+          detached: process.platform !== "win32",
+          stdio: ["pipe", "pipe", "pipe", "pipe"],
+        },
+      );
+    } catch (error) {
+      resolve(
+        spawnReturn({
+          status: null,
+          signal: null,
+          stdout,
+          stderr,
+          error: error instanceof Error ? error : new Error(String(error)),
+        }),
+      );
+      return;
+    }
+    child.stdin?.on("error", (error) => {
+      if (treeTermination !== undefined || settled) return;
+      terminalError ??= error;
+      requestTermination();
+    });
+    child.stdin?.write(`${serializedRequest}\n`);
+    executionTimeout = setTimeout(() => {
+      terminalError ??= spawnError(
+        "SUPERVISOR_FAILED",
+        "process-group anchor did not report before its cleanup deadline",
+      );
+      requestTermination();
+    }, options.timeoutMs + 4_000);
+
+    const capture = (stream: "stdout" | "stderr", chunk: Buffer): void => {
+      if (stream === "stdout") {
+        stdoutBytes += chunk.length;
+        if (stdoutBytes > options.maxBuffer) {
+          terminalError = spawnError("ENOBUFS", "stdout exceeded maxBuffer");
+          requestTermination();
+          return;
+        }
+        stdout += stdoutDecoder.write(chunk);
+        return;
+      }
+      stderrBytes += chunk.length;
+      if (stderrBytes > options.maxBuffer) {
+        terminalError = spawnError("ENOBUFS", "stderr exceeded maxBuffer");
+        requestTermination();
+        return;
+      }
+      stderr += stderrDecoder.write(chunk);
+    };
+
+    child.stdout?.on("data", (chunk: Buffer) => capture("stdout", chunk));
+    child.stderr?.on("data", (chunk: Buffer) => capture("stderr", chunk));
+    let controlOutput = "";
+    child.stdio[3]?.on("data", (chunk: Buffer) => {
+      controlOutput += chunk.toString("utf-8");
+      let newline = controlOutput.indexOf("\n");
+      while (newline >= 0) {
+        const line = controlOutput.slice(0, newline);
+        controlOutput = controlOutput.slice(newline + 1);
+        let meta: ProcessGroupMeta;
+        try {
+          meta = JSON.parse(line) as ProcessGroupMeta;
+        } catch {
+          terminalError = spawnError(
+            "SUPERVISOR_FAILED",
+            "process-group anchor emitted invalid lifecycle metadata",
+          );
+          requestTermination();
+          return;
+        }
+        if (meta.cleanupOnly !== true) {
+          commandPid =
+            Number.isInteger(meta.pid) && (meta.pid ?? 0) > 0
+              ? meta.pid
+              : undefined;
+          commandCreationTicks =
+            commandPid !== undefined &&
+            typeof meta.commandCreationTicks === "string" &&
+            /^\d+$/.test(meta.commandCreationTicks)
+              ? meta.commandCreationTicks
+              : undefined;
+          commandStartedAtMs =
+            commandPid !== undefined &&
+            Number.isInteger(meta.commandStartedAtMs) &&
+            (meta.commandStartedAtMs ?? 0) > 0
+              ? meta.commandStartedAtMs
+              : undefined;
+          commandExitedAtMs =
+            commandPid !== undefined &&
+            Number.isInteger(meta.commandExitedAtMs) &&
+            (meta.commandExitedAtMs ?? 0) >= (commandStartedAtMs ?? 0)
+              ? meta.commandExitedAtMs
+              : undefined;
+          commandExited = meta.commandExited === true;
+          commandStatus = meta.status;
+          commandSignal = meta.signal;
+        }
+        if (meta.cleanupSucceeded === true) {
+          anchorCleanupSucceeded = true;
+        }
+        if (meta.cleanupOnly === true) anchorCleanupReported = true;
+        if (meta.unsafeDetachedDescendant === true) {
+          terminalError = spawnError(
+            "SUPERVISOR_FAILED",
+            "process tree created an unowned detached descendant",
+          );
+        }
+        if (meta.errorCode !== undefined) {
+          terminalError ??= spawnError(
+            meta.errorCode,
+            meta.errorMessage ?? meta.errorCode,
+          );
+        }
+        if (executionTimeout !== undefined) clearTimeout(executionTimeout);
+        requestTermination(meta.status, meta.signal);
+        newline = controlOutput.indexOf("\n");
+      }
+    });
+    child.on("error", (error) => {
+      terminalError ??= error;
+    });
+    child.on("exit", (status, signal) => {
+      if (executionTimeout !== undefined) clearTimeout(executionTimeout);
+      requestTermination(
+        commandStatus === undefined ? status : commandStatus,
+        commandSignal === undefined ? signal : commandSignal,
+      );
+    });
+    child.on("close", (status, signal) => {
+      const settledStatus =
+        commandStatus === undefined ? status : commandStatus;
+      const settledSignal =
+        commandSignal === undefined ? signal : commandSignal;
+      const termination = treeTermination;
+      if (termination === undefined) {
+        settle(settledStatus, settledSignal);
+        return;
+      }
+      void termination.then((terminated) => {
+        if (!terminated) {
+          terminalError = spawnError(
+            "SUPERVISOR_FAILED",
+            "process-tree cleanup helpers failed",
+          );
+        }
+        settle(settledStatus, settledSignal);
+      });
+    });
+    options.signal?.addEventListener("abort", abort, { once: true });
+    if (abortRequested(options.signal)) abort();
+  });
+}
+
+function processGroupOptionsError(
+  options: ProcessGroupOptions,
+): Error | undefined {
+  if (
+    !Number.isSafeInteger(options.timeoutMs) ||
+    options.timeoutMs <= 0 ||
+    options.timeoutMs > MAX_BUILT_IN_PROCESS_TIMEOUT_MS
+  ) {
+    return spawnError(
+      "EINVAL",
+      `process timeoutMs must be a positive safe integer not exceeding ${MAX_BUILT_IN_PROCESS_TIMEOUT_MS}`,
+    );
+  }
+  if (!Number.isSafeInteger(options.maxBuffer) || options.maxBuffer <= 0) {
+    return spawnError(
+      "EINVAL",
+      "process maxBuffer must be a positive safe integer",
+    );
+  }
+  return undefined;
+}
+
+function abortRequested(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+function processAnchorEnvironment(ownershipToken: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    [PROCESS_TREE_TOKEN_ENV]: ownershipToken,
+  };
+  for (const name of [
+    "PATH",
+    "SystemRoot",
+    "WINDIR",
+    "PATHEXT",
+    "ComSpec",
+    "TEMP",
+    "TMP",
+  ]) {
+    if (process.env[name] !== undefined) environment[name] = process.env[name];
+  }
+  return environment;
+}
+
+async function terminateOwnedPosixTree(
+  groupLeaderPid: number,
+  child: ReturnType<typeof spawn>,
+  ownershipToken: string,
+  timeoutMs: number,
+  anchorCleanupReported: () => boolean,
+  onInitialized: () => void,
+): Promise<boolean> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  let anchorExited = child.exitCode !== null || child.signalCode !== null;
+  let safe = !anchorExited || anchorCleanupReported();
+  if (hasUnownedEscapedDescendant(groupLeaderPid, ownershipToken)) {
+    const owned = listOwnedPosixProcesses(ownershipToken);
+    if (owned.ok) {
+      for (const pid of owned.pids) {
+        if (pid !== groupLeaderPid) signalPosixTarget(pid, "SIGKILL");
+      }
+    }
+    killOwnedPosixGroup(child);
+    return false;
+  }
+  const initial = listOwnedPosixProcesses(ownershipToken);
+  if (!initial.ok) {
+    killOwnedPosixGroup(child);
+    return false;
+  }
+
+  for (const pid of initial.pids) {
+    if (pid === groupLeaderPid) continue;
+    const ownership = posixProcessOwnership(pid, ownershipToken);
+    if (ownership === "unknown") {
+      safe = false;
+      continue;
+    }
+    if (ownership === "owned") {
+      safe = signalPosixTarget(pid, "SIGKILL") && safe;
+    }
+  }
+  if (!anchorExited) {
+    const groupKilled = killOwnedPosixGroup(child);
+    if (!groupKilled) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      anchorExited = child.exitCode !== null || child.signalCode !== null;
+      safe = anchorExited && anchorCleanupReported() && safe;
+    }
+  }
+  onInitialized();
+  const deadline = Date.now() + timeoutMs;
+  let extinctPasses = 0;
+  while (Date.now() < deadline) {
+    const remaining = listOwnedPosixProcesses(ownershipToken);
+    if (!remaining.ok) return false;
+    if (remaining.pids.length === 0) {
+      const group = listLivePosixProcessGroupMembers(groupLeaderPid);
+      if (!group.ok) return false;
+      extinctPasses = group.pids.length === 0 ? extinctPasses + 1 : 0;
+      if (extinctPasses >= 2) return safe;
+    } else {
+      extinctPasses = 0;
+    }
+    for (const pid of remaining.pids) {
+      const ownership = posixProcessOwnership(pid, ownershipToken);
+      if (ownership === "unknown") return false;
+      if (ownership === "owned") signalPosixTarget(pid, "SIGKILL");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
+function hasUnownedEscapedDescendant(
+  groupLeaderPid: number,
+  ownershipToken: string,
+): boolean {
+  const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid="], {
+    encoding: "utf-8",
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) return true;
+  const processes = result.stdout
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(
+      (entry): entry is [number, number, number] =>
+        entry.length >= 3 && entry.every(Number.isInteger),
+    )
+    .map(([pid, ppid, processGroupId]) => ({ pid, ppid, processGroupId }));
+  const known = new Set([groupLeaderPid]);
+  let added: boolean;
+  do {
+    added = false;
+    for (const processRecord of processes) {
+      if (known.has(processRecord.ppid) && !known.has(processRecord.pid)) {
+        known.add(processRecord.pid);
+        added = true;
+      }
+    }
+  } while (added);
+  return processes.some(
+    (processRecord) =>
+      known.has(processRecord.pid) &&
+      processRecord.processGroupId !== groupLeaderPid &&
+      posixProcessOwnership(processRecord.pid, ownershipToken) !== "owned",
+  );
+}
+
+type PosixOwnership = "owned" | "not_owned" | "unknown";
+
+function posixProcessOwnership(
+  pid: number,
+  ownershipToken: string,
+): PosixOwnership {
+  const marker = `${PROCESS_TREE_TOKEN_ENV}=${ownershipToken}`;
+  if (process.platform === "linux") {
+    try {
+      const environment = fs.readFileSync(`/proc/${pid}/environ`);
+      return environment.toString("utf-8").split("\0").includes(marker)
+        ? "owned"
+        : "not_owned";
+    } catch (error) {
+      return errnoCode(error) === "ENOENT" ? "not_owned" : "unknown";
+    }
+  }
+  const result = spawnSync("ps", ["eww", "-p", String(pid), "-o", "command="], {
+    encoding: "utf-8",
+    timeout: 500,
+    maxBuffer: 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined) return "unknown";
+  if (result.status !== 0) return "not_owned";
+  return result.stdout.includes(marker) ? "owned" : "not_owned";
+}
+
+type OwnedPosixProcesses = { ok: true; pids: number[] } | { ok: false };
+
+type PosixProcessGroupMembers = { ok: true; pids: number[] } | { ok: false };
+
+function listLivePosixProcessGroupMembers(
+  processGroupId: number,
+): PosixProcessGroupMembers {
+  const result = spawnSync("ps", ["-eo", "pid=,pgid=,state="], {
+    encoding: "utf-8",
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) {
+    return { ok: false };
+  }
+  const pids = result.stdout
+    .split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line))
+    .filter(
+      (match) =>
+        match !== null &&
+        Number(match[2]) === processGroupId &&
+        !match[3]?.startsWith("Z"),
+    )
+    .map((match) => Number(match?.[1]))
+    .filter((pid) => Number.isInteger(pid));
+  return { ok: true, pids };
+}
+
+function listOwnedPosixProcesses(ownershipToken: string): OwnedPosixProcesses {
+  const marker = `${PROCESS_TREE_TOKEN_ENV}=${ownershipToken}`;
+  if (process.platform === "linux") {
+    try {
+      const pids = fs
+        .readdirSync("/proc")
+        .filter((entry) => /^\d+$/.test(entry))
+        .map(Number)
+        .filter(
+          (pid) => posixProcessOwnership(pid, ownershipToken) === "owned",
+        );
+      return { ok: true, pids };
+    } catch {
+      return { ok: false };
+    }
+  }
+  const result = spawnSync("ps", ["eww", "-axo", "pid=,state=,command="], {
+    encoding: "utf-8",
+    timeout: POSIX_PROCESS_QUERY_TIMEOUT_MS,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) {
+    return { ok: false };
+  }
+  const pids = result.stdout
+    .split("\n")
+    .filter((line) => line.includes(marker))
+    .map((line) => /^\s*(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && !match[2]?.startsWith("Z"))
+    .map((match) => Number(match?.[1]))
+    .filter((pid) => Number.isInteger(pid));
+  return { ok: true, pids };
+}
+
+function killOwnedPosixGroup(child: ReturnType<typeof spawn>): boolean {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  try {
+    return child.kill("SIGKILL");
+  } catch (error) {
+    return errnoCode(error) === "ESRCH";
+  }
+}
+
+function signalPosixTarget(target: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(target, signal);
+    return true;
+  } catch (error) {
+    return errnoCode(error) === "ESRCH";
+  }
+}
+
+/**
+ * Discover descendants from retained ParentProcessId values, so cleanup does
+ * not depend on the leader still being alive when its `exit` event fires.
+ * When the command exited, direct descendants must have been created between
+ * its retained creation and exit times to remain cleanup targets.
+ */
+function killWindowsProcessTree(
+  rootPid: number,
+  ownershipToken: string,
+  commandIdentity?: {
+    pid: number;
+    creationTicks?: string;
+    startedAtMs: number;
+    exitedAtMs?: number;
+    exited: boolean;
+  },
+): Promise<boolean> {
+  const hasCommandIdentity =
+    commandIdentity !== undefined &&
+    Number.isInteger(commandIdentity.pid) &&
+    commandIdentity.pid > 0 &&
+    typeof commandIdentity.creationTicks === "string" &&
+    /^\d+$/.test(commandIdentity.creationTicks) &&
+    Number.isInteger(commandIdentity.startedAtMs) &&
+    commandIdentity.startedAtMs > 0 &&
+    (!commandIdentity.exited ||
+      (Number.isInteger(commandIdentity.exitedAtMs) &&
+        (commandIdentity.exitedAtMs ?? 0) >= commandIdentity.startedAtMs));
+  if (commandIdentity !== undefined && !hasCommandIdentity) {
+    return Promise.resolve(false);
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$selfPid = $PID",
+    `$rootPid = ${rootPid}`,
+    `$ownershipToken = ${JSON.stringify(ownershipToken)}`,
+    '$root = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $rootPid)',
+    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+    ...(hasCommandIdentity
+      ? [
+          "if ($null -ne $root -and $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
+          "if ($null -ne $root) { $identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks }",
+        ]
+      : [
+          "if ($null -eq $root -or $root.CommandLine -notlike ('*' + $ownershipToken + '*')) { exit 1 }",
+          "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+        ]),
+    ...(hasCommandIdentity
+      ? [
+          `$commandPid = ${commandIdentity.pid}`,
+          `$commandCreationTicks = [long]${commandIdentity.creationTicks}`,
+          `$commandExited = $${commandIdentity.exited}`,
+          `$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.startedAtMs}).UtcDateTime.Ticks`,
+          "$commandExitedAtTicks = 0",
+          ...(commandIdentity.exitedAtMs !== undefined
+            ? [
+                `$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(${commandIdentity.exitedAtMs}).UtcDateTime.Ticks`,
+              ]
+            : []),
+          "$identities[$commandPid] = $commandCreationTicks",
+        ]
+      : []),
+    "$stablePasses = 0",
+    "$observedRootChild = $false",
+    "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
+    "while ($watch.ElapsedMilliseconds -lt 3500) {",
+    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+    "  $byPid = @{}",
+    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+    "  foreach ($knownPid in @($identities.Keys)) {",
+    "    $current = $byPid[$knownPid]",
+    ...(hasCommandIdentity && commandIdentity?.exited !== true
+      ? [
+          "    if ($knownPid -eq $commandPid -and $null -eq $current) { exit 1 }",
+        ]
+      : []),
+    "    if ($null -eq $current) { continue }",
+    "    $expected = [long]$identities[$knownPid]",
+    "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
+    "  }",
+    "  $added = $false",
+    "  do {",
+    "    $passAdded = $false",
+    "    foreach ($item in $processes) {",
+    "      if ($item.ParentProcessId -eq $rootPid) { $observedRootChild = $true }",
+    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    ...(hasCommandIdentity && commandIdentity?.exited === true
+      ? [
+          "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
+        ]
+      : []),
+    "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
+    "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
+    "      if ($identities.ContainsKey($item.ProcessId)) {",
+    "        if ([long]$identities[$item.ProcessId] -ne $item.CreationTicks) { exit 1 }",
+    "      } else {",
+    "        $identities[$item.ProcessId] = $item.CreationTicks",
+    "        $passAdded = $true",
+    "        $added = $true",
+    "      }",
+    "    }",
+    "  } while ($passAdded)",
+    "  $targets = @($identities.Keys | Where-Object { $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
+    "  [array]::Reverse($targets)",
+    "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+    "  Start-Sleep -Milliseconds 50",
+    "  $alive = @($identities.Keys | Where-Object { $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+    "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
+    `  if ($stablePasses -ge 2 -and ($${hasCommandIdentity} -or $observedRootChild)) { exit 0 }`,
+    "}",
+    "exit 1",
+  ].join("\n");
+  return launchWindowsTreeKiller("powershell.exe", [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    script,
+  ]);
+}
+
+function launchWindowsTreeKiller(
+  command: string,
+  args: string[],
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let killer: ReturnType<typeof spawn>;
+    try {
+      killer = spawn(command, args, {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+    let finished = false;
+    const finish = (success: boolean): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      resolve(success);
+    };
+    const deadline = setTimeout(() => {
+      try {
+        killer.kill("SIGKILL");
+      } catch {
+        // The helper may already have exited.
+      }
+    }, WINDOWS_PROCESS_TREE_FALLBACK_TIMEOUT_MS);
+    killer.once("exit", (code) => finish(code === 0));
+    killer.once("error", () => finish(false));
+    killer.unref();
+  });
 }
 
 function readOptionalFile(filePath: string): string {
@@ -851,7 +2009,7 @@ function spawnReturn(input: {
     stderr: input.stderr,
     status: input.status,
     signal: input.signal,
-    ...(input.error !== undefined ? { error: input.error } : {})
+    ...(input.error !== undefined ? { error: input.error } : {}),
   };
 }
 
@@ -861,19 +2019,545 @@ function spawnError(code: string, message: string): NodeJS.ErrnoException {
   return error;
 }
 
+function attachProcessOutput(
+  error: Error | undefined,
+  stdout: string,
+  stderr: string,
+): Error {
+  return Object.assign(
+    error ?? spawnError("SUPERVISOR_FAILED", "process supervisor failed"),
+    { stdout, stderr },
+  );
+}
+
+const LIVE_STEP_COMMAND_WRAPPER = String.raw`
+const fs = require("node:fs");
+const { spawn, spawnSync } = require("node:child_process");
+const request = JSON.parse(fs.readFileSync(4, "utf-8"));
+let reported = false;
+
+function emit(meta) {
+  try { fs.writeSync(3, JSON.stringify(meta) + "\n"); } catch {}
+}
+
+function report(meta) {
+  if (reported) return;
+  reported = true;
+  emit({ type: "result", ...meta });
+}
+
+function ownCreationTicks() {
+  const script = "$p = Get-CimInstance Win32_Process -Filter (\"ProcessId = " + process.pid + "\"); if ($null -eq $p) { exit 1 }; [Console]::Out.Write([long]$p.CreationDate.ToUniversalTime().Ticks)";
+  const result = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf-8",
+    timeout: 1000,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  const value = result.stdout && result.stdout.trim();
+  return !result.error && result.status === 0 && /^\d+$/.test(value) ? value : undefined;
+}
+
+const creationTicks = process.platform === "win32" ? ownCreationTicks() : undefined;
+if (process.platform === "win32" && creationTicks === undefined) {
+  report({
+    status: null,
+    signal: null,
+    errorCode: "SUPERVISOR_FAILED",
+    errorMessage: "Windows command wrapper could not retain its launch identity"
+  });
+} else {
+  if (creationTicks !== undefined) {
+    emit({ type: "identity", pid: process.pid, creationTicks });
+  }
+  try {
+    const target = spawn(request.command, request.args, {
+      cwd: request.cwd,
+      env: request.env,
+      detached: false,
+      stdio: ["ignore", "inherit", "inherit"]
+    });
+    target.once("error", (error) => {
+      report({
+        status: null,
+        signal: null,
+        errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+        errorMessage: error && error.message ? error.message : String(error)
+      });
+    });
+    target.once("exit", (status, signal) => report({ status, signal }));
+  } catch (error) {
+    report({
+      status: null,
+      signal: null,
+      errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+      errorMessage: error && error.message ? error.message : String(error)
+    });
+  }
+}
+process.stdin.setEncoding("utf-8");
+process.stdin.on("data", (chunk) => {
+  if (process.platform !== "win32" && chunk.split("\n").includes("kill")) {
+    try { process.kill(-process.pid, "SIGKILL"); } catch { process.exit(1); }
+  }
+});
+process.stdin.resume();
+setInterval(() => {}, 2147483647);
+`;
+
+const LIVE_STEP_ASYNC_GROUP_ANCHOR = String.raw`
+const { spawn, spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const COMMAND_WRAPPER = ${JSON.stringify(LIVE_STEP_COMMAND_WRAPPER)};
+let command;
+let finished = false;
+let reported = false;
+let input = "";
+let executionTimer;
+let fallbackTimer;
+let ancestryTracker;
+let commandStartedAtMs = 0;
+let commandExitedAtMs = 0;
+let commandCreationTicks;
+let commandLaunchFailed = false;
+let unsafeDetachedDescendant = false;
+const retainedEscapedPids = new Set();
+const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + process.env.MOMENTUM_PROCESS_TREE_TOKEN;
+
+function ownedPosixPids() {
+  if (process.platform === "linux") {
+    try {
+      return fs.readdirSync("/proc")
+        .filter((entry) => /^\d+$/.test(entry))
+        .map(Number)
+        .filter((pid) => {
+          try {
+            return fs.readFileSync("/proc/" + pid + "/environ", "utf-8")
+              .split("\0").includes(ownershipMarker);
+          } catch { return false; }
+        });
+    } catch { return undefined; }
+  }
+  const result = spawnSync("ps", ["eww", "-axo", "pid=,state=,command="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.split("\n")
+    .filter((line) => line.includes(ownershipMarker))
+    .map((line) => /^\s*(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && !match[2]?.startsWith("Z"))
+    .map((match) => Number(match?.[1]))
+    .filter((pid) => Number.isInteger(pid))
+    .filter((pid) => {
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    });
+}
+
+function refreshDetachedDescendants() {
+  if (process.platform === "win32") return;
+  const result = spawnSync("ps", ["-eo", "pid=,ppid=,pgid="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) {
+    unsafeDetachedDescendant = true;
+    return;
+  }
+  const processes = result.stdout.split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter((entry) => entry.length >= 3 && entry.every(Number.isInteger))
+    .map(([pid, ppid, processGroupId]) => ({ pid, ppid, processGroupId }));
+  const known = new Set([process.pid]);
+  let added;
+  do {
+    added = false;
+    for (const entry of processes) {
+      if (known.has(entry.ppid) && !known.has(entry.pid)) {
+        known.add(entry.pid);
+        added = true;
+      }
+    }
+  } while (added);
+  const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
+  for (const pid of retainedEscapedPids) {
+    if (!byPid.has(pid)) {
+      retainedEscapedPids.delete(pid);
+    }
+  }
+  for (const entry of processes) {
+    if (known.has(entry.pid) && entry.processGroupId !== process.pid) {
+      retainedEscapedPids.add(entry.pid);
+    }
+  }
+  if (retainedEscapedPids.size === 0) return;
+  const ownedPids = ownedPosixPids();
+  if (!ownedPids) {
+    unsafeDetachedDescendant = true;
+    return;
+  }
+  const owned = new Set(ownedPids);
+  for (const pid of retainedEscapedPids) {
+    if (!owned.has(pid)) unsafeDetachedDescendant = true;
+  }
+}
+
+function emitMeta(meta) {
+  try { fs.writeSync(3, JSON.stringify(meta) + "\n"); } catch {}
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function killOwnedTree() {
+  if (finished) return;
+  refreshDetachedDescendants();
+  emitMeta({
+    status: null,
+    signal: null,
+    unsafeDetachedDescendant,
+    cleanupOnly: true
+  });
+  finished = true;
+  if (executionTimer) clearTimeout(executionTimer);
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+  if (ancestryTracker) clearInterval(ancestryTracker);
+  if (process.platform === "win32") {
+    const commandPid = command && command.pid;
+    if (commandLaunchFailed && !Number.isInteger(commandPid)) {
+      if (!unsafeDetachedDescendant) {
+        emitMeta({
+          status: null,
+          signal: null,
+          cleanupOnly: true,
+          cleanupSucceeded: true
+        });
+      }
+      process.exit(unsafeDetachedDescendant ? 1 : 0);
+    }
+    const commandExited = command.exitCode !== null || command.signalCode !== null;
+    if (!Number.isInteger(commandPid) || commandPid <= 0 || !/^\d+$/.test(commandCreationTicks || "") || commandStartedAtMs <= 0 || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
+      try { command.kill("SIGKILL"); } catch {}
+      process.exit(1);
+    }
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      "$selfPid = $PID",
+      "$rootPid = " + process.pid,
+      "$commandPid = " + commandPid,
+      "$commandCreationTicks = [long]" + commandCreationTicks,
+      "$commandExited = $" + commandExited,
+      "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
+      "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
+      "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+      "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
+      "if ($null -eq $root) { exit 1 }",
+      "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+      "$identities[$commandPid] = $commandCreationTicks",
+      "$stablePasses = 0",
+      "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
+      "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
+      "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+      "  $byPid = @{}",
+      "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+      "  foreach ($knownPid in @($identities.Keys)) {",
+      "    $current = $byPid[$knownPid]",
+      "    if ($knownPid -eq $commandPid -and -not $commandExited -and $null -eq $current) { exit 1 }",
+      "    if ($null -eq $current) { continue }",
+      "    $expected = [long]$identities[$knownPid]",
+      "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
+      "  }",
+      "  $added = $false",
+      "  do {",
+      "    $passAdded = $false",
+      "    foreach ($item in $processes) {",
+      "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+      "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
+      "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
+      "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
+      "      if ($identities.ContainsKey($item.ProcessId)) {",
+      "        $expected = [long]$identities[$item.ProcessId]",
+      "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
+      "      } else {",
+      "        $identities[$item.ProcessId] = $item.CreationTicks",
+      "        $passAdded = $true",
+      "        $added = $true",
+      "      }",
+      "    }",
+      "  } while ($passAdded)",
+      "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
+      "  [array]::Reverse($targets)",
+      "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+      "  Start-Sleep -Milliseconds 50",
+      "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+      "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
+      "  }",
+      "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
+    ].join("\n");
+    const cleanup = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+      timeout: 3000,
+      stdio: "ignore"
+    });
+    const cleanupSucceeded = cleanup.status === 0 && !cleanup.error && !unsafeDetachedDescendant;
+    if (cleanupSucceeded) {
+      emitMeta({
+        status: null,
+        signal: null,
+        cleanupOnly: true,
+        cleanupSucceeded: true
+      });
+    }
+    process.exit(cleanupSucceeded ? 0 : 1);
+  }
+  let stablePasses = 0;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && stablePasses < 2) {
+    const owned = ownedPosixPids();
+    if (!owned) {
+      stablePasses = 0;
+      sleep(50);
+      continue;
+    }
+    const targets = owned.filter((pid) => pid !== process.pid);
+    for (const pid of targets) {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+    stablePasses = targets.length === 0 ? stablePasses + 1 : 0;
+    sleep(50);
+  }
+  if (stablePasses >= 2 && !unsafeDetachedDescendant) {
+    emitMeta({
+      status: null,
+      signal: null,
+      cleanupOnly: true,
+      cleanupSucceeded: true
+    });
+  }
+  try { process.kill(-process.pid, "SIGKILL"); } catch {}
+  process.exit(1);
+}
+
+function reportThenAwaitCleanup(meta) {
+  if (finished || reported) return;
+  reported = true;
+  refreshDetachedDescendants();
+  emitMeta({
+    ...meta,
+    commandStartedAtMs,
+    commandCreationTicks,
+    commandExitedAtMs: commandExitedAtMs > 0 ? commandExitedAtMs : undefined,
+    commandExited:
+      meta.commandExited === true ||
+      (command && (command.exitCode !== null || command.signalCode !== null)),
+    unsafeDetachedDescendant
+  });
+  fallbackTimer = setTimeout(killOwnedTree, 5000);
+}
+
+function launch(request) {
+  try {
+    commandStartedAtMs = Date.now();
+    command = process.platform === "win32"
+      ? spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
+          cwd: request.cwd,
+          env: process.env,
+          detached: false,
+          stdio: ["pipe", "inherit", "inherit", "pipe", "pipe"]
+        })
+      : spawn(request.command, request.args, {
+          cwd: request.cwd,
+          env: request.env,
+          detached: false,
+          stdio: ["ignore", "inherit", "inherit"]
+        });
+    if (process.platform === "win32") {
+      let wrapperControl = "";
+      command.stdio[3].setEncoding("utf-8");
+      command.stdio[3].on("data", (chunk) => {
+        wrapperControl += chunk;
+        let newline = wrapperControl.indexOf("\n");
+        while (newline >= 0) {
+          const line = wrapperControl.slice(0, newline);
+          wrapperControl = wrapperControl.slice(newline + 1);
+          try {
+            const meta = JSON.parse(line);
+            if (meta.type === "identity" && meta.pid === command.pid && /^\d+$/.test(meta.creationTicks || "")) {
+              commandCreationTicks = meta.creationTicks;
+            } else if (meta.type === "result") {
+              commandExitedAtMs = Date.now();
+              if (executionTimer) clearTimeout(executionTimer);
+              reportThenAwaitCleanup({
+                pid: command.pid,
+                status: meta.status ?? null,
+                signal: meta.signal ?? null,
+                errorCode: meta.errorCode,
+                errorMessage: meta.errorMessage
+              });
+            }
+          } catch (error) {
+            reportThenAwaitCleanup({
+              pid: command.pid,
+              status: null,
+              signal: null,
+              errorCode: "SUPERVISOR_FAILED",
+              errorMessage: error && error.message ? error.message : String(error)
+            });
+          }
+          newline = wrapperControl.indexOf("\n");
+        }
+      });
+      command.stdio[4].end(JSON.stringify(request));
+    }
+  } catch (error) {
+    commandLaunchFailed = true;
+    reportThenAwaitCleanup({
+      status: null,
+      signal: null,
+      errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+      errorMessage: error && error.message ? error.message : String(error)
+    });
+    return;
+  }
+  executionTimer = setTimeout(() => {
+    reportThenAwaitCleanup({
+      pid: command.pid,
+      status: null,
+      signal: null,
+      errorCode: "ETIMEDOUT",
+      errorMessage: "process timed out after " + request.timeoutMs + "ms"
+    });
+  }, request.timeoutMs);
+  command.once("error", (error) => {
+    if (!Number.isInteger(command.pid)) commandLaunchFailed = true;
+    reportThenAwaitCleanup({
+      pid: command.pid,
+      status: null,
+      signal: null,
+      errorCode: error && error.code ? error.code : "SPAWN_ERROR",
+      errorMessage: error && error.message ? error.message : String(error)
+    });
+  });
+  command.once("exit", (status, signal) => {
+    if (process.platform === "win32" && !reported) {
+      reportThenAwaitCleanup({
+        pid: command.pid,
+        status: null,
+        signal,
+        errorCode: "SUPERVISOR_FAILED",
+        errorMessage: "Windows command wrapper exited before reporting a result"
+      });
+      return;
+    }
+    commandExitedAtMs = Date.now();
+    if (executionTimer) clearTimeout(executionTimer);
+    reportThenAwaitCleanup({
+      pid: command.pid,
+      status,
+      signal,
+      commandExited: true
+    });
+  });
+  if (process.platform !== "win32") {
+    refreshDetachedDescendants();
+    ancestryTracker = setInterval(refreshDetachedDescendants, 250);
+  }
+}
+
+process.stdin.setEncoding("utf-8");
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+  let newline = input.indexOf("\n");
+  while (newline >= 0) {
+    const line = input.slice(0, newline);
+    input = input.slice(newline + 1);
+    if (command !== undefined) {
+      if (line === "kill") killOwnedTree();
+    } else {
+      try {
+        launch(JSON.parse(line));
+      } catch (error) {
+        reportThenAwaitCleanup({
+          status: null,
+          signal: null,
+          errorCode: "SUPERVISOR_FAILED",
+          errorMessage: error && error.message ? error.message : String(error)
+        });
+      }
+    }
+    newline = input.indexOf("\n");
+  }
+});
+process.stdin.on("end", killOwnedTree);
+process.stdin.on("error", killOwnedTree);
+process.stdin.resume();
+`;
+
 const LIVE_STEP_PROCESS_GROUP_HELPER = String.raw`
 const fs = require("node:fs");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
+const COMMAND_WRAPPER = ${JSON.stringify(LIVE_STEP_COMMAND_WRAPPER)};
 const [requestPath, metaPath, stdoutPath, stderrPath] = process.argv.slice(1);
 const request = JSON.parse(fs.readFileSync(requestPath, "utf-8"));
 let child;
 let finished = false;
+let cleanupResult;
+let commandStartedAtMs = 0;
+let commandExitedAtMs = 0;
+let commandCreationTicks;
 const state = {
   stdoutBytes: 0,
   stderrBytes: 0,
   errorCode: undefined,
   errorMessage: undefined
 };
+const ownershipMarker = "MOMENTUM_PROCESS_TREE_TOKEN=" + request.env.MOMENTUM_PROCESS_TREE_TOKEN;
+function ownedPosixPids() {
+  if (process.platform === "linux") {
+    try {
+      return fs.readdirSync("/proc")
+        .filter((entry) => /^\d+$/.test(entry))
+        .map(Number)
+        .filter((pid) => {
+          try {
+            const state = fs.readFileSync("/proc/" + pid + "/stat", "utf-8").split(" ")[2];
+            if (state === "Z") return false;
+            return fs.readFileSync("/proc/" + pid + "/environ", "utf-8").split("\0").includes(ownershipMarker);
+          } catch { return false; }
+        });
+    } catch { return undefined; }
+  }
+  const result = spawnSync("ps", ["eww", "-axo", "pid=,state=,command="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.split("\n")
+    .filter((line) => line.includes(ownershipMarker))
+    .map((line) => /^\s*(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && !match[2]?.startsWith("Z"))
+    .map((match) => Number(match[1]))
+    .filter((pid) => Number.isInteger(pid));
+}
+function posixGroupPids(processGroupId) {
+  const result = spawnSync("ps", ["-eo", "pid=,pgid=,state="], {
+    encoding: "utf-8",
+    timeout: 1000,
+    maxBuffer: 4 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  if (result.error || result.status !== 0) return undefined;
+  return result.stdout.split("\n")
+    .map((line) => /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line))
+    .filter((match) => match !== null && Number(match[2]) === processGroupId && !match[3]?.startsWith("Z"))
+    .map((match) => Number(match[1]))
+    .filter((pid) => Number.isInteger(pid));
+}
 function writeMeta(status, signal) {
   fs.writeFileSync(metaPath, JSON.stringify({
     pid: child && child.pid,
@@ -883,12 +2567,112 @@ function writeMeta(status, signal) {
     errorMessage: state.errorMessage
   }));
 }
-function killTree() {
-  if (!child || child.pid === undefined) return;
-  if (process.platform !== "win32") {
-    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+function killTree(commandExited = false, commandStatus = null, commandSignal = null) {
+  if (cleanupResult !== undefined) return cleanupResult;
+  if (!child || child.pid === undefined) {
+    cleanupResult = true;
+    return cleanupResult;
   }
-  try { child.kill("SIGKILL"); } catch {}
+  if (process.platform !== "win32") {
+    try { child.stdin.write("kill\n"); } catch {}
+    let stablePasses = 0;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && stablePasses < 2) {
+      const owned = ownedPosixPids();
+      const group = posixGroupPids(child.pid);
+      if (!owned || !group) break;
+      for (const pid of owned) {
+        try { process.kill(pid, "SIGKILL"); } catch {}
+      }
+      stablePasses = owned.length === 0 && group.length === 0 ? stablePasses + 1 : 0;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    try { child.kill("SIGKILL"); } catch {}
+    cleanupResult = stablePasses >= 2;
+    if (!cleanupResult) {
+      state.errorCode = "SUPERVISOR_FAILED";
+      state.errorMessage = "ownership-checked POSIX process-tree cleanup failed";
+      writeMeta(commandStatus, commandSignal);
+    }
+    return cleanupResult;
+  }
+  if (!/^\d+$/.test(commandCreationTicks || "") || (commandExited && commandExitedAtMs < commandStartedAtMs)) {
+    cleanupResult = false;
+    try { child.kill("SIGKILL"); } catch {}
+    state.errorCode = "SUPERVISOR_FAILED";
+    state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
+    writeMeta(commandStatus, commandSignal);
+    return cleanupResult;
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$selfPid = $PID",
+    "$rootPid = " + process.pid,
+    "$commandPid = " + child.pid,
+    "$commandCreationTicks = [long]" + commandCreationTicks,
+    "$commandExited = $" + commandExited,
+    "$commandStartedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandStartedAtMs + ").UtcDateTime.Ticks",
+    "$commandExitedAtTicks = [DateTimeOffset]::FromUnixTimeMilliseconds(" + commandExitedAtMs + ").UtcDateTime.Ticks",
+    "$identities = [System.Collections.Generic.Dictionary[int,long]]::new()",
+    "$root = Get-CimInstance Win32_Process -Filter (\"ProcessId = \" + $rootPid)",
+    "if ($null -eq $root) { exit 1 }",
+    "$identities[$rootPid] = [long]$root.CreationDate.ToUniversalTime().Ticks",
+    "$identities[$commandPid] = $commandCreationTicks",
+    "$stablePasses = 0",
+    "$watch = [System.Diagnostics.Stopwatch]::StartNew()",
+    "while ($watch.ElapsedMilliseconds -lt 2500 -and $stablePasses -lt 2) {",
+    "  $processes = @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ ProcessId = [int]$_.ProcessId; ParentProcessId = [int]$_.ParentProcessId; CreationTicks = [long]$_.CreationDate.ToUniversalTime().Ticks } })",
+    "  $byPid = @{}",
+    "  foreach ($item in $processes) { $byPid[$item.ProcessId] = $item }",
+    "  foreach ($knownPid in @($identities.Keys)) {",
+    "    $current = $byPid[$knownPid]",
+    "    if ($knownPid -eq $commandPid -and -not $commandExited -and $null -eq $current) { exit 1 }",
+    "    if ($null -eq $current) { continue }",
+    "    $expected = [long]$identities[$knownPid]",
+    "    if ($expected -gt 0 -and $current.CreationTicks -ne $expected) { exit 1 }",
+    "  }",
+    "  $added = $false",
+    "  do {",
+    "    $passAdded = $false",
+    "    foreach ($item in $processes) {",
+    "      if ($item.ProcessId -eq $selfPid -or -not $identities.ContainsKey($item.ParentProcessId)) { continue }",
+    "      if ($item.ParentProcessId -eq $commandPid -and $commandExited -and $item.CreationTicks -gt $commandExitedAtTicks) { continue }",
+    "      $parentIdentity = [Math]::Abs([long]$identities[$item.ParentProcessId])",
+    "      if ($item.CreationTicks -lt $parentIdentity) { continue }",
+    "      if ($identities.ContainsKey($item.ProcessId)) {",
+    "        $expected = [long]$identities[$item.ProcessId]",
+    "        if ($expected -gt 0 -and $item.CreationTicks -ne $expected) { exit 1 }",
+    "      } else {",
+    "        $identities[$item.ProcessId] = $item.CreationTicks",
+    "        $passAdded = $true",
+    "        $added = $true",
+    "      }",
+    "    }",
+    "  } while ($passAdded)",
+    "  $targets = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and $byPid.ContainsKey($_) -and [long]$identities[$_] -eq [long]$byPid[$_].CreationTicks })",
+    "  [array]::Reverse($targets)",
+    "  $targets | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+    "  Start-Sleep -Milliseconds 50",
+    "  $alive = @($identities.Keys | Where-Object { $_ -ne $rootPid -and $_ -ne $selfPid -and (Get-Process -Id $_ -ErrorAction SilentlyContinue) })",
+    "  if ($alive.Count -eq 0 -and -not $added) { $stablePasses += 1 } else { $stablePasses = 0 }",
+    "}",
+    "if ($stablePasses -ge 2) { exit 0 } else { exit 1 }"
+  ].join("\n");
+  const cleanup = spawnSync("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], {
+    timeout: 3000,
+    stdio: "ignore"
+  });
+  cleanupResult = cleanup.status === 0 && !cleanup.error;
+  if (!cleanupResult) {
+    // Cleanup proof is a safety precondition for settlement, even when the
+    // command exited successfully. Retain its outcome for diagnostics without
+    // converting an unverified tree into a successful step.
+    state.errorCode = "SUPERVISOR_FAILED";
+    state.errorMessage = "ownership-checked Windows process-tree cleanup failed";
+    writeMeta(commandStatus, commandSignal);
+    process.exit(0);
+  }
+  return cleanupResult;
 }
 function onData(filePath, field) {
   return (chunk) => {
@@ -904,11 +2688,12 @@ function onData(filePath, field) {
   };
 }
 try {
-  child = spawn(request.command, request.args, {
+  commandStartedAtMs = Date.now();
+  child = spawn(process.execPath, ["-e", COMMAND_WRAPPER], {
     cwd: request.cwd,
-    env: request.env,
+    env: process.platform === "win32" ? process.env : request.env,
     detached: process.platform !== "win32",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"]
   });
 } catch (error) {
   state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
@@ -918,11 +2703,63 @@ try {
 }
 child.stdout.on("data", onData(stdoutPath, "stdoutBytes"));
 child.stderr.on("data", onData(stderrPath, "stderrBytes"));
+{
+  let wrapperControl = "";
+  child.stdio[3].setEncoding("utf-8");
+  child.stdio[3].on("data", (chunk) => {
+    wrapperControl += chunk;
+    let newline = wrapperControl.indexOf("\n");
+    while (newline >= 0) {
+      const line = wrapperControl.slice(0, newline);
+      wrapperControl = wrapperControl.slice(newline + 1);
+      try {
+        const meta = JSON.parse(line);
+        if (meta.type === "identity" && meta.pid === child.pid && /^\d+$/.test(meta.creationTicks || "")) {
+          commandCreationTicks = meta.creationTicks;
+        } else if (meta.type === "result" && !finished) {
+          finished = true;
+          commandExitedAtMs = Date.now();
+          clearTimeout(timer);
+          if (meta.errorCode !== undefined && state.errorCode === undefined) {
+            state.errorCode = meta.errorCode;
+            state.errorMessage = meta.errorMessage;
+          }
+          killTree(false, meta.status ?? null, meta.signal ?? null);
+          writeMeta(meta.status ?? null, meta.signal ?? null);
+          process.exit(0);
+        }
+      } catch (error) {
+        if (state.errorCode === undefined) {
+          state.errorCode = "SUPERVISOR_FAILED";
+          state.errorMessage = error && error.message ? error.message : String(error);
+        }
+        killTree();
+      }
+      newline = wrapperControl.indexOf("\n");
+    }
+  });
+  child.stdio[4].end(JSON.stringify(request));
+}
 child.on("error", (error) => {
   if (state.errorCode === undefined) {
     state.errorCode = error && error.code ? error.code : "SPAWN_ERROR";
     state.errorMessage = error && error.message ? error.message : String(error);
   }
+});
+child.on("exit", (status, signal) => {
+  if (process.platform === "win32") {
+    if (!finished) {
+      finished = true;
+      if (state.errorCode === undefined) {
+        state.errorCode = "SUPERVISOR_FAILED";
+        state.errorMessage = "Windows command wrapper exited before reporting a result";
+      }
+      writeMeta(null, signal);
+    }
+    return;
+  }
+  commandExitedAtMs = Date.now();
+  killTree(true, status, signal);
 });
 const timer = setTimeout(() => {
   if (state.errorCode === undefined) {
@@ -933,20 +2770,21 @@ const timer = setTimeout(() => {
 }, request.timeoutMs);
 child.on("close", (status, signal) => {
   if (finished) return;
+  if (process.platform === "win32") return;
   finished = true;
   clearTimeout(timer);
-  killTree();
+  killTree(true, status, signal);
   writeMeta(status, signal);
 });
 `;
 
 function checkRuntimeAvailability(
-  command: string
+  command: string,
 ): { ok: true } | { ok: false; error: string } {
   if (!path.isAbsolute(command)) {
     return {
       ok: false,
-      error: `live step runtime ${command} must be an absolute executable path.`
+      error: `live step runtime ${command} must be an absolute executable path.`,
     };
   }
   try {
@@ -954,7 +2792,7 @@ function checkRuntimeAvailability(
     if (!stat.isFile()) {
       return {
         ok: false,
-        error: `live step runtime ${command} exists but is not a regular file.`
+        error: `live step runtime ${command} exists but is not a regular file.`,
       };
     }
     return { ok: true };
@@ -962,20 +2800,20 @@ function checkRuntimeAvailability(
     if (errnoCode(error) === "ENOENT") {
       return {
         ok: false,
-        error: `live step runtime ${command} is not installed at the configured path.`
+        error: `live step runtime ${command} is not installed at the configured path.`,
       };
     }
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `live step runtime ${command} is not accessible: ${detail}`
+      error: `live step runtime ${command} is not accessible: ${detail}`,
     };
   }
 }
 
 function resolveResultJsonPath(
   iterationDir: string,
-  resultFile: string
+  resultFile: string,
 ): { ok: true; path: string } | { ok: false; error: string } {
   const base = path.resolve(iterationDir);
   const resolved = path.resolve(base, resultFile);
@@ -991,7 +2829,7 @@ function resolveResultJsonPath(
     return {
       ok: false,
       error:
-        "live step result_file must resolve inside the iteration artifact directory."
+        "live step result_file must resolve inside the iteration artifact directory.",
     };
   }
   return { ok: true, path: resolved };
@@ -999,7 +2837,7 @@ function resolveResultJsonPath(
 
 function validateResultPathContainment(
   iterationDir: string,
-  resultJsonPath: string
+  resultJsonPath: string,
 ): { ok: true } | { ok: false; error: string } {
   let baseReal: string;
   try {
@@ -1008,7 +2846,7 @@ function validateResultPathContainment(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `live step result_file base directory is not accessible: ${detail}`
+      error: `live step result_file base directory is not accessible: ${detail}`,
     };
   }
 
@@ -1025,7 +2863,7 @@ function validateResultPathContainment(
             ok: false,
             error:
               "live step result_file parent directory does not exist inside " +
-              "the iteration artifact directory."
+              "the iteration artifact directory.",
           };
         }
         existing = parent;
@@ -1034,7 +2872,7 @@ function validateResultPathContainment(
       const detail = error instanceof Error ? error.message : "unknown error";
       return {
         ok: false,
-        error: `live step result_file parent directory is not accessible: ${detail}`
+        error: `live step result_file parent directory is not accessible: ${detail}`,
       };
     }
 
@@ -1042,7 +2880,7 @@ function validateResultPathContainment(
       return {
         ok: false,
         error:
-          "live step result_file must not traverse a symlink or non-directory parent."
+          "live step result_file must not traverse a symlink or non-directory parent.",
       };
     }
 
@@ -1053,7 +2891,7 @@ function validateResultPathContainment(
       const detail = error instanceof Error ? error.message : "unknown error";
       return {
         ok: false,
-        error: `live step result_file parent directory is not accessible: ${detail}`
+        error: `live step result_file parent directory is not accessible: ${detail}`,
       };
     }
 
@@ -1066,21 +2904,24 @@ function validateResultPathContainment(
       return {
         ok: false,
         error:
-          "live step result_file must remain inside the iteration artifact directory."
+          "live step result_file must remain inside the iteration artifact directory.",
       };
     }
     return { ok: true };
   }
 }
 
-function resolveCwd(config: LiveWrapperConfig, input: LiveStepWrapperInput): string {
+function resolveCwd(
+  config: LiveWrapperConfig,
+  input: LiveStepWrapperInput,
+): string {
   return config.cwd === "iteration" ? input.iterationDir : input.repoPath;
 }
 
 function resolveEnv(
   config: LiveWrapperConfig,
   input: LiveStepWrapperInput,
-  resultJsonPath: string
+  resultJsonPath: string,
 ): NodeJS.ProcessEnv {
   const source = input.env ?? process.env;
   const env: NodeJS.ProcessEnv = {};
@@ -1126,7 +2967,7 @@ function formatProbeCommand(probe: LiveWrapperProbeConfig): string {
 function writeLog(
   handle: number,
   label: "stdout" | "stderr" | "probe stdout" | "probe stderr",
-  chunk: unknown
+  chunk: unknown,
 ): void {
   if (typeof chunk !== "string" || chunk.length === 0) return;
   writeLine(handle, `[live-step] ${label}:`);
@@ -1136,6 +2977,18 @@ function writeLog(
   }
 }
 
+function writeSupervisorFailureOutput(
+  handle: number,
+  error: unknown,
+  stdoutLabel: "stdout" | "probe stdout",
+  stderrLabel: "stderr" | "probe stderr",
+): void {
+  if (typeof error !== "object" || error === null) return;
+  const output = error as { stdout?: unknown; stderr?: unknown };
+  writeLog(handle, stdoutLabel, output.stdout);
+  writeLog(handle, stderrLabel, output.stderr);
+}
+
 function writeLine(handle: number, line: string): void {
   fs.writeSync(handle, `${line}\n`);
 }
@@ -1143,16 +2996,16 @@ function writeLine(handle: number, line: string): void {
 function clearResultFile(
   logHandle: number,
   resultJsonPath: string,
-  iterationDir: string
+  iterationDir: string,
 ): { ok: true } | { ok: false; error: string } {
   const pathSafety = validateResultPathContainment(
     iterationDir,
-    resultJsonPath
+    resultJsonPath,
   );
   if (!pathSafety.ok) {
     writeLine(
       logHandle,
-      `[live-step] result_clear_failed: ${pathSafety.error}`
+      `[live-step] result_clear_failed: ${pathSafety.error}`,
     );
     writeLine(logHandle, "[live-step] summary: result file invalid");
     return { ok: false, error: pathSafety.error };
@@ -1168,7 +3021,7 @@ function clearResultFile(
     writeLine(logHandle, "[live-step] summary: result file invalid");
     return {
       ok: false,
-      error: `live step result file at ${resultJsonPath} could not be cleared before execution: ${detail}`
+      error: `live step result file at ${resultJsonPath} could not be cleared before execution: ${detail}`,
     };
   }
 }
@@ -1176,13 +3029,13 @@ function clearResultFile(
 function readResultFile(
   logHandle: number,
   resultJsonPath: string,
-  iterationDir: string
+  iterationDir: string,
 ):
   | { ok: true; raw: string }
   | { ok: false; code: "result_missing" | "result_invalid"; error: string } {
   const pathSafety = validateResultPathContainment(
     iterationDir,
-    resultJsonPath
+    resultJsonPath,
   );
   if (!pathSafety.ok) {
     writeLine(logHandle, `[live-step] result_invalid: ${pathSafety.error}`);
@@ -1190,7 +3043,7 @@ function readResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: pathSafety.error
+      error: pathSafety.error,
     };
   }
   let stat: fs.Stats;
@@ -1204,7 +3057,7 @@ function readResultFile(
       return {
         ok: false,
         code: "result_missing",
-        error: `live step result file was not written at ${resultJsonPath}.`
+        error: `live step result file was not written at ${resultJsonPath}.`,
       };
     }
     writeLine(logHandle, `[live-step] result_unreadable: ${detail}`);
@@ -1212,7 +3065,7 @@ function readResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultJsonPath} is unreadable: ${detail}`
+      error: `live step result file at ${resultJsonPath} is unreadable: ${detail}`,
     };
   }
 
@@ -1222,20 +3075,20 @@ function readResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultJsonPath} is not a regular file.`
+      error: `live step result file at ${resultJsonPath} is not a regular file.`,
     };
   }
 
   if (stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
     writeLine(
       logHandle,
-      `[live-step] result_too_large: ${stat.size} bytes exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES}`
+      `[live-step] result_too_large: ${stat.size} bytes exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES}`,
     );
     writeLine(logHandle, "[live-step] summary: result file too large");
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultJsonPath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`
+      error: `live step result file at ${resultJsonPath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
     };
   }
 
@@ -1248,7 +3101,7 @@ function readResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultJsonPath} is unreadable: ${detail}`
+      error: `live step result file at ${resultJsonPath} is unreadable: ${detail}`,
     };
   }
 }
@@ -1258,17 +3111,25 @@ function errnoCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
 }
 
+function throwProcessCancellation(
+  result: SpawnSyncReturns<string>,
+  signal: AbortSignal,
+): never {
+  if (signal.aborted) signal.throwIfAborted();
+  throw result.error ?? spawnError("ABORT_ERR", "process cancelled");
+}
+
 function wrapperError(
   executorLogPath: string,
   resultJsonPath: string | undefined,
   code: LiveStepWrapperRecoveryCode,
-  error: string
+  error: string,
 ): LiveStepWrapperError {
   return { ok: false, code, error, resultJsonPath, executorLogPath };
 }
 
 function isCodingWorkflowWrapperInvocation(config: LiveWrapperConfig): boolean {
   return config.args.some((arg) =>
-    arg.includes("coding-workflow-live-wrapper-cli")
+    arg.includes("coding-workflow-live-wrapper-cli"),
   );
 }

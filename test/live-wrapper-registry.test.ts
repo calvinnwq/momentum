@@ -6,7 +6,7 @@ import {
   listConfiguredLiveWrapperKinds,
   parseLiveWrapperConfig,
   parseLiveWrapperProfile,
-  resolveLiveWrapper
+  resolveLiveWrapper,
 } from "../src/adapters/live-wrapper-registry.js";
 
 const validWrapper = {
@@ -19,8 +19,8 @@ const validWrapper = {
   probe: {
     command: "/usr/bin/gnhf-probe",
     args: ["--check"],
-    timeout_sec: 15
-  }
+    timeout_sec: 15,
+  },
 };
 
 function clone<T>(value: T): T {
@@ -57,7 +57,7 @@ describe("parseLiveWrapperConfig shape", () => {
     expect(result.config.probe).toEqual({
       command: "/usr/bin/gnhf-probe",
       args: ["--check"],
-      timeoutSec: 15
+      timeoutSec: 15,
     });
   });
 
@@ -83,7 +83,7 @@ describe("parseLiveWrapperConfig shape", () => {
       ...clone(validWrapper),
       timeoutSec: 1,
       envAllow: ["IGNORED"],
-      resultFile: "ignored.json"
+      resultFile: "ignored.json",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -119,7 +119,10 @@ describe("parseLiveWrapperConfig command", () => {
   });
 
   it("rejects an empty command", () => {
-    const result = parseLiveWrapperConfig({ ...clone(validWrapper), command: "   " });
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      command: "   ",
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
@@ -128,7 +131,7 @@ describe("parseLiveWrapperConfig command", () => {
   it("rejects a relative command path", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      command: "gnhf-runner"
+      command: "gnhf-runner",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -139,7 +142,7 @@ describe("parseLiveWrapperConfig command", () => {
   it("trims surrounding whitespace from an absolute command", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      command: "  /usr/bin/gnhf-runner  "
+      command: "  /usr/bin/gnhf-runner  ",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -161,7 +164,7 @@ describe("parseLiveWrapperConfig args", () => {
   it("coerces numeric argv entries to strings", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      args: ["--iteration", 7]
+      args: ["--iteration", 7],
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -169,7 +172,10 @@ describe("parseLiveWrapperConfig args", () => {
   });
 
   it("rejects a non-array args", () => {
-    const result = parseLiveWrapperConfig({ ...clone(validWrapper), args: "x" });
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      args: "x",
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
@@ -178,7 +184,7 @@ describe("parseLiveWrapperConfig args", () => {
   it("rejects a non-string/number argv entry", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      args: [{}]
+      args: [{}],
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -200,7 +206,7 @@ describe("parseLiveWrapperConfig cwd", () => {
   it("accepts cwd iteration", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      cwd: "iteration"
+      cwd: "iteration",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -208,7 +214,10 @@ describe("parseLiveWrapperConfig cwd", () => {
   });
 
   it("rejects an unknown cwd value", () => {
-    const result = parseLiveWrapperConfig({ ...clone(validWrapper), cwd: "home" });
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      cwd: "home",
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
@@ -227,7 +236,10 @@ describe("parseLiveWrapperConfig timeout_sec", () => {
   });
 
   it("rejects a non-positive timeout_sec", () => {
-    const result = parseLiveWrapperConfig({ ...clone(validWrapper), timeout_sec: 0 });
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      timeout_sec: 0,
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
@@ -236,11 +248,22 @@ describe("parseLiveWrapperConfig timeout_sec", () => {
   it("rejects a fractional timeout_sec", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      timeout_sec: 1.5
+      timeout_sec: 1.5,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
+  });
+
+  it("rejects a timeout_sec above the built-in supervisor limit", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      timeout_sec: 2_147_454,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("must not exceed 2147453 seconds");
   });
 });
 
@@ -258,7 +281,7 @@ describe("parseLiveWrapperConfig env_allow", () => {
   it("rejects a non-array env_allow", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      env_allow: "PATH"
+      env_allow: "PATH",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -268,7 +291,7 @@ describe("parseLiveWrapperConfig env_allow", () => {
   it("rejects an invalid environment variable name", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      env_allow: ["1BAD"]
+      env_allow: ["1BAD"],
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -290,7 +313,7 @@ describe("parseLiveWrapperConfig result_file", () => {
   it("rejects an absolute result_file", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      result_file: "/tmp/result.json"
+      result_file: "/tmp/result.json",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -300,7 +323,7 @@ describe("parseLiveWrapperConfig result_file", () => {
   it("rejects a result_file that escapes the iteration directory", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      result_file: "../escape.json"
+      result_file: "../escape.json",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -311,7 +334,7 @@ describe("parseLiveWrapperConfig result_file", () => {
     for (const resultFile of [".", "./", "nested/..", "nested\\.."]) {
       const result = parseLiveWrapperConfig({
         ...clone(validWrapper),
-        result_file: resultFile
+        result_file: resultFile,
       });
       expect(result.ok, `expected invalid for ${resultFile}`).toBe(false);
       if (result.ok) continue;
@@ -323,7 +346,7 @@ describe("parseLiveWrapperConfig result_file", () => {
   it("accepts a nested relative result_file", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      result_file: "live/result.json"
+      result_file: "live/result.json",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -344,29 +367,43 @@ describe("parseLiveWrapperConfig probe", () => {
   it("defaults the probe timeout when omitted", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      probe: { command: "/usr/bin/gnhf-probe" }
+      probe: { command: "/usr/bin/gnhf-probe" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.probe?.timeoutSec).toBe(
-      DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC
+      DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC,
     );
   });
 
   it("accepts a probe timeoutSec alias during the durable-config transition", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 }
+      probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.probe?.timeoutSec).toBe(20);
   });
 
+  it("rejects a probe timeout above the built-in supervisor limit", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      probe: {
+        command: "/usr/bin/gnhf-probe",
+        timeout_sec: 2_147_454,
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("must not exceed 2147453 seconds");
+  });
+
   it("rejects a probe without a command", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      probe: { args: ["--check"] }
+      probe: { args: ["--check"] },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -376,7 +413,7 @@ describe("parseLiveWrapperConfig probe", () => {
   it("rejects a probe with a relative command path", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      probe: { command: "gnhf-probe" }
+      probe: { command: "gnhf-probe" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -387,7 +424,7 @@ describe("parseLiveWrapperConfig probe", () => {
   it("rejects a non-mapping probe", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      probe: "always"
+      probe: "always",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -419,7 +456,7 @@ describe("parseLiveWrapperProfile", () => {
 
   it("rejects a profile without a name", () => {
     const result = parseLiveWrapperProfile({
-      wrappers: { implementation: clone(validWrapper) }
+      wrappers: { implementation: clone(validWrapper) },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -438,7 +475,7 @@ describe("parseLiveWrapperProfile", () => {
   it("rejects an empty wrappers mapping", () => {
     const result = parseLiveWrapperProfile({
       name: "openclaw-live",
-      wrappers: {}
+      wrappers: {},
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -448,7 +485,7 @@ describe("parseLiveWrapperProfile", () => {
   it("rejects an unknown workflow step kind key", () => {
     const result = parseLiveWrapperProfile({
       name: "openclaw-live",
-      wrappers: { teleport: clone(validWrapper) }
+      wrappers: { teleport: clone(validWrapper) },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -461,7 +498,7 @@ describe("parseLiveWrapperProfile", () => {
     delete broken["command"];
     const result = parseLiveWrapperProfile({
       name: "openclaw-live",
-      wrappers: { implementation: broken }
+      wrappers: { implementation: broken },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -474,18 +511,18 @@ describe("parseLiveWrapperProfile", () => {
       name: "openclaw-live",
       wrappers: {
         implementation: clone(validWrapper),
-        postflight: { ...clone(validWrapper), command: "/usr/bin/postflight" }
-      }
+        postflight: { ...clone(validWrapper), command: "/usr/bin/postflight" },
+      },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profile.name).toBe("openclaw-live");
     expect(result.profile.wrappers.size).toBe(2);
     expect(result.profile.wrappers.get("implementation")?.command).toBe(
-      "/usr/bin/gnhf-runner"
+      "/usr/bin/gnhf-runner",
     );
     expect(result.profile.wrappers.get("postflight")?.command).toBe(
-      "/usr/bin/postflight"
+      "/usr/bin/postflight",
     );
   });
 });
@@ -494,7 +531,7 @@ describe("resolveLiveWrapper", () => {
   const profile = (() => {
     const parsed = parseLiveWrapperProfile({
       name: "openclaw-live",
-      wrappers: { implementation: clone(validWrapper) }
+      wrappers: { implementation: clone(validWrapper) },
     });
     if (!parsed.ok) throw new Error("fixture profile failed to parse");
     return parsed.profile;
@@ -529,14 +566,14 @@ describe("listConfiguredLiveWrapperKinds", () => {
       name: "openclaw-live",
       wrappers: {
         postflight: { ...clone(validWrapper), command: "/usr/bin/postflight" },
-        implementation: clone(validWrapper)
-      }
+        implementation: clone(validWrapper),
+      },
     });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(listConfiguredLiveWrapperKinds(parsed.profile)).toEqual([
       "implementation",
-      "postflight"
+      "postflight",
     ]);
   });
 });
@@ -549,7 +586,7 @@ describe("LIVE_WRAPPER_REFUSAL_CODES", () => {
       "live_wrapper_profile_missing",
       "live_wrapper_profile_invalid",
       "live_wrapper_unsupported_kind",
-      "live_wrapper_not_configured"
+      "live_wrapper_not_configured",
     ]);
   });
 });

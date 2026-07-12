@@ -66,18 +66,19 @@
  *     rather than looping forever or silently failing.
  */
 
-import type {
-  ExecutorArtifactClass,
-  ExecutorArtifactRecord,
-  ExecutorCheckpointRecord,
-  ExecutorCompletionClassification,
-  ExecutorHumanGateType,
-  ExecutorInvocationRecord,
-  ExecutorInvocationState,
-  ExecutorRoundRecord,
-  ExecutorRoundState,
-  ExecutorRoundVerificationResult,
-  WorkflowExecutorFamily
+import {
+  executorInvocationStateForClassification,
+  type ExecutorArtifactClass,
+  type ExecutorArtifactRecord,
+  type ExecutorCheckpointRecord,
+  type ExecutorCompletionClassification,
+  type ExecutorHumanGateType,
+  type ExecutorInvocationRecord,
+  type ExecutorInvocationState,
+  type ExecutorRoundRecord,
+  type ExecutorRoundState,
+  type ExecutorRoundVerificationResult,
+  type WorkflowExecutorFamily,
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
@@ -434,7 +435,7 @@ export const GOAL_LOOP_GLOBAL_DEFAULT_SELECTION: Required<GoalLoopSelectionConfi
     effort: null,
     timeoutMs: null,
     maxRounds: null,
-    policyEnvelope: null
+    policyEnvelope: null,
   };
 
 /**
@@ -449,7 +450,7 @@ const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
   "repo_lock_lost",
   "invalid_input",
   "result_missing",
-  "result_invalid"
+  "result_invalid",
 ]);
 
 /**
@@ -458,7 +459,7 @@ const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
  * `success` flag and `goal_complete` completion recommendation to classify.
  */
 export function goalLoopRecommendationFromResult(
-  result: RunnerResult
+  result: RunnerResult,
 ): GoalLoopRecommendation {
   return { success: result.success, goalComplete: result.goal_complete };
 }
@@ -474,7 +475,7 @@ export function goalLoopRecommendationFromResult(
  * source. Pure: the same layered config always yields the same selection.
  */
 export function resolveGoalLoopRoundSelection(
-  input: ResolveGoalLoopRoundSelectionInput
+  input: ResolveGoalLoopRoundSelectionInput,
 ): GoalLoopRoundSelection {
   // Highest precedence first. The caller's `globalDefault` overrides the built-in
   // floor at the same source level; the built-in floor is always all-defined so
@@ -485,13 +486,13 @@ export function resolveGoalLoopRoundSelection(
     { config: input.repositoryPolicy, source: "repository_policy" },
     {
       config: input.familyDefault ?? GOAL_LOOP_FAMILY_DEFAULT_SELECTION,
-      source: "executor_family_default"
+      source: "executor_family_default",
     },
     { config: input.globalDefault, source: "momentum_global_default" },
     {
       config: GOAL_LOOP_GLOBAL_DEFAULT_SELECTION,
-      source: "momentum_global_default"
-    }
+      source: "momentum_global_default",
+    },
   ];
 
   const agentProvider = resolveSelectionField(levels, (c) => c.agentProvider);
@@ -514,8 +515,8 @@ export function resolveGoalLoopRoundSelection(
       effort: effort.source,
       timeoutMs: timeoutMs.source,
       maxRounds: maxRounds.source,
-      policyEnvelope: policyEnvelope.source
-    }
+      policyEnvelope: policyEnvelope.source,
+    },
   };
 }
 
@@ -531,7 +532,7 @@ export function resolveGoalLoopRoundSelection(
  * round."
  */
 export function planGoalLoopRoundStart(
-  input: PlanGoalLoopRoundStartInput
+  input: PlanGoalLoopRoundStartInput,
 ): ExecutorRoundRecord {
   return {
     roundId: input.roundId,
@@ -562,7 +563,7 @@ export function planGoalLoopRoundStart(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
@@ -578,7 +579,7 @@ export function planGoalLoopRoundStart(
 export function goalLoopInvocationId(
   workflowRunId: string,
   stepRunId: string,
-  attempt: number
+  attempt: number,
 ): string {
   return `${workflowRunId}::${stepRunId}::${GOAL_LOOP_EXECUTOR_FAMILY}::${attempt}`;
 }
@@ -591,7 +592,7 @@ export function goalLoopInvocationId(
  */
 export function goalLoopRoundId(
   invocationId: string,
-  roundIndex: number
+  roundIndex: number,
 ): string {
   return `${invocationId}::round::${roundIndex}`;
 }
@@ -606,13 +607,13 @@ export function goalLoopRoundId(
  * `startedAt`.
  */
 export function planGoalLoopInvocation(
-  input: PlanGoalLoopInvocationInput
+  input: PlanGoalLoopInvocationInput,
 ): ExecutorInvocationRecord {
   return {
     invocationId: goalLoopInvocationId(
       input.workflowRunId,
       input.stepRunId,
-      input.attempt
+      input.attempt,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
@@ -622,7 +623,7 @@ export function planGoalLoopInvocation(
     attempt: input.attempt,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
@@ -637,7 +638,7 @@ export function planGoalLoopInvocation(
  * identity. This is the round-identity half of the adapter "below `StepRun`".
  */
 export function planGoalLoopRoundStartForInvocation(
-  input: PlanGoalLoopRoundStartForInvocationInput
+  input: PlanGoalLoopRoundStartForInvocationInput,
 ): PlanGoalLoopRoundStartInput {
   const { invocation, runtime } = input;
   return {
@@ -652,7 +653,7 @@ export function planGoalLoopRoundStartForInvocation(
     inputDigest: runtime.inputDigest,
     artifactRoot: runtime.artifactRoot,
     ...(runtime.logPaths !== undefined ? { logPaths: runtime.logPaths } : {}),
-    startedAt: input.startedAt
+    startedAt: input.startedAt,
   };
 }
 
@@ -664,12 +665,12 @@ export function planGoalLoopRoundStartForInvocation(
  * otherwise the verdict is `null`.
  */
 export function goalLoopFinalizeEvidenceFromResult(
-  result: FinalizeWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult,
 ): GoalLoopFinalizeEvidence {
   return {
     outcome: result.outcome,
     commitSha: result.outcome === "committed" ? result.commit.commitSha : null,
-    verificationStatus: verificationStatusFromResult(result)
+    verificationStatus: verificationStatusFromResult(result),
   };
 }
 
@@ -686,7 +687,7 @@ export function goalLoopFinalizeEvidenceFromResult(
  * stable and reattachable. Pure: no SQLite, no file system.
  */
 export function planGoalLoopRoundArtifacts(
-  input: PlanGoalLoopRoundArtifactsInput
+  input: PlanGoalLoopRoundArtifactsInput,
 ): ExecutorArtifactRecord[] {
   const { roundId, logPaths } = input;
   const artifacts = input.artifacts ?? {};
@@ -696,7 +697,11 @@ export function planGoalLoopRoundArtifacts(
   // verification, commit/reset, recovery.
   if (artifacts.resultDocument != null) {
     records.push(
-      goalLoopArtifactRecord(roundId, "result_document", artifacts.resultDocument)
+      goalLoopArtifactRecord(
+        roundId,
+        "result_document",
+        artifacts.resultDocument,
+      ),
     );
   }
   logPaths.forEach((path, index) => {
@@ -707,8 +712,8 @@ export function planGoalLoopRoundArtifacts(
       goalLoopArtifactRecord(
         roundId,
         "checkpoint_stream",
-        artifacts.checkpointStream
-      )
+        artifacts.checkpointStream,
+      ),
     );
   }
   if (artifacts.verificationOutput != null) {
@@ -716,8 +721,8 @@ export function planGoalLoopRoundArtifacts(
       goalLoopArtifactRecord(
         roundId,
         "verification_output",
-        artifacts.verificationOutput
-      )
+        artifacts.verificationOutput,
+      ),
     );
   }
   if (artifacts.commitOrResetEvidence != null) {
@@ -725,13 +730,13 @@ export function planGoalLoopRoundArtifacts(
       goalLoopArtifactRecord(
         roundId,
         "commit_or_reset_evidence",
-        artifacts.commitOrResetEvidence
-      )
+        artifacts.commitOrResetEvidence,
+      ),
     );
   }
   if (artifacts.recoveryNote != null) {
     records.push(
-      goalLoopArtifactRecord(roundId, "recovery_note", artifacts.recoveryNote)
+      goalLoopArtifactRecord(roundId, "recovery_note", artifacts.recoveryNote),
     );
   }
   return records;
@@ -756,7 +761,7 @@ export function planGoalLoopRoundArtifacts(
  * holds. Pure: no SQLite, no file system.
  */
 export function planGoalLoopRoundCheckpoints(
-  input: PlanGoalLoopRoundCheckpointsInput
+  input: PlanGoalLoopRoundCheckpointsInput,
 ): ExecutorCheckpointRecord[] {
   const { roundId } = input;
   const records: ExecutorCheckpointRecord[] = [];
@@ -767,7 +772,7 @@ export function planGoalLoopRoundCheckpoints(
       roundId,
       sequence,
       stage,
-      detail
+      detail,
     });
   };
 
@@ -776,7 +781,10 @@ export function planGoalLoopRoundCheckpoints(
   // (steps 9-10). A round that produced no result skips `result_captured` — it
   // routed straight from running to manual recovery.
   checkpoint("round_started", null);
-  checkpoint("mechanism_completed", `finalize outcome: ${input.finalizeOutcome}`);
+  checkpoint(
+    "mechanism_completed",
+    `finalize outcome: ${input.finalizeOutcome}`,
+  );
   if (input.capturedResult) {
     checkpoint("result_captured", null);
   }
@@ -795,7 +803,7 @@ export function planGoalLoopRoundCheckpoints(
  * {@link decideGoalLoopRound}).
  */
 export function planGoalLoopRoundPersistence(
-  input: PlanGoalLoopRoundPersistenceInput
+  input: PlanGoalLoopRoundPersistenceInput,
 ): GoalLoopRoundPersistencePlan {
   // A missing/invalid result has no recommendation to project; the finalize
   // outcome is unsafe in that case, so the decision ignores the recommendation
@@ -809,7 +817,7 @@ export function planGoalLoopRoundPersistence(
     finalizeOutcome: input.finalize.outcome,
     finalizeRecoveryCode: recoveryCodeFromFinalizeResult(input.finalize),
     roundIndex: input.roundIndex,
-    maxRounds: input.maxRounds
+    maxRounds: input.maxRounds,
   });
   const evidence = goalLoopFinalizeEvidenceFromResult(input.finalize);
   const verificationResults = verificationResultsFromFinalize(input.finalize);
@@ -827,14 +835,14 @@ export function planGoalLoopRoundPersistence(
           // round-start record's null rather than overwriting it.
           ...(input.resultDigest != null
             ? { resultDigest: input.resultDigest }
-            : {})
+            : {}),
         };
   const terminalUpdate: ExecutorRoundUpdate = {
     toState: decision.roundState,
     classification: decision.classification,
     executorRecommendation: completionRecommendationFromResult(
       input.result,
-      decision.classification
+      decision.classification,
     ),
     verificationStatus: evidence.verificationStatus,
     ...(verificationResults.length > 0 ? { verificationResults } : {}),
@@ -847,14 +855,14 @@ export function planGoalLoopRoundPersistence(
     // construction a non-empty list only accompanies a committed outcome.
     ...(input.changedFiles != null && input.changedFiles.length > 0
       ? { changedFiles: input.changedFiles }
-      : {})
+      : {}),
   };
   return { decision, evidence, captureUpdate, terminalUpdate };
 }
 
 function completionRecommendationFromResult(
   result: RunnerResult | null,
-  fallback: ExecutorCompletionClassification
+  fallback: ExecutorCompletionClassification,
 ): ExecutorCompletionClassification {
   if (result === null) return fallback;
   if (!result.success) return "failed";
@@ -862,7 +870,7 @@ function completionRecommendationFromResult(
 }
 
 function verificationResultsFromFinalize(
-  result: FinalizeWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult,
 ): ExecutorRoundVerificationResult[] {
   const verification =
     "verification" in result ? result.verification : undefined;
@@ -871,7 +879,7 @@ function verificationResultsFromFinalize(
     command: commandResult.command,
     exitCode: commandResult.exit_code,
     durationMs: commandResult.duration_ms,
-    timedOut: commandResult.timed_out
+    timedOut: commandResult.timed_out,
   }));
 }
 
@@ -883,7 +891,7 @@ function verificationResultsFromFinalize(
  * is neither null nor a positive integer.
  */
 export function decideGoalLoopRound(
-  input: DecideGoalLoopRoundInput
+  input: DecideGoalLoopRoundInput,
 ): GoalLoopRoundDecision {
   validateInput(input);
   const { recommendation, finalizeOutcome, roundIndex, maxRounds } = input;
@@ -901,7 +909,7 @@ export function decideGoalLoopRound(
       recoveryCode,
       humanGate: "manual_recovery_required",
       continueLoop: false,
-      reason: `goal-loop round finalize outcome ${finalizeOutcome} (${recoveryCode}) requires manual recovery before any further round`
+      reason: `goal-loop round finalize outcome ${finalizeOutcome} (${recoveryCode}) requires manual recovery before any further round`,
     };
   }
 
@@ -918,13 +926,13 @@ export function decideGoalLoopRound(
         recoveryCode: null,
         humanGate: null,
         continueLoop: false,
-        reason: "goal-loop round committed and recommended completion"
+        reason: "goal-loop round committed and recommended completion",
       };
     }
     return continueOrExhaust({
       roundState: "succeeded",
       budgetRemains,
-      committed: true
+      committed: true,
     });
   }
 
@@ -935,7 +943,7 @@ export function decideGoalLoopRound(
   return continueOrExhaust({
     roundState: "failed",
     budgetRemains,
-    committed: false
+    committed: false,
   });
 }
 
@@ -946,25 +954,9 @@ export function decideGoalLoopRound(
  * orchestrator when it transitions the `executor_invocations` row after a round.
  */
 export function invocationStateForRoundClassification(
-  classification: ExecutorCompletionClassification
+  classification: ExecutorCompletionClassification,
 ): ExecutorInvocationState {
-  switch (classification) {
-    case "complete":
-      return "succeeded";
-    case "continue":
-      return "running";
-    case "approval_required":
-    case "operator_decision_required":
-      return "waiting_operator";
-    case "manual_recovery_required":
-      return "manual_recovery_required";
-    case "blocked":
-      return "blocked";
-    case "failed":
-      return "failed";
-    case "cancelled":
-      return "cancelled";
-  }
+  return executorInvocationStateForClassification(classification);
 }
 
 function continueOrExhaust(input: {
@@ -982,7 +974,7 @@ function continueOrExhaust(input: {
       recoveryCode: null,
       humanGate: null,
       continueLoop: true,
-      reason: `goal-loop round ${progress}; another round remains in budget`
+      reason: `goal-loop round ${progress}; another round remains in budget`,
     };
   }
   return {
@@ -991,7 +983,7 @@ function continueOrExhaust(input: {
     recoveryCode: null,
     humanGate: "quota_exhausted",
     continueLoop: false,
-    reason: `goal-loop round ${progress} and exhausted its round budget; operator decision required`
+    reason: `goal-loop round ${progress} and exhausted its round budget; operator decision required`,
   };
 }
 
@@ -1010,7 +1002,7 @@ type SelectionLevel = {
  */
 function resolveSelectionField<T extends string | number>(
   levels: readonly SelectionLevel[],
-  pick: (config: GoalLoopSelectionConfig) => T | null | undefined
+  pick: (config: GoalLoopSelectionConfig) => T | null | undefined,
 ): { value: T | null; source: GoalLoopSelectionSource } {
   for (const level of levels) {
     if (level.config === undefined) continue;
@@ -1032,7 +1024,7 @@ function recoveryCodeForFinalize(outcome: GoalLoopFinalizeOutcome): string {
 }
 
 function recoveryCodeFromFinalizeResult(
-  result: FinalizeWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (result.outcome) {
     case "manual_recovery_required":
@@ -1058,7 +1050,7 @@ function commitFailureResetFailure(
   result: Extract<
     FinalizeWorkflowStepFromResultFileResult,
     { outcome: "commit_failed" }
-  >
+  >,
 ): Extract<NonNullable<typeof result.reset>, { ok: false }> | null {
   if (result.reset !== undefined && !result.reset.ok) {
     return result.reset;
@@ -1075,7 +1067,7 @@ function goalLoopArtifactRecord(
   roundId: string,
   artifactClass: ExecutorArtifactClass,
   pointer: GoalLoopArtifactPointer,
-  index?: number
+  index?: number,
 ): ExecutorArtifactRecord {
   const suffix =
     index !== undefined ? `${artifactClass}-${index}` : artifactClass;
@@ -1085,7 +1077,7 @@ function goalLoopArtifactRecord(
     artifactClass,
     path: pointer.path,
     digest: pointer.digest ?? null,
-    description: pointer.description ?? null
+    description: pointer.description ?? null,
   };
 }
 
@@ -1098,7 +1090,7 @@ function goalLoopArtifactRecord(
  * problems aborted finalize) carry no verdict.
  */
 function verificationStatusFromResult(
-  result: FinalizeWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult,
 ): GoalLoopVerificationStatus | null {
   switch (result.outcome) {
     case "committed":
@@ -1117,7 +1109,7 @@ function verificationStatusFromResult(
 function validateInput(input: DecideGoalLoopRoundInput): void {
   if (!Number.isInteger(input.roundIndex) || input.roundIndex < 0) {
     throw new Error(
-      `decideGoalLoopRound: roundIndex must be a non-negative integer, got ${String(input.roundIndex)}`
+      `decideGoalLoopRound: roundIndex must be a non-negative integer, got ${String(input.roundIndex)}`,
     );
   }
   if (
@@ -1125,7 +1117,7 @@ function validateInput(input: DecideGoalLoopRoundInput): void {
     (!Number.isInteger(input.maxRounds) || input.maxRounds <= 0)
   ) {
     throw new Error(
-      `decideGoalLoopRound: maxRounds must be null or a positive integer, got ${String(input.maxRounds)}`
+      `decideGoalLoopRound: maxRounds must be null or a positive integer, got ${String(input.maxRounds)}`,
     );
   }
 }

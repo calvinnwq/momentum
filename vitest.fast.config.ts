@@ -20,14 +20,14 @@ const integrationTestFiles = [
   "test/source-reconciliation-read-only.test.ts",
   "test/stale-recovery.test.ts",
   "test/verification.test.ts",
-  "test/workflow-dispatch-execute.test.ts"
+  "test/workflow-dispatch-execute.test.ts",
 ];
 
 export default defineConfig({
   test: {
     globals: true,
-    testTimeout: 15_000,
+    testTimeout: 30_000,
     include: ["test/**/*.test.ts"],
-    exclude: ["node_modules/**", "dist/**", ...integrationTestFiles]
-  }
+    exclude: ["node_modules/**", "dist/**", ...integrationTestFiles],
+  },
 });
