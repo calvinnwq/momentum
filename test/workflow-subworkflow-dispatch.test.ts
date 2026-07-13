@@ -13,7 +13,7 @@ import {
   type AsyncWorkflowStepDispatch,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext,
-  type WorkflowStepDispatchResult
+  type WorkflowStepDispatchResult,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -23,11 +23,11 @@ import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 import {
   createSubworkflowWorkflowDispatch,
-  type DispatchedSubworkflowContextResolution
+  type DispatchedSubworkflowContextResolution,
 } from "../src/core/workflow/dispatch/subworkflow-dispatch.js";
 import type { SubworkflowChildObservation } from "../src/core/workflow/dispatch/subworkflow-run.js";
 import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
@@ -44,7 +44,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  *     invocation; any other family (the live-wrapper / external-apply lanes own
  *     those) is echoed through untouched;
  *   - it only acts on a base dispatch that genuinely started a scaffold
- *     ({@link shouldRunDispatchedExecutor}); a fail-closed base result is echoed
+ *     (the shared dispatch-status predicate); a fail-closed base result is echoed
  *     through without deriving a child runner;
  *   - a refused context derivation parks the parent for manual recovery (the
  *     fail-closed-on-missing-child-config path) instead of throwing and stranding
@@ -92,7 +92,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-497",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -100,17 +100,17 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
 function approveAndClaim(
   db: MomentumDb,
   stepId: string = STEP_ID,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -128,7 +128,7 @@ function subworkflowScaffoldBaseDispatch(): AsyncWorkflowStepDispatch {
     const result = executeWorkflowStepDispatch(claim, context);
     context.db
       .prepare(
-        "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+        "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
       )
       .run(deriveDispatchInvocationId(claim.runId, claim.stepId));
     return result;
@@ -144,7 +144,7 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 function stepStateForRun(
   db: MomentumDb,
   runId: string,
-  stepId: string = STEP_ID
+  stepId: string = STEP_ID,
 ): string {
   const row = getWorkflowStep(db, runId, stepId);
   if (!row) throw new Error(`step ${runId}/${stepId} not found`);
@@ -156,10 +156,12 @@ function invocationState(db: MomentumDb): string | undefined {
     ?.state;
 }
 
-function makeWritableEvidence(root = makeTempDir("momentum-subdisp-evidence-")) {
+function makeWritableEvidence(
+  root = makeTempDir("momentum-subdisp-evidence-"),
+) {
   return {
     executorLogPath: path.join(root, "nested", "subworkflow.log"),
-    resultJsonPath: path.join(root, "nested", "subworkflow.json")
+    resultJsonPath: path.join(root, "nested", "subworkflow.json"),
   };
 }
 
@@ -178,13 +180,13 @@ function countingChildRunner(observation: SubworkflowChildObservation): {
       calls += 1;
       return observation;
     },
-    calls: () => calls
+    calls: () => calls,
   };
 }
 
 function sequencedChildRunner(
   states: readonly WorkflowRunState[],
-  childRunId = CHILD_RUN_ID
+  childRunId = CHILD_RUN_ID,
 ): {
   run: () => Promise<SubworkflowChildObservation>;
   calls: () => number;
@@ -198,14 +200,14 @@ function sequencedChildRunner(
       index += 1;
       return { childRunId, childState };
     },
-    calls: () => calls
+    calls: () => calls,
   };
 }
 
 const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
   db,
   workerId: WORKER,
-  now: DISPATCH_AT
+  now: DISPATCH_AT,
 });
 
 describe("createSubworkflowWorkflowDispatch — family gate", () => {
@@ -220,9 +222,13 @@ describe("createSubworkflowWorkflowDispatch — family gate", () => {
       {
         deriveSubworkflow: () => {
           derives += 1;
-          return { ok: true, runSubworkflowChild: runner.run, evidence: makeWritableEvidence() };
-        }
-      }
+          return {
+            ok: true,
+            runSubworkflowChild: runner.run,
+            evidence: makeWritableEvidence(),
+          };
+        },
+      },
     );
 
     const result = await dispatch(claim, context(db));
@@ -234,7 +240,7 @@ describe("createSubworkflowWorkflowDispatch — family gate", () => {
     expect(runner.calls()).toBe(0);
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.executorFamily
+        ?.executorFamily,
     ).toBe("one-shot");
   });
 });
@@ -250,9 +256,9 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         deriveSubworkflow: () => ({
           ok: true,
           runSubworkflowChild: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
 
     const result = await dispatch(claim, context(db));
@@ -276,9 +282,9 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         deriveSubworkflow: () => ({
           ok: true,
           runSubworkflowChild: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
 
     await dispatch(claim, context(db));
@@ -292,7 +298,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
   it("scheduler rechecks a deferred subworkflow dispatch and heartbeats its lease", async () => {
     const db = openSeededDb();
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, STEP_ID);
     const runner = sequencedChildRunner(["running", "running", "succeeded"]);
     const dispatch = createSubworkflowWorkflowDispatch(
@@ -301,9 +307,9 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         deriveSubworkflow: () => ({
           ok: true,
           runSubworkflowChild: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
     const leaseDurationMs = 5_000;
 
@@ -312,7 +318,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: WORKER,
       dispatch,
       leaseDurationMs,
-      now: () => NOW
+      now: () => NOW,
     });
     expect(tick1.code).toBe("dispatched");
     expect(runner.calls()).toBe(1);
@@ -324,12 +330,12 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: WORKER,
       dispatch,
       leaseDurationMs,
-      now: () => tick2Now
+      now: () => tick2Now,
     });
     expect(tick2.code).toBe("dispatched");
     if (tick2.code === "dispatched") {
       expect(tick2.dispatch.status).toBe(
-        WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+        WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
       );
     }
     expect(runner.calls()).toBe(2);
@@ -343,7 +349,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: WORKER,
       dispatch,
       leaseDurationMs,
-      now: () => tick2Now + 3_000
+      now: () => tick2Now + 3_000,
     });
     expect(tick3.code).toBe("dispatched");
     expect(runner.calls()).toBe(3);
@@ -355,7 +361,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
   it("does not recheck a fresh deferred subworkflow before the heartbeat cadence when other work is runnable", async () => {
     const db = openSeededDb();
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, STEP_ID);
     const runner = sequencedChildRunner(["running", "succeeded"]);
     const dispatch = createSubworkflowWorkflowDispatch(
@@ -364,9 +370,9 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         deriveSubworkflow: () => ({
           ok: true,
           runSubworkflowChild: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
     const leaseDurationMs = 5_000;
 
@@ -375,7 +381,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: WORKER,
       dispatch,
       leaseDurationMs,
-      now: () => NOW
+      now: () => NOW,
     });
     expect(tick1.code).toBe("dispatched");
     expect(runner.calls()).toBe(1);
@@ -386,10 +392,10 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       runId: otherRunId,
       repoPath: "/repos/momentum",
       objective: "Other runnable workflow",
-      now: NOW + 10
+      now: NOW + 10,
     });
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(otherRunId, STEP_ID);
 
     const otherDispatchCalls: ClaimedWorkflowStep[] = [];
@@ -401,13 +407,15 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         return { status: "other_dispatched" };
       },
       leaseDurationMs,
-      now: () => NOW + 1_000
+      now: () => NOW + 1_000,
     });
 
     expect(tick2.code).toBe("dispatched");
     if (tick2.code !== "dispatched") throw new Error("expected dispatch");
     expect(tick2.claim.runId).toBe(otherRunId);
-    expect(otherDispatchCalls.map((claim) => claim.runId)).toEqual([otherRunId]);
+    expect(otherDispatchCalls.map((claim) => claim.runId)).toEqual([
+      otherRunId,
+    ]);
     expect(runner.calls()).toBe(1);
     expect(stepState(db)).toBe("running");
     expect(stepStateForRun(db, otherRunId)).toBe("approved");
@@ -416,7 +424,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
   it("reattaches a deferred subworkflow after a daemon restart instead of parking the parent", async () => {
     const db = openSeededDb();
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, STEP_ID);
     const runner = sequencedChildRunner(["running", "running"]);
     const dispatch = createSubworkflowWorkflowDispatch(
@@ -425,9 +433,9 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
         deriveSubworkflow: () => ({
           ok: true,
           runSubworkflowChild: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
     const leaseDurationMs = 5_000;
 
@@ -436,7 +444,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: "daemon-old",
       dispatch,
       leaseDurationMs,
-      now: () => NOW
+      now: () => NOW,
     });
     expect(tick1.code).toBe("dispatched");
     expect(runner.calls()).toBe(1);
@@ -446,7 +454,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: "daemon-new",
       dispatch,
       leaseDurationMs,
-      now: () => NOW + leaseDurationMs + 1
+      now: () => NOW + leaseDurationMs + 1,
     });
 
     expect(tick2.code).toBe("dispatched");
@@ -454,12 +462,12 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     expect(tick2.claim.runId).toBe(RUN_ID);
     expect(tick2.claim.lease.holder).toBe("daemon-new");
     expect(tick2.claim.lease.expiresAt).toBe(
-      NOW + leaseDurationMs + 1 + leaseDurationMs
+      NOW + leaseDurationMs + 1 + leaseDurationMs,
     );
     expect(runner.calls()).toBe(2);
     expect(stepState(db)).toBe("running");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
   });
 });
@@ -470,18 +478,18 @@ describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
     const claim = approveAndClaim(db);
     const resolution: DispatchedSubworkflowContextResolution = {
       ok: false,
-      reason: "child_definition_missing"
+      reason: "child_definition_missing",
     };
     const dispatch = createSubworkflowWorkflowDispatch(
       subworkflowScaffoldBaseDispatch(),
-      { deriveSubworkflow: () => resolution }
+      { deriveSubworkflow: () => resolution },
     );
 
     await dispatch(claim, context(db));
 
     expect(invocationState(db)).toBe("manual_recovery_required");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     // The parent step is parked (still running) with an operator-visible gate,
     // not fabricated terminal.
@@ -490,7 +498,7 @@ describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: STEP_ID
+      stepRunId: STEP_ID,
     });
   });
 
@@ -502,15 +510,15 @@ describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
       {
         deriveSubworkflow: () => {
           throw new Error("boom resolving child run");
-        }
-      }
+        },
+      },
     );
 
     await dispatch(claim, context(db));
 
     expect(invocationState(db)).toBe("manual_recovery_required");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
   });
@@ -522,14 +530,19 @@ describe("createSubworkflowWorkflowDispatch — not-startable base dispatch", ()
     const claim = approveAndClaim(db);
     const runner = countingChildRunner(observe("succeeded"));
     let derives = 0;
-    const failClosedBase: AsyncWorkflowStepDispatch = (): WorkflowStepDispatchResult => ({
-      status: WORKFLOW_DISPATCH_RESULT_STATUS.failClosed
-    });
+    const failClosedBase: AsyncWorkflowStepDispatch =
+      (): WorkflowStepDispatchResult => ({
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.failClosed,
+      });
     const dispatch = createSubworkflowWorkflowDispatch(failClosedBase, {
       deriveSubworkflow: () => {
         derives += 1;
-        return { ok: true, runSubworkflowChild: runner.run, evidence: makeWritableEvidence() };
-      }
+        return {
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence(),
+        };
+      },
     });
 
     const result = await dispatch(claim, context(db));

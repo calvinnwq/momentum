@@ -18,7 +18,7 @@
  *
  * It deliberately does not spawn the full agent, persist leases, capture result
  * files, or run the verification/commit transaction - those stay owned by the
- * live-wrapper dispatch / executor-run lanes and the coding-workflow-pipeline skill.
+ * registered SDK dispatch lane and the coding-workflow-pipeline skill.
  */
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
@@ -27,7 +27,7 @@ import fs from "node:fs";
 import type { LiveWrapperProbeConfig } from "./live-wrapper-registry.js";
 import {
   classifyProbeSpawnResult,
-  type WorkflowHarnessRawOutcome
+  type WorkflowHarnessRawOutcome,
 } from "../core/executors/smoke/workflow-harness.js";
 
 /** Points the opt-in harness-probe smoke at a live-wrapper profile JSON document. */
@@ -44,7 +44,7 @@ export type RunHarnessProbeOptions = {
 
 export function buildHarnessProbeEnv(
   envAllow: readonly string[],
-  source: Record<string, string | undefined> = process.env
+  source: Record<string, string | undefined> = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of envAllow) {
@@ -63,7 +63,7 @@ export function buildHarnessProbeEnv(
  */
 export function runHarnessProbe(
   probe: LiveWrapperProbeConfig,
-  options: RunHarnessProbeOptions = {}
+  options: RunHarnessProbeOptions = {},
 ): WorkflowHarnessRawOutcome {
   let spawn: SpawnSyncReturns<string>;
   try {
@@ -74,7 +74,7 @@ export function runHarnessProbe(
       encoding: "utf-8",
       maxBuffer: PROBE_OUTPUT_MAX_BYTES,
       stdio: ["ignore", "pipe", "pipe"],
-      shell: false
+      shell: false,
     });
   } catch (error) {
     // spawnSync surfaces ENOENT/timeout through the returned result, not a
@@ -83,7 +83,7 @@ export function runHarnessProbe(
     return {
       kind: "spawn_error",
       code: err.code ?? null,
-      message: err instanceof Error ? err.message : String(error)
+      message: err instanceof Error ? err.message : String(error),
     };
   }
 
@@ -91,9 +91,9 @@ export function runHarnessProbe(
     {
       error: (spawn.error as (Error & { code?: string }) | undefined) ?? null,
       status: spawn.status,
-      signal: spawn.signal ?? null
+      signal: spawn.signal ?? null,
     },
-    probe
+    probe,
   );
 }
 
@@ -105,7 +105,7 @@ export function runHarnessProbe(
  * `profile_unavailable`.
  */
 export function loadRawWorkflowProfileFromEnv(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): unknown {
   const profilePath = env[REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]?.trim();
   if (!profilePath) return undefined;

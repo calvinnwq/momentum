@@ -9,7 +9,7 @@ import { openDb } from "../src/adapters/db.js";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
@@ -154,6 +154,33 @@ JSON`;
           cwd: "iteration",
           timeout_sec: timeoutSec,
           env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    }),
+    "utf8",
+  );
+  return profilePath;
+}
+
+function writeLeaseLossPreflightProfile(dir: string, runId: string): string {
+  const profilePath = path.join(dir, "lease-loss-profile.json");
+  const script = `printf 'unowned edit\\n' > "$MOMENTUM_REPO_PATH/lease-loss-edit.txt"
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"runner completed after lease loss","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"must not commit after lease loss","body":"","breaking":false}}
+JSON
+sqlite3 "$MOMENTUM_TEST_DB" "UPDATE workflow_leases SET released_at = 1700000000001, updated_at = 1700000000001 WHERE run_id = '${runId}' AND lease_kind = 'dispatch' AND released_at IS NULL"`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "daemon-lease-loss-test",
+      wrappers: {
+        preflight: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "iteration",
+          timeout_sec: 5,
+          env_allow: ["MOMENTUM_TEST_DB"],
           result_file: "result.json",
         },
       },
@@ -512,6 +539,76 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     );
     expect(recoveryMd).toContain("git_failed");
     expect(recoveryMd).toContain("uncommitted changes");
+  });
+
+  it("keeps an unproven worktree locked when the dispatch lease is lost before git mutation", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    initRepo(repoDir);
+    const baseHead = runGit(repoDir, ["rev-parse", "HEAD"]);
+    const runId = "registered-executor-lease-loss";
+    const profilePath = writeLeaseLossPreflightProfile(makeTempDir(), runId);
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
+        MOMENTUM_TEST_DB: path.join(dataDir, "momentum.db"),
+      },
+    );
+
+    expect(result.code).toBe(0);
+    expect(runGit(repoDir, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoDir, "lease-loss-edit.txt"))).toBe(true);
+    const db = openDb(dataDir);
+    try {
+      const run = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId) as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      // The worker that lost the dispatch fence must not mutate run state.
+      // Repository ownership is independently retained below for recovery.
+      expect(run.needs_manual_recovery).toBe(0);
+      expect(run.manual_recovery_reason).toBeNull();
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE repo_root = ?",
+        )
+        .get(repoDir) as {
+        state: string;
+        recovery_status: string | null;
+      };
+      expect(lock.state).toBe("needs_manual_recovery");
+      expect(lock.recovery_status).toContain("unproven worktree");
+      expect(
+        acquireRepoLock(db, {
+          repoRoot: repoDir,
+          holder: "other-worker",
+          goalId: "other-run",
+          iteration: 1,
+          jobId: "other-run::preflight::dispatch",
+          leaseExpiresAt: 1_700_000_600_000,
+          now: 1_700_000_000_002,
+        }).ok,
+      ).toBe(false);
+    } finally {
+      db.close();
+    }
   });
 
   it("matches external-apply intents by Linear issue key scope", async () => {

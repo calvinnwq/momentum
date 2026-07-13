@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-evidence.js";
 import {
   planSubworkflowChildMirror,
-  type SubworkflowMirrorEvidence
+  type SubworkflowMirrorEvidence,
 } from "../src/core/workflow/dispatch/subworkflow.js";
 import {
   WORKFLOW_RUN_STATES,
-  type WorkflowRunState
+  type WorkflowRunState,
 } from "../src/core/workflow/run/reducer.js";
 
 /**
@@ -36,7 +36,7 @@ import {
 const EVIDENCE: SubworkflowMirrorEvidence = {
   childRunId: "child-run-001",
   executorLogPath: "/tmp/run/subworkflow.log",
-  resultJsonPath: "/tmp/run/subworkflow.json"
+  resultJsonPath: "/tmp/run/subworkflow.json",
 } as const;
 
 describe("planSubworkflowChildMirror — terminal child runs mirror to executor evidence", () => {
@@ -57,7 +57,7 @@ describe("planSubworkflowChildMirror — terminal child runs mirror to executor 
     expect(result.result.checkpoints).toEqual([]);
     expect(result.result.artifacts).toEqual([
       { kind: "executor-log", path: EVIDENCE.executorLogPath },
-      { kind: "subworkflow-child-run", path: EVIDENCE.resultJsonPath }
+      { kind: "subworkflow-child-run", path: EVIDENCE.resultJsonPath },
     ]);
     // The child run id is the stable digest tying the parent evidence to the
     // child run it mirrors.
@@ -134,7 +134,7 @@ describe("planSubworkflowChildMirror — non-terminal child runs defer", () => {
   it("routes an in-flight child already marked for manual recovery to fail-closed evidence", () => {
     const plan = planSubworkflowChildMirror("running", EVIDENCE, {
       childNeedsManualRecovery: true,
-      childManualRecoveryReason: "child step requires operator recovery"
+      childManualRecoveryReason: "child step requires operator recovery",
     });
 
     expect(plan.outcome).toBe("mirror");
@@ -145,7 +145,9 @@ describe("planSubworkflowChildMirror — non-terminal child runs defer", () => {
     expect(plan.result.code).toBe("manual_recovery_required");
     expect(plan.result.error).toContain(EVIDENCE.childRunId);
     expect(plan.result.error).toContain("manual recovery");
-    expect(plan.result.error).toContain("child step requires operator recovery");
+    expect(plan.result.error).toContain(
+      "child step requires operator recovery",
+    );
   });
 });
 
@@ -157,7 +159,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
       outcome: "clean_terminal",
       invocationState: "succeeded",
       roundState: "succeeded",
-      classification: "complete"
+      classification: "complete",
     });
   });
 
@@ -168,7 +170,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
       outcome: "clean_terminal",
       invocationState: "failed",
       roundState: "failed",
-      classification: "failed"
+      classification: "failed",
     });
   });
 
@@ -192,9 +194,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
 describe("planSubworkflowChildMirror — totality", () => {
   it("never throws across every workflow run state", () => {
     for (const state of WORKFLOW_RUN_STATES) {
-      expect(() =>
-        planSubworkflowChildMirror(state, EVIDENCE)
-      ).not.toThrow();
+      expect(() => planSubworkflowChildMirror(state, EVIDENCE)).not.toThrow();
     }
   });
 
@@ -211,7 +211,7 @@ describe("planSubworkflowChildMirror — totality", () => {
     // fabricate a clean terminal.
     const plan = planSubworkflowChildMirror(
       "imploded" as WorkflowRunState,
-      EVIDENCE
+      EVIDENCE,
     );
     expect(plan.outcome).toBe("mirror");
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");

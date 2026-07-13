@@ -10,16 +10,16 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workflow/dispatch/subworkflow-run.js";
 import { deriveDispatchedSubworkflowContext } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
@@ -54,8 +54,14 @@ const CHILD_DEFINITION: WorkflowDefinition = {
   title: "NGX-498 subworkflow child",
   version: 1,
   steps: [
-    { key: "preflight", kind: "preflight", executor: "one-shot", order: 1, required: true }
-  ]
+    {
+      key: "preflight",
+      kind: "preflight",
+      executor: "one-shot",
+      order: 1,
+      required: true,
+    },
+  ],
 };
 
 const PARENT_DEFINITION: WorkflowDefinition = {
@@ -68,9 +74,9 @@ const PARENT_DEFINITION: WorkflowDefinition = {
       kind: "implementation",
       executor: "subworkflow",
       order: 1,
-      required: true
-    }
-  ]
+      required: true,
+    },
+  ],
 };
 
 const PARENT_STEP_ID = "implementation";
@@ -96,11 +102,7 @@ function makeTempDir(prefix = "momentum-sub-flip-"): string {
  * authored child-launch config rides in the run's `route` JSON, exactly where the
  * production lane sources it.
  */
-function seedParentRun(
-  dataDir: string,
-  repoPath: string,
-  runId: string
-): void {
+function seedParentRun(dataDir: string, repoPath: string, runId: string): void {
   const db = openDb(dataDir);
   try {
     persistWorkflowDefinition(db, CHILD_DEFINITION, { now: NOW });
@@ -114,17 +116,17 @@ function seedParentRun(
         subworkflow: {
           child: {
             childDefinitionKey: CHILD_DEFINITION.key,
-            childDefinitionVersion: CHILD_DEFINITION.version
-          }
-        }
+            childDefinitionVersion: CHILD_DEFINITION.version,
+          },
+        },
       },
-      now: NOW
+      now: NOW,
     });
     db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(runId, PARENT_STEP_ID);
     db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
-      runId
+      runId,
     );
   } finally {
     db.close();
@@ -154,24 +156,24 @@ describe("subworkflow production flip — configured step dispatches through dae
         "0",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ],
       {
         stdout: {
           write(chunk: string) {
             stdout += chunk;
             return true;
-          }
+          },
         },
         stderr: {
           write(chunk: string) {
             stderr += chunk;
             return true;
-          }
+          },
         },
-        env: {}
+        env: {},
       },
-      {}
+      {},
     );
 
     expect(code).toBe(0);
@@ -189,7 +191,7 @@ describe("subworkflow production flip — configured step dispatches through dae
 
       const invocation = loadExecutorInvocation(
         db,
-        deriveDispatchInvocationId(runId, PARENT_STEP_ID)
+        deriveDispatchInvocationId(runId, PARENT_STEP_ID),
       );
       expect(invocation?.executorFamily).toBe("subworkflow");
       expect(invocation?.state).toBe("running");
@@ -211,7 +213,7 @@ describe("subworkflow production flip — configured step dispatches through dae
       expect(childRoute.subworkflow?.lineage).toMatchObject({
         parentRunId: runId,
         parentStepId: PARENT_STEP_ID,
-        ancestorDefinitionKeys: [PARENT_DEFINITION.key]
+        ancestorDefinitionKeys: [PARENT_DEFINITION.key],
       });
 
       // The dispatch lease stays held so a later tick can re-check the child.
@@ -229,19 +231,20 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
       stepId: PARENT_STEP_ID,
       holder: WORKER,
       leaseExpiresAt: NOW + 30_000,
-      now: NOW
+      now: NOW,
     });
-    if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
+    if (!claim.ok)
+      throw new Error(`test setup: claim failed (${claim.reason})`);
     return claim.claim;
   }
 
   function finalizeChildRun(
     db: MomentumDb,
     id: string,
-    state: WorkflowRunState
+    state: WorkflowRunState,
   ): void {
     db.prepare(
-      "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?"
+      "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?",
     ).run(state, NOW + 5, id);
   }
 
@@ -260,13 +263,13 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
       executeWorkflowStepDispatch(claim, {
         db,
         workerId: WORKER,
-        now: NOW + 1
+        now: NOW + 1,
       });
       expect(
         loadExecutorInvocation(
           db,
-          deriveDispatchInvocationId(runId, PARENT_STEP_ID)
-        )?.executorFamily
+          deriveDispatchInvocationId(runId, PARENT_STEP_ID),
+        )?.executorFamily,
       ).toBe("subworkflow");
 
       // Tick 1: the real deriver reads the parent run row + route config, resolves
@@ -274,7 +277,7 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
       const resolved1 = deriveDispatchedSubworkflowContext(claim, {
         db,
         workerId: WORKER,
-        now: NOW + 10
+        now: NOW + 10,
       });
       expect(resolved1.ok).toBe(true);
       if (!resolved1.ok) throw new Error(resolved1.reason);
@@ -285,10 +288,10 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         stepId: PARENT_STEP_ID,
         runSubworkflowChild: resolved1.runSubworkflowChild,
         evidence: resolved1.evidence,
-        now: NOW + 10
+        now: NOW + 10,
       });
       expect(tick1.status).toBe(
-        WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred
+        WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred,
       );
       expect(getWorkflowStep(db, runId, PARENT_STEP_ID)?.state).toBe("running");
 
@@ -300,7 +303,7 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
       const resolved2 = deriveDispatchedSubworkflowContext(claim, {
         db,
         workerId: WORKER,
-        now: NOW + 50
+        now: NOW + 50,
       });
       expect(resolved2.ok).toBe(true);
       if (!resolved2.ok) throw new Error(resolved2.reason);
@@ -311,31 +314,29 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         stepId: PARENT_STEP_ID,
         runSubworkflowChild: resolved2.runSubworkflowChild,
         evidence: resolved2.evidence,
-        now: NOW + 50
+        now: NOW + 50,
       });
       expect(tick2.status).toBe(
-        WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+        WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
       );
       expect(tick2.reconcile?.status).toBe(
-        WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+        WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
       );
 
       expect(getWorkflowStep(db, runId, PARENT_STEP_ID)?.state).toBe(
-        "succeeded"
+        "succeeded",
       );
       expect(
         loadExecutorInvocation(
           db,
-          deriveDispatchInvocationId(runId, PARENT_STEP_ID)
-        )?.state
+          deriveDispatchInvocationId(runId, PARENT_STEP_ID),
+        )?.state,
       ).toBe("succeeded");
 
       // Exactly one child run exists — start-or-attach never duplicated it.
       const childCount = (
         db
-          .prepare(
-            "SELECT COUNT(*) AS n FROM workflow_runs WHERE id = ?"
-          )
+          .prepare("SELECT COUNT(*) AS n FROM workflow_runs WHERE id = ?")
           .get(childRunId(runId)) as { n: number }
       ).n;
       expect(childCount).toBe(1);
@@ -346,7 +347,9 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
       expect(fs.existsSync(resolved2.evidence.resultJsonPath)).toBe(true);
       expect(resolved2.evidence.executorLogPath).toContain(repoDir);
 
-      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).not.toBeNull();
+      expect(
+        getWorkflowLease(db, runId, "dispatch")?.releasedAt,
+      ).not.toBeNull();
     } finally {
       db.close();
     }

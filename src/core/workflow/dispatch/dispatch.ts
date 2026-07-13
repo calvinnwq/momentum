@@ -3,7 +3,7 @@
  * runtime.
  *
  * This module owns the *pure* half of the production workflow-lane dispatcher:
- * the phase-1 executor-family allowlist and the deterministic decision
+ * the durable executor-identity resolution and the deterministic decision
  * ({@link planWorkflowStepDispatch}) that routes a claimed workflow step either
  * to a real executor dispatch or to a fail-closed, operator-visible
  * manual-recovery outcome. It follows the same discipline as `gate/gate.ts`
@@ -20,14 +20,10 @@
  * Safety, and Runtime Consolidation anchors in SPEC.md plus the long-form
  * planning contracts externalized to the personal wiki:
  *
- *   - The phase-1 dispatchable set is exactly the executor families that have a
- *     landed production adapter in the base allowlist (`goal-loop` executor-loop,
- *     `one-shot` / `script` executor-loop, legacy `no-mistakes`,
- *     `delegate-supervisor` through today's kind-keyed live wrapper,
- *     `external-apply` the external-apply seam,
- *     and `subworkflow` once its configured production lane was
- *     proven). A family with no landed adapter still fails closed rather than
- *     silently no-op or strand a lease.
+ *   - Every syntactically valid executor identity reaches the common dispatch
+ *     scaffold. Later registered-executor, built-in, external-apply, and
+ *     subworkflow adapters either drive that identity or record honest durable
+ *     unavailability instead of silently no-oping or stranding a lease.
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
  *     without operator inspection and recovery." The dispatcher fails *closed*,
@@ -36,8 +32,8 @@
  *     missing parent and instead releases the dispatch lease without fabricating
  *     orphaned recovery state.
  *   - The decision is independent of *how* a claimed step resolves to its
- *     executor family. The persistence twin performs the read-only resolution
- *     (run -> definition link -> step definition -> family) and hands the
+ *     executor identity. The persistence twin performs the read-only resolution
+ *     (run -> definition link -> step definition -> identity) and hands the
  *     {@link WorkflowStepDispatchResolution} to this brain, so the resolution
  *     failure taxonomy and the supportability decision share one pure entry
  *     point and one test surface.
@@ -47,18 +43,17 @@
  * `{ action: ... }` convention used by the reducers and the gate brain.
  */
 
-import type { WorkflowExecutorFamily } from "../definition/definition.js";
+import type {
+  ExecutorName,
+  WorkflowExecutorFamily,
+} from "../definition/definition.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 
 /**
- * Executor families the production workflow lane can genuinely dispatch through
- * the base PHASE1 allowlist. Anything outside this set fails closed (see the
- * module doc). `subworkflow` flipped into the allowlist once its
- * configured production lane — child-definition config, route-sourced bounded
- * recursion safety, key-resolved start-or-attach child runner, and the daemon
- * context deriver — was proven; the `unsupported_executor_family` fail-closed
- * branch is retained as a defensive guard for any future not-yet-landed family.
- * The order mirrors the adapter landing order.
+ * Legacy built-in executor-family set retained for callers that need to narrow a
+ * built-in identity to its historical production-adapter type.
+ * Arbitrary registered executor identities do not need membership in this set to
+ * receive the common dispatch scaffold.
  */
 export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
   "goal-loop",
@@ -76,9 +71,9 @@ const PHASE1_DISPATCHABLE_FAMILY_SET: ReadonlySet<WorkflowExecutorFamily> =
   new Set(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES);
 
 /**
- * Whether the production workflow lane can dispatch `family` this phase. Narrows
- * to {@link Phase1DispatchableExecutorFamily} so a caller that has checked
- * membership carries a compile-time guarantee the family has a landed adapter.
+ * Whether `family` is one of the legacy built-in production-adapter identities.
+ * Narrows to {@link Phase1DispatchableExecutorFamily} for callers that need that
+ * built-in distinction; it is not the registered-executor dispatch gate.
  */
 export function isPhase1DispatchableExecutorFamily(
   family: WorkflowExecutorFamily,
@@ -87,18 +82,18 @@ export function isPhase1DispatchableExecutorFamily(
 }
 
 /**
- * Why the read-only resolution of a claimed step to its executor family failed.
+ * Why the read-only resolution of a claimed step to its executor identity failed.
  * The persistence twin maps each durable-state shortfall to one of these:
  *
  *   - `run_not_found`: the `workflow_runs` row vanished between claim and
  *     dispatch.
  *   - `definition_unlinked`: the run carries no
  *     `(workflow_definition_key, workflow_definition_version)` link, so its steps
- *     cannot be resolved to an executor family (e.g. an workflow-run-imported run).
+ *     cannot be resolved to an executor identity (for example, an imported run).
  *   - `step_definition_not_found`: no `step_definitions` row matches the claimed
  *     step's `(definitionKey, definitionVersion, stepId)` identity.
  *   - `unknown_executor_family`: the step definition's `executor` column is not a
- *     known {@link WorkflowExecutorFamily} (corrupt or legacy state).
+ *     syntactically valid durable executor identity (corrupt or legacy state).
  */
 export const WORKFLOW_STEP_RESOLUTION_FAILURES = [
   "run_not_found",
@@ -111,19 +106,19 @@ export type WorkflowStepResolutionFailure =
 
 /**
  * The resolved facts about a claimed workflow step that the dispatch decision
- * needs: either the step's executor family, or a typed resolution failure (with
+ * needs: either the step's executor identity, or a typed resolution failure (with
  * an optional detail for the operator-facing reason, e.g. the offending raw
  * family string).
  */
 export type WorkflowStepDispatchResolution =
-  | { ok: true; executorFamily: WorkflowExecutorFamily }
+  | { ok: true; executorFamily: ExecutorName }
   | { ok: false; failure: WorkflowStepResolutionFailure; detail?: string };
 
 /**
  * Stable fail-closed codes the dispatcher stamps on a durable manual-recovery
  * outcome so daemon-lane telemetry, recovery artifacts, and status / monitor
  * surfaces can recognise the cause. One per resolution failure plus
- * `unsupported_executor_family` for a resolved-but-unsupported family.
+ * the retained `unsupported_executor_family` compatibility code.
  */
 export const WORKFLOW_DISPATCH_FAIL_CLOSED_CODES = [
   "workflow_run_not_found",
@@ -139,14 +134,14 @@ export type WorkflowDispatchFailClosedCode =
 /**
  * The dispatch decision for a claimed workflow step.
  *
- *   - `dispatch`: the step resolved to a phase-1 dispatchable family; the
+ *   - `dispatch`: the step resolved to a valid executor identity; the
  *     persistence twin creates the executor invocation / round start scaffold.
  *   - `fail_closed`: the step is unresolvable, under-configured, or resolved to
- *     an unsupported family; the persistence twin records a durable
+ *     an invalid identity; the persistence twin records a durable
  *     operator-visible manual-recovery outcome and releases the dispatch lease.
  */
 export type WorkflowStepDispatchPlan =
-  | { action: "dispatch"; executorFamily: Phase1DispatchableExecutorFamily }
+  | { action: "dispatch"; executorFamily: ExecutorName }
   | {
       action: "fail_closed";
       code: WorkflowDispatchFailClosedCode;
@@ -187,12 +182,12 @@ const RESOLUTION_FAILURE_PLANS: Record<
 
 /**
  * Decide what the production workflow lane should do with a claimed step, given
- * the resolution of that step to its executor family.
+ * the resolution of that step to its executor identity.
  *
  * Pure and total: never throws, always returns a {@link WorkflowStepDispatchPlan}.
- * A resolution failure or an unsupported family always fails *closed* to a
- * durable manual-recovery outcome — the dispatcher never silently no-ops a
- * claimed step.
+ * A resolution failure always fails *closed* to a durable manual-recovery
+ * outcome. Every valid identity receives a dispatch scaffold so the selected
+ * runtime adapter can execute it or record honest unavailability.
  */
 export function planWorkflowStepDispatch(
   resolution: WorkflowStepDispatchResolution,
@@ -207,15 +202,5 @@ export function planWorkflowStepDispatch(
     };
   }
 
-  const family = resolution.executorFamily;
-  if (isPhase1DispatchableExecutorFamily(family)) {
-    return { action: "dispatch", executorFamily: family };
-  }
-
-  return {
-    action: "fail_closed",
-    code: "unsupported_executor_family",
-    gateType: FAIL_CLOSED_GATE_TYPE,
-    reason: `Executor family '${family}' has no landed daemon-dispatchable adapter this phase; routing the dispatch to manual recovery.`,
-  };
+  return { action: "dispatch", executorFamily: resolution.executorFamily };
 }

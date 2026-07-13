@@ -172,9 +172,11 @@ describe("validateWorkflowDefinition", () => {
     }
   });
 
-  it("rejects a step with an unknown executor family", () => {
+  it("accepts registered executor names and rejects malformed identities", () => {
     const def = baseValidDefinition();
-    def.steps[0]!.executor = "wildcard" as never;
+    def.steps[0]!.executor = "third-party.executor";
+    expect(validateWorkflowDefinition(def).ok).toBe(true);
+    def.steps[0]!.executor = "NOT A VALID EXECUTOR";
     const result = validateWorkflowDefinition(def);
     expect(result.ok).toBe(false);
     if (!result.ok) {

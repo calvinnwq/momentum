@@ -13,19 +13,19 @@ were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern              | Modules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Definition           | `definition/definition.ts`, `definition/persist.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Run lifecycle        | `run/start.ts`, `run/start-persist.ts`, `run/import.ts`, `run/import-persist.ts`, `run/reducer.ts`, `run/recovery.ts`, `run/status.ts`, `run/events.ts`, `run/logs.ts`, `run/handoff.ts`, `run/runtime-state.ts`                                                                                                                                                                                                                                                                                                                             |
-| Steps                | `step/executor.ts`, `step/executor-real-adapters.ts`, `step/transitions.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Gates                | `gate/gate.ts`, `gate/persist.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Leases               | `leases.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Dispatch             | `dispatch/dispatch.ts`, `dispatch/persist.ts`, `dispatch/execute.ts`, `dispatch/retry.ts`, `dispatch/executor-run.ts`, `dispatch/executor-terminalize.ts`, `dispatch/reconcile.ts`, `dispatch/reconcile-execute.ts`, `dispatch/external-apply.ts`, `dispatch/external-apply-run.ts`, `dispatch/external-apply-dispatch.ts`, `dispatch/linear-refresh-lifecycle.ts`, `dispatch/subworkflow.ts`, `dispatch/subworkflow-run.ts`, `dispatch/subworkflow-dispatch.ts`, `dispatch/live-wrapper.ts`, `dispatch/dogfood.ts`, `dispatch/scheduler.ts` |
-| Routes               | `route/coding.ts`, `route/subworkflow.ts`, `route/subworkflow-child-config.ts`, `route/subworkflow-child-runner.ts`, `route/subworkflow-dispatch-context.ts`                                                                                                                                                                                                                                                                                                                                                                                 |
-| Preflight            | `preflight/structural.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Monitor & watch      | `monitor/state.ts`, `monitor/envelope.ts`, `monitor/progress.ts`, `monitor/watch-advisory.ts`, `monitor/watch-stream.ts`, `monitor/watch-stream-source.ts`, `monitor/action-authority.ts`                                                                                                                                                                                                                                                                                                                                                    |
-| Live-wrapper dogfood | `live-wrapper/coding-workflow.ts`, `live-wrapper/merge-cleanup-preflight.ts`, `live-wrapper/merge-cleanup-lifecycle.ts`, `live-wrapper/daemon-profile.ts`, `live-wrapper/daemon-exec-context.ts`                                                                                                                                                                                                                                                                                                                                             |
-| Recovery             | `recovery/artifact.ts`, `recovery/reconcile.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Concern              | Modules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Definition           | `definition/definition.ts`, `definition/persist.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Run lifecycle        | `run/start.ts`, `run/start-persist.ts`, `run/import.ts`, `run/import-persist.ts`, `run/reducer.ts`, `run/recovery.ts`, `run/status.ts`, `run/events.ts`, `run/logs.ts`, `run/handoff.ts`, `run/runtime-state.ts`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Steps                | `step/executor.ts`, `step/executor-real-adapters.ts`, `step/transitions.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Gates                | `gate/gate.ts`, `gate/persist.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Leases               | `leases.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Dispatch             | `dispatch/dispatch.ts`, `dispatch/persist.ts`, `dispatch/execute.ts`, `dispatch/retry.ts`, `dispatch/dispatch-status.ts`, `dispatch/executor-context.ts`, `dispatch/executor-evidence.ts`, `dispatch/executor-recovery.ts`, `dispatch/registered-executor.ts`, `dispatch/reconcile.ts`, `dispatch/reconcile-execute.ts`, `dispatch/external-apply.ts`, `dispatch/external-apply-run.ts`, `dispatch/external-apply-dispatch.ts`, `dispatch/linear-refresh-lifecycle.ts`, `dispatch/subworkflow.ts`, `dispatch/subworkflow-run.ts`, `dispatch/subworkflow-dispatch.ts`, `dispatch/dogfood.ts`, `dispatch/scheduler.ts` |
+| Routes               | `route/coding.ts`, `route/subworkflow.ts`, `route/subworkflow-child-config.ts`, `route/subworkflow-child-runner.ts`, `route/subworkflow-dispatch-context.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Preflight            | `preflight/structural.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Monitor & watch      | `monitor/state.ts`, `monitor/envelope.ts`, `monitor/progress.ts`, `monitor/watch-advisory.ts`, `monitor/watch-stream.ts`, `monitor/watch-stream-source.ts`, `monitor/action-authority.ts`                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Live-wrapper dogfood | `live-wrapper/coding-workflow.ts`, `live-wrapper/merge-cleanup-preflight.ts`, `live-wrapper/merge-cleanup-lifecycle.ts`, `live-wrapper/daemon-profile.ts`, `live-wrapper/daemon-exec-context.ts`                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Recovery             | `recovery/artifact.ts`, `recovery/reconcile.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 `dispatch/dispatch.ts` and `dispatch/persist.ts` are internal helpers behind
 `dispatch/execute.ts`; `run/reducer.ts` is the central pure reducer and the most
@@ -47,7 +47,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/events/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for bounded daemon cycles and eligible `workflow run watch --once` ticks.
+- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/registered-executor`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, and `live-wrapper/daemon-profile`; configured profile-backed and third-party executors share the registered SDK tick driver.
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
   `dispatch/reconcile-execute` own the pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -89,51 +89,25 @@ Fake demotion has since landed in this folder: the production
 deterministic fake registry lives under `test/helpers/` and is injected only by
 tests that need substrate smoke coverage.
 
-The dispatched-step execution path producer has since landed:
-`dispatch/executor-terminalize.ts` records a finished
-`WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
-`dispatch/executor-run.ts` composes "run the dispatched step's executor (through
-an injected real registry) -> finalize successful live-wrapper results through
-repo-safety / verification / commit-reset -> terminalize -> reconcile" so a
-configured profile finalizes the step exactly once and a configured profile that
-lacks the claimed step kind parks the run for manual recovery instead of
-fabricating success. `live-wrapper/daemon-profile.ts`
-has since added the daemon-default profile **source resolution**: a pure resolver
-that turns the `MOMENTUM_LIVE_WRAPPER_PROFILE` env var (a JSON profile file path)
-into an absent profile (unchanged default lane), a parsed `LiveWrapperProfile` the
-lane can build a real registry from, or an honest invalid outcome — never a
-silently fabricated profile. `dispatch/live-wrapper.ts` then composes the base
-dispatch with that producer into a `WorkflowStepDispatch`
-(`createLiveWrapperWorkflowDispatch`): the production analogue of the dogfood
-`createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
-and — only for a genuinely-started dispatch — runs the executor + reconciliation in
-the same tick, taking the registry and the per-step exec-context deriver by
-injection, heartbeating the dispatch lease through verification / git
-finalization, and leaving the reconciliation seam the single workflow-row
-finalization owner. `dispatch/retry.ts`
-keeps the retry path explicit for stale live-wrapper bootstrap failures: after
-guarded recovery clear prepares either an `unsupported_platform` refusal for any
-dispatched step or another retryable setup failure for `no-mistakes` or
-`merge-cleanup`, the next dispatch reopens the same deterministic invocation id
-with the next attempt / round while `dispatch/live-wrapper.ts` scopes attempt >
-1 evidence paths under `attempt-<n>/`.
-`live-wrapper/daemon-exec-context.ts` has since added that per-step exec-context
-**deriver**: a pure resolver (plus its injected run-row loader) that maps a run's
-provenance to the bounded session's working directory — a native run runs under
-`<repoPath>/.agent-workflows/<runId>/` and an imported run under its source
-artifact's run dir — and refuses honestly with `missing_repo_path` (rather than
-fabricating a working directory) when the run has no repo, so the lane can fail
-closed into manual recovery. `dispatch/live-wrapper.ts` now consumes that refusal
-safely: its deriver injection returns a total
-`DispatchedStepExecutorContextResolution`, and an `ok: false` resolution is routed
-to manual recovery (`recordUnresolvedDispatchedStepContext` in
-`dispatch/executor-run.ts`, which terminalizes the same honest
-`manual_recovery_required` evidence an unconfigured executor produces and lets the reconciliation seam
-park the run) instead of throwing — a throw inside the dispatch closure, after the
-scaffold exists, would release the lease over a still-`running` step and strand it.
-The bounded `daemon start` workflow lane now wires the resolved profile,
-registry, and deriver by composing `dispatch/live-wrapper.ts` around the base
-workflow dispatcher for configured daemon-default profiles.
+Registered executor dispatch supersedes the interim live-wrapper composition.
+`dispatch/registered-executor.ts` creates the durable scaffold, resolves the
+executor by permanent name, drives bounded SDK ticks, and reconciles daemon-owned
+classification. Profile-backed built-ins run through
+`executors/live-step/sdk-executor.ts`; that executor records its observation and
+`mechanism_completed` checkpoint before daemon classification, so reattachment
+classifies durable completed work without rerunning the bounded mechanism.
+`dispatch/executor-evidence.ts` and `dispatch/executor-recovery.ts` retain neutral
+settlement helpers used by external-apply and subworkflow; they are not an
+alternate live-wrapper execution lane.
+
+`live-wrapper/daemon-profile.ts` resolves the optional daemon profile source, and
+`live-wrapper/daemon-exec-context.ts` maps durable run provenance to host-local
+paths. The registered host-binding resolver keeps portable step config separate
+from executable paths, environment, repo ownership, verification, and commit-or-
+reset policy. Missing host bindings become precise durable recovery evidence
+rather than escaping across the scheduler boundary. `dispatch/retry.ts` reopens
+the same deterministic invocation with the next attempt and scopes later attempt
+evidence beneath `attempt-<n>/`.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,
@@ -182,15 +156,16 @@ It reuses `run/start` / `run/start-persist` for durable rows, reserves the histo
 The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, default to persisted `gnhf`, and fail closed before implementation dispatch when a persisted current-GNHF/CWFP route is selected because that compatibility lane is not wired into native dispatch yet. The current built-in definition classifies implementation and no-mistakes as `delegate-supervisor` with their tool in portable step config; version 1 remains registered unchanged for recorded runs.
 
 `workflow run preview-coding` is the read-only native plan-preview door.
-It shares the `start-coding` preconditions and built-in definition resolution but writes nothing, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` - a pure projection of the version-pinned built-in definition plus inputs, including `route.implementationEngine` and each step's optional portable config, so a later `start-coding` from the same inputs persists a matching run.
+It shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` after those checks pass.
+The resulting plan is a pure projection of the version-pinned built-in definition plus inputs, including `route.implementationEngine` and each step's optional portable config, so a later `start-coding` from the same inputs persists a matching run.
 
 `route/coding.ts` is the pure keystone for native per-step coding route/config overrides: it validates, normalizes, reads, writes, and projects operator `harness`/`model`/`effort` selections per configurable coding step (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) under a byte-stable `route.steps` namespace on the run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`.
 The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and embeds them in the durable run route (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
 Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
 
-`preflight/structural.ts` is the pure structural preflight seam for native coding workflow setup.
-The start and preview doors use it to validate built-in definition lookup, required run shape, approval boundary, issue scope, route profile, and route steps before durable writes.
+`preflight/structural.ts` is the pure structural preflight seam for workflow setup.
+The start and preview doors use it to validate built-in definition lookup, required run shape, approval boundary, issue scope, route profile, route steps, registered executor presence, and portable config against each registered declaration before durable writes.
 It emits compact `preflightEvidence` objects with stable fields (`checkId`, `status`, `severity`, `path`, `key`, `message`, `recommendedAction`) so CLI clients can fix setup without parsing prose.
 It also exposes wrapper config validation for canonical snake_case keys, env allowlists, timeouts, safe or expected result files, no-mistakes runner-profile shape, no-mistakes runner required-env allowlist coverage, and the merge-cleanup target shape, while GitHub, Linear, no-mistakes external config, and other side-effect checks stay inside the step that owns the side effect.
 Native `goal-loop` round evidence is currently consumed by `workflow run logs` from executor invocation / round rows and child evidence.

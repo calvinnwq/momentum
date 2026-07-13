@@ -10,9 +10,8 @@
  *
  *   1. **profile source resolution** — how the daemon discovers a
  *      {@link LiveWrapperProfile} from operator configuration (this module); and
- *   2. **daemon-lane wiring** — composing the resolved profile + the
- *      `executeAndReconcileDispatchedWorkflowStep` producer
- *      (`dispatch/executor-run.ts`) into the bounded `daemon start` workflow lane.
+ *   2. **daemon-lane wiring** — registering profile-backed built-ins and
+ *      resolving their host bindings for the bounded SDK dispatch driver.
  *
  * This module owns profile source resolution. It resolves the daemon's
  * live-wrapper profile from a single operator-controlled environment variable
@@ -43,7 +42,7 @@ import fs from "node:fs";
 
 import {
   parseLiveWrapperProfile,
-  type LiveWrapperProfile
+  type LiveWrapperProfile,
 } from "../../../adapters/live-wrapper-registry.js";
 
 /**
@@ -51,13 +50,12 @@ import {
  * daemon's live-wrapper profile. Unset/blank keeps the default daemon lane
  * unchanged. Mirrors the repo's other `MOMENTUM_*` runtime opt-in spellings.
  */
-export const DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR = "MOMENTUM_LIVE_WRAPPER_PROFILE";
+export const DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR =
+  "MOMENTUM_LIVE_WRAPPER_PROFILE";
 
 /** Why a configured profile source could not be turned into a valid profile. */
 export type DaemonLiveWrapperProfileErrorCode =
-  | "source_unreadable"
-  | "source_invalid_json"
-  | "profile_invalid";
+  "source_unreadable" | "source_invalid_json" | "profile_invalid";
 
 /**
  * The outcome of resolving the daemon's live-wrapper profile from the
@@ -76,8 +74,7 @@ export type DaemonLiveWrapperProfileResolution =
 
 /** The result of attempting to load a profile source's raw contents. */
 export type DaemonLiveWrapperProfileSourceLoad =
-  | { ok: true; contents: string }
-  | { ok: false; error: string };
+  { ok: true; contents: string } | { ok: false; error: string };
 
 /** Injected IO seam: read a profile source path into its raw contents. */
 export type ResolveDaemonLiveWrapperProfileDeps = {
@@ -94,7 +91,7 @@ export type ResolveDaemonLiveWrapperProfileDeps = {
  */
 export function resolveDaemonLiveWrapperProfile(
   env: Record<string, string | undefined>,
-  deps: ResolveDaemonLiveWrapperProfileDeps
+  deps: ResolveDaemonLiveWrapperProfileDeps,
 ): DaemonLiveWrapperProfileResolution {
   const rawSourcePath = env[DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR];
   const source = (rawSourcePath ?? "").trim();
@@ -108,7 +105,7 @@ export function resolveDaemonLiveWrapperProfile(
       status: "invalid",
       source,
       code: "source_unreadable",
-      error: load.error
+      error: load.error,
     };
   }
 
@@ -120,7 +117,7 @@ export function resolveDaemonLiveWrapperProfile(
       status: "invalid",
       source,
       code: "source_invalid_json",
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 
@@ -130,7 +127,7 @@ export function resolveDaemonLiveWrapperProfile(
       status: "invalid",
       source,
       code: "profile_invalid",
-      error: parsedProfile.error
+      error: parsedProfile.error,
     };
   }
 
@@ -143,14 +140,14 @@ export function resolveDaemonLiveWrapperProfile(
  * a typed `{ ok: false }` rather than throwing, so resolution stays total.
  */
 export function readDaemonLiveWrapperProfileSource(
-  sourcePath: string
+  sourcePath: string,
 ): DaemonLiveWrapperProfileSourceLoad {
   try {
     return { ok: true, contents: fs.readFileSync(sourcePath, "utf8") };
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

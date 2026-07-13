@@ -9,7 +9,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -17,15 +17,15 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
-  listExecutorRoundsForInvocation
+  listExecutorRoundsForInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import { createExternalApplyWorkflowDispatch } from "../src/core/workflow/dispatch/external-apply-dispatch.js";
 import { executeAndReconcileDispatchedExternalApplyStep } from "../src/core/workflow/dispatch/external-apply-run.js";
 import type {
@@ -34,7 +34,7 @@ import type {
   ExecuteExternalApplyExternalResult,
   ExecuteExternalApplyFailure,
   ExecuteExternalApplyResult,
-  ExecuteExternalApplySuccess
+  ExecuteExternalApplySuccess,
 } from "../src/core/intent/apply-execute.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
@@ -94,7 +94,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-496",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -102,17 +102,17 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -129,39 +129,50 @@ function approveAndClaim(
 function dispatchStep(
   db: MomentumDb,
   stepId: string = STEP_ID,
-  executor: "external-apply" | "one-shot" = "external-apply"
+  executor: "external-apply" | "one-shot" = "external-apply",
 ): void {
   db.prepare(
     `UPDATE step_definitions
         SET executor = ?
-      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
   ).run(
     executor,
     CODING_WORKFLOW_DEFINITION.key,
     CODING_WORKFLOW_DEFINITION.version,
-    stepId
+    stepId,
   );
   const claim = approveAndClaim(db, stepId);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
 }
 
 async function dispatchStepThroughExternalApplyWrapper(
   db: MomentumDb,
-  runner: ReturnType<typeof countingRunner>
+  runner: ReturnType<typeof countingRunner>,
 ): Promise<void> {
   db.prepare(
     `UPDATE step_definitions
         SET executor = 'external-apply'
-      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
-  ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, STEP_ID);
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
+  ).run(
+    CODING_WORKFLOW_DEFINITION.key,
+    CODING_WORKFLOW_DEFINITION.version,
+    STEP_ID,
+  );
   const claim = approveAndClaim(db, STEP_ID);
-  const dispatch = createExternalApplyWorkflowDispatch(executeWorkflowStepDispatch, {
-    deriveExternalApply: () => ({
-      ok: true,
-      runExternalApply: runner.run,
-      evidence: makeWritableEvidence()
-    })
-  });
+  const dispatch = createExternalApplyWorkflowDispatch(
+    executeWorkflowStepDispatch,
+    {
+      deriveExternalApply: () => ({
+        ok: true,
+        runExternalApply: runner.run,
+        evidence: makeWritableEvidence(),
+      }),
+    },
+  );
   await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
 }
 
@@ -174,19 +185,21 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
   return listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId)
+    deriveDispatchInvocationId(RUN_ID, stepId),
   );
 }
 
 const EVIDENCE = {
-  executorLogPath: "/repos/momentum/.agent-workflows/run-xa-001/external-apply.log",
-  resultJsonPath: "/repos/momentum/.agent-workflows/run-xa-001/external-apply.json"
+  executorLogPath:
+    "/repos/momentum/.agent-workflows/run-xa-001/external-apply.log",
+  resultJsonPath:
+    "/repos/momentum/.agent-workflows/run-xa-001/external-apply.json",
 } as const;
 
 function makeWritableEvidence(root = makeTempDir("momentum-xa-evidence-")) {
   return {
     executorLogPath: path.join(root, "nested", "external-apply.log"),
-    resultJsonPath: path.join(root, "nested", "external-apply.json")
+    resultJsonPath: path.join(root, "nested", "external-apply.json"),
   };
 }
 
@@ -207,7 +220,7 @@ function countingRunner(result: ExecuteExternalApplyResult): {
       calls += 1;
       return result;
     },
-    calls: () => calls
+    calls: () => calls,
   };
 }
 
@@ -217,12 +230,12 @@ function makeTarget(): ExecuteExternalApplyContext["target"] {
     externalId: "ext-1",
     externalKey: "NGX-1",
     url: "https://linear.app/ngxcalvin/issue/NGX-1",
-    title: "Some issue"
+    title: "Some issue",
   };
 }
 
 function makeContext(
-  overrides: Partial<ExecuteExternalApplyContext> = {}
+  overrides: Partial<ExecuteExternalApplyContext> = {},
 ): ExecuteExternalApplyContext {
   return {
     intentId: "intent-001",
@@ -235,12 +248,12 @@ function makeContext(
     mutationKind: "comment",
     auditId: "audit-001",
     reconcile: { status: "pending", warning: null },
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeExternal(
-  overrides: Partial<ExecuteExternalApplyExternalResult> = {}
+  overrides: Partial<ExecuteExternalApplyExternalResult> = {},
 ): ExecuteExternalApplyExternalResult {
   return {
     alreadyApplied: false,
@@ -253,7 +266,7 @@ function makeExternal(
     nextStateId: null,
     nextStateName: null,
     idempotencyMarker: IDEMPOTENCY_MARKER,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -277,7 +290,7 @@ function makeIntent(): UpdateIntent {
     updatedAt: 2,
     appliedAt: 3,
     skippedAt: null,
-    canceledAt: null
+    canceledAt: null,
   };
 }
 
@@ -291,7 +304,7 @@ function makeAudit(): IntentApplyAudit {
       externalId: "ext-1",
       externalKey: "NGX-1",
       url: "https://linear.app/ngxcalvin/issue/NGX-1",
-      title: "Some issue"
+      title: "Some issue",
     },
     requestedAt: 1,
     finishedAt: 2,
@@ -309,33 +322,34 @@ function makeAudit(): IntentApplyAudit {
     externalRefs: {
       commentId: "comment-1",
       commentUrl: "https://linear.app/ngxcalvin/issue/NGX-1#comment-1",
-      stateTransitionId: null
+      stateTransitionId: null,
     },
     reconcile: { status: "pending", warning: null },
     createdAt: 1,
-    updatedAt: 2
+    updatedAt: 2,
   };
 }
 
 function makeSuccess(
-  externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {}
+  externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {},
 ): ExecuteExternalApplySuccess {
   const external = makeExternal(externalOverrides);
   return {
     ok: true,
-    resultCode: external.alreadyApplied && !external.statusTransitioned
-      ? "already_applied"
-      : "applied",
+    resultCode:
+      external.alreadyApplied && !external.statusTransitioned
+        ? "already_applied"
+        : "applied",
     context: makeContext({ intentStatus: "applied" }),
     intent: makeIntent(),
     audit: makeAudit(),
-    external
+    external,
   };
 }
 
 function makeFailure(
   code: ExecuteExternalApplyErrorCode,
-  message = `simulated ${code}`
+  message = `simulated ${code}`,
 ): ExecuteExternalApplyFailure {
   return {
     ok: false,
@@ -344,7 +358,7 @@ function makeFailure(
     context: makeContext(),
     intent: null,
     audit: null,
-    external: null
+    external: null,
   };
 }
 
@@ -358,7 +372,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(runner.calls()).toBe(1);
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.executorFamily
+        ?.executorFamily,
     ).toBe("external-apply");
     expect(stepState(db)).toBe("succeeded");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -372,7 +386,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
         calls += 1;
         throw new Error("external apply exploded");
       },
-      calls: () => calls
+      calls: () => calls,
     };
 
     await dispatchStepThroughExternalApplyWrapper(db, runner);
@@ -380,11 +394,11 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(runner.calls()).toBe(1);
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -404,22 +418,22 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.calls()).toBe(1);
     expect(out.executorResult?.ok).toBe(true);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
     // The dispatch invocation + round carry the captured terminal evidence.
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("succeeded");
     const rounds = dispatchRounds(db);
@@ -428,7 +442,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(rounds[0]?.summary).toContain("intent-001");
     expect(rounds[0]?.logPaths).toEqual([
       evidence.executorLogPath,
-      evidence.resultJsonPath
+      evidence.resultJsonPath,
     ]);
     // The idempotency marker is the durable digest tying evidence to the write.
     expect(rounds[0]?.resultDigest).toBe(IDEMPOTENCY_MARKER);
@@ -450,16 +464,16 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
     expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
     expect(fs.readFileSync(evidence.executorLogPath, "utf8")).toContain(
-      "external-apply applied"
+      "external-apply applied",
     );
     const snapshot = JSON.parse(
-      fs.readFileSync(evidence.resultJsonPath, "utf8")
+      fs.readFileSync(evidence.resultJsonPath, "utf8"),
     ) as ExecuteExternalApplyResult;
     expect(snapshot.ok).toBe(true);
     if (!snapshot.ok) throw new Error("expected success snapshot");
@@ -478,11 +492,11 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(stepState(db)).toBe("succeeded");
     expect(dispatchRounds(db)[0]?.summary).toContain("already applied");
@@ -495,7 +509,10 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
     dispatchStep(db);
     const evidence = makeWritableEvidence();
     const runner = countingRunner(
-      makeFailure("policy_denied", "intent_apply_policy is create_intents_only")
+      makeFailure(
+        "policy_denied",
+        "intent_apply_policy is create_intents_only",
+      ),
     );
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
@@ -504,23 +521,23 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.calls()).toBe(1);
     expect(out.executorResult?.ok).toBe(false);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
     // The invocation carries terminal manual-recovery evidence — not a fake clean
     // terminal — and the precise M6 cause is preserved for the operator.
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
@@ -529,14 +546,14 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
     expect(round?.summary).toContain("create_intents_only");
 
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
     expect(gates[0]).toMatchObject({
       gateType: "manual_recovery_required",
-      stepRunId: STEP_ID
+      stepRunId: STEP_ID,
     });
   });
 
@@ -545,7 +562,10 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
     dispatchStep(db);
     const evidence = makeWritableEvidence();
     const runner = countingRunner(
-      makeFailure("policy_denied", "intent_apply_policy is create_intents_only")
+      makeFailure(
+        "policy_denied",
+        "intent_apply_policy is create_intents_only",
+      ),
     );
 
     await executeAndReconcileDispatchedExternalApplyStep({
@@ -554,16 +574,16 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
     expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
     expect(fs.readFileSync(evidence.executorLogPath, "utf8")).toContain(
-      "external-apply refused"
+      "external-apply refused",
     );
     const snapshot = JSON.parse(
-      fs.readFileSync(evidence.resultJsonPath, "utf8")
+      fs.readFileSync(evidence.resultJsonPath, "utf8"),
     ) as ExecuteExternalApplyResult;
     expect(snapshot.ok).toBe(false);
     if (snapshot.ok) throw new Error("expected refusal snapshot");
@@ -577,11 +597,11 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     db.prepare(
       `UPDATE step_definitions
           SET executor = 'external-apply'
-        WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+        WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
-      STEP_ID
+      STEP_ID,
     );
     const claim = approveAndClaim(db, STEP_ID);
     const runner = countingRunner(makeSuccess());
@@ -591,23 +611,23 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
         deriveExternalApply: () => ({
           ok: true,
           runExternalApply: runner.run,
-          evidence: makeWritableEvidence()
-        })
-      }
+          evidence: makeWritableEvidence(),
+        }),
+      },
     );
 
     await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
     expect(runner.calls()).toBe(1);
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("succeeded");
 
     let deriveCalls = 0;
     const reentryDispatch = createExternalApplyWorkflowDispatch(
       () => ({
         status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
-        detail: deriveDispatchInvocationId(RUN_ID, STEP_ID)
+        detail: deriveDispatchInvocationId(RUN_ID, STEP_ID),
       }),
       {
         deriveExternalApply: () => {
@@ -617,19 +637,21 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
             runExternalApply: async () => {
               throw new Error("terminal re-entry must not run external apply");
             },
-            evidence: makeWritableEvidence()
+            evidence: makeWritableEvidence(),
           };
-        }
-      }
+        },
+      },
     );
 
     const result = await reentryDispatch(claim, {
       db,
       workerId: WORKER,
-      now: DISPATCH_AT + 100
+      now: DISPATCH_AT + 100,
     });
 
-    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched);
+    expect(result.status).toBe(
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
+    );
     expect(deriveCalls).toBe(0);
     expect(runner.calls()).toBe(1);
     expect(stepState(db)).toBe("succeeded");
@@ -647,10 +669,10 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     expect(first.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.calls()).toBe(1);
 
@@ -662,14 +684,14 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT + 100
+      now: EXECUTE_AT + 100,
     });
     expect(second.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
     );
     expect(runner.calls()).toBe(1);
     expect(second.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
 
     // No duplicate scaffold round; the step is terminal exactly once.
@@ -699,17 +721,19 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
-    expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred);
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+    );
     expect(out.reconcile).toBeUndefined();
     expect(out.terminalize?.status).toBe("terminalize_recorded");
     // The external write is recorded as terminal evidence; the step stays running
     // with the lease held so a later tick re-drives only the reconciliation.
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
@@ -728,14 +752,14 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence: EVIDENCE,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
   });
@@ -752,13 +776,13 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
       stepId: STEP_ID,
       runExternalApply: runner.run,
       evidence: EVIDENCE,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
     ).toBeUndefined();
     // The step is left exactly as it was; nothing was finalized.
     expect(stepState(db)).toBe("pending");

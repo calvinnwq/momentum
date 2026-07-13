@@ -134,11 +134,21 @@ condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
-`unsupported_platform`, `auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
-uses this run-scoped surface when a claimed step cannot be resolved to a known
-definition step or uses an executor family the daemon cannot dispatch yet; that
-path opens a `manual_recovery_required` workflow gate instead of silently dropping
-the claim.
+`unsupported_platform`, `auth_unavailable`, and `executor_threw`.
+The workflow scheduler dispatcher also uses this run-scoped surface when a
+claimed step cannot be resolved to a known definition step or carries an invalid
+executor identity; that path opens a `manual_recovery_required` workflow gate
+instead of silently dropping the claim.
+A valid but unregistered executor identity instead records an invocation and
+round at `manual_recovery_required` with `runtime_unavailable`, then workflow
+reconciliation parks the run behind its standard
+`manual_recovery_required` step gate.
+If the configured module for that identity cannot be imported or validated, the
+same refusal preserves the precise registry diagnostic in durable round evidence.
+The daemon retries failed discovery after recovery is cleared, so repairing the
+executor entry module does not require a daemon restart. If the repair changes
+only a transitive dependency that Node already attempted to load or evaluate, restart the
+daemon before clearing recovery.
 The daemon-dispatchable `external-apply` path uses the same surface when issue scope, source evidence, deterministic intent seeding, valid payload, resolved target, credentials, policy, audit, or adapter safety checks refuse the write.
 The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
 The configured live-wrapper dispatch lane uses the same surface when the wrapper is
@@ -158,9 +168,12 @@ evidence when it is available.
 For `unsupported_platform`, move the workflow to Linux or macOS and confirm from
 the executor log and worktree that no supervised process ran and no edits were
 made.
-Clearing recovery on the supported host prepares the affected dispatched step
-for one scheduler retry, regardless of step kind; the retry uses a new attempt
+Clearing recovery after repairing an unsupported or unavailable runtime prepares
+the affected dispatched step for one scheduler retry, regardless of step kind or
+registered executor name; the retry uses a new attempt
 and round while preserving the refused round as durable evidence.
+The same explicit repair-and-retry path applies to registered SDK executors that
+settled with `executor_threw` or `executor_contract_invalid`.
 If the claimed run row has vanished, Momentum cannot write a run-scoped flag or gate without orphaning evidence, so it releases the lingering dispatch lease only.
 Stale `manual-recovery-required` workflow leases use the same surface;
 stale `auto-release` workflow leases are usually released, but a stale running

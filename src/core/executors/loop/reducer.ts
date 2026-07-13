@@ -43,10 +43,13 @@
  *     `StepDefinition.executor`.
  */
 
-import type { WorkflowExecutorFamily } from "../../workflow/definition/definition.js";
+import type { ExecutorName } from "../../workflow/definition/definition.js";
 import type { TransitionResult } from "../../workflow/run/reducer.js";
 
-export type { WorkflowExecutorFamily } from "../../workflow/definition/definition.js";
+export type {
+  ExecutorName,
+  WorkflowExecutorFamily,
+} from "../../workflow/definition/definition.js";
 
 /**
  * Executor invocation states (contract "Executor States"). One invocation is a
@@ -447,15 +450,15 @@ export function transitionExecutorRound(
 
 /**
  * The resolved executor configuration the contract calls `ExecutorDefinition`.
- * `StepDefinition.executor` names the executor family and its optional `config`
- * carries portable recipe intent; this record carries the deterministic agent /
- * model / effort / timeout / policy knobs resolved by the contract's selection
- * precedence ("Agent And Model Selection") and copied into each round before it
- * starts.
+ * `StepDefinition.executor` names the permanent executor identity and its
+ * optional `config` carries portable recipe intent; this record carries the
+ * deterministic agent / model / effort / timeout / policy knobs resolved by the
+ * contract's selection precedence ("Agent And Model Selection") and copied into
+ * each round before it starts.
  */
 export type ExecutorDefinitionRecord = {
   executorKey: string;
-  family: WorkflowExecutorFamily;
+  family: ExecutorName;
   agentProvider: string | null;
   model: string | null;
   effort: string | null;
@@ -474,7 +477,7 @@ export type ExecutorInvocationRecord = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  executorFamily: WorkflowExecutorFamily;
+  executorFamily: ExecutorName;
   state: ExecutorInvocationState;
   attempt: number;
   startedAt: number | null;
@@ -499,7 +502,7 @@ export type ExecutorRoundRecord = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  executorFamily: WorkflowExecutorFamily;
+  executorFamily: ExecutorName;
   attempt: number;
   roundIndex: number;
   // Execution.

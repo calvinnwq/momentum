@@ -13,9 +13,12 @@
 import path from "node:path";
 
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
+import { validateExecutorConfig } from "../../executors/sdk/config-schema.js";
+import type { ExecutorRegistry } from "../../executors/sdk/registry.js";
 
 import {
   getBuiltInWorkflowDefinition,
+  WORKFLOW_EXECUTOR_FAMILIES,
   type WorkflowDefinition,
 } from "../definition/definition.js";
 import {
@@ -120,6 +123,85 @@ export type CodingWorkflowBuiltInDefinitionPreflightResult =
       ok: false;
       evidence: readonly [StructuralPreflightEvidence];
     };
+
+export type WorkflowExecutorConfigPreflightResult =
+  | { ok: true; evidence: readonly StructuralPreflightEvidence[] }
+  | { ok: false; evidence: readonly StructuralPreflightEvidence[] };
+
+/**
+ * Validate every step against the schema declared by its registered executor.
+ * Pure and intended to run before opening a write transaction or materializing
+ * workflow-run rows.
+ */
+export function preflightWorkflowExecutorConfigs(
+  definition: WorkflowDefinition,
+  registry: ExecutorRegistry,
+  options: { allowUnregisteredBuiltIns?: boolean } = {},
+): WorkflowExecutorConfigPreflightResult {
+  const evidence: StructuralPreflightEvidence[] = [];
+  for (const [index, step] of definition.steps.entries()) {
+    const executor = registry.get(step.executor);
+    const basePath = `workflow.definition.steps[${index}]`;
+    if (executor === undefined) {
+      if (
+        options.allowUnregisteredBuiltIns === true &&
+        (WORKFLOW_EXECUTOR_FAMILIES as readonly string[]).includes(
+          step.executor,
+        )
+      ) {
+        continue;
+      }
+      evidence.push(
+        buildStructuralPreflightEvidence({
+          checkId: "executor.registration",
+          status: "failed",
+          severity: "error",
+          path: `${basePath}.executor`,
+          key: step.executor,
+          message: `Executor ${step.executor} is not registered.`,
+          recommendedAction:
+            "Register the executor name in Momentum executor config and retry.",
+        }),
+      );
+      continue;
+    }
+    const validated = validateExecutorConfig(
+      step.config ?? {},
+      executor.configSchema,
+    );
+    if (!validated.ok) {
+      for (const issue of validated.issues) {
+        evidence.push(
+          buildStructuralPreflightEvidence({
+            checkId: "executor.config",
+            status: "failed",
+            severity: "error",
+            path: `${basePath}.${issue.path}`,
+            key: step.executor,
+            message: `Executor ${step.executor} ${issue.path} ${issue.message}.`,
+            recommendedAction:
+              "Update the step config to match the registered executor's declared schema.",
+          }),
+        );
+      }
+      continue;
+    }
+    evidence.push(
+      buildStructuralPreflightEvidence({
+        checkId: "executor.config",
+        status: "passed",
+        severity: "info",
+        path: `${basePath}.config`,
+        key: step.executor,
+        message: `Executor ${step.executor} config is structurally valid.`,
+        recommendedAction: "No action required.",
+      }),
+    );
+  }
+  return evidence.some((item) => item.status === "failed")
+    ? { ok: false, evidence }
+    : { ok: true, evidence };
+}
 
 const WORKFLOW_DEFINITION_CHECK_ID = "workflow.definition";
 const RUN_SHAPE_CHECK_ID = "workflow.run_shape";

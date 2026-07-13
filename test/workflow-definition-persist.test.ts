@@ -152,7 +152,7 @@ describe("persistWorkflowDefinition", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "bogus-family",
+            executor: "NOT A VALID EXECUTOR",
             order: 0,
             required: true,
           },

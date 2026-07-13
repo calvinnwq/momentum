@@ -4,8 +4,7 @@
  *
  * This is the daemon-dispatchable *producer* that makes `external-apply`
  * runnable by the workflow lane. It is the async sibling of
- * `dispatch/executor-run.ts`'s {@link executeAndReconcileDispatchedWorkflowStep}:
- * same "run the work -> terminalize the evidence -> let the reconciliation seam finalize" shape and
+ * It shares the neutral "run the work -> settle evidence -> reconcile" shape and
  * the same single-finalization-owner / idempotent-re-entry discipline, but the
  * work it runs is the existing external-apply write path
  * (`executeExternalApply`, `src/core/intent/apply-execute.ts`) rather than a
@@ -63,20 +62,18 @@ import type { ExecuteExternalApplyResult } from "../../intent/apply-execute.js";
 import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
 import { loadExecutorInvocation } from "../../executors/loop/persist.js";
 import { deriveDispatchInvocationId } from "./execute.js";
-import {
-  terminalizeDispatchedExecutorInvocation
-} from "./executor-terminalize.js";
+import { terminalizeDispatchedExecutorInvocation } from "./executor-evidence.js";
 import {
   reconcileDispatchedWorkflowStep,
-  type WorkflowStepReconciliationResult
+  type WorkflowStepReconciliationResult,
 } from "./reconcile-execute.js";
 import {
   WORKFLOW_EXECUTE_RECONCILE_STATUS,
-  type ExecuteAndReconcileDispatchedStepResult
-} from "./executor-run.js";
+  type ExecuteAndReconcileDispatchedStepResult,
+} from "./executor-recovery.js";
 import {
   mapExternalApplyResultToExecutorResult,
-  type ExternalApplyExecutorEvidence
+  type ExternalApplyExecutorEvidence,
 } from "./external-apply.js";
 import { getWorkflowStep } from "../step/transitions.js";
 
@@ -90,7 +87,8 @@ import { getWorkflowStep } from "../step/transitions.js";
  * `executeExternalApply` is) — a rejection propagates so a re-entered tick
  * retries the still-non-terminal scaffold.
  */
-export type DispatchedExternalApplyRunner = () => Promise<ExecuteExternalApplyResult>;
+export type DispatchedExternalApplyRunner =
+  () => Promise<ExecuteExternalApplyResult>;
 
 export type ExecuteAndReconcileDispatchedExternalApplyStepInput = {
   db: MomentumDb;
@@ -116,13 +114,13 @@ export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
 }): ExecuteAndReconcileDispatchedStepResult | null {
   const invocation = loadExecutorInvocation(
     input.db,
-    deriveDispatchInvocationId(input.runId, input.stepId)
+    deriveDispatchInvocationId(input.runId, input.stepId),
   );
   if (invocation?.executorFamily !== "external-apply") return null;
   if (!isTerminalExecutorInvocationState(invocation.state)) return null;
   return reconcileTerminalDispatchedExternalApplyInvocation(
     input,
-    invocation.state
+    invocation.state,
   );
 }
 
@@ -135,7 +133,7 @@ export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
  * external write).
  */
 export async function executeAndReconcileDispatchedExternalApplyStep(
-  input: ExecuteAndReconcileDispatchedExternalApplyStepInput
+  input: ExecuteAndReconcileDispatchedExternalApplyStepInput,
 ): Promise<ExecuteAndReconcileDispatchedStepResult> {
   const { db, runId, stepId, runExternalApply, evidence, now } = input;
   const invocationId = deriveDispatchInvocationId(runId, stepId);
@@ -146,20 +144,20 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     // the external write — the structural guard against a double finalize.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: invocationId
+      detail: invocationId,
     };
   }
   if (invocation.executorFamily !== "external-apply") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${invocationId}: ${invocation.executorFamily}`
+      detail: `${invocationId}: ${invocation.executorFamily}`,
     };
   }
 
   if (isTerminalExecutorInvocationState(invocation.state)) {
     return reconcileTerminalDispatchedExternalApplyInvocation(
       { db, runId, stepId, now },
-      invocation.state
+      invocation.state,
     );
   }
 
@@ -167,7 +165,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   if (step === undefined) {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotFound,
-      detail: stepId
+      detail: stepId,
     };
   }
   if (step.state !== "running") {
@@ -175,7 +173,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     // unexpected lane state the seam refuses rather than writing over.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning,
-      detail: step.state
+      detail: step.state,
     };
   }
 
@@ -188,7 +186,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   writeExternalApplyEvidence(evidence, externalApplyResult);
   const executorResult = mapExternalApplyResultToExecutorResult(
     externalApplyResult,
-    evidence
+    evidence,
   );
 
   // Record the result as terminal evidence, then let the reconciliation seam finalize the step from
@@ -199,20 +197,20 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     runId,
     stepId,
     result: executorResult,
-    now
+    now,
   });
   const reconciled = tryReconcileDispatchedWorkflowStep({
     db,
     runId,
     stepId,
-    now
+    now,
   });
   if (!reconciled.ok) {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
       executorResult,
       terminalize,
-      detail: reconciled.detail
+      detail: reconciled.detail,
     };
   }
 
@@ -220,26 +218,25 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     executorResult,
     terminalize,
-    reconcile: reconciled.reconcile
+    reconcile: reconciled.reconcile,
   };
 }
 
-
 function reconcileTerminalDispatchedExternalApplyInvocation(
   input: { db: MomentumDb; runId: string; stepId: string; now: number },
-  state: string
+  state: string,
 ): ExecuteAndReconcileDispatchedStepResult {
   const reconciled = tryReconcileDispatchedWorkflowStep(input);
   if (!reconciled.ok) {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
-      detail: reconciled.detail
+      detail: reconciled.detail,
     };
   }
   return {
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
     reconcile: reconciled.reconcile,
-    detail: state
+    detail: state,
   };
 }
 
@@ -247,7 +244,7 @@ function reconcileTerminalDispatchedExternalApplyInvocation(
  * Drive the idempotent reconciliation, trapping a thrown reconcile so a
  * recorded-but-unreconciled terminal can be retried on a later tick without
  * losing the durable evidence or releasing the held lease. Mirrors the same
- * helper the synchronous run path uses (`dispatch/executor-run.ts`).
+ * helper the other dispatched producers use.
  */
 function tryReconcileDispatchedWorkflowStep(input: {
   db: MomentumDb;
@@ -260,19 +257,19 @@ function tryReconcileDispatchedWorkflowStep(input: {
   try {
     return {
       ok: true,
-      reconcile: reconcileDispatchedWorkflowStep(input)
+      reconcile: reconcileDispatchedWorkflowStep(input),
     };
   } catch (error) {
     return {
       ok: false,
-      detail: error instanceof Error ? error.message : String(error)
+      detail: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
 function writeExternalApplyEvidence(
   evidence: ExternalApplyExecutorEvidence,
-  result: ExecuteExternalApplyResult
+  result: ExecuteExternalApplyResult,
 ): void {
   fs.mkdirSync(path.dirname(evidence.executorLogPath), { recursive: true });
   fs.mkdirSync(path.dirname(evidence.resultJsonPath), { recursive: true });
@@ -280,7 +277,7 @@ function writeExternalApplyEvidence(
   fs.writeFileSync(
     evidence.resultJsonPath,
     `${JSON.stringify(result, null, 2)}\n`,
-    "utf8"
+    "utf8",
   );
 }
 
@@ -300,7 +297,7 @@ function externalApplyLog(result: ExecuteExternalApplyResult): string {
       `result: ${result.resultCode}`,
       `alreadyApplied: ${String(result.external.alreadyApplied)}`,
       `idempotencyMarker: ${result.external.idempotencyMarker}`,
-      ""
+      "",
     ].join("\n");
   }
   return [
@@ -309,6 +306,6 @@ function externalApplyLog(result: ExecuteExternalApplyResult): string {
     `message: ${result.message}`,
     `intent: ${result.context.intentId}`,
     `adapter: ${result.context.adapterKind}`,
-    ""
+    "",
   ].join("\n");
 }

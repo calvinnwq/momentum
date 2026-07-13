@@ -19,14 +19,14 @@ import {
   type ClaimedWorkflowStep,
   type WorkflowStepDispatch,
   type WorkflowStepDispatchContext,
-  type WorkflowStepDispatchResult
+  type WorkflowStepDispatchResult,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery/artifact.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { deriveWorkflowRunState } from "../src/core/workflow/run/reducer.js";
@@ -38,7 +38,7 @@ import type {
   WorkflowLeaseStalePolicy,
   WorkflowRunState,
   WorkflowStepKind,
-  WorkflowStepState
+  WorkflowStepState,
 } from "../src/core/workflow/run/reducer.js";
 
 const NOW = 1_730_000_000_000;
@@ -73,14 +73,14 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, repo_path, issue_scope_json, route_json,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', ?, ?, ?)`
+     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
     input.repoPath ?? null,
     input.needsManualRecovery ? 1 : 0,
     input.createdAt ?? NOW,
-    input.createdAt ?? NOW
+    input.createdAt ?? NOW,
   );
 }
 
@@ -97,7 +97,7 @@ function seedStep(db: MomentumDb, input: SeedStepInput): void {
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -106,7 +106,7 @@ function seedStep(db: MomentumDb, input: SeedStepInput): void {
     input.order,
     input.required === false ? 0 : 1,
     NOW,
-    NOW
+    NOW,
   );
 }
 
@@ -127,7 +127,7 @@ function seedLease(db: MomentumDb, input: SeedLeaseInput): void {
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.leaseKind,
@@ -138,7 +138,7 @@ function seedLease(db: MomentumDb, input: SeedLeaseInput): void {
     input.releasedAt ?? null,
     input.stalePolicy ?? "auto-release",
     acquiredAt,
-    acquiredAt
+    acquiredAt,
   );
 }
 
@@ -152,21 +152,21 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "postflight",
         kind: "postflight",
         state: "pending",
-        order: 2
+        order: 2,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -179,8 +179,8 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
           stepOrder: 0,
           required: true,
           repoPath: "/repos/a",
-          runState: "approved"
-        }
+          runState: "approved",
+        },
       ]);
       expect(scan.staleLeases).toEqual([]);
     } finally {
@@ -197,21 +197,21 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "skipped",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "postflight",
         kind: "postflight",
         state: "approved",
-        order: 2
+        order: 2,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -232,14 +232,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "running",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -259,14 +259,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
-        order: 1
+        order: 1,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -291,14 +291,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "pending",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
 
       // Precondition: the run is genuinely dispatchable per run-state, so the
@@ -312,18 +312,18 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
               kind: "preflight",
               state: "pending",
               order: 0,
-              required: true
+              required: true,
             },
             {
               stepId: "implementation",
               kind: "implementation",
               state: "approved",
               order: 1,
-              required: true
-            }
+              required: true,
+            },
           ],
-          { leases: [], now: NOW }
-        )
+          { leases: [], now: NOW },
+        ),
       ).toBe("approved");
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -341,14 +341,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
       seedRun(db, {
         runId: "run-a",
         state: "approved",
-        needsManualRecovery: true
+        needsManualRecovery: true,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -369,7 +369,7 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -389,12 +389,12 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
-        expiresAt: NOW + 10_000
+        expiresAt: NOW + 10_000,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -415,13 +415,13 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -434,8 +434,8 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
           holder: "worker-1",
           classification: "stale-auto-release",
           stalePolicy: "auto-release",
-          expiresAt: NOW - 10_000
-        }
+          expiresAt: NOW - 10_000,
+        },
       ]);
     } finally {
       db.close();
@@ -451,13 +451,13 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -470,8 +470,8 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
           holder: "worker-1",
           classification: "stale-manual-recovery-required",
           stalePolicy: "manual-recovery-required",
-          expiresAt: NOW - 10_000
-        }
+          expiresAt: NOW - 10_000,
+        },
       ]);
     } finally {
       db.close();
@@ -487,14 +487,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
         releasedAt: NOW - 5_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -515,12 +515,12 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "monitor",
-        expiresAt: NOW + 10_000
+        expiresAt: NOW + 10_000,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
@@ -541,12 +541,12 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
-        expiresAt: NOW - 1_000
+        expiresAt: NOW - 1_000,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW, graceMs: 5_000 });
@@ -562,13 +562,17 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
   it("returns one runnable step per eligible run, ordered by run creation", () => {
     const db = openDb(makeTempDir());
     try {
-      seedRun(db, { runId: "run-late", state: "approved", createdAt: NOW + 100 });
+      seedRun(db, {
+        runId: "run-late",
+        state: "approved",
+        createdAt: NOW + 100,
+      });
       seedStep(db, {
         runId: "run-late",
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedRun(db, { runId: "run-early", state: "approved", createdAt: NOW });
       seedStep(db, {
@@ -576,14 +580,14 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW + 200 });
 
       expect(scan.runnable.map((s) => s.runId)).toEqual([
         "run-early",
-        "run-late"
+        "run-late",
       ]);
     } finally {
       db.close();
@@ -593,11 +597,11 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
   it("validates the now input", () => {
     const db = openDb(makeTempDir());
     try {
+      expect(() => selectRunnableWorkflowWork(db, { now: Number.NaN })).toThrow(
+        /now must be a finite number/,
+      );
       expect(() =>
-        selectRunnableWorkflowWork(db, { now: Number.NaN })
-      ).toThrow(/now must be a finite number/);
-      expect(() =>
-        selectRunnableWorkflowWork(db, { now: NOW, graceMs: -1 })
+        selectRunnableWorkflowWork(db, { now: NOW, graceMs: -1 }),
       ).toThrow(/graceMs must be a non-negative finite number/);
     } finally {
       db.close();
@@ -615,10 +619,10 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         runId: "run-a",
         repoPath: "/repos/a",
         objective: "Recover terminal dispatch evidence",
-        now: NOW
+        now: NOW,
       });
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
       ).run("run-a", "preflight");
       const claim = claimRunnableWorkflowStep(db, {
         runId: "run-a",
@@ -626,18 +630,18 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         holder: "worker-1",
         leaseExpiresAt: NOW + 30_000,
         now: NOW,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
       if (!claim.ok) throw new Error(`claim failed: ${claim.reason}`);
       executeWorkflowStepDispatch(claim.claim, {
         db,
         workerId: "worker-1",
-        now: NOW + 1
+        now: NOW + 1,
       });
       db.prepare(
         `UPDATE workflow_leases
             SET acquired_at = ?, heartbeat_at = ?, expires_at = ?, updated_at = ?
-          WHERE run_id = ? AND lease_kind = 'dispatch'`
+          WHERE run_id = ? AND lease_kind = 'dispatch'`,
       ).run(NOW - 60_000, NOW - 60_000, NOW - 10_000, NOW - 60_000, "run-a");
       terminalizeDispatchedExecutorInvocation({
         db,
@@ -655,19 +659,19 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
             errorCode: null,
             errorMessage: null,
             retryHint: null,
-            recoveryHint: null
+            recoveryHint: null,
           },
           executorLogPath: "/repos/a/.agent-workflows/run-a/executor.log",
-          resultJsonPath: "/repos/a/.agent-workflows/run-a/result.json"
-        }
+          resultJsonPath: "/repos/a/.agent-workflows/run-a/result.json",
+        },
       });
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
         loadExecutorInvocation(
           db,
-          deriveDispatchInvocationId("run-a", "preflight")
-        )?.state
+          deriveDispatchInvocationId("run-a", "preflight"),
+        )?.state,
       ).toBe("succeeded");
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW + 100 });
@@ -679,17 +683,19 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
           holder: "worker-1",
           stalePolicy: "auto-release",
           action: "released",
-          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
       ]);
       expect(result.skipped).toEqual([]);
-      expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("succeeded");
+      expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe(
+        "succeeded",
+      );
       expect(getWorkflowLease(db, "run-a", "dispatch")?.releasedAt).toBe(
-        NOW + 100
+        NOW + 100,
       );
       expect(selectRunnableWorkflowWork(db, { now: NOW + 100 })).toEqual({
         runnable: [],
-        staleLeases: []
+        staleLeases: [],
       });
     } finally {
       db.close();
@@ -705,10 +711,10 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         runId: "run-a",
         repoPath: "/repos/a",
         objective: "Recover nonterminal dispatch evidence",
-        now: NOW
+        now: NOW,
       });
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
       ).run("run-a", "preflight");
       const claim = claimRunnableWorkflowStep(db, {
         runId: "run-a",
@@ -716,26 +722,26 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         holder: "worker-1",
         leaseExpiresAt: NOW + 30_000,
         now: NOW,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
       if (!claim.ok) throw new Error(`claim failed: ${claim.reason}`);
       executeWorkflowStepDispatch(claim.claim, {
         db,
         workerId: "worker-1",
-        now: NOW + 1
+        now: NOW + 1,
       });
       db.prepare(
         `UPDATE workflow_leases
             SET acquired_at = ?, heartbeat_at = ?, expires_at = ?, updated_at = ?
-          WHERE run_id = ? AND lease_kind = 'dispatch'`
+          WHERE run_id = ? AND lease_kind = 'dispatch'`,
       ).run(NOW - 60_000, NOW - 60_000, NOW - 10_000, NOW - 60_000, "run-a");
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
         loadExecutorInvocation(
           db,
-          deriveDispatchInvocationId("run-a", "preflight")
-        )?.state
+          deriveDispatchInvocationId("run-a", "preflight"),
+        )?.state,
       ).toBe("running");
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW + 100 });
@@ -747,8 +753,8 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
           holder: "worker-1",
           stalePolicy: "auto-release",
           action: "flagged_manual_recovery",
-          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS,
+        },
       ]);
       expect(result.skipped).toEqual([]);
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
@@ -756,11 +762,11 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       expect(recovery?.needsManualRecovery).toBe(true);
       expect(recovery?.reason).toContain("dispatch lease");
       expect(getWorkflowLease(db, "run-a", "dispatch")?.releasedAt).toBe(
-        NOW + 100
+        NOW + 100,
       );
       expect(selectRunnableWorkflowWork(db, { now: NOW + 100 })).toEqual({
         runnable: [],
-        staleLeases: []
+        staleLeases: [],
       });
     } finally {
       db.close();
@@ -776,13 +782,13 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       // Before recovery the fresh-but-stale lease withholds the run.
@@ -797,8 +803,8 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
           holder: "worker-1",
           stalePolicy: "auto-release",
           action: "released",
-          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
       ]);
       expect(result.skipped).toEqual([]);
 
@@ -821,27 +827,27 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       seedRun(db, {
         runId: "run-a",
         state: "running",
-        createdAt: NOW - 60_000
+        createdAt: NOW - 60_000,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -849,7 +855,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       expect(result.recovered).toHaveLength(1);
       const row = db
         .prepare(
-          "SELECT state, finished_at, updated_at FROM workflow_runs WHERE id = ?"
+          "SELECT state, finished_at, updated_at FROM workflow_runs WHERE id = ?",
         )
         .get("run-a") as
         | { state: string; finished_at: number | null; updated_at: number }
@@ -857,11 +863,11 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       expect(row).toEqual({
         state: "succeeded",
         finished_at: NOW,
-        updated_at: NOW
+        updated_at: NOW,
       });
       expect(selectRunnableWorkflowWork(db, { now: NOW })).toEqual({
         runnable: [],
-        staleLeases: []
+        staleLeases: [],
       });
     } finally {
       db.close();
@@ -877,13 +883,13 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -895,8 +901,8 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
           holder: "worker-1",
           stalePolicy: "manual-recovery-required",
           action: "flagged_manual_recovery",
-          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS,
+        },
       ]);
       expect(result.skipped).toEqual([]);
 
@@ -924,13 +930,13 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "running",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -938,7 +944,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       expect(result.recovered).toHaveLength(1);
       const artifactPath = resolveWorkflowRecoveryArtifactPath(
         path.join(repoPath, ".agent-workflows"),
-        "run-a"
+        "run-a",
       );
       expect(fs.existsSync(artifactPath)).toBe(true);
       const body = fs.readFileSync(artifactPath, "utf-8");
@@ -959,12 +965,12 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
-        expiresAt: NOW + 10_000
+        expiresAt: NOW + 10_000,
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -986,14 +992,14 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
         releasedAt: NOW - 5_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -1015,13 +1021,13 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       const first = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -1043,13 +1049,13 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const first = recoverStaleWorkflowLeases(db, { now: NOW });
@@ -1072,44 +1078,47 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-auto",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
-      seedRun(db, { runId: "run-manual", state: "running", createdAt: NOW + 1 });
+      seedRun(db, {
+        runId: "run-manual",
+        state: "running",
+        createdAt: NOW + 1,
+      });
       seedStep(db, {
         runId: "run-manual",
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-manual",
         leaseKind: "dispatch",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const result = recoverStaleWorkflowLeases(db, { now: NOW });
 
-      expect(
-        result.recovered.map((r) => [r.runId, r.action])
-      ).toEqual([
+      expect(result.recovered.map((r) => [r.runId, r.action])).toEqual([
         ["run-auto", "released"],
-        ["run-manual", "flagged_manual_recovery"]
+        ["run-manual", "flagged_manual_recovery"],
       ]);
       expect(result.skipped).toEqual([]);
       expect(getWorkflowLease(db, "run-auto", "managed-step")?.releasedAt).toBe(
-        NOW
+        NOW,
       );
       expect(
-        getWorkflowRunManualRecoveryState(db, "run-manual")?.needsManualRecovery
+        getWorkflowRunManualRecoveryState(db, "run-manual")
+          ?.needsManualRecovery,
       ).toBe(true);
     } finally {
       db.close();
@@ -1125,19 +1134,24 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 1_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
-      const result = recoverStaleWorkflowLeases(db, { now: NOW, graceMs: 5_000 });
+      const result = recoverStaleWorkflowLeases(db, {
+        now: NOW,
+        graceMs: 5_000,
+      });
 
       expect(result).toEqual({ recovered: [], skipped: [] });
-      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBeNull();
+      expect(
+        getWorkflowLease(db, "run-a", "managed-step")?.releasedAt,
+      ).toBeNull();
     } finally {
       db.close();
     }
@@ -1146,11 +1160,11 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
   it("validates the now and graceMs inputs", () => {
     const db = openDb(makeTempDir());
     try {
+      expect(() => recoverStaleWorkflowLeases(db, { now: Number.NaN })).toThrow(
+        /now must be a finite number/,
+      );
       expect(() =>
-        recoverStaleWorkflowLeases(db, { now: Number.NaN })
-      ).toThrow(/now must be a finite number/);
-      expect(() =>
-        recoverStaleWorkflowLeases(db, { now: NOW, graceMs: -1 })
+        recoverStaleWorkflowLeases(db, { now: NOW, graceMs: -1 }),
       ).toThrow(/graceMs must be a non-negative finite number/);
     } finally {
       db.close();
@@ -1170,14 +1184,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
-        order: 1
+        order: 1,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1185,7 +1199,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result.ok).toBe(true);
@@ -1197,7 +1211,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepOrder: 0,
         required: true,
         repoPath: "/repos/a",
-        runState: "approved"
+        runState: "approved",
       });
       expect(result.claim.lease).toMatchObject({
         runId: "run-a",
@@ -1205,7 +1219,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         holder: "worker-1",
         expiresAt: LEASE_EXPIRES_AT,
         releasedAt: null,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       // The dispatch lease is durable, and the run now scans as busy.
@@ -1227,14 +1241,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1242,13 +1256,13 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "implementation",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({
         ok: false,
         reason: "step_superseded",
-        runnableStepId: "preflight"
+        runnableStepId: "preflight",
       });
       expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
     } finally {
@@ -1265,14 +1279,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "pending",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1280,7 +1294,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "implementation",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       // A *pending* predecessor (vs. the superseded case's approved one) means
@@ -1292,12 +1306,12 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
       expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
       const states = db
         .prepare(
-          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all("run-a") as Array<{ step_id: string; state: string }>;
       expect(states).toEqual([
         { step_id: "preflight", state: "pending" },
-        { step_id: "implementation", state: "approved" }
+        { step_id: "implementation", state: "approved" },
       ]);
     } finally {
       db.close();
@@ -1312,7 +1326,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_found" });
@@ -1330,7 +1344,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1338,7 +1352,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
@@ -1353,14 +1367,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
       seedRun(db, {
         runId: "run-a",
         state: "approved",
-        needsManualRecovery: true
+        needsManualRecovery: true,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1368,7 +1382,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
@@ -1387,14 +1401,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "running",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1402,7 +1416,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "implementation",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
@@ -1420,13 +1434,13 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         holder: "worker-2",
-        expiresAt: NOW + 10_000
+        expiresAt: NOW + 10_000,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1434,7 +1448,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result.ok).toBe(false);
@@ -1443,7 +1457,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
       if (result.reason !== "lease_held") throw new Error("unreachable");
       expect(result.existing).toMatchObject({
         leaseKind: "managed-step",
-        holder: "worker-2"
+        holder: "worker-2",
       });
       // No dispatch lease is created when the claim loses.
       expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
@@ -1461,13 +1475,13 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1475,12 +1489,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
       // The stale lease is left untouched for the recovery pass to handle.
-      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBeNull();
+      expect(
+        getWorkflowLease(db, "run-a", "managed-step")?.releasedAt,
+      ).toBeNull();
       expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
     } finally {
       db.close();
@@ -1496,13 +1512,13 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1510,7 +1526,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
@@ -1528,12 +1544,12 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "monitor",
-        expiresAt: NOW + 10_000
+        expiresAt: NOW + 10_000,
       });
 
       const result = claimRunnableWorkflowStep(db, {
@@ -1541,11 +1557,13 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
 
       expect(result.ok).toBe(true);
-      expect(getWorkflowLease(db, "run-a", "dispatch")?.holder).toBe("worker-1");
+      expect(getWorkflowLease(db, "run-a", "dispatch")?.holder).toBe(
+        "worker-1",
+      );
     } finally {
       db.close();
     }
@@ -1560,7 +1578,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
 
       const first = claimRunnableWorkflowStep(db, {
@@ -1568,7 +1586,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       });
       expect(first.ok).toBe(true);
 
@@ -1577,7 +1595,7 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-2",
         leaseExpiresAt: LEASE_EXPIRES_AT + 5_000,
-        now: NOW + 1_000
+        now: NOW + 1_000,
       });
 
       expect(second.ok).toBe(false);
@@ -1598,22 +1616,22 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         stepId: "preflight",
         holder: "worker-1",
         leaseExpiresAt: LEASE_EXPIRES_AT,
-        now: NOW
+        now: NOW,
       };
       expect(() =>
-        claimRunnableWorkflowStep(db, { ...base, now: Number.NaN })
+        claimRunnableWorkflowStep(db, { ...base, now: Number.NaN }),
       ).toThrow(/now must be a finite number/);
       expect(() =>
-        claimRunnableWorkflowStep(db, { ...base, graceMs: -1 })
+        claimRunnableWorkflowStep(db, { ...base, graceMs: -1 }),
       ).toThrow(/graceMs must be a non-negative finite number/);
       expect(() =>
-        claimRunnableWorkflowStep(db, { ...base, holder: "" })
+        claimRunnableWorkflowStep(db, { ...base, holder: "" }),
       ).toThrow(/holder is required/);
       expect(() =>
-        claimRunnableWorkflowStep(db, { ...base, stepId: "" })
+        claimRunnableWorkflowStep(db, { ...base, stepId: "" }),
       ).toThrow(/stepId is required/);
       expect(() =>
-        claimRunnableWorkflowStep(db, { ...base, leaseExpiresAt: 0 })
+        claimRunnableWorkflowStep(db, { ...base, leaseExpiresAt: 0 }),
       ).toThrow(/leaseExpiresAt must be a positive integer/);
     } finally {
       db.close();
@@ -1623,11 +1641,14 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
 
 type DispatchRecorder = {
   dispatch: WorkflowStepDispatch;
-  calls: Array<{ claim: ClaimedWorkflowStep; context: WorkflowStepDispatchContext }>;
+  calls: Array<{
+    claim: ClaimedWorkflowStep;
+    context: WorkflowStepDispatchContext;
+  }>;
 };
 
 function recordingDispatch(
-  result: WorkflowStepDispatchResult = { status: "dispatched" }
+  result: WorkflowStepDispatchResult = { status: "dispatched" },
 ): DispatchRecorder {
   const calls: DispatchRecorder["calls"] = [];
   const dispatch: WorkflowStepDispatch = (claim, context) => {
@@ -1647,13 +1668,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW
+        now: () => NOW,
       });
 
       expect(result).toEqual({
         code: "idle",
         workerId: "scheduler-1",
-        recovery: { recovered: [], skipped: [] }
+        recovery: { recovered: [], skipped: [] },
       });
       expect(recorder.calls).toHaveLength(0);
     } finally {
@@ -1670,14 +1691,14 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId: "run-a",
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
-        order: 1
+        order: 1,
       });
       const recorder = recordingDispatch();
 
@@ -1685,7 +1706,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW
+        now: () => NOW,
       });
 
       expect(result.code).toBe("dispatched");
@@ -1697,7 +1718,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepOrder: 0,
         required: true,
         repoPath: "/repos/a",
-        runState: "approved"
+        runState: "approved",
       });
       expect(result.dispatch).toEqual({ status: "dispatched" });
       expect(result.recovery).toEqual({ recovered: [], skipped: [] });
@@ -1708,7 +1729,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls[0]?.context).toEqual({
         db,
         workerId: "scheduler-1",
-        now: NOW
+        now: NOW,
       });
 
       // The dispatch lease is durable and left held for the dispatcher to own.
@@ -1730,7 +1751,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       // A dead worker's stale auto-release lease withholds the run until it is
       // recovered; the tick must recover before it scans.
@@ -1738,7 +1759,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       });
       const recorder = recordingDispatch();
 
@@ -1746,7 +1767,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW
+        now: () => NOW,
       });
 
       expect(result.code).toBe("dispatched");
@@ -1758,16 +1779,18 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           holder: "worker-1",
           stalePolicy: "auto-release",
           action: "released",
-          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
       ]);
       expect(result.claim.stepId).toBe("preflight");
       expect(recorder.calls).toHaveLength(1);
 
       // The stale lease was released and a fresh dispatch lease was taken.
-      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBe(NOW);
+      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBe(
+        NOW,
+      );
       expect(
-        getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND)?.holder
+        getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND)?.holder,
       ).toBe("scheduler-1");
     } finally {
       db.close();
@@ -1783,13 +1806,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedLease(db, {
         runId: "run-a",
         leaseKind: "managed-step",
         expiresAt: NOW - 10_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
       const recorder = recordingDispatch();
 
@@ -1797,7 +1820,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW
+        now: () => NOW,
       });
 
       expect(result.code).toBe("idle");
@@ -1809,17 +1832,21 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           holder: "worker-1",
           stalePolicy: "manual-recovery-required",
           action: "flagged_manual_recovery",
-          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
-        }
+          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS,
+        },
       ]);
       expect(recorder.calls).toHaveLength(0);
 
       // The run is parked for manual recovery and its lease left as evidence.
       expect(
-        getWorkflowRunManualRecoveryState(db, "run-a")?.needsManualRecovery
+        getWorkflowRunManualRecoveryState(db, "run-a")?.needsManualRecovery,
       ).toBe(true);
-      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBeNull();
-      expect(getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND)).toBeUndefined();
+      expect(
+        getWorkflowLease(db, "run-a", "managed-step")?.releasedAt,
+      ).toBeNull();
+      expect(
+        getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND),
+      ).toBeUndefined();
     } finally {
       db.close();
     }
@@ -1828,13 +1855,17 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
   it("dispatches the oldest eligible run first", () => {
     const db = openDb(makeTempDir());
     try {
-      seedRun(db, { runId: "run-late", state: "approved", createdAt: NOW + 100 });
+      seedRun(db, {
+        runId: "run-late",
+        state: "approved",
+        createdAt: NOW + 100,
+      });
       seedStep(db, {
         runId: "run-late",
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       seedRun(db, { runId: "run-early", state: "approved", createdAt: NOW });
       seedStep(db, {
@@ -1842,7 +1873,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       const recorder = recordingDispatch();
 
@@ -1850,7 +1881,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW + 200
+        now: () => NOW + 200,
       });
 
       expect(result.code).toBe("dispatched");
@@ -1858,7 +1889,9 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(result.claim.runId).toBe("run-early");
       // Only one step is claimed per tick; the late run waits for a later tick.
       expect(recorder.calls).toHaveLength(1);
-      expect(getWorkflowLease(db, "run-late", WORKFLOW_DISPATCH_LEASE_KIND)).toBeUndefined();
+      expect(
+        getWorkflowLease(db, "run-late", WORKFLOW_DISPATCH_LEASE_KIND),
+      ).toBeUndefined();
     } finally {
       db.close();
     }
@@ -1873,7 +1906,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       const recorder = recordingDispatch();
       const existing: WorkflowLeaseRecord = {
@@ -1884,7 +1917,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         expiresAt: NOW + 10_000,
         heartbeatAt: NOW - 1_000,
         releasedAt: null,
-        stalePolicy: "auto-release"
+        stalePolicy: "auto-release",
       };
 
       const result = runWorkflowSchedulerOnce({
@@ -1894,15 +1927,15 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         now: () => NOW,
         deps: {
           // Simulate another worker winning the lease between scan and claim.
-          claimStep: () => ({ ok: false, reason: "lease_held", existing })
-        }
+          claimStep: () => ({ ok: false, reason: "lease_held", existing }),
+        },
       });
 
       expect(result).toEqual({
         code: "claim_contended",
         workerId: "scheduler-1",
         recovery: { recovered: [], skipped: [] },
-        claimResult: { ok: false, reason: "lease_held", existing }
+        claimResult: { ok: false, reason: "lease_held", existing },
       });
       expect(recorder.calls).toHaveLength(0);
     } finally {
@@ -1919,7 +1952,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       const boom = new Error("dispatcher exploded");
       const dispatch: WorkflowStepDispatch = () => {
@@ -1931,8 +1964,8 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           db,
           workerId: "scheduler-1",
           dispatch,
-          now: () => NOW
-        })
+          now: () => NOW,
+        }),
       ).toThrow(boom);
 
       // The claim is not stranded: the dispatch lease this tick acquired is
@@ -1953,7 +1986,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
       const recorder = recordingDispatch();
 
@@ -1963,7 +1996,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         dispatch: recorder.dispatch,
         now: () => NOW,
         leaseDurationMs: 45_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
 
       expect(result.code).toBe("dispatched");
@@ -1971,10 +2004,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(result.claim.lease).toMatchObject({
         leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
         expiresAt: NOW + 45_000,
-        stalePolicy: "manual-recovery-required"
+        stalePolicy: "manual-recovery-required",
       });
       expect(
-        getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND)?.stalePolicy
+        getWorkflowLease(db, "run-a", WORKFLOW_DISPATCH_LEASE_KIND)
+          ?.stalePolicy,
       ).toBe("manual-recovery-required");
     } finally {
       db.close();
@@ -1989,22 +2023,22 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         db,
         workerId: "scheduler-1",
         dispatch: recorder.dispatch,
-        now: () => NOW
+        now: () => NOW,
       };
+      expect(() => runWorkflowSchedulerOnce({ ...base, workerId: "" })).toThrow(
+        /workerId is required/,
+      );
       expect(() =>
-        runWorkflowSchedulerOnce({ ...base, workerId: "" })
-      ).toThrow(/workerId is required/);
-      expect(() =>
-        runWorkflowSchedulerOnce({ ...base, leaseDurationMs: 0 })
+        runWorkflowSchedulerOnce({ ...base, leaseDurationMs: 0 }),
       ).toThrow(/leaseDurationMs must be a positive finite number/);
       expect(() =>
-        runWorkflowSchedulerOnce({ ...base, leaseDurationMs: -5 })
+        runWorkflowSchedulerOnce({ ...base, leaseDurationMs: -5 }),
       ).toThrow(/leaseDurationMs must be a positive finite number/);
       expect(() =>
         runWorkflowSchedulerOnce({
           ...base,
-          dispatch: undefined as unknown as WorkflowStepDispatch
-        })
+          dispatch: undefined as unknown as WorkflowStepDispatch,
+        }),
       ).toThrow(/dispatch is required/);
     } finally {
       db.close();

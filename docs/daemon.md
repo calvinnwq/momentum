@@ -93,7 +93,7 @@ readiness probe.
 `workflowStepsDispatched` counts workflow scheduler ticks whose top-level code
 is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
-For a supported executor family, dispatch advances the step to `running` and
+For a valid executor identity, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
 family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
@@ -145,14 +145,40 @@ with `unsupported_platform`, and preserves the refused round for recovery.
 When the variable is unset or blank, supported live-wrapper-owned steps
 get the durable start scaffold only, while unconfigured wrapper kinds fail
 honestly with `runtime_unavailable` if a profile is configured but omits that
-step kind. If a claimed step cannot be resolved or uses an executor family the
-daemon cannot dispatch yet, the dispatcher parks the run behind a
+step kind. If a claimed step cannot be resolved or carries an invalid executor
+identity, the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
 if the run row vanished before that gate can be written, it still releases the
 dispatch lease so no claim is stranded. Register-only `daemon start` exits before
 the managed loop and never runs the workflow scheduler lane, reads
-`MOMENTUM_LIVE_WRAPPER_PROFILE`, attempts external apply, or dispatches
-subworkflow children.
+`MOMENTUM_LIVE_WRAPPER_PROFILE` or `MOMENTUM_EXECUTOR_CONFIG`, attempts external
+apply, or dispatches subworkflow children.
+
+### Registered SDK executors
+
+Third-party SDK executors are registered through the JSON file named by
+`MOMENTUM_EXECUTOR_CONFIG`.
+Its `executors` object maps each durable executor name to an npm package or local
+module path.
+Local relative paths resolve from the config file's directory.
+See [Executor SDK](executor-sdk.md#registration-and-discovery) for the file,
+module-export, name, and schema contracts.
+
+Managed-loop startup refuses an unreadable or structurally invalid registry
+file.
+Module imports are lazy until workflow dispatch.
+A configured module that cannot be loaded or validated becomes an honest
+`runtime_unavailable` refusal for that executor name without disabling unrelated
+registered executors.
+The daemon retries failed module discovery on a later scheduler pass, so an
+operator can repair the executor entry module and clear recovery without
+restarting the daemon. If the repair changes only a transitive dependency that
+Node already attempted to load or evaluate, restart the daemon before clearing recovery;
+the in-process ESM dependency graph cannot be unloaded safely.
+Registered executors are driven one bounded tick per daemon scheduler pass, and
+a `continue` recommendation leaves the invocation resumable for the next pass.
+The dispatch lease is heartbeated independently while a tick runs and every
+executor evidence write remains fenced by the live lease identity.
 
 ### Workflow live-wrapper profile
 

@@ -7,7 +7,7 @@
  * and reconciled in the same tick, through the landed producer
  * {@link executeAndReconcileDispatchedSubworkflowStep}. The base dispatch creates
  * the `<run>::<step>::dispatch` scaffold; this wrapper then runs the producer
- * against it, gated on {@link shouldRunDispatchedExecutor} and the dispatched
+ * against it, gated on the shared dispatch-status predicate and the dispatched
  * invocation's executor family.
  *
  * Boundary discipline (mirrors the external-apply lane so the reconciliation seam stays the single
@@ -17,8 +17,8 @@
  *     re-entered) a scaffold; a fail-closed / not-startable base result already
  *     parked the run and released its lease, so the wrapper echoes it untouched.
  *   - It runs the producer ONLY for a `subworkflow`-family invocation. The
- *     live-wrapper lane (`dispatch/live-wrapper.ts`) and the external-apply lane
- *     own the other families; routing a non-`subworkflow` invocation here would
+ *     registered SDK lane and the external-apply lane own the other families;
+ *     routing a non-`subworkflow` invocation here would
  *     run the wrong producer against a foreign scaffold.
  *   - The child-run start/attach is derived by injection
  *     ({@link DeriveDispatchedSubworkflowContext}): the daemon caller owns building
@@ -41,19 +41,19 @@ import { deriveDispatchInvocationId } from "./execute.js";
 import {
   recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
-  WORKFLOW_EXECUTE_RECONCILE_STATUS
-} from "./executor-run.js";
+  WORKFLOW_EXECUTE_RECONCILE_STATUS,
+} from "./executor-recovery.js";
 import {
   executeAndReconcileDispatchedSubworkflowStep,
   type DispatchedSubworkflowChildRunner,
-  type SubworkflowDispatchEvidencePaths
+  type SubworkflowDispatchEvidencePaths,
 } from "./subworkflow-run.js";
-import { shouldRunDispatchedExecutor } from "./live-wrapper.js";
+import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import type {
   AsyncWorkflowStepDispatch,
   ClaimedWorkflowStep,
   MaybePromise,
-  WorkflowStepDispatchContext
+  WorkflowStepDispatchContext,
 } from "./scheduler.js";
 
 /**
@@ -82,7 +82,7 @@ export type DispatchedSubworkflowContextResolution =
  */
 export type DeriveDispatchedSubworkflowContext = (
   claim: ClaimedWorkflowStep,
-  context: WorkflowStepDispatchContext
+  context: WorkflowStepDispatchContext,
 ) => MaybePromise<DispatchedSubworkflowContextResolution>;
 
 export type SubworkflowWorkflowDispatchDeps = {
@@ -97,15 +97,15 @@ export type SubworkflowWorkflowDispatchDeps = {
  */
 export function createSubworkflowWorkflowDispatch(
   baseDispatch: AsyncWorkflowStepDispatch,
-  deps: SubworkflowWorkflowDispatchDeps
+  deps: SubworkflowWorkflowDispatchDeps,
 ): AsyncWorkflowStepDispatch {
   return async (claim, context) => {
     const result = await baseDispatch(claim, context);
-    if (!shouldRunDispatchedExecutor(result.status)) return result;
+    if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
     const invocation = loadExecutorInvocation(
       context.db,
-      deriveDispatchInvocationId(claim.runId, claim.stepId)
+      deriveDispatchInvocationId(claim.runId, claim.stepId),
     );
     if (invocation?.executorFamily !== "subworkflow") return result;
 
@@ -118,7 +118,7 @@ export function createSubworkflowWorkflowDispatch(
           stepId: claim.stepId,
           runSubworkflowChild: resolved.runSubworkflowChild,
           evidence: resolved.evidence,
-          now: context.now
+          now: context.now,
         });
       } else {
         recordUnresolvedDispatchedStepContext({
@@ -126,7 +126,7 @@ export function createSubworkflowWorkflowDispatch(
           runId: claim.runId,
           stepId: claim.stepId,
           reason: resolved.reason,
-          now: context.now
+          now: context.now,
         });
       }
     } catch (error) {
@@ -138,7 +138,7 @@ export function createSubworkflowWorkflowDispatch(
         error: `subworkflow dispatch failed for dispatched step ${claim.runId}/${claim.stepId}: ${detail}`,
         status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executionRejected,
         detail,
-        now: context.now
+        now: context.now,
       });
     }
 

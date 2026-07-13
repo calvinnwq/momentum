@@ -188,14 +188,14 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     }
   });
 
-  it("fails closed with unknown_executor_family when the executor column is corrupt", () => {
+  it("fails closed with unknown_executor_family when the executor identity is corrupt", () => {
     const db = openSeededDb();
     db.prepare(
       `UPDATE step_definitions
          SET executor = ?
        WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,
     ).run(
-      "legacy-family",
+      "NOT A VALID EXECUTOR",
       CODING_WORKFLOW_DEFINITION.key,
       CODING_WORKFLOW_DEFINITION.version,
       "implementation",
@@ -207,7 +207,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
       expect(resolution.failure).toBe("unknown_executor_family");
-      expect(resolution.detail).toBe("legacy-family");
+      expect(resolution.detail).toBe("NOT A VALID EXECUTOR");
     }
   });
 });

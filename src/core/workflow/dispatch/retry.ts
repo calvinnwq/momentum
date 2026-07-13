@@ -1,10 +1,7 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import { insertExecutorRound } from "../../executors/loop/persist.js";
 import type { ExecutorRoundRecord } from "../../executors/loop/reducer.js";
-import {
-  isWorkflowExecutorFamily,
-  type WorkflowExecutorFamily,
-} from "../definition/definition.js";
+import { isExecutorName, type ExecutorName } from "../definition/definition.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
@@ -12,6 +9,8 @@ import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "unsupported_platform",
   "runtime_unavailable",
+  "executor_threw",
+  "executor_contract_invalid",
 ]);
 
 type RetryableStepState = "approved" | "running";
@@ -33,7 +32,7 @@ export type RetryableDispatchedStepRecovery = {
   stepId: string;
   kind: WorkflowStepKind;
   invocationId: string;
-  executorFamily: WorkflowExecutorFamily;
+  executorFamily: ExecutorName;
   invocationState: "manual_recovery_required";
   attempt: number;
   latestRoundIndex: number;
@@ -185,6 +184,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
     now: number;
     stepState?: RetryableStepState;
     selection?: RetryRoundSelection;
+    executorOwnsRounds?: boolean;
   },
 ): ReopenRetryableDispatchInvocationResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
@@ -220,16 +220,18 @@ export function reopenRetryableDispatchInvocationForAttempt(
     );
   if (Number(updated.changes) === 0) return { reopened: false };
 
-  insertExecutorRound(
-    db,
-    buildRetryRound(
-      retryable,
-      nextAttempt,
-      nextRoundIndex,
-      input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
-    ),
-    { now: input.now },
-  );
+  if (input.executorOwnsRounds !== true) {
+    insertExecutorRound(
+      db,
+      buildRetryRound(
+        retryable,
+        nextAttempt,
+        nextRoundIndex,
+        input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
+      ),
+      { now: input.now },
+    );
+  }
 
   return {
     reopened: true,
@@ -252,7 +254,7 @@ function parseRetryableDispatchRow(
   if (row === undefined) return undefined;
   if (!isWorkflowStepKind(row.kind)) return undefined;
   if (row.invocation_state !== "manual_recovery_required") return undefined;
-  if (!isWorkflowExecutorFamily(row.executor_family)) return undefined;
+  if (!isExecutorName(row.executor_family)) return undefined;
   if (
     row.executor_family === "external-apply" ||
     row.executor_family === "subworkflow"
@@ -354,10 +356,8 @@ function isWorkflowStepKind(value: string): value is WorkflowStepKind {
 }
 
 function isRetryableDispatchRecovery(
-  kind: WorkflowStepKind,
+  _kind: WorkflowStepKind,
   recoveryCode: string,
 ): boolean {
-  if (!RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return false;
-  if (recoveryCode === "unsupported_platform") return true;
-  return kind === "no-mistakes" || kind === "merge-cleanup";
+  return RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode);
 }

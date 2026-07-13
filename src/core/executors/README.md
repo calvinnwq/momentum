@@ -1,7 +1,8 @@
 # core/executors
 
-Executor runtime domain. This folder owns the runtime execution _mechanisms_:
-the executor-loop reducer/persistence, the goal-loop and single-shot executor
+Executor runtime domain. This folder owns the executor registration, config
+validation, bounded tick driver, and durable execution _mechanisms_: the
+executor-loop reducer/persistence, the goal-loop and single-shot executor
 families, the production live-step wrapper executor, and the no-mistakes
 mechanism, plus their runner-profile, foreground iteration, and runner-smoke
 support. It holds business/runtime behavior only —
@@ -17,7 +18,7 @@ were left in place; importers still reference the concrete modules below.
 
 | Concern                        | Modules                                                                                                    |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`                                                                          |
+| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/driver.ts`              |
 | Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                       |
 | Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts`      |
 | Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
@@ -34,6 +35,9 @@ families build on `loop/reducer` / `loop/persist`.
 `sdk/types.ts` is the dependency-free third-party contract: one bounded `tick`,
 a declared portable config schema, a durable snapshot, and an envelope facade
 that can record observations/evidence but cannot classify terminal state.
+`sdk/registry.ts` discovers configured ESM/CommonJS modules by permanent name,
+`sdk/config-schema.ts` validates declared strict schemas and portable config, and
+`sdk/driver.ts` applies daemon-owned decisions one bounded tick at a time.
 `sdk/envelope.ts` is Momentum's SQLite-backed host implementation; its
 daemon-only controller owns a separate frozen facade passed to executor code.
 Facade writes are available only while the invocation is `running`; an operator
@@ -44,7 +48,10 @@ The controller also rejects classification decisions whose invocation or round
 state is inconsistent with the classification before writing any settlement.
 `single-shot/sdk.ts` is the first built-in proof: the current `one-shot` and
 `script` families implement the same `Executor` interface and accept a runner
-adapter as their narrower lifecycle extension point. The built-in runner
+adapter as their narrower lifecycle extension point.
+`live-step/sdk-executor.ts` registers profile-backed built-ins through the same
+guard and records replay-safe mechanism completion before daemon classification.
+The built-in runner
 mechanisms supervise process groups asynchronously below a crash-surviving
 anchor/watchdog, terminate them on tick cancellation or daemon loss, require a
 fresh per-run ownership-token proof before signalling POSIX PIDs, require host
@@ -79,8 +86,9 @@ The comparison is intentionally strict; large ignored trees and concurrent cache
 New single-shot dispatches insert their invocation, initial running round, and
 hashed dispatch-binding checkpoint in one transaction after resolving runtime
 inputs, so reattach never inherits a new invocation without its complete binding.
-Registration/discovery and structural-preflight schema validation remain separate
-wiring.
+Registration/discovery, structural-preflight schema validation, and daemon tick
+driving remain separate runtime concerns joined by the same executor identity and
+declared config schema.
 Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
 Malformed JavaScript or casted returns leave only the atomically materialized invocation, running round, and dispatch-binding checkpoint for recovery.
 Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
@@ -104,9 +112,9 @@ The retired live-step direct-finalize lane (`live-step/advance.ts`,
 execution-lane decision: the dispatch reconciliation seam
 (`dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`) owns finalizing
 dispatched workflow steps from durable terminal executor evidence in
-production, while `dispatch/executor-run.ts` calls this shared verify -> commit /
-reset seam before terminalizing successful live-wrapper results as durable
-executor evidence.
+production, while `live-step/sdk-executor.ts` calls this shared verify -> commit /
+reset seam before recording durable mechanism completion for daemon
+classification.
 That superseded the staged live-step composition lane.
 The remaining `live-step/executor.ts` is the production live-wrapper step
 executor consumed by the real-adapter registry.

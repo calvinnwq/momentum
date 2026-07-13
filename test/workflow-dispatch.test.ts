@@ -84,20 +84,14 @@ describe("planWorkflowStepDispatch — every executor family is now dispatchable
     }
   });
 
-  it("still fails closed defensively for a family outside the phase-1 set", () => {
-    // No real WorkflowExecutorFamily is outside the phase-1 set after NGX-498, so
-    // this casts a hypothetical not-yet-landed family to confirm the defensive
-    // unsupported_executor_family branch remains an operator-visible manual-
-    // recovery gate rather than silently dispatching.
+  it("dispatches third-party executor names for registry resolution", () => {
     const plan = planWorkflowStepDispatch({
       ok: true,
       executorFamily: "future-unlanded-family" as WorkflowExecutorFamily,
     });
-    expect(plan.action).toBe("fail_closed");
-    if (plan.action === "fail_closed") {
-      expect(plan.code).toBe("unsupported_executor_family");
-      expect(plan.gateType).toBe("manual_recovery_required");
-      expect(plan.reason).toContain("future-unlanded-family");
+    expect(plan.action).toBe("dispatch");
+    if (plan.action === "dispatch") {
+      expect(plan.executorFamily).toBe("future-unlanded-family");
     }
   });
 });

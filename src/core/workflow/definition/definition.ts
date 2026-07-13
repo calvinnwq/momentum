@@ -16,7 +16,8 @@
  * Scope decisions pinned here, grounded in the compact runtime anchors in
  * SPEC.md and the long-form planning contracts externalized to the personal wiki:
  *
- *   - `StepDefinition.executor` names an executor *family* only. Portable
+ *   - `StepDefinition.executor` names one permanent executor identity. Built-in
+ *     family names and third-party registered names share this field. Portable
  *     executor intent belongs in the optional step `config`; machine-local
  *     command resolution stays below the definition contract.
  *   - `StepDefinition.kind` reuses the canonical workflow-run `WorkflowStepKind`
@@ -36,10 +37,10 @@
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 
 /**
- * Executor families pinned by SPEC.md's Runtime Model and Native Goal-Loop
- * Contract anchors. A `StepDefinition` selects one family; delegated tools such
- * as GNHF belong in portable step config below `delegate-supervisor`, never in
- * this family list.
+ * Built-in executor identities pinned by SPEC.md's Runtime Model and Native
+ * Goal-Loop Contract anchors. A `StepDefinition` may select one of these or an
+ * arbitrary valid registered identity; delegated tools such as GNHF belong in
+ * portable step config below `delegate-supervisor`, never in this built-in list.
  */
 export const WORKFLOW_EXECUTOR_FAMILIES = [
   "goal-loop",
@@ -53,6 +54,9 @@ export const WORKFLOW_EXECUTOR_FAMILIES = [
 export type WorkflowExecutorFamily =
   (typeof WORKFLOW_EXECUTOR_FAMILIES)[number];
 
+/** Durable registration identity used by step definitions and executor rows. */
+export type ExecutorName = string;
+
 const EXECUTOR_FAMILY_SET: ReadonlySet<string> = new Set(
   WORKFLOW_EXECUTOR_FAMILIES,
 );
@@ -63,6 +67,14 @@ export function isWorkflowExecutorFamily(
   return EXECUTOR_FAMILY_SET.has(value);
 }
 
+export function isExecutorName(value: unknown): value is ExecutorName {
+  return (
+    typeof value === "string" &&
+    value.trim() === value &&
+    /^[a-z0-9][a-z0-9._/-]*$/u.test(value)
+  );
+}
+
 /**
  * One configured step inside a workflow recipe.
  *
@@ -71,7 +83,7 @@ export function isWorkflowExecutorFamily(
  *     `workflow_steps.step_id` values, letting a recipe carry more than one step
  *     of the same `kind` (e.g. multiple postflight passes) without colliding.
  *   - `kind` is the canonical routing classification (`WorkflowStepKind`).
- *   - `executor` is the executor family that powers the step.
+ *   - `executor` is the permanent executor identity that powers the step.
  *   - `config` is optional JSON-compatible portable executor intent; host-local
  *     command resolution does not belong here.
  *   - `order` is the step's position; orders must be unique within a
@@ -82,7 +94,7 @@ export function isWorkflowExecutorFamily(
 export type StepDefinition = {
   key: string;
   kind: WorkflowStepKind;
-  executor: WorkflowExecutorFamily;
+  executor: ExecutorName;
   config?: Record<string, unknown>;
   order: number;
   required: boolean;
@@ -254,13 +266,10 @@ function validateSteps(
       });
     }
 
-    if (
-      typeof rawStep["executor"] !== "string" ||
-      !isWorkflowExecutorFamily(rawStep["executor"])
-    ) {
+    if (!isExecutorName(rawStep["executor"])) {
       errors.push({
         code: "step_executor_invalid",
-        message: `Step ${index} executor must be one of: ${WORKFLOW_EXECUTOR_FAMILIES.join(", ")}.`,
+        message: `Step ${index} executor must be a non-empty stable identifier.`,
         path: `${at}.executor`,
       });
     }

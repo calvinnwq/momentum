@@ -13,7 +13,7 @@
  *
  * The durable dispatch lane already has two reusable seams this composes with:
  *
- *   - `dispatch/executor-terminalize.ts` records a finished
+ *   - `dispatch/executor-evidence.ts` records a finished
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
  *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
@@ -121,7 +121,7 @@ export type SubworkflowChildMirrorPlan =
 export function planSubworkflowChildMirror(
   childState: WorkflowRunState,
   evidence: SubworkflowMirrorEvidence,
-  options: SubworkflowChildMirrorOptions = {}
+  options: SubworkflowChildMirrorOptions = {},
 ): SubworkflowChildMirrorPlan {
   if (options.childNeedsManualRecovery === true) {
     const reason = options.childManualRecoveryReason?.trim();
@@ -142,7 +142,7 @@ export function planSubworkflowChildMirror(
       childState,
       reason:
         `Subworkflow child run ${evidence.childRunId} is still ${childState}; ` +
-        "deferring parent step finalization until the child reaches a terminal state."
+        "deferring parent step finalization until the child reaches a terminal state.",
     };
   }
 
@@ -168,14 +168,19 @@ export function planSubworkflowChildMirror(
 function mirror(
   childState: WorkflowRunState,
   evidence: SubworkflowMirrorEvidence,
-  result: WorkflowStepExecutorDispatchResult
+  result: WorkflowStepExecutorDispatchResult,
 ): SubworkflowChildMirrorPlan {
-  return { outcome: "mirror", childRunId: evidence.childRunId, childState, result };
+  return {
+    outcome: "mirror",
+    childRunId: evidence.childRunId,
+    childState,
+    result,
+  };
 }
 
 function cleanResult(
   state: "succeeded" | "failed",
-  evidence: SubworkflowMirrorEvidence
+  evidence: SubworkflowMirrorEvidence,
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: true,
@@ -185,7 +190,7 @@ function cleanResult(
       checkpoints: [],
       artifacts: [
         { kind: "executor-log", path: evidence.executorLogPath },
-        { kind: "subworkflow-child-run", path: evidence.resultJsonPath }
+        { kind: "subworkflow-child-run", path: evidence.resultJsonPath },
       ],
       // The child run id is the stable digest tying this terminal evidence to the
       // child run it mirrors.
@@ -193,22 +198,22 @@ function cleanResult(
       errorCode: null,
       errorMessage: null,
       retryHint: null,
-      recoveryHint: null
+      recoveryHint: null,
     },
     executorLogPath: evidence.executorLogPath,
-    resultJsonPath: evidence.resultJsonPath
+    resultJsonPath: evidence.resultJsonPath,
   };
 }
 
 function manualRecoveryResult(
   error: string,
-  evidence: SubworkflowMirrorEvidence
+  evidence: SubworkflowMirrorEvidence,
 ): WorkflowStepExecutorDispatchResult {
   return {
     ok: false,
     code: "manual_recovery_required",
     error,
     executorLogPath: evidence.executorLogPath,
-    resultJsonPath: evidence.resultJsonPath
+    resultJsonPath: evidence.resultJsonPath,
   };
 }

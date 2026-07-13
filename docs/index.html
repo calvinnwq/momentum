@@ -139,7 +139,7 @@ node dist/index.js workflow handoff demo-1 --json</code></pre>
               <a class="card" href="intent-commands.html">
                 <span class="card-k">Executors and apply</span>
                 <strong>Bounded work lives below steps; side effects stay explicit.</strong>
-                <span>Executor families such as goal-loop, one-shot, script, no-mistakes, and external-apply produce normalized evidence the workflow can resume from.</span>
+                <span>Built-in and registered third-party executors produce normalized evidence the workflow can resume from.</span>
               </a>
             </div>
           </section>
@@ -166,8 +166,8 @@ node dist/index.js workflow handoff demo-1 --json</code></pre>
               <div class="map-line"></div>
               <div class="map-node">
                 <span>Executors</span>
-                <strong>goal-loop, one-shot, script, no-mistakes</strong>
-                <small>bounded work with normalized results and logs</small>
+                <strong>Built-ins plus registered modules</strong>
+                <small>bounded ticks with normalized results, logs, and durable evidence</small>
               </div>
               <div class="map-line"></div>
               <div class="map-node accent">
@@ -199,7 +199,7 @@ node dist/index.js workflow handoff demo-1 --json</code></pre>
               <a href="goal-spec.html"><b>Stored goal specs</b><span>The retired goal lane's Markdown format, kept as compatibility data.</span></a>
               <a href="data-directory.html"><b>State and artifacts</b><span>Where Momentum stores SQLite rows, run artifacts, and evidence.</span></a>
               <a href="runners.html"><b>Runner profiles</b><span>Stored runner-profile metadata, repo policy, and the runner result schema.</span></a>
-              <a href="executor-sdk.html"><b>Executor SDK</b><span>The tick contract, durable envelope facade, portable config schemas, and lifecycle extension points.</span></a>
+              <a href="executor-sdk.html"><b>Executor SDK</b><span>Module registration and discovery, the tick contract, durable envelope facade, portable config schemas, and lifecycle extension points.</span></a>
               <a href="failure-reset.html"><b>Failure semantics</b><span>How the retired goal lane recorded reset and failure evidence.</span></a>
               <a href="doctor.html"><b>Doctor</b><span>Runtime readiness, data directory health, daemon state, and external apply checks.</span></a>
               <a href="agent-skill.html"><b>Agent skill</b><span>Package-shipped skill files, CLI resolution, and agent operating rules.</span></a>

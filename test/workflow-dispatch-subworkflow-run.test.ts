@@ -9,7 +9,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
-  type ClaimedWorkflowStep
+  type ClaimedWorkflowStep,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
@@ -17,17 +17,17 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
-  listExecutorRoundsForInvocation
+  listExecutorRoundsForInvocation,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
-  executeWorkflowStepDispatch
+  executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import {
   executeAndReconcileDispatchedSubworkflowStep,
-  type SubworkflowChildObservation
+  type SubworkflowChildObservation,
 } from "../src/core/workflow/dispatch/subworkflow-run.js";
 import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
 
@@ -93,7 +93,7 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     runId,
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-497",
-    now: NOW
+    now: NOW,
   });
   return db;
 }
@@ -101,17 +101,17 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -128,13 +128,17 @@ function approveAndClaim(
 function dispatchStep(
   db: MomentumDb,
   stepId: string = STEP_ID,
-  family: "subworkflow" | "one-shot" = "subworkflow"
+  family: "subworkflow" | "one-shot" = "subworkflow",
 ): void {
   const claim = approveAndClaim(db, stepId);
-  executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  executeWorkflowStepDispatch(claim, {
+    db,
+    workerId: WORKER,
+    now: DISPATCH_AT,
+  });
   if (family === "subworkflow") {
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
     ).run(deriveDispatchInvocationId(RUN_ID, stepId));
   }
 }
@@ -148,20 +152,22 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
   return listExecutorRoundsForInvocation(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId)
+    deriveDispatchInvocationId(RUN_ID, stepId),
   );
 }
 
 function makeWritableEvidence(root = makeTempDir("momentum-sub-evidence-")) {
   return {
     executorLogPath: path.join(root, "nested", "subworkflow.log"),
-    resultJsonPath: path.join(root, "nested", "subworkflow.json")
+    resultJsonPath: path.join(root, "nested", "subworkflow.json"),
   };
 }
 
 const EVIDENCE = {
-  executorLogPath: "/repos/momentum/.agent-workflows/run-sub-001/subworkflow.log",
-  resultJsonPath: "/repos/momentum/.agent-workflows/run-sub-001/subworkflow.json"
+  executorLogPath:
+    "/repos/momentum/.agent-workflows/run-sub-001/subworkflow.log",
+  resultJsonPath:
+    "/repos/momentum/.agent-workflows/run-sub-001/subworkflow.json",
 } as const;
 
 /**
@@ -180,7 +186,7 @@ function countingChildRunner(observation: SubworkflowChildObservation): {
       calls += 1;
       return observation;
     },
-    calls: () => calls
+    calls: () => calls,
   };
 }
 
@@ -191,7 +197,7 @@ function countingChildRunner(observation: SubworkflowChildObservation): {
  */
 function sequencedChildRunner(
   states: readonly WorkflowRunState[],
-  childRunId = CHILD_RUN_ID
+  childRunId = CHILD_RUN_ID,
 ): {
   run: () => Promise<SubworkflowChildObservation>;
   calls: () => number;
@@ -205,7 +211,7 @@ function sequencedChildRunner(
       index += 1;
       return { childRunId, childState };
     },
-    calls: () => calls
+    calls: () => calls,
   };
 }
 
@@ -228,7 +234,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — defer (child in fligh
         stepId: STEP_ID,
         runSubworkflowChild: runner.run,
         evidence,
-        now: EXECUTE_AT
+        now: EXECUTE_AT,
       });
 
       expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
@@ -237,14 +243,14 @@ describe("executeAndReconcileDispatchedSubworkflowStep — defer (child in fligh
       // dispatch lease stays held for a later tick to re-check the child.
       expect(
         loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-          ?.state
+          ?.state,
       ).toBe("running");
       expect(stepState(db)).toBe("running");
       expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
       // The scaffold round is untouched (still pending); nothing was terminalized.
       expect(dispatchRounds(db)[0]?.state).toBe("pending");
       expect(out.detail).toContain(CHILD_RUN_ID);
-    }
+    },
   );
 });
 
@@ -261,21 +267,21 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.calls()).toBe(1);
     expect(out.executorResult?.ok).toBe(true);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
     const invocation = loadExecutorInvocation(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
     expect(invocation?.state).toBe("succeeded");
     const rounds = dispatchRounds(db);
@@ -284,7 +290,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
     expect(rounds[0]?.summary).toContain(CHILD_RUN_ID);
     expect(rounds[0]?.logPaths).toEqual([
       evidence.executorLogPath,
-      evidence.resultJsonPath
+      evidence.resultJsonPath,
     ]);
     // The child run id is the durable digest tying the evidence to the child run.
     expect(rounds[0]?.resultDigest).toBe(CHILD_RUN_ID);
@@ -305,26 +311,26 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(true);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.finalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("failed");
     expect(dispatchRounds(db)[0]?.state).toBe("failed");
     // A child failure is a legitimate mirrored terminal — the run is NOT parked
     // for manual recovery.
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
     expect(stepState(db)).toBe("failed");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -342,16 +348,16 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
     expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
     expect(fs.readFileSync(evidence.executorLogPath, "utf8")).toContain(
-      CHILD_RUN_ID
+      CHILD_RUN_ID,
     );
     const snapshot = JSON.parse(
-      fs.readFileSync(evidence.resultJsonPath, "utf8")
+      fs.readFileSync(evidence.resultJsonPath, "utf8"),
     ) as SubworkflowChildObservation;
     expect(snapshot.childRunId).toBe(CHILD_RUN_ID);
     expect(snapshot.childState).toBe("succeeded");
@@ -366,7 +372,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
     const runner = countingChildRunner({
       ...observe("running"),
       childNeedsManualRecovery: true,
-      childManualRecoveryReason: "child run blocked on recovery gate"
+      childManualRecoveryReason: "child run blocked on recovery gate",
     });
 
     const out = await executeAndReconcileDispatchedSubworkflowStep({
@@ -375,32 +381,32 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(out.executorResult?.ok).toBe(false);
     expect(out.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(
-      "child run blocked on recovery gate"
+      "child run blocked on recovery gate",
     );
     expect(
-      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(stepState(db)).toBe("running");
   });
 
   it.each<{ childState: WorkflowRunState; marker: string }>([
     { childState: "canceled", marker: "canceled" },
-    { childState: "blocked", marker: "blocked" }
+    { childState: "blocked", marker: "blocked" },
   ])(
     "parks the parent for manual recovery when the child is $childState",
     async ({ childState, marker }) => {
@@ -415,20 +421,20 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
         stepId: STEP_ID,
         runSubworkflowChild: runner.run,
         evidence,
-        now: EXECUTE_AT
+        now: EXECUTE_AT,
       });
 
       expect(out.status).toBe(
-        WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+        WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
       );
       expect(out.executorResult?.ok).toBe(false);
       expect(out.reconcile?.status).toBe(
-        WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+        WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
       );
 
       const invocation = loadExecutorInvocation(
         db,
-        deriveDispatchInvocationId(RUN_ID, STEP_ID)
+        deriveDispatchInvocationId(RUN_ID, STEP_ID),
       );
       expect(invocation?.state).toBe("manual_recovery_required");
       const round = dispatchRounds(db)[0];
@@ -436,7 +442,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
       expect(round?.summary).toContain(marker);
 
       expect(
-        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
       ).toBe(true);
       // The parent step is parked, not fabricated terminal: it stays running with
       // an operator-visible recovery gate.
@@ -445,9 +451,9 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
       expect(gates).toHaveLength(1);
       expect(gates[0]).toMatchObject({
         gateType: "manual_recovery_required",
-        stepRunId: STEP_ID
+        stepRunId: STEP_ID,
       });
-    }
+    },
   );
 });
 
@@ -464,10 +470,10 @@ describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry",
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     expect(first.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
     expect(runner.calls()).toBe(1);
 
@@ -477,15 +483,15 @@ describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry",
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 100
+      now: EXECUTE_AT + 100,
     });
     expect(second.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
     );
     // The child run is never re-started; the finalization converges idempotently.
     expect(runner.calls()).toBe(1);
     expect(second.reconcile?.status).toBe(
-      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
     );
     expect(dispatchRounds(db)).toHaveLength(1);
     expect(stepState(db)).toBe("succeeded");
@@ -504,7 +510,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry",
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
     expect(tick1.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
     expect(stepState(db)).toBe("running");
@@ -515,7 +521,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry",
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 50
+      now: EXECUTE_AT + 50,
     });
     expect(tick2.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
     expect(stepState(db)).toBe("running");
@@ -526,10 +532,10 @@ describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry",
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT + 100
+      now: EXECUTE_AT + 100,
     });
     expect(tick3.status).toBe(
-      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     );
 
     // The child runner was consulted on every non-terminal tick (start-or-attach
@@ -562,17 +568,19 @@ describe("executeAndReconcileDispatchedSubworkflowStep — reconcile deferral", 
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
-    expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred);
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+    );
     expect(out.reconcile).toBeUndefined();
     expect(out.terminalize?.status).toBe("terminalize_recorded");
     // The child terminal is recorded as evidence; the step stays running with the
     // lease held so a later tick re-drives only the reconciliation.
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
@@ -592,13 +600,13 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence: EVIDENCE,
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
     ).toBeUndefined();
     expect(stepState(db)).toBe("pending");
   });
@@ -614,7 +622,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
       stepId: STEP_ID,
       runSubworkflowChild: runner.run,
       evidence: makeWritableEvidence(),
-      now: EXECUTE_AT
+      now: EXECUTE_AT,
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
@@ -622,7 +630,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     expect(runner.calls()).toBe(0);
     expect(
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
-        ?.state
+        ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
   });
