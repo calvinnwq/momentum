@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/calvinnwq/momentum/compare/v0.18.0...v0.19.0) (2026-07-13)
+
+
+### Features
+
+* add executor registration and SDK dispatch ([#228](https://github.com/calvinnwq/momentum/issues/228)) ([cb9d091](https://github.com/calvinnwq/momentum/commit/cb9d091533ccf99aff93c1a656c9c3f2535c0f34))
+* **executors:** add durable executor SDK ([#226](https://github.com/calvinnwq/momentum/issues/226)) ([9d24b00](https://github.com/calvinnwq/momentum/commit/9d24b00f27c0a93962e8f6849cd81ab5ec6dc3a6))
+* **workflow:** add portable delegated coding workflow ([#224](https://github.com/calvinnwq/momentum/issues/224)) ([461b18c](https://github.com/calvinnwq/momentum/commit/461b18c035ec7236be7f7a705f133d502de2f842))
+
+
+### Bug Fixes
+
+* **executors:** fail closed on native Windows ([#227](https://github.com/calvinnwq/momentum/issues/227)) ([628e419](https://github.com/calvinnwq/momentum/commit/628e419418c523d931c93f37b43d709cd193f5ba))
+
 ## [0.18.0](https://github.com/calvinnwq/momentum/compare/v0.17.0...v0.18.0) (2026-07-10)
 
 ### ⚠ BREAKING CHANGES
