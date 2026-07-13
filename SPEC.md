@@ -116,9 +116,12 @@ registered declaration before workflow-run rows are written.
 An unregistered executor records the honest `runtime_unavailable` class in
 `manual_recovery_required`; after registration repair and guarded recovery clear,
 the same deterministic invocation reopens with an incremented attempt.
-The daemon SDK driver applies one bounded tick per scheduler pass and rechecks
-non-terminal invocations, so single-round and multi-round executors share one
-driving loop.
+The daemon SDK driver normally applies one bounded tick per scheduler pass and
+rechecks non-terminal invocations, so single-round and multi-round executors
+share one driving loop.
+A new delegate-supervisor handoff may use a second bounded tick in its initial
+pass so the first external-state read follows the durable handoff immediately;
+later passes return to one tick.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;

@@ -241,6 +241,7 @@ function parseDurableDecision(detail: string): DurableLiveStepDecision {
   return parsed;
 }
 
+/** Finalize one profile-backed result through shared repo safety. */
 export function finalizeLiveStepResult(
   result: WorkflowStepExecutorDispatchResult,
   repoPath: string,
@@ -428,6 +429,7 @@ function artifactClassForPath(
   return "result_document";
 }
 
+/** Whether finalization proved repository ownership can be released. */
 export function isProvenClean(
   result: WorkflowStepExecutorDispatchResult,
 ): boolean {

@@ -34,6 +34,7 @@ import type {
 } from "./types.js";
 
 export const DELEGATE_SUPERVISOR_EXECUTOR_NAME = "delegate-supervisor";
+/** Maximum unchanged semantic-progress window before manual recovery. */
 export const DELEGATE_SUPERVISOR_STALL_AFTER_MS = 4 * 60 * 1000;
 
 const HANDOFF_STAGE = "delegate_handoff_completed";
@@ -46,6 +47,7 @@ export type DelegateSupervisorConfig = {
   tool: string;
 };
 
+/** Strict portable config shared by preflight and daemon registration. */
 export const DELEGATE_SUPERVISOR_CONFIG_SCHEMA = {
   type: "object",
   properties: {

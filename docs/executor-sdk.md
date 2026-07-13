@@ -130,14 +130,37 @@ It returns a recommendation, suggested round and invocation states, a recovery c
 Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
 The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
-The built-in `delegate-supervisor` uses the same interface. Its portable config
-is `{ "tool": "<adapter-name>" }`; adapters implement only a bounded handoff and
-canonical external-state read. The executor owns mirrored evidence, findings,
-decisions, heartbeats, stall detection, and corroborated settlement. Tool names
-are adapter registrations, not executor names or schema enum values, so another
-tool can be added without changing workflow schema. Before calling a tool, the
-executor persists a handoff intent; after interruption, the adapter must recover
-from durable tool evidence or fail closed instead of launching again.
+The built-in `delegate-supervisor` uses the same interface.
+Its strict portable config is `{ "tool": "<adapter-name>" }`.
+The current coding definition uses `gnhf` for implementation and `no-mistakes` for validation without adding either tool as a new executor identity.
+Profile-backed tool bindings are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
+
+### Delegate-supervisor lifecycle
+
+A delegated-tool adapter owns only three bounded operations: initial handoff, optional interrupted-handoff recovery, and canonical external-state read.
+The executor owns durable rounds, evidence projection, semantic liveness, gates, stalls, and terminal classification.
+
+Before invoking a tool, the executor records a `delegate_handoff_intent` checkpoint.
+A successful handoff records the pinned external run id, branch, head SHA, summary, and artifact paths in `delegate_handoff_completed`.
+The profile-backed host releases repository ownership only after that handoff evidence is durable.
+If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
+An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
+Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
+
+Each later bounded executor tick reads one canonical state containing the external identity, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
+The external status is one of `running`, `awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, `cancelled`, or `completed`; CI is `passed`, `failed`, `pending`, or `none`.
+Momentum rejects malformed state, identity drift, selected findings without matching surfaced findings, invalid decision action sets, and completed claims that still have findings, unresolved current or previously mirrored decisions, or pending/failed CI.
+An approval or decision state is projected into durable executor decisions and a round-scoped workflow gate.
+Findings and decision revisions are append-only projections keyed by their external identities.
+
+Every accepted read stores the digest of the raw adapter response in `inputDigest` and a stable semantic-state digest in `resultDigest`.
+The semantic digest ignores ordering differences in findings, selected ids, decisions, and allowed actions.
+Each unchanged running read still refreshes durable liveness, but it carries forward the time of the last semantic change.
+After four minutes without semantic progress or terminal evidence, the invocation enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
+
+Terminal success requires the handoff identity to match, no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Unreadable state, cancelled state, contradictory completion, and identity drift require manual recovery rather than optimistic retry or success.
+`blocked` and `failed` external states remain distinct terminal recommendations with `external_state_blocked` and `external_run_failed` recovery codes.
 
 Third-party modules loaded only through `MOMENTUM_EXECUTOR_CONFIG` currently receive an empty `hostBindings` object.
 The public registration surface does not inject machine-local commands, credentials, or clients into those modules.
@@ -145,7 +168,8 @@ Profile-backed built-ins use Momentum's internal host-binding resolver for live-
 
 ## Registered dispatch lifecycle
 
-The managed daemon drives at most one registered-executor tick per scheduler pass.
+The managed daemon normally drives at most one registered-executor tick per scheduler pass.
+For a new delegate-supervisor handoff, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows the durable handoff immediately; later passes return to one tick.
 The tick must return the id of the current non-terminal round for the current invocation attempt.
 A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.
 The executor starts the next sequential round when its next tick observes no current non-terminal round.
@@ -301,13 +325,16 @@ Successful turns pass through `capturing_result`, but only a captured document p
 
 ## Lifecycle extension points
 
-There are three extension levels:
+There are three public extension levels:
 
 1. Use a built-in lifecycle with config only.
 2. Supply the shipped single-shot lifecycle's narrower runner adapter for agent-once or script.
 3. Implement `Executor` directly for a new lifecycle.
 
-The planned agent-loop runner adapter and delegate-supervisor tool adapter will add narrower extension points without changing the core interface. Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate. A looping executor must never add an implicit cap in its own adapter.
+The shipped delegate-supervisor has a narrower tool-adapter interface inside the profile-backed built-in host, but there is not yet a public tool-adapter registry for third-party modules.
+Agent-loop's planned runner adapter can add another narrower extension point without changing the core interface.
+Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
+A looping executor must never add an implicit cap in its own adapter.
 
 ## RunnerResult SDK surface
 

@@ -644,6 +644,7 @@ function resolveDelegateToolName(
   return tool;
 }
 
+/** Map portable built-in tool config to the host's live-wrapper step kind. */
 export function resolveProfileBackedDelegateToolStepKind(
   tool: string,
 ): WorkflowStepExecutorKind | null {

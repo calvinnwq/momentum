@@ -2374,6 +2374,20 @@ In both cases `gnhf` is not a workflow executor family, and its work must remain
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
 
+## Delegate-supervisor evidence contract
+
+The current coding definition uses `delegate-supervisor` with portable `tool` config for both GNHF implementation and no-mistakes validation.
+The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
+Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
+The initial dispatcher pass may perform the durable handoff and first read as two ticks under the same workflow claim, while later passes perform one tick.
+The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
+Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
+
+Terminal success requires the observed external run id, branch, and head SHA to match the handoff plus no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
+Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
+GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.
+
 ## `workflow run logs`
 
 ```text
@@ -2383,6 +2397,8 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
 It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
+The derived `outcome` reports any terminal `succeeded` round as `successful`, including a `continue` round with no commit SHA.
+This distinguishes a successful bounded handoff or poll from a failed continuation while keeping the invocation eligible for its next scheduler tick.
 
 Invocations are returned across the run in step key, attempt, invocation id order.
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.

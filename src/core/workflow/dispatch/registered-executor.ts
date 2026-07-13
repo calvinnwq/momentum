@@ -46,6 +46,7 @@ export type RegisteredExecutorWorkflowDispatchOptions = {
   unavailableReasons?: ReadonlyMap<string, string>;
   resolveHostBindings?: RegisteredExecutorHostBindingsResolver;
   maxTicks?: number;
+  /** Resolve a per-invocation bounded tick cap, overriding `maxTicks`. */
   resolveMaxTicks?: (input: {
     executorName: string;
     invocation: Readonly<{ invocationId: string; attempt: number }>;

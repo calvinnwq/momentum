@@ -50,10 +50,14 @@
  *   - `awaiting_approval` is `approval_required`: an approval boundary that the
  *     mirror surfaces as a durable `waiting_operator` gate.
  *   - `completed` is `complete` *only when the corroborating evidence agrees* —
- *     CI is passing or not configured, and every surfaced decision is resolved.
+ *     no active findings remain, CI is passing or not configured, and every
+ *     surfaced decision is resolved.
  *     A `completed` claim that contradicts its own CI / decision evidence is not
  *     trusted; it routes to `manual_recovery_required` (`external_state_inconsistent`).
  *   - `failed` is `failed` (`external_run_failed`).
+ *   - `cancelled` is `manual_recovery_required`
+ *     (`external_state_inconsistent`) because cancellation is not reliable
+ *     completion evidence.
  *   - `blocked` is `blocked` (`external_state_blocked`) with an
  *     `external_state_required` gate naming the blocker; the round ends blocked
  *     while the workflow may later start a fresh invocation once the blocker

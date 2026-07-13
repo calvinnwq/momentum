@@ -2,10 +2,11 @@
 
 Executor runtime domain. This folder owns the executor registration, config
 validation, bounded tick driver, and durable execution _mechanisms_: the
-executor-loop reducer/persistence, the goal-loop and single-shot executor
-families, the production live-step wrapper executor, and the no-mistakes
-mechanism, plus their runner-profile, foreground iteration, and runner-smoke
-support. It holds business/runtime behavior only —
+executor-loop reducer/persistence, the goal-loop, single-shot, and
+delegate-supervisor executor families, the production live-step wrapper
+executor, and the no-mistakes state reader and legacy mirror support, plus their
+runner-profile, foreground iteration, and runner-smoke support. It holds
+business/runtime behavior only:
 reducers, state machines, persistence policies, and execution decisions. It does
 not parse CLI arguments or format output.
 
@@ -22,6 +23,7 @@ were left in place; importers still reference the concrete modules below.
 | Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                       |
 | Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts`      |
 | Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
+| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`     |
 | Live-step executor             | `live-step/executor.ts` (production live-wrapper lane)                                                     |
 | Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                          |
 | No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                 |
@@ -131,15 +133,15 @@ recorded `no-mistakes` invocations remain readable.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
-| Adapter edge                                                                                        | Disposition                                                                                                                                                                                                |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                   | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                        |
-| `git-transaction.ts` → `runner/types.ts`                                                            | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                   |
-| `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                     | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                     |
-| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts` | Temporary, explicitly re-justified: the current mirror predates the SDK. It dissolves when supervision moves into the core `delegate-supervisor` lifecycle and the adapter shrinks to a tool adapter.      |
-| `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`       | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals. |
-| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                              | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                          |
-| `runner/profile.ts`                                                                                 | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                        |
+| Adapter edge                                                                                        | Disposition                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                   | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                         |
+| `git-transaction.ts` → `runner/types.ts`                                                            | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                    |
+| `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                     | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                      |
+| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts` | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` invocations, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter. |
+| `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`       | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals.  |
+| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                              | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                           |
+| `runner/profile.ts`                                                                                 | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                         |
 
 `test/executor-sdk-import-boundaries.test.ts` pins this exact allowlist so no
 new adapter reverse dependency can appear without a named disposition. The end

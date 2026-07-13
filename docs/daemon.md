@@ -328,6 +328,13 @@ For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrap
 
 If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no runner evidence.
 
+For current coding definitions, the implementation and no-mistakes steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
+The implementation adapter performs the configured live-wrapper handoff once, records a normalized terminal external-state artifact, and lets a later bounded tick corroborate it.
+The no-mistakes adapter uses the configured wrapper command for the initial `axi run` handoff, then invokes that validated executable as `axi status --run <external-run-id>` with the same filtered child environment on later ticks.
+Status read-back must match the pinned run id, branch, and resolved full head SHA.
+Unreadable status, identity drift, pending CI behind a terminal claim, active findings, or unresolved decisions fail closed instead of settling success.
+The daemon stores `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
+
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 
 ```json
@@ -384,7 +391,7 @@ concrete no-result runner lifecycle failures.
 Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
-When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence for the workflow step and leaves upstream no-mistakes to continue its own PR-lifecycle monitoring.
+When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the adapter normalizes a completed external state and the delegate supervisor records successful executor evidence while upstream no-mistakes may continue its own PR-lifecycle monitoring.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` can reconcile only that failed required `no-mistakes` step and re-derive the run for downstream work from either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
 Structured no-mistakes recovery evidence must match the current workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
 Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, running, or otherwise non-successful checks suppress that successful classification; explicitly skipped checks are treated as absent checks.

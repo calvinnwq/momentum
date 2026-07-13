@@ -2767,6 +2767,7 @@ function resolveConfiguredResultPath(
   return { ok: true };
 }
 
+/** Build the exact filtered environment shared by handoff and status reads. */
 export function buildCodingWorkflowChildEnv(
   env: NodeJS.ProcessEnv,
   envAllow: readonly string[],

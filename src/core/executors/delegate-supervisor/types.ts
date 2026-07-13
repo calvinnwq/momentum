@@ -106,6 +106,7 @@ export interface DelegateSupervisorToolAdapter {
   handoff(
     context: DelegateSupervisorToolContext,
   ): DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
+  /** Reconcile an interrupted handoff intent without launching again. */
   recoverHandoff?(
     context: DelegateSupervisorToolContext,
   ): DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
