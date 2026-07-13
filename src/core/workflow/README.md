@@ -106,8 +106,9 @@ paths. The registered host-binding resolver keeps portable step config separate
 from executable paths, environment, repo ownership, verification, and commit-or-
 reset policy. Missing host bindings become precise durable recovery evidence
 rather than escaping across the scheduler boundary. `dispatch/retry.ts` reopens
-the same deterministic invocation with the next attempt and scopes later attempt
-evidence beneath `attempt-<n>/`.
+the same deterministic invocation with the next attempt. Ordinary live-wrapper
+evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
+evidence is first isolated beneath `delegate/<step-id>/`.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,

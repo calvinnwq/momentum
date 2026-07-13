@@ -392,7 +392,9 @@ export class DelegateSupervisorExecutor implements Executor<
       roundId,
       decision,
       read.digest,
-      { state: read.value, progressDigest, progressAt, observedAt },
+      identityMismatch === null
+        ? { state: read.value, progressDigest, progressAt, observedAt }
+        : null,
       observedAt,
     );
     return tickResult(roundId, decision);

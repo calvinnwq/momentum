@@ -4,7 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
+import { commitVerifiedChanges } from "../../adapters/git-transaction.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../adapters/live-step-wrapper.js";
 import {
+  commitIdentitiesMatch,
   createNoMistakesToolAdapter,
   parseNoMistakesAxiStatus,
   parseNoMistakesLaunchIdentity,
@@ -69,6 +72,7 @@ import type {
 } from "../executors/delegate-supervisor/types.js";
 import type { Executor } from "../executors/sdk/types.js";
 import type { ExecutorRegistryLoadResult } from "../executors/sdk/registry.js";
+import { parseRunnerResult } from "../executors/runner/result.js";
 import {
   loadDispatchedStepRunProvenance,
   resolveDispatchedStepExecutorContext,
@@ -121,6 +125,7 @@ import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
 import {
   dispatchWorkflowStepExecutor,
+  type WorkflowStepExecutorDispatchResult,
   type WorkflowStepExecutorKind,
 } from "../workflow/step/executor.js";
 import {
@@ -465,10 +470,13 @@ function createLiveStepHostBindingsResolver(
       );
     }
     const attempt = invocation.attempt;
+    const artifactRoot = isDelegate
+      ? path.join(safety.runDir, "delegate", claim.stepId)
+      : safety.runDir;
     const runDir =
       attempt <= 1
-        ? safety.runDir
-        : path.join(safety.runDir, `attempt-${attempt}`);
+        ? artifactRoot
+        : path.join(artifactRoot, `attempt-${attempt}`);
     try {
       fs.mkdirSync(runDir, { recursive: true });
     } catch (error) {
@@ -532,7 +540,7 @@ function createLiveStepHostBindingsResolver(
     if (isDelegate) {
       const statePath = path.join(runDir, "delegate-external-state.json");
       const handoffReceiptPath = path.join(
-        safety.runDir,
+        artifactRoot,
         "delegate-handoff.json",
       );
       const adapter = createProfileBackedDelegateToolAdapter({
@@ -550,6 +558,10 @@ function createLiveStepHostBindingsResolver(
         statusCommand: noMistakesRuntime?.command ?? "no-mistakes",
         statusArgsPrefix: noMistakesRuntime?.argsPrefix ?? [],
         statusEnv: noMistakesRuntime?.env ?? {},
+        legacyPaths: {
+          rootDir: safety.runDir,
+          handoffReceiptPath: path.join(safety.runDir, "delegate-handoff.json"),
+        },
         run: () =>
           dispatchWorkflowStepExecutor(
             dispatchKind,
@@ -739,11 +751,38 @@ type ProfileBackedDelegateToolInput = {
   resultJsonPath: string;
   executorLogPath: string;
   repoPath: string;
-  repoSafety: LiveStepSdkHostBindings["repoSafety"];
+  repoSafety: NonNullable<LiveStepSdkHostBindings["repoSafety"]>;
   run: LiveStepSdkHostBindings["run"];
   statusCommand: string;
   statusArgsPrefix: readonly string[];
   statusEnv: Record<string, string | undefined>;
+  legacyPaths: {
+    rootDir: string;
+    handoffReceiptPath: string;
+  };
+};
+
+type LiveWrapperDelegateReceipt = {
+  schemaVersion: 1;
+  tool: string;
+  invocationId: string;
+  attempt: number;
+  phase: "launched" | "completed" | "finalizing" | "finalized";
+  baseHead: string;
+  branch: string;
+  statePath: string;
+  resultJsonPath: string;
+  executorLogPath: string;
+  verificationLogPath: string;
+  preexistingResultDigest: string | null;
+  resultDigest?: string | null;
+  worktreeTree?: string;
+  dispatchOutcome?:
+    | { ok: true; state: "succeeded" | "failed"; summary: string }
+    | { ok: false; code: string; error: string };
+  expectedTree?: string;
+  expectedMessage?: string;
+  externalState?: DelegateSupervisorExternalState;
 };
 
 function createProfileBackedDelegateToolAdapter(
@@ -757,14 +796,82 @@ function createProfileBackedDelegateToolAdapter(
 function createLiveWrapperDelegateToolAdapter(
   input: ProfileBackedDelegateToolInput,
 ): DelegateSupervisorToolAdapter {
+  const artifactPaths = [
+    input.statePath,
+    input.handoffReceiptPath,
+    input.resultJsonPath,
+    input.executorLogPath,
+    input.repoSafety.verificationLogPath,
+  ];
   return {
     name: input.tool,
     handoff: async () => {
-      const finalized = finalizeLiveStepResult(
-        await input.run(),
+      const launched: LiveWrapperDelegateReceipt = {
+        schemaVersion: 1,
+        tool: input.tool,
+        invocationId: input.invocationId,
+        attempt: input.attempt,
+        phase: "launched",
+        baseHead: input.headSha,
+        branch: input.branch,
+        statePath: input.statePath,
+        resultJsonPath: input.resultJsonPath,
+        executorLogPath: input.executorLogPath,
+        verificationLogPath: input.repoSafety.verificationLogPath,
+        preexistingResultDigest: fileDigest(input.resultJsonPath),
+      };
+      writeJsonAtomically(input.handoffReceiptPath, launched);
+      const raw = await input.run();
+      const resultDigest = fileDigest(input.resultJsonPath);
+      const ownership = input.repoSafety.beforeGitMutation?.();
+      if (ownership?.ok === false) throw new Error(ownership.error);
+      const worktreeTree = captureWorktreeTree(
         input.repoPath,
-        input.repoSafety,
+        input.headSha,
+        path.dirname(input.handoffReceiptPath),
       );
+      const completed: LiveWrapperDelegateReceipt = {
+        ...launched,
+        phase: "completed",
+        resultDigest,
+        worktreeTree,
+        dispatchOutcome: raw.ok
+          ? {
+              ok: true,
+              state: raw.result.state === "succeeded" ? "succeeded" : "failed",
+              summary: raw.result.summary,
+            }
+          : { ok: false, code: raw.code, error: raw.error },
+      };
+      writeJsonAtomically(input.handoffReceiptPath, completed);
+      let preparedReceipt = completed;
+      const finalized = finalizeLiveStepResult(raw, input.repoPath, {
+        ...input.repoSafety,
+        beforeCommit: ({ expectedTree, message }) => {
+          if (resultDigest === null) {
+            return {
+              ok: false,
+              error: "delegated live-wrapper result disappeared before commit",
+            };
+          }
+          preparedReceipt = {
+            ...completed,
+            phase: "finalizing",
+            resultDigest,
+            expectedTree,
+            expectedMessage: message,
+          };
+          try {
+            writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+            return { ok: true };
+          } catch (error) {
+            return {
+              ok: false,
+              error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+            };
+          }
+        },
+      });
       if (!isProvenClean(finalized) || !finalized.ok) {
         throw new Error(
           finalized.ok
@@ -788,43 +895,574 @@ function createLiveWrapperDelegateToolAdapter(
         prUrl: null,
         ciState: "none",
       };
-      fs.writeFileSync(input.statePath, JSON.stringify(externalState));
-      const artifactPaths = [
-        input.statePath,
-        input.resultJsonPath,
-        input.executorLogPath,
+      writeJsonAtomically(input.handoffReceiptPath, {
+        ...preparedReceipt,
+        phase: "finalized",
+        externalState,
+      } satisfies LiveWrapperDelegateReceipt);
+      writeJsonAtomically(input.statePath, externalState);
+      const completedArtifacts = [
+        ...artifactPaths,
         ...finalized.result.artifacts.map((artifact) => artifact.path),
       ].filter((value, index, values) => values.indexOf(value) === index);
       return {
         externalIdentity: identity,
         summary: finalized.result.summary,
-        artifactPaths,
+        artifactPaths: completedArtifacts,
       };
     },
     recoverHandoff: () => {
-      const recovered = readPersistedDelegateState([input.statePath]);
-      if (!recovered.ok) {
-        throw new Error(
-          `interrupted ${input.tool} handoff cannot be safely reconciled: ${recovered.error}`,
-        );
-      }
-      return {
-        externalIdentity: {
-          externalRunId: recovered.value.externalRunId,
-          branch: recovered.value.branch,
-          headSha: recovered.value.headSha,
-        },
-        summary: `recovered completed ${input.tool} handoff from durable state`,
-        artifactPaths: [
-          input.statePath,
-          input.resultJsonPath,
-          input.executorLogPath,
-        ],
-      };
+      return recoverLiveWrapperDelegateHandoff(input);
     },
     readExternalState: ({ handoff }) =>
       readPersistedDelegateState(handoff.artifactPaths),
   };
+}
+
+function recoverLiveWrapperDelegateHandoff(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorHandoff {
+  const migrated = migrateLegacyLiveWrapperDelegateHandoff(input);
+  if (migrated !== null) return migrated;
+  const receipt = readLiveWrapperDelegateReceipt(input);
+  if (receipt.phase === "finalized") {
+    if (receipt.externalState === undefined) {
+      throw new Error(
+        "finalized delegated handoff receipt has no external state",
+      );
+    }
+    return persistRecoveredLiveWrapperHandoff(
+      input,
+      receipt,
+      receipt.externalState,
+    );
+  }
+
+  if (receipt.phase === "launched") {
+    throw new Error(
+      `interrupted ${input.tool} handoff has no durable wrapper-completion evidence`,
+    );
+  }
+
+  const recovered = readRecoveredLiveWrapperResult(receipt);
+  const digest = fileDigest(receipt.resultJsonPath);
+  if (
+    digest === null ||
+    (receipt.phase === "completed" && digest !== receipt.resultDigest) ||
+    (receipt.phase === "finalizing" && digest !== receipt.resultDigest)
+  ) {
+    throw new Error(
+      `interrupted ${input.tool} handoff has no correlated completed result`,
+    );
+  }
+  if (
+    receipt.dispatchOutcome === undefined ||
+    !receipt.dispatchOutcome.ok ||
+    !recovered.ok ||
+    recovered.result.state !== receipt.dispatchOutcome.state ||
+    recovered.result.summary !== receipt.dispatchOutcome.summary
+  ) {
+    throw new Error(
+      `interrupted ${input.tool} handoff wrapper outcome is not safely recoverable`,
+    );
+  }
+
+  const currentHead = resolveCurrentHead(input.repoPath, "");
+  if (currentHead !== receipt.baseHead) {
+    if (
+      receipt.phase !== "finalizing" ||
+      recovered.result.state !== "succeeded" ||
+      !isRecoveredDelegateCommit(input.repoPath, currentHead, receipt)
+    ) {
+      throw new Error(
+        `interrupted ${input.tool} handoff repository state does not match its durable finalization receipt`,
+      );
+    }
+    const externalState = liveWrapperDelegateExternalState(
+      receipt,
+      "completed",
+      currentHead,
+    );
+    return persistRecoveredLiveWrapperHandoff(input, receipt, externalState);
+  }
+
+  const snapshotOwnership = input.repoSafety.beforeGitMutation?.();
+  if (snapshotOwnership?.ok === false) throw new Error(snapshotOwnership.error);
+  const currentTree = captureWorktreeTree(
+    input.repoPath,
+    receipt.baseHead,
+    path.dirname(input.handoffReceiptPath),
+  );
+  const expectedTree =
+    receipt.phase === "finalizing"
+      ? receipt.expectedTree
+      : receipt.worktreeTree;
+  if (currentTree !== expectedTree) {
+    throw new Error(
+      `interrupted ${input.tool} handoff worktree does not match its durable completion receipt`,
+    );
+  }
+  if (receipt.phase === "finalizing") {
+    const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
+    const commit = commitVerifiedChanges({
+      repoPath: input.repoPath,
+      baseHead: receipt.baseHead,
+      commit: runnerResult.commit,
+      beforeCommit: (evidence) =>
+        evidence.expectedTree === receipt.expectedTree &&
+        evidence.message === receipt.expectedMessage
+          ? { ok: true }
+          : {
+              ok: false,
+              error:
+                "delegated prepared commit no longer matches its durable finalization receipt",
+            },
+    });
+    if (!commit.ok) throw new Error(commit.error);
+    const externalState = liveWrapperDelegateExternalState(
+      receipt,
+      "completed",
+      commit.commitSha,
+    );
+    return persistRecoveredLiveWrapperHandoff(input, receipt, externalState);
+  }
+
+  let preparedReceipt = receipt;
+  const finalized = finalizeLiveStepResult(recovered, input.repoPath, {
+    ...input.repoSafety,
+    baseHead: receipt.baseHead,
+    verificationLogPath: receipt.verificationLogPath,
+    beforeCommit: ({ expectedTree, message }) => {
+      preparedReceipt = {
+        ...receipt,
+        phase: "finalizing",
+        resultDigest: digest,
+        expectedTree,
+        expectedMessage: message,
+      };
+      try {
+        writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+        };
+      }
+    },
+  });
+  if (!isProvenClean(finalized) || !finalized.ok) {
+    throw new Error(
+      finalized.ok
+        ? (finalized.result.errorMessage ?? finalized.result.summary)
+        : finalized.error,
+    );
+  }
+  const externalState = liveWrapperDelegateExternalState(
+    preparedReceipt,
+    finalized.result.state === "succeeded" ? "completed" : "failed",
+    resolveCurrentHead(input.repoPath, receipt.baseHead),
+  );
+  return persistRecoveredLiveWrapperHandoff(
+    input,
+    preparedReceipt,
+    externalState,
+  );
+}
+
+function migrateLegacyLiveWrapperDelegateHandoff(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorHandoff | null {
+  if (fs.existsSync(input.handoffReceiptPath)) return null;
+  const legacyPaths = legacyDelegateAttemptPaths(input).find((candidate) => {
+    if (!fs.existsSync(candidate.statePath)) return false;
+    const read = readPersistedDelegateState([candidate.statePath]);
+    return (
+      read.ok &&
+      read.value.externalRunId === input.invocationId &&
+      read.value.branch === resolveDelegateBranch(input.repoPath) &&
+      read.value.headSha === resolveCurrentHead(input.repoPath, "") &&
+      (read.value.stepStatus === "completed" ||
+        read.value.stepStatus === "failed")
+    );
+  });
+  if (legacyPaths === undefined) return null;
+  const legacy = readPersistedDelegateState([legacyPaths.statePath]);
+  if (
+    !legacy.ok ||
+    legacy.value.externalRunId !== input.invocationId ||
+    legacy.value.branch !== resolveDelegateBranch(input.repoPath) ||
+    legacy.value.headSha !== resolveCurrentHead(input.repoPath, "") ||
+    (legacy.value.stepStatus !== "completed" &&
+      legacy.value.stepStatus !== "failed")
+  ) {
+    return null;
+  }
+  const receipt: LiveWrapperDelegateReceipt = {
+    schemaVersion: 1,
+    tool: input.tool,
+    invocationId: input.invocationId,
+    attempt: input.attempt,
+    phase: "finalized",
+    baseHead: legacy.value.headSha,
+    branch: legacy.value.branch,
+    statePath: input.statePath,
+    resultJsonPath: input.resultJsonPath,
+    executorLogPath: input.executorLogPath,
+    verificationLogPath: input.repoSafety.verificationLogPath,
+    preexistingResultDigest: null,
+    externalState: legacy.value,
+  };
+  writeJsonAtomically(input.statePath, legacy.value);
+  writeJsonAtomically(input.handoffReceiptPath, receipt);
+  return {
+    externalIdentity: {
+      externalRunId: legacy.value.externalRunId,
+      branch: legacy.value.branch,
+      headSha: legacy.value.headSha,
+    },
+    summary: `migrated completed ${input.tool} handoff from legacy durable state`,
+    artifactPaths: [
+      input.statePath,
+      input.handoffReceiptPath,
+      legacyPaths.statePath,
+      legacyPaths.resultJsonPath,
+      legacyPaths.executorLogPath,
+      legacyPaths.verificationLogPath,
+    ].filter((artifactPath) => fs.existsSync(artifactPath)),
+  };
+}
+
+function legacyDelegateAttemptPaths(
+  input: ProfileBackedDelegateToolInput,
+): Array<{
+  statePath: string;
+  resultJsonPath: string;
+  executorLogPath: string;
+  verificationLogPath: string;
+}> {
+  const paths = [];
+  for (let attempt = input.attempt; attempt >= 1; attempt -= 1) {
+    const runDir =
+      attempt === 1
+        ? input.legacyPaths.rootDir
+        : path.join(input.legacyPaths.rootDir, `attempt-${attempt}`);
+    paths.push({
+      statePath: path.join(runDir, "delegate-external-state.json"),
+      resultJsonPath: path.join(runDir, path.basename(input.resultJsonPath)),
+      executorLogPath: path.join(runDir, path.basename(input.executorLogPath)),
+      verificationLogPath: path.join(
+        runDir,
+        path.basename(input.repoSafety.verificationLogPath),
+      ),
+    });
+  }
+  return paths;
+}
+
+function readLiveWrapperDelegateReceipt(
+  input: ProfileBackedDelegateToolInput,
+): LiveWrapperDelegateReceipt {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(input.handoffReceiptPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `interrupted ${input.tool} handoff receipt is unreadable: ${errorMessage(error)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`interrupted ${input.tool} handoff receipt is invalid`);
+  }
+  const receipt = parsed as Partial<LiveWrapperDelegateReceipt>;
+  const paths = [
+    receipt.statePath,
+    receipt.resultJsonPath,
+    receipt.executorLogPath,
+    receipt.verificationLogPath,
+  ];
+  const receiptDir = path.dirname(input.handoffReceiptPath);
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.tool !== input.tool ||
+    receipt.invocationId !== input.invocationId ||
+    !Number.isInteger(receipt.attempt) ||
+    receipt.attempt! < 1 ||
+    receipt.attempt! > input.attempt ||
+    !["launched", "completed", "finalizing", "finalized"].includes(
+      receipt.phase ?? "",
+    ) ||
+    typeof receipt.baseHead !== "string" ||
+    !/^[0-9a-f]{40}$/.test(receipt.baseHead) ||
+    typeof receipt.branch !== "string" ||
+    (typeof receipt.preexistingResultDigest !== "string" &&
+      receipt.preexistingResultDigest !== null) ||
+    paths.some(
+      (candidate) =>
+        typeof candidate !== "string" || !isPathWithin(receiptDir, candidate),
+    )
+  ) {
+    throw new Error(`interrupted ${input.tool} handoff receipt is invalid`);
+  }
+  const currentBranch = resolveDelegateBranch(input.repoPath);
+  if (receipt.branch !== currentBranch) {
+    throw new Error(
+      `interrupted ${input.tool} handoff branch mismatch: expected ${receipt.branch}, observed ${currentBranch}`,
+    );
+  }
+  if (
+    (receipt.phase === "completed" || receipt.phase === "finalizing") &&
+    (receipt.dispatchOutcome === undefined ||
+      typeof receipt.dispatchOutcome !== "object" ||
+      receipt.dispatchOutcome === null ||
+      typeof receipt.dispatchOutcome.ok !== "boolean")
+  ) {
+    throw new Error(
+      `interrupted ${input.tool} handoff completion receipt is incomplete`,
+    );
+  }
+  if (
+    receipt.phase === "completed" &&
+    (typeof receipt.worktreeTree !== "string" ||
+      !/^[0-9a-f]{40}$/.test(receipt.worktreeTree))
+  ) {
+    throw new Error(
+      `interrupted ${input.tool} handoff completion receipt has no worktree proof`,
+    );
+  }
+  if (
+    receipt.phase === "finalizing" &&
+    (typeof receipt.resultDigest !== "string" ||
+      typeof receipt.expectedTree !== "string" ||
+      !/^[0-9a-f]{40}$/.test(receipt.expectedTree) ||
+      typeof receipt.expectedMessage !== "string")
+  ) {
+    throw new Error(
+      `interrupted ${input.tool} handoff finalization receipt is incomplete`,
+    );
+  }
+  return receipt as LiveWrapperDelegateReceipt;
+}
+
+function readRecoveredLiveWrapperResult(
+  receipt: LiveWrapperDelegateReceipt,
+): WorkflowStepExecutorDispatchResult {
+  let raw: string;
+  try {
+    raw = readBoundedResultFile(receipt.resultJsonPath).toString("utf8");
+  } catch (error) {
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `delegated live-wrapper result is unreadable: ${errorMessage(error)}`,
+      executorLogPath: receipt.executorLogPath,
+      resultJsonPath: receipt.resultJsonPath,
+    };
+  }
+  const parsed = parseRunnerResult(raw);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `delegated live-wrapper result is invalid: ${parsed.error}`,
+      executorLogPath: receipt.executorLogPath,
+      resultJsonPath: receipt.resultJsonPath,
+    };
+  }
+  return {
+    ok: true,
+    result: {
+      state: parsed.value.success ? "succeeded" : "failed",
+      summary: parsed.value.summary,
+      checkpoints: [],
+      artifacts: [
+        { kind: "executor-log", path: receipt.executorLogPath },
+        { kind: "runner-result", path: receipt.resultJsonPath },
+      ],
+      resultDigest: null,
+      errorCode: parsed.value.success ? null : "command_failed",
+      errorMessage: parsed.value.success
+        ? null
+        : `live step runner reported success=false: ${parsed.value.summary}`,
+      retryHint: null,
+      recoveryHint: null,
+    },
+    executorLogPath: receipt.executorLogPath,
+    resultJsonPath: receipt.resultJsonPath,
+  };
+}
+
+function readRecoveredRunnerResult(resultJsonPath: string) {
+  const raw = readBoundedResultFile(resultJsonPath).toString("utf8");
+  const parsed = parseRunnerResult(raw);
+  if (!parsed.ok) {
+    throw new Error(
+      `delegated live-wrapper result is invalid: ${parsed.error}`,
+    );
+  }
+  return parsed.value;
+}
+
+function captureWorktreeTree(
+  repoPath: string,
+  baseHead: string,
+  artifactRoot: string,
+): string {
+  const indexPath = path.join(
+    artifactRoot,
+    `.delegate-index-${process.pid}-${crypto.randomUUID()}`,
+  );
+  const env = { ...process.env, GIT_INDEX_FILE: indexPath };
+  try {
+    execFileSync("git", ["-C", repoPath, "read-tree", baseHead], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    execFileSync("git", ["-C", repoPath, "add", "-A"], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const tree = execFileSync("git", ["-C", repoPath, "write-tree"], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (!/^[0-9a-f]{40}$/.test(tree)) {
+      throw new Error(
+        `delegated worktree snapshot returned invalid tree ${tree}`,
+      );
+    }
+    return tree;
+  } finally {
+    fs.rmSync(indexPath, { force: true });
+    fs.rmSync(`${indexPath}.lock`, { force: true });
+  }
+}
+
+function isRecoveredDelegateCommit(
+  repoPath: string,
+  currentHead: string,
+  receipt: LiveWrapperDelegateReceipt,
+): boolean {
+  try {
+    const parent = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", `${currentHead}^`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    const tree = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", `${currentHead}^{tree}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    const message = execFileSync(
+      "git",
+      ["-C", repoPath, "show", "-s", "--format=%B", currentHead],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trimEnd();
+    const status = execFileSync(
+      "git",
+      ["-C", repoPath, "status", "--porcelain", "--untracked-files=all"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return (
+      parent === receipt.baseHead &&
+      tree === receipt.expectedTree &&
+      message === receipt.expectedMessage &&
+      status.length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function liveWrapperDelegateExternalState(
+  receipt: LiveWrapperDelegateReceipt,
+  stepStatus: "completed" | "failed",
+  headSha: string,
+): DelegateSupervisorExternalState {
+  return {
+    externalRunId: receipt.invocationId,
+    branch: receipt.branch,
+    headSha,
+    activeStep: null,
+    stepStatus,
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    prUrl: null,
+    ciState: "none",
+  };
+}
+
+function persistRecoveredLiveWrapperHandoff(
+  input: ProfileBackedDelegateToolInput,
+  receipt: LiveWrapperDelegateReceipt,
+  externalState: DelegateSupervisorExternalState,
+): DelegateSupervisorHandoff {
+  if (
+    externalState.externalRunId !== receipt.invocationId ||
+    externalState.branch !== receipt.branch ||
+    externalState.headSha !== resolveCurrentHead(input.repoPath, "")
+  ) {
+    throw new Error(
+      `interrupted ${receipt.tool} handoff external state does not match the current repository identity`,
+    );
+  }
+  writeJsonAtomically(receipt.statePath, externalState);
+  writeJsonAtomically(input.handoffReceiptPath, {
+    ...receipt,
+    phase: "finalized",
+    externalState,
+  } satisfies LiveWrapperDelegateReceipt);
+  return {
+    externalIdentity: {
+      externalRunId: externalState.externalRunId,
+      branch: externalState.branch,
+      headSha: externalState.headSha,
+    },
+    summary: `recovered completed ${receipt.tool} handoff from durable evidence`,
+    artifactPaths: [
+      receipt.statePath,
+      input.handoffReceiptPath,
+      receipt.resultJsonPath,
+      receipt.executorLogPath,
+      receipt.verificationLogPath,
+    ],
+  };
+}
+
+function isPathWithin(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative.length === 0 ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function fileDigest(filePath: string): string | null {
+  try {
+    const raw = readBoundedResultFile(filePath);
+    return `sha256:${crypto.createHash("sha256").update(raw).digest("hex")}`;
+  } catch {
+    return null;
+  }
+}
+
+function readBoundedResultFile(filePath: string): Buffer {
+  const stat = fs.lstatSync(filePath);
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isFile() ||
+    stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES
+  ) {
+    throw new Error("result is not a bounded regular file");
+  }
+  return fs.readFileSync(filePath);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createPersistedProfileDelegateToolAdapter(input: {
@@ -887,7 +1525,9 @@ function createProfileNoMistakesToolAdapter(
       invocationId: input.invocationId,
       attempt: input.attempt,
       externalIdentity: launchIdentity.value,
-      handoffSucceeded: finalized.ok && finalized.result.state === "succeeded",
+      ...(finalized.ok && finalized.result.state === "succeeded"
+        ? { terminalProofHeadSha: launchIdentity.value.headSha }
+        : {}),
     });
     writeProvisionalNoMistakesState(input.statePath, launchIdentity.value);
     const status = readNoMistakesStatus({
@@ -900,7 +1540,9 @@ function createProfileNoMistakesToolAdapter(
     if (!status.ok) throw new Error(status.error);
     const observed = settleNoMistakesHandoffState(
       status,
-      finalized.ok && finalized.result.state === "succeeded",
+      finalized.ok && finalized.result.state === "succeeded"
+        ? launchIdentity.value.headSha
+        : null,
     );
     fs.writeFileSync(input.statePath, JSON.stringify(observed.value));
     const artifactPaths = [
@@ -963,6 +1605,7 @@ function createProfileNoMistakesToolAdapter(
 function recoverNoMistakesHandoff(
   input: ProfileBackedDelegateToolInput,
 ): DelegateSupervisorHandoff | null {
+  migrateLegacyNoMistakesReceipt(input);
   const receiptExists = fs.existsSync(input.handoffReceiptPath);
   let receiptAttemptHint: number | null = null;
   if (receiptExists) {
@@ -1004,7 +1647,7 @@ function recoverNoMistakesHandoff(
     headSha: string;
   };
   let receiptAttempt: number;
-  let receiptHandoffSucceeded = false;
+  let receiptTerminalProofHeadSha: string | null = null;
   try {
     const stored = JSON.parse(
       fs.readFileSync(input.handoffReceiptPath, "utf8"),
@@ -1016,7 +1659,7 @@ function recoverNoMistakesHandoff(
         branch?: unknown;
         headSha?: unknown;
       };
-      handoffSucceeded?: unknown;
+      terminalProofHeadSha?: unknown;
     };
     const identity = stored.externalIdentity;
     if (
@@ -1024,14 +1667,13 @@ function recoverNoMistakesHandoff(
       !Number.isInteger(stored.attempt) ||
       stored.attempt < 1 ||
       stored.attempt > input.attempt ||
-      (stored.attempt === input.attempt &&
-        stored.invocationId !== input.invocationId) ||
+      stored.invocationId !== input.invocationId ||
       identity === undefined ||
       typeof identity.externalRunId !== "string" ||
       typeof identity.branch !== "string" ||
       typeof identity.headSha !== "string" ||
-      (stored.handoffSucceeded !== undefined &&
-        typeof stored.handoffSucceeded !== "boolean")
+      (stored.terminalProofHeadSha !== undefined &&
+        typeof stored.terminalProofHeadSha !== "string")
     ) {
       throw new Error("stored handoff identity is incomplete");
     }
@@ -1040,8 +1682,17 @@ function recoverNoMistakesHandoff(
       branch: identity.branch,
       headSha: identity.headSha,
     };
+    if (
+      typeof stored.terminalProofHeadSha === "string" &&
+      !commitIdentitiesMatch(stored.terminalProofHeadSha, expected.headSha)
+    ) {
+      throw new Error("stored terminal proof does not match handoff head");
+    }
     receiptAttempt = stored.attempt;
-    receiptHandoffSucceeded = stored.handoffSucceeded === true;
+    receiptTerminalProofHeadSha =
+      typeof stored.terminalProofHeadSha === "string"
+        ? stored.terminalProofHeadSha
+        : null;
   } catch (error) {
     throw new Error(
       `stored no-mistakes handoff is unreadable: ${error instanceof Error ? error.message : String(error)}`,
@@ -1099,7 +1750,7 @@ function recoverNoMistakesHandoff(
   if (!status.ok) throw new Error(status.error);
   const observed = settleNoMistakesHandoffState(
     status,
-    receiptHandoffSucceeded,
+    receiptTerminalProofHeadSha,
   );
   if (
     receiptAttempt < input.attempt &&
@@ -1129,6 +1780,64 @@ function recoverNoMistakesHandoff(
         }
       : {}),
   };
+}
+
+function migrateLegacyNoMistakesReceipt(
+  input: ProfileBackedDelegateToolInput,
+): void {
+  if (
+    fs.existsSync(input.handoffReceiptPath) ||
+    !fs.existsSync(input.legacyPaths.handoffReceiptPath)
+  ) {
+    return;
+  }
+  let stored: unknown;
+  try {
+    stored = JSON.parse(
+      fs.readFileSync(input.legacyPaths.handoffReceiptPath, "utf8"),
+    );
+  } catch {
+    return;
+  }
+  if (stored === null || typeof stored !== "object" || Array.isArray(stored)) {
+    return;
+  }
+  const receipt = stored as {
+    invocationId?: unknown;
+    attempt?: unknown;
+    externalIdentity?: {
+      externalRunId?: unknown;
+      branch?: unknown;
+      headSha?: unknown;
+    };
+    terminalProofHeadSha?: unknown;
+    handoffSucceeded?: unknown;
+  };
+  const identity = receipt.externalIdentity;
+  if (
+    typeof receipt.attempt !== "number" ||
+    !Number.isInteger(receipt.attempt) ||
+    receipt.attempt < 1 ||
+    receipt.attempt > input.attempt ||
+    receipt.invocationId !== input.invocationId ||
+    identity === undefined ||
+    typeof identity.externalRunId !== "string" ||
+    typeof identity.branch !== "string" ||
+    typeof identity.headSha !== "string" ||
+    (receipt.terminalProofHeadSha !== undefined &&
+      typeof receipt.terminalProofHeadSha !== "string") ||
+    (receipt.handoffSucceeded !== undefined &&
+      typeof receipt.handoffSucceeded !== "boolean")
+  ) {
+    return;
+  }
+  const { handoffSucceeded, ...migrated } = receipt;
+  writeJsonAtomically(input.handoffReceiptPath, {
+    ...migrated,
+    ...(migrated.terminalProofHeadSha === undefined && handoffSucceeded === true
+      ? { terminalProofHeadSha: identity.headSha }
+      : {}),
+  });
 }
 
 function readNoMistakesLaunchIdentity(input: {

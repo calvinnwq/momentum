@@ -1385,6 +1385,53 @@ describe("delegate-supervisor SDK executor", () => {
       db.close();
     },
   );
+
+  it("does not checkpoint state from a mismatched external identity", async () => {
+    const { db, invocation } = openDelegateDb();
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "ci-run",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "ci-42",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "CI run dispatched",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: state({ externalRunId: "untrusted-run" }),
+        digest: "sha256:untrusted-raw-input",
+      }),
+    };
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "ci-run" },
+      hostBindings: { tools: { "ci-run": adapter } },
+      maxTicks: 2,
+      now: () => 20,
+    });
+    expect(result.lastRound).toMatchObject({
+      inputDigest: "sha256:untrusted-raw-input",
+      resultDigest: null,
+      commitSha: null,
+      summary: expect.stringContaining(
+        "delegated external identity mismatch for externalRunId",
+      ),
+    });
+    const currentRound = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    }).snapshot().currentRound;
+    expect(
+      currentRound?.checkpoints.some(
+        (checkpoint) => checkpoint.stage === "delegate_external_state_mirrored",
+      ),
+    ).toBe(false);
+    db.close();
+  });
 });
 
 describe("no-mistakes tool adapter", () => {
@@ -1784,7 +1831,7 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
-  it("preserves checks-passed handoff evidence when status still reports historical work", () => {
+  it("preserves pending status despite terminal proof and historical work", () => {
     const status = parseNoMistakesAxiStatus(
       [
         "run:",
@@ -1814,18 +1861,40 @@ describe("no-mistakes tool adapter", () => {
       "continue",
     );
 
-    const settled = settleNoMistakesHandoffState(status, true);
-    expect(settled.value).toMatchObject({
-      headSha: "b".repeat(40),
-      activeStep: null,
-      stepStatus: "completed",
-      findings: [],
-      decisions: [],
-      ciState: "passed",
-    });
+    const settled = settleNoMistakesHandoffState(status, "b".repeat(40));
+    expect(settled).toBe(status);
     expect(classifyDelegateSupervisorState(settled.value).classification).toBe(
-      "complete",
+      "continue",
     );
+  });
+
+  it("does not apply terminal handoff proof to a different head", () => {
+    const read = {
+      ok: true as const,
+      value: state({ headSha: "b".repeat(40), ciState: "passed" }),
+      digest: "sha256:newer-head-status",
+      headRelation: "verified_descendant" as const,
+    };
+    expect(settleNoMistakesHandoffState(read, HEAD)).toBe(read);
+  });
+
+  it("applies terminal handoff proof across abbreviated commit identity", () => {
+    const read = {
+      ok: true as const,
+      value: state({ ciState: "passed" }),
+      digest: "sha256:resolved-head-status",
+    };
+    const settled = settleNoMistakesHandoffState(read, HEAD.slice(0, 8));
+    expect(settled.value.stepStatus).toBe("completed");
+  });
+
+  it("does not override pending CI at the terminal proof head", () => {
+    const read = {
+      ok: true as const,
+      value: state({ ciState: "pending" }),
+      digest: "sha256:pending-current-status",
+    };
+    expect(settleNoMistakesHandoffState(read, HEAD)).toBe(read);
   });
 
   it.each([
@@ -1858,7 +1927,7 @@ describe("no-mistakes tool adapter", () => {
     state({ ciState: "failed" }),
   ])("does not overwrite contradictory current status evidence", (value) => {
     const read = { ok: true as const, value, digest: "sha256:current-status" };
-    expect(settleNoMistakesHandoffState(read, true)).toBe(read);
+    expect(settleNoMistakesHandoffState(read, HEAD)).toBe(read);
   });
 
   it.each(["passed", "none"] as const)(
@@ -1869,7 +1938,7 @@ describe("no-mistakes tool adapter", () => {
         value: state({ ciState }),
         digest: `sha256:monitoring-${ciState}`,
       };
-      const settled = settleNoMistakesHandoffState(read, true);
+      const settled = settleNoMistakesHandoffState(read, HEAD);
       expect(settled.value).toMatchObject({
         activeStep: null,
         stepStatus: "completed",

@@ -235,9 +235,11 @@ Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
 `MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`,
 `MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
 `MOMENTUM_RESULT_PATH` for every wrapper.
-For native workflow runs, `MOMENTUM_ITERATION_DIR` is the repo-local
-`.agent-workflows/<run-id>/` directory; attempts after the first scope their
-result, executor log, and verification log paths under `attempt-<n>/`.
+For native workflow runs, ordinary live-wrapper steps use the repo-local
+`.agent-workflows/<run-id>/` directory and scope attempts after the first under
+`attempt-<n>/`.
+Delegate-supervisor steps use `.agent-workflows/<run-id>/delegate/<step-id>/`
+and scope their later attempts beneath that step directory.
 When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from persisted `route.steps` overrides when the
@@ -334,8 +336,9 @@ The no-mistakes adapter uses the configured wrapper command for the initial `axi
 Status read-back must match the pinned run id and branch.
 The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
 Unreadable status, identity drift, pending CI behind a terminal claim, active findings, or unresolved decisions fail closed instead of settling success.
-The daemon stores `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
-When the initial handoff already proves checks passed, that terminal state is stored with the handoff and reused directly instead of being replaced by a lagging monitoring snapshot.
+The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
+Generic live-wrapper receipts bind the result, prepared Git tree, commit message, and base commit so a retry can reconstruct a completed commit without launching the tool again.
+When the initial no-mistakes handoff already proves checks passed, that terminal state is stored for its exact commit and reused directly only while current status reports passed or absent CI rather than pending CI.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 
@@ -374,8 +377,10 @@ Missing auth, issue scope, target, source evidence, deterministic intent evidenc
 Momentum does not store these credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
-evidence is kept separate: attempt 1 uses the configured run directory paths,
-while later attempts write result and executor-log files under `attempt-<n>/`.
+evidence is kept separate.
+Ordinary live-wrapper attempt 1 uses the configured run directory paths and
+later attempts use `attempt-<n>/`; delegate-supervisor steps apply the same
+attempt layout beneath their step-scoped `delegate/<step-id>/` directory.
 If a wrapper command is `node` (or `/usr/bin/env node`) and the configured
 script entrypoint itself is missing, the failure is classified as
 `runtime_unavailable`; module failures from inside an existing wrapper script

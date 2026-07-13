@@ -8,6 +8,7 @@ export type CommitErrorCode =
   | "invalid_input"
   | "head_mismatch"
   | "nothing_to_commit"
+  | "precommit_rejected"
   | "git_failed";
 
 export type CommitFailure = {
@@ -29,6 +30,10 @@ export type CommitInput = {
   repoPath: string;
   baseHead: string;
   commit: CommitIntent;
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 export function commitVerifiedChanges(input: CommitInput): CommitResult {
@@ -47,7 +52,7 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return {
       ok: false,
       code: "head_mismatch",
-      error: `HEAD ${currentHead} does not match expected base ${baseHead}; runner must not commit.`
+      error: `HEAD ${currentHead} does not match expected base ${baseHead}; runner must not commit.`,
     };
   }
 
@@ -67,11 +72,23 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return {
       ok: false,
       code: "nothing_to_commit",
-      error: "No staged changes after runner; nothing to commit."
+      error: "No staged changes after runner; nothing to commit.",
     };
   }
 
   const message = formatCommitMessage(commit);
+  if (input.beforeCommit !== undefined) {
+    let expectedTree: string;
+    try {
+      expectedTree = runGit(repoPath, ["write-tree"]).trim();
+    } catch (error) {
+      return gitFailure("git write-tree failed", error);
+    }
+    const prepared = input.beforeCommit({ expectedTree, message });
+    if (!prepared.ok) {
+      return { ok: false, code: "precommit_rejected", error: prepared.error };
+    }
+  }
 
   try {
     runGit(repoPath, ["commit", "--quiet", "-m", message]);
@@ -89,14 +106,14 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return {
       ok: false,
       code: "git_failed",
-      error: `Unexpected HEAD format after commit: ${commitSha}`
+      error: `Unexpected HEAD format after commit: ${commitSha}`,
     };
   }
   if (commitSha === baseHead) {
     return {
       ok: false,
       code: "git_failed",
-      error: `HEAD did not advance after commit: still at ${baseHead}.`
+      error: `HEAD did not advance after commit: still at ${baseHead}.`,
     };
   }
 
@@ -113,7 +130,7 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
 export function listCommittedChangedFiles(
   repoPath: string,
   parentSha: string,
-  commitSha: string
+  commitSha: string,
 ): string[] {
   return runGit(repoPath, ["diff", "--name-only", parentSha, commitSha])
     .split("\n")
@@ -134,10 +151,7 @@ export function formatCommitMessage(intent: CommitIntent): string {
 }
 
 export type ResetErrorCode =
-  | "invalid_input"
-  | "missing_base"
-  | "git_failed"
-  | "head_mismatch";
+  "invalid_input" | "missing_base" | "git_failed" | "head_mismatch";
 
 export type ResetFailure = {
   ok: false;
@@ -167,7 +181,7 @@ export function resetToBase(input: ResetInput): ResetResult {
     return {
       ok: false,
       code: "missing_base",
-      error: `Base commit does not exist in repo: ${baseHead}`
+      error: `Base commit does not exist in repo: ${baseHead}`,
     };
   }
 
@@ -181,7 +195,7 @@ export function resetToBase(input: ResetInput): ResetResult {
     return {
       ok: false,
       code: "head_mismatch",
-      error: `HEAD ${currentHead} does not match expected base ${baseHead}; refusing to reset commits made outside Momentum.`
+      error: `HEAD ${currentHead} does not match expected base ${baseHead}; refusing to reset commits made outside Momentum.`,
     };
   }
 
@@ -207,7 +221,7 @@ export function resetToBase(input: ResetInput): ResetResult {
     return {
       ok: false,
       code: "head_mismatch",
-      error: `HEAD ${head} does not match base ${baseHead} after reset.`
+      error: `HEAD ${head} does not match base ${baseHead} after reset.`,
     };
   }
 
@@ -215,18 +229,21 @@ export function resetToBase(input: ResetInput): ResetResult {
 }
 
 function validateCommitInput(input: CommitInput): CommitFailure | { ok: true } {
-  if (typeof input.repoPath !== "string" || input.repoPath.trim().length === 0) {
+  if (
+    typeof input.repoPath !== "string" ||
+    input.repoPath.trim().length === 0
+  ) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Repo path is required."
+      error: "Repo path is required.",
     };
   }
   if (typeof input.baseHead !== "string" || !SHA40_RE.test(input.baseHead)) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Base HEAD must be a 40-character hex SHA."
+      error: "Base HEAD must be a 40-character hex SHA.",
     };
   }
   const commit = input.commit;
@@ -234,39 +251,45 @@ function validateCommitInput(input: CommitInput): CommitFailure | { ok: true } {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Commit intent is required."
+      error: "Commit intent is required.",
     };
   }
   if (typeof commit.type !== "string" || commit.type.length === 0) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Commit intent type is required."
+      error: "Commit intent type is required.",
     };
   }
-  if (typeof commit.subject !== "string" || commit.subject.trim().length === 0) {
+  if (
+    typeof commit.subject !== "string" ||
+    commit.subject.trim().length === 0
+  ) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Commit intent subject is required."
+      error: "Commit intent subject is required.",
     };
   }
   return { ok: true };
 }
 
 function validateResetInput(input: ResetInput): ResetFailure | { ok: true } {
-  if (typeof input.repoPath !== "string" || input.repoPath.trim().length === 0) {
+  if (
+    typeof input.repoPath !== "string" ||
+    input.repoPath.trim().length === 0
+  ) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Repo path is required."
+      error: "Repo path is required.",
     };
   }
   if (typeof input.baseHead !== "string" || !SHA40_RE.test(input.baseHead)) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Base HEAD must be a 40-character hex SHA."
+      error: "Base HEAD must be a 40-character hex SHA.",
     };
   }
   return { ok: true };
@@ -276,7 +299,7 @@ function hasStagedChanges(repoPath: string): boolean {
   const result = spawnSync(
     "git",
     ["-C", repoPath, "diff", "--cached", "--quiet"],
-    { stdio: ["ignore", "pipe", "pipe"] }
+    { stdio: ["ignore", "pipe", "pipe"] },
   );
   if (result.error !== undefined) {
     throw result.error;
@@ -293,7 +316,7 @@ function hasStagedChanges(repoPath: string): boolean {
         : "";
   const suffix = stderr.length > 0 ? `: ${stderr}` : "";
   throw new Error(
-    `git diff --cached --quiet exited with status ${result.status ?? "null"}${suffix}`
+    `git diff --cached --quiet exited with status ${result.status ?? "null"}${suffix}`,
   );
 }
 
@@ -306,18 +329,21 @@ function commitExists(repoPath: string, sha: string): boolean {
   }
 }
 
-function gitFailure(prefix: string, error: unknown): CommitFailure & ResetFailure {
+function gitFailure(
+  prefix: string,
+  error: unknown,
+): CommitFailure & ResetFailure {
   const detail = error instanceof Error ? error.message : "unknown error";
   return {
     ok: false,
     code: "git_failed",
-    error: `${prefix}: ${detail}`
+    error: `${prefix}: ${detail}`,
   };
 }
 
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }

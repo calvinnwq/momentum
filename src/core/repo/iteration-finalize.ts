@@ -6,13 +6,13 @@ import {
   type CommitFailure,
   type CommitSuccess,
   type ResetFailure,
-  type ResetSuccess
+  type ResetSuccess,
 } from "../../adapters/git-transaction.js";
 import type { CommitIntent } from "../executors/runner/types.js";
 import {
   runVerification,
   type VerificationFailure,
-  type VerificationSuccess
+  type VerificationSuccess,
 } from "./verification.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
@@ -31,6 +31,10 @@ export type FinalizeIterationInput = {
    * aborts the transaction with `ownership_lost` before mutating git.
    */
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 export type FinalizeResetTrigger = "runner_failure" | "verification_failure";
@@ -77,7 +81,7 @@ export type FinalizeIterationResult =
     };
 
 export function finalizeIteration(
-  input: FinalizeIterationInput
+  input: FinalizeIterationInput,
 ): FinalizeIterationResult {
   const invalid = validateInput(input);
   if (invalid !== null) return invalid;
@@ -89,7 +93,7 @@ export function finalizeIteration(
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
-    verificationLogPath
+    verificationLogPath,
   } = input;
 
   if (!runnerSuccess) {
@@ -102,7 +106,7 @@ export function finalizeIteration(
         outcome: "reset_failed",
         trigger: "runner_failure",
         verification: null,
-        reset
+        reset,
       };
     }
     return { outcome: "reset_runner_failure", reset };
@@ -112,7 +116,7 @@ export function finalizeIteration(
     repoPath,
     commands: verificationCommands,
     timeoutSec: verificationTimeoutSec,
-    logPath: verificationLogPath
+    logPath: verificationLogPath,
   });
 
   if (!verification.ok) {
@@ -124,7 +128,7 @@ export function finalizeIteration(
         outcome: "reset_failed",
         trigger: "verification_failure",
         verification,
-        reset
+        reset,
       };
     }
     return { outcome: "reset_verification_failure", verification, reset };
@@ -136,7 +140,10 @@ export function finalizeIteration(
   const commit = commitVerifiedChanges({
     repoPath,
     baseHead,
-    commit: commitIntent
+    commit: commitIntent,
+    ...(input.beforeCommit !== undefined
+      ? { beforeCommit: input.beforeCommit }
+      : {}),
   });
 
   if (!commit.ok) {
@@ -153,7 +160,7 @@ export function finalizeIteration(
 }
 
 function checkOwnership(
-  input: FinalizeIterationInput
+  input: FinalizeIterationInput,
 ): Extract<FinalizeIterationResult, { outcome: "ownership_lost" }> | null {
   if (input.beforeGitMutation === undefined) return null;
   const check = input.beforeGitMutation();
@@ -162,27 +169,33 @@ function checkOwnership(
 }
 
 function shouldResetAfterCommitFailure(code: CommitFailure["code"]): boolean {
-  return code !== "nothing_to_commit" &&
+  return (
+    code !== "nothing_to_commit" &&
     code !== "head_mismatch" &&
-    code !== "invalid_input";
+    code !== "invalid_input" &&
+    code !== "precommit_rejected"
+  );
 }
 
 function validateInput(
-  input: FinalizeIterationInput
+  input: FinalizeIterationInput,
 ): { outcome: "invalid_input"; error: string } | null {
-  if (typeof input.repoPath !== "string" || input.repoPath.trim().length === 0) {
+  if (
+    typeof input.repoPath !== "string" ||
+    input.repoPath.trim().length === 0
+  ) {
     return { outcome: "invalid_input", error: "repoPath is required." };
   }
   if (typeof input.baseHead !== "string" || !SHA40_RE.test(input.baseHead)) {
     return {
       outcome: "invalid_input",
-      error: "baseHead must be a 40-character hex SHA."
+      error: "baseHead must be a 40-character hex SHA.",
     };
   }
   if (typeof input.runnerSuccess !== "boolean") {
     return {
       outcome: "invalid_input",
-      error: "runnerSuccess must be a boolean."
+      error: "runnerSuccess must be a boolean.",
     };
   }
   if (input.commitIntent === null || typeof input.commitIntent !== "object") {
@@ -191,7 +204,7 @@ function validateInput(
   if (!Array.isArray(input.verificationCommands)) {
     return {
       outcome: "invalid_input",
-      error: "verificationCommands must be an array of strings."
+      error: "verificationCommands must be an array of strings.",
     };
   }
   if (
@@ -200,14 +213,17 @@ function validateInput(
   ) {
     return {
       outcome: "invalid_input",
-      error: "verificationTimeoutSec must be a positive integer."
+      error: "verificationTimeoutSec must be a positive integer.",
     };
   }
   if (
     typeof input.verificationLogPath !== "string" ||
     input.verificationLogPath.trim().length === 0
   ) {
-    return { outcome: "invalid_input", error: "verificationLogPath is required." };
+    return {
+      outcome: "invalid_input",
+      error: "verificationLogPath is required.",
+    };
   }
   return null;
 }

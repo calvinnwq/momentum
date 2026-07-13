@@ -84,12 +84,17 @@ const CLEARED_CURRENT_STEP_FINDINGS_DETAIL =
 /** Preserve terminal evidence returned by `axi run` even when `axi status` lags. */
 export function settleNoMistakesHandoffState(
   read: SuccessfulNoMistakesExternalStateRead,
-  handoffSucceeded: boolean,
+  terminalProofHeadSha: string | null,
 ): SuccessfulNoMistakesExternalStateRead {
-  if (!handoffSucceeded) return read;
+  if (
+    terminalProofHeadSha === null ||
+    !commitIdentitiesMatch(terminalProofHeadSha, read.value.headSha)
+  ) {
+    return read;
+  }
   const laggingMonitoringState =
     read.value.stepStatus === "running" &&
-    read.value.ciState !== "failed" &&
+    (read.value.ciState === "passed" || read.value.ciState === "none") &&
     (read.value.findings.length === 0 ||
       (read.value.findings.length === 1 &&
         read.value.findings[0]?.externalId === "active-findings" &&
@@ -105,7 +110,7 @@ export function settleNoMistakesHandoffState(
     findings: [],
     selectedFindingIds: [],
     decisions: [],
-    ciState: read.value.ciState === "none" ? "none" : "passed",
+    ciState: read.value.ciState,
   };
   return {
     ok: true,
@@ -118,6 +123,25 @@ export function settleNoMistakesHandoffState(
       ? { headRelation: read.headRelation }
       : {}),
   };
+}
+
+export function commitIdentitiesMatch(left: string, right: string): boolean {
+  const normalizedLeft = left.toLowerCase();
+  const normalizedRight = right.toLowerCase();
+  if (
+    !/^[0-9a-f]{7,40}$/.test(normalizedLeft) ||
+    !/^[0-9a-f]{7,40}$/.test(normalizedRight)
+  ) {
+    return false;
+  }
+  if (normalizedLeft === normalizedRight) return true;
+  if (normalizedLeft.length === 40) {
+    return normalizedLeft.startsWith(normalizedRight);
+  }
+  if (normalizedRight.length === 40) {
+    return normalizedRight.startsWith(normalizedLeft);
+  }
+  return false;
 }
 
 /**

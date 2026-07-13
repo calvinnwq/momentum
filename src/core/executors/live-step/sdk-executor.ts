@@ -18,6 +18,10 @@ export type LiveStepRepoSafetyHostBinding = {
   verificationTimeoutSec: number;
   verificationLogPath: string;
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 export type LiveStepSdkHostBindings = {
@@ -263,6 +267,9 @@ export function finalizeLiveStepResult(
           verificationLogPath: safety.verificationLogPath,
           ...(safety.beforeGitMutation !== undefined
             ? { beforeGitMutation: safety.beforeGitMutation }
+            : {}),
+          ...(safety.beforeCommit !== undefined
+            ? { beforeCommit: safety.beforeCommit }
             : {}),
         });
   switch (finalize.outcome) {

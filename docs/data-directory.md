@@ -98,7 +98,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   A `delegate-supervisor` handoff completes one durable round, and each normal continuation read completes another; a round reopened after gate resolution resumes in place.
   Each read keeps the raw response digest in `inputDigest`, stores its semantic progress digest in `resultDigest`, refreshes durable liveness, and carries the last semantic-progress time across rounds.
   After four minutes without fresh progress or terminal evidence, the active round and invocation record manual recovery rather than waiting forever on stale external state.
-  Retried live-wrapper setup recovery appends the next pending round (`round-2`, `round-3`, and so on) while preserving the failed round as durable evidence and the current selected agent / model / effort metadata; attempt-specific result and log paths are isolated under `attempt-<n>/` for attempts after the first.
+  Retried live-wrapper setup recovery appends the next pending round (`round-2`, `round-3`, and so on) while preserving the failed round as durable evidence and the current selected agent / model / effort metadata; ordinary live-wrapper attempt paths use `attempt-<n>/`, while delegate-supervisor evidence first scopes by step under `delegate/<step-id>/` and then by later attempt.
   A registered executor's `continue` recommendation terminalizes its current round while leaving the invocation running; the next daemon scheduler pass may append the next sequential round for the same attempt.
   A registered executor's approval or operator-decision recommendation pauses its current round at `waiting_operator`, mirrors an unresolved executor decision into a round-scoped workflow gate, and releases the dispatch lease. Resolving that gate records the chosen action, reopens the same round, and makes it eligible for scheduler reattachment.
   `workflow run logs` reads invocations run-wide in deterministic step / attempt / invocation order and rounds in deterministic step / attempt / invocation / round order.
@@ -121,9 +121,9 @@ Files at `<data-dir>/goals/<goal-id>/`, written by the retired goal-first lane a
 
 Native workflow runs that execute through a configured live-wrapper profile use `<repo>/.agent-workflows/<run-id>/` as the run directory.
 Imported workflow runs use the directory derived from their source artifact path.
-The live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
-Delegate-supervisor steps also write `delegate-external-state.json` in the current attempt directory.
-The no-mistakes adapter writes the atomic `delegate-handoff.json` receipt at the run root so an interrupted or retried attempt can reattach the correlated external run instead of launching another one.
+The ordinary live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
+Delegate-supervisor steps write their result, log, verification, and external-state evidence beneath `delegate/<step-id>/`, with later attempts beneath that step directory's `attempt-<n>/` child.
+Each delegated step writes its atomic `delegate-handoff.json` receipt at the step-scoped delegate root so an interrupted or retried attempt can reattach only its correlated external run instead of launching another one.
 When that run directory resolves inside the repository, daemon and watch dispatch require it to be ignored by git before the wrapper starts; otherwise the step is parked for manual recovery with `invalid_input` instead of risking evidence files being swept into a Momentum commit.
 
 ## OpenClaw supervisor state files
