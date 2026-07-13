@@ -10,7 +10,7 @@ import {
   DELEGATE_SUPERVISOR_EXTERNAL_STATUSES,
 } from "./types.js";
 
-const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
+const COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
 const STATUS_SET: ReadonlySet<string> = new Set(
   DELEGATE_SUPERVISOR_EXTERNAL_STATUSES,
 );
@@ -45,7 +45,7 @@ function findUnreadableReason(
   if (!isNonBlank(state.externalRunId)) return "external run id is missing";
   if (!isNonBlank(state.branch)) return "branch is missing";
   if (!COMMIT_SHA_RE.test(state.headSha)) {
-    return "head SHA is not a 40-character hex SHA";
+    return "head SHA is not a 7- to 40-character hex commit id";
   }
   if (state.activeStep !== null && !isNonBlank(state.activeStep)) {
     return "active step is blank or not a string";

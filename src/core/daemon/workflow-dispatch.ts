@@ -8,6 +8,7 @@ import {
   createNoMistakesToolAdapter,
   parseNoMistakesAxiStatus,
   parseNoMistakesLaunchIdentity,
+  settleNoMistakesHandoffState,
 } from "../../adapters/no-mistakes-tool-adapter.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
@@ -59,8 +60,10 @@ import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_EXECUTOR_NAME,
 } from "../executors/delegate-supervisor/executor.js";
+import { classifyDelegateSupervisorState } from "../executors/delegate-supervisor/classifier.js";
 import type {
   DelegateSupervisorExternalState,
+  DelegateSupervisorHandoff,
   DelegateSupervisorHostBindings,
   DelegateSupervisorToolAdapter,
 } from "../executors/delegate-supervisor/types.js";
@@ -884,6 +887,7 @@ function createProfileNoMistakesToolAdapter(
       invocationId: input.invocationId,
       attempt: input.attempt,
       externalIdentity: launchIdentity.value,
+      handoffSucceeded: finalized.ok && finalized.result.state === "succeeded",
     });
     writeProvisionalNoMistakesState(input.statePath, launchIdentity.value);
     const status = readNoMistakesStatus({
@@ -894,7 +898,11 @@ function createProfileNoMistakesToolAdapter(
       expected: launchIdentity.value,
     });
     if (!status.ok) throw new Error(status.error);
-    fs.writeFileSync(input.statePath, JSON.stringify(status.value));
+    const observed = settleNoMistakesHandoffState(
+      status,
+      finalized.ok && finalized.result.state === "succeeded",
+    );
+    fs.writeFileSync(input.statePath, JSON.stringify(observed.value));
     const artifactPaths = [
       input.statePath,
       input.handoffReceiptPath,
@@ -905,15 +913,26 @@ function createProfileNoMistakesToolAdapter(
         : []),
     ].filter((value, index, values) => values.indexOf(value) === index);
     return {
-      externalIdentity: {
-        externalRunId: status.value.externalRunId,
-        branch: status.value.branch,
-        headSha: status.value.headSha,
-      },
+      externalIdentity: launchIdentity.value,
       summary: finalized.ok
         ? finalized.result.summary
         : "no-mistakes accepted the delegated run",
       artifactPaths,
+      ...(finalized.ok &&
+      finalized.result.state === "succeeded" &&
+      classifyDelegateSupervisorState(observed.value).classification ===
+        "complete" &&
+      delegateStateHeadMatchesRepo(input.repoPath, observed.value.headSha)
+        ? {
+            terminalState: {
+              value: observed.value,
+              digest: observed.digest,
+              ...(observed.headRelation !== undefined
+                ? { headRelation: observed.headRelation }
+                : {}),
+            },
+          }
+        : {}),
     };
   };
   const recoverHandoff = async () => {
@@ -941,15 +960,9 @@ function createProfileNoMistakesToolAdapter(
   });
 }
 
-function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
-  externalIdentity: {
-    externalRunId: string;
-    branch: string;
-    headSha: string;
-  };
-  summary: string;
-  artifactPaths: string[];
-} | null {
+function recoverNoMistakesHandoff(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorHandoff | null {
   const receiptExists = fs.existsSync(input.handoffReceiptPath);
   let receiptAttemptHint: number | null = null;
   if (receiptExists) {
@@ -991,6 +1004,7 @@ function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
     headSha: string;
   };
   let receiptAttempt: number;
+  let receiptHandoffSucceeded = false;
   try {
     const stored = JSON.parse(
       fs.readFileSync(input.handoffReceiptPath, "utf8"),
@@ -1002,6 +1016,7 @@ function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
         branch?: unknown;
         headSha?: unknown;
       };
+      handoffSucceeded?: unknown;
     };
     const identity = stored.externalIdentity;
     if (
@@ -1014,7 +1029,9 @@ function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
       identity === undefined ||
       typeof identity.externalRunId !== "string" ||
       typeof identity.branch !== "string" ||
-      typeof identity.headSha !== "string"
+      typeof identity.headSha !== "string" ||
+      (stored.handoffSucceeded !== undefined &&
+        typeof stored.handoffSucceeded !== "boolean")
     ) {
       throw new Error("stored handoff identity is incomplete");
     }
@@ -1024,17 +1041,51 @@ function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
       headSha: identity.headSha,
     };
     receiptAttempt = stored.attempt;
+    receiptHandoffSucceeded = stored.handoffSucceeded === true;
   } catch (error) {
     throw new Error(
       `stored no-mistakes handoff is unreadable: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   const currentBranch = resolveDelegateBranch(input.repoPath);
-  const currentHead = resolveCurrentHead(input.repoPath, "");
-  if (expected.branch !== currentBranch || expected.headSha !== currentHead) {
+  if (expected.branch !== currentBranch) {
     throw new Error(
-      `stored no-mistakes handoff does not match current repo identity: expected ${currentBranch}/${currentHead}, stored ${expected.branch}/${expected.headSha}`,
+      `stored no-mistakes handoff does not match current repo branch: expected ${currentBranch}, stored ${expected.branch}`,
     );
+  }
+  const artifactPaths = [
+    input.statePath,
+    input.handoffReceiptPath,
+    input.resultJsonPath,
+    input.executorLogPath,
+  ];
+  const persisted = readPersistedDelegateState(artifactPaths);
+  if (
+    persisted.ok &&
+    persisted.value.externalRunId === expected.externalRunId &&
+    persisted.value.branch === expected.branch &&
+    classifyDelegateSupervisorState(persisted.value).classification ===
+      "complete" &&
+    delegateStateHeadMatchesRepo(input.repoPath, persisted.value.headSha) &&
+    (persisted.value.headSha === expected.headSha ||
+      isGitDescendant(
+        input.repoPath,
+        expected.headSha,
+        persisted.value.headSha,
+      ))
+  ) {
+    return {
+      externalIdentity: expected,
+      summary: "reattached terminal no-mistakes handoff evidence",
+      artifactPaths,
+      terminalState: {
+        value: persisted.value,
+        digest: persisted.digest,
+        ...(persisted.value.headSha !== expected.headSha
+          ? { headRelation: "verified_descendant" as const }
+          : {}),
+      },
+    };
   }
   const previousState = readPreviousDelegateState(input.statePath);
   const status = readNoMistakesStatus({
@@ -1046,23 +1097,37 @@ function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
     ...(previousState !== undefined ? { previousState } : {}),
   });
   if (!status.ok) throw new Error(status.error);
+  const observed = settleNoMistakesHandoffState(
+    status,
+    receiptHandoffSucceeded,
+  );
   if (
     receiptAttempt < input.attempt &&
-    (status.value.stepStatus === "failed" ||
-      status.value.stepStatus === "cancelled")
+    (observed.value.stepStatus === "failed" ||
+      observed.value.stepStatus === "cancelled")
   ) {
     return null;
   }
-  fs.writeFileSync(input.statePath, JSON.stringify(status.value));
+  fs.writeFileSync(input.statePath, JSON.stringify(observed.value));
+  const terminal =
+    classifyDelegateSupervisorState(observed.value).classification ===
+      "complete" &&
+    delegateStateHeadMatchesRepo(input.repoPath, observed.value.headSha);
   return {
     externalIdentity: expected,
     summary: "reattached the correlated no-mistakes run",
-    artifactPaths: [
-      input.statePath,
-      input.handoffReceiptPath,
-      input.resultJsonPath,
-      input.executorLogPath,
-    ],
+    artifactPaths,
+    ...(terminal
+      ? {
+          terminalState: {
+            value: observed.value,
+            digest: observed.digest,
+            ...(observed.headRelation !== undefined
+              ? { headRelation: observed.headRelation }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -1173,18 +1238,62 @@ function readNoMistakesStatus(input: {
         maxBuffer: 1024 * 1024,
       },
     );
-    return parseNoMistakesAxiStatus(raw, input.expected, {
+    const parsed = parseNoMistakesAxiStatus(raw, input.expected, {
       resolveHeadSha: (abbreviatedHead) =>
         resolveGitCommit(input.repoPath, abbreviatedHead),
+      isHeadDescendant: (launchHead, observedHead) =>
+        isGitDescendant(input.repoPath, launchHead, observedHead),
       ...(input.previousState !== undefined
         ? { previousState: input.previousState }
         : {}),
     });
+    if (
+      parsed.ok &&
+      classifyDelegateSupervisorState(parsed.value).classification ===
+        "complete" &&
+      !delegateStateHeadMatchesRepo(input.repoPath, parsed.value.headSha)
+    ) {
+      return {
+        ok: false,
+        error: `no-mistakes terminal state head ${parsed.value.headSha} does not match the current repository head`,
+      };
+    }
+    return parsed;
   } catch (error) {
     return {
       ok: false,
       error: `no-mistakes axi status failed: ${error instanceof Error ? error.message : String(error)}`,
     };
+  }
+}
+
+function delegateStateHeadMatchesRepo(
+  repoPath: string,
+  observedHead: string,
+): boolean {
+  const currentHead = resolveCurrentHead(repoPath, "");
+  if (currentHead.length === 0) return false;
+  const resolvedObserved =
+    observedHead.length === 40
+      ? observedHead.toLowerCase()
+      : resolveGitCommit(repoPath, observedHead);
+  return resolvedObserved === currentHead;
+}
+
+function isGitDescendant(
+  repoPath: string,
+  launchHead: string,
+  observedHead: string,
+): boolean {
+  try {
+    execFileSync(
+      "git",
+      ["-C", repoPath, "merge-base", "--is-ancestor", launchHead, observedHead],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+    return true;
+  } catch {
+    return false;
   }
 }
 

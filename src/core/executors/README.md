@@ -126,7 +126,7 @@ executor consumed by the real-adapter registry.
 `delegate-supervisor/` owns the SDK executor, canonical external-state
 classification, semantic-progress heartbeat / stall logic, and evidence
 projection. `src/adapters/no-mistakes-tool-adapter.ts` is the narrow external
-edge: it hands off to no-mistakes and reads normalized state without owning
+edge: it hands off to no-mistakes, preserves terminal handoff evidence, and reads normalized state without owning
 durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
 recorded `no-mistakes` invocations remain readable.

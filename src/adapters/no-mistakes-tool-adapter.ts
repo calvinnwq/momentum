@@ -7,6 +7,7 @@ import {
 import type {
   DelegateSupervisorExternalIdentity,
   DelegateSupervisorExternalState,
+  DelegateSupervisorExternalStateRead,
   DelegateSupervisorHandoff,
   DelegateSupervisorToolAdapter,
   DelegateSupervisorToolContext,
@@ -68,8 +69,56 @@ export type NoMistakesLaunchIdentityRead =
 
 export type ParseNoMistakesAxiStatusOptions = {
   resolveHeadSha?: (abbreviatedHead: string) => string | null;
+  isHeadDescendant?: (launchHead: string, observedHead: string) => boolean;
   previousState?: DelegateSupervisorExternalState;
 };
+
+type SuccessfulNoMistakesExternalStateRead = Extract<
+  DelegateSupervisorExternalStateRead,
+  { ok: true }
+>;
+
+const CLEARED_CURRENT_STEP_FINDINGS_DETAIL =
+  "aggregate run findings remain, but every current step row reports zero findings";
+
+/** Preserve terminal evidence returned by `axi run` even when `axi status` lags. */
+export function settleNoMistakesHandoffState(
+  read: SuccessfulNoMistakesExternalStateRead,
+  handoffSucceeded: boolean,
+): SuccessfulNoMistakesExternalStateRead {
+  if (!handoffSucceeded) return read;
+  const laggingMonitoringState =
+    read.value.stepStatus === "running" &&
+    read.value.ciState !== "failed" &&
+    (read.value.findings.length === 0 ||
+      (read.value.findings.length === 1 &&
+        read.value.findings[0]?.externalId === "active-findings" &&
+        read.value.findings[0].detail ===
+          CLEARED_CURRENT_STEP_FINDINGS_DETAIL)) &&
+    read.value.selectedFindingIds.length === 0 &&
+    read.value.decisions.length === 0;
+  if (!laggingMonitoringState) return read;
+  const value: DelegateSupervisorExternalState = {
+    ...read.value,
+    activeStep: null,
+    stepStatus: "completed",
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    ciState: read.value.ciState === "none" ? "none" : "passed",
+  };
+  return {
+    ok: true,
+    value,
+    digest: `sha256:${crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ handoffDigest: read.digest, value }))
+      .digest("hex")}`,
+    ...(read.headRelation !== undefined
+      ? { headRelation: read.headRelation }
+      : {}),
+  };
+}
 
 /**
  * Read only the durable identity from `axi run` output. The launch envelope
@@ -105,7 +154,7 @@ export function parseNoMistakesAxiStatus(
   raw: string,
   expected: DelegateSupervisorExternalIdentity,
   options: ParseNoMistakesAxiStatusOptions = {},
-): NoMistakesExternalStateRead {
+): DelegateSupervisorExternalStateRead {
   const currentRaw = stripHistoricalToonSections(raw);
   const runId = toonSectionScalar(currentRaw, "run", "id");
   const branch = toonSectionScalar(currentRaw, "run", "branch");
@@ -133,12 +182,25 @@ export function parseNoMistakesAxiStatus(
   const resolvedReportedHead = /^[0-9a-f]{40}$/i.test(reportedHead)
     ? normalizedReportedHead
     : /^[0-9a-f]{7,39}$/i.test(reportedHead)
-      ? (options.resolveHeadSha?.(normalizedReportedHead) ?? null)
+      ? (options.resolveHeadSha?.(normalizedReportedHead) ??
+        normalizedReportedHead)
       : null;
-  if (resolvedReportedHead?.toLowerCase() !== expected.headSha.toLowerCase()) {
+  if (resolvedReportedHead === null) {
     return {
       ok: false,
-      error: `no-mistakes axi status head mismatch: expected ${expected.headSha}, observed ${reportedHead}`,
+      error: `no-mistakes axi status reported invalid head ${reportedHead}`,
+    };
+  }
+  if (
+    resolvedReportedHead !== expected.headSha.toLowerCase() &&
+    options.isHeadDescendant?.(
+      expected.headSha.toLowerCase(),
+      resolvedReportedHead,
+    ) !== true
+  ) {
+    return {
+      ok: false,
+      error: `no-mistakes axi status head ${reportedHead} is not a verified descendant of launch head ${expected.headSha}`,
     };
   }
 
@@ -188,9 +250,9 @@ export function parseNoMistakesAxiStatus(
     null;
   const runFindings = toonSectionScalar(currentRaw, "run", "findings");
   const hasStepFindings = stepRows.some((row) => row.findings > 0);
-  const hasActiveFindings =
-    hasStepFindings ||
-    (runFindings !== null && !/^0(?:\s|$)/.test(runFindings));
+  const hasRunFindings =
+    runFindings !== null && !/^0(?:\s|$)/.test(runFindings);
+  const hasActiveFindings = hasStepFindings || hasRunFindings;
   const allowedActions = [
     ...currentRaw.matchAll(/--action\s+([a-z0-9_-]+)/gi),
   ].map((match) => match[1]!.toLowerCase());
@@ -278,7 +340,10 @@ export function parseNoMistakesAxiStatus(
           title:
             runFindings ?? "no-mistakes step table reports active findings",
           severity: null,
-          detail: gateSummary,
+          detail:
+            hasRunFindings && stepRows.length > 0 && !hasStepFindings
+              ? CLEARED_CURRENT_STEP_FINDINGS_DETAIL
+              : gateSummary,
         },
       ]
     : [];
@@ -291,8 +356,7 @@ export function parseNoMistakesAxiStatus(
   const previousDecisions =
     previousState !== undefined &&
     previousState.externalRunId === expected.externalRunId &&
-    previousState.branch === expected.branch &&
-    previousState.headSha.toLowerCase() === expected.headSha.toLowerCase()
+    previousState.branch === expected.branch
       ? previousState.decisions
       : [];
   const carriedDecisions = previousDecisions.map((decision) => {
@@ -340,7 +404,7 @@ export function parseNoMistakesAxiStatus(
     value: {
       externalRunId: runId,
       branch,
-      headSha: expected.headSha,
+      headSha: resolvedReportedHead,
       activeStep,
       stepStatus,
       findings,
@@ -350,6 +414,9 @@ export function parseNoMistakesAxiStatus(
       ciState,
     },
     digest: `sha256:${crypto.createHash("sha256").update(raw).digest("hex")}`,
+    ...(resolvedReportedHead !== expected.headSha.toLowerCase()
+      ? { headRelation: "verified_descendant" as const }
+      : {}),
   };
 }
 

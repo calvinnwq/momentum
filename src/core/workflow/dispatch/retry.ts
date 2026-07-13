@@ -11,6 +11,11 @@ const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "runtime_unavailable",
   "executor_threw",
   "executor_contract_invalid",
+  "tool_adapter_unavailable",
+  "delegate_handoff_failed",
+  "delegate_handoff_recovery_required",
+  "external_state_unreadable",
+  "external_state_inconsistent",
 ]);
 
 type RetryableStepState = "approved" | "running";

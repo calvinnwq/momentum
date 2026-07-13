@@ -141,15 +141,16 @@ A delegated-tool adapter owns only three bounded operations: initial handoff, op
 The executor owns durable rounds, evidence projection, semantic liveness, gates, stalls, and terminal classification.
 
 Before invoking a tool, the executor records a `delegate_handoff_intent` checkpoint.
-A successful handoff records the pinned external run id, branch, head SHA, summary, and artifact paths in `delegate_handoff_completed`.
+A successful handoff records the pinned external run id and branch, the launch head, summary, artifact paths, and any terminal state observed during handoff in `delegate_handoff_completed`.
 The profile-backed host releases repository ownership only after that handoff evidence is durable.
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
 
-Each later bounded executor tick reads one canonical state containing the external identity, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
+Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
+The external run id and branch remain the stable correlation identity; exact launch head matching is the default, while an adapter may mark a changed head as `verified_descendant` after proving the tool committed forward from the launch commit.
 The external status is one of `running`, `awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, `cancelled`, or `completed`; CI is `passed`, `failed`, `pending`, or `none`.
-Momentum rejects malformed state, identity drift, selected findings without matching surfaced findings, invalid decision action sets, and completed claims that still have findings, unresolved current or previously mirrored decisions, or pending/failed CI.
+Momentum rejects malformed state, run or branch identity drift, selected findings without matching surfaced findings, invalid decision action sets, and completed claims that still have findings, unresolved current or previously mirrored decisions, or pending/failed CI.
 An approval or decision state is projected into durable executor decisions and a round-scoped workflow gate.
 Findings and decision revisions are append-only projections keyed by their external identities.
 
@@ -158,7 +159,8 @@ The semantic digest ignores ordering differences in findings, selected ids, deci
 Each unchanged running read still refreshes durable liveness, but it carries forward the time of the last semantic change.
 After four minutes without semantic progress or terminal evidence, the invocation enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
-Terminal success requires the handoff identity to match, no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Terminal success requires the handoff run id and branch to match, no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Terminal evidence captured by the handoff is persisted in the same envelope and cannot be downgraded by a lagging later status response.
 Unreadable state, cancelled state, contradictory completion, and identity drift require manual recovery rather than optimistic retry or success.
 `blocked` and `failed` external states remain distinct terminal recommendations with `external_state_blocked` and `external_run_failed` recovery codes.
 

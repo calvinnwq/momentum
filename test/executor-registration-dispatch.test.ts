@@ -1968,95 +1968,118 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
-  it("retries an executor_threw invocation after the executor is repaired", async () => {
-    const definition = fixtureDefinition({});
-    const db = openDb(tempDir());
-    persistWorkflowDefinition(db, definition, { now: NOW });
-    persistWorkflowRunStart(db, {
-      definition,
-      runId: "thrown-tick-run",
-      repoPath: "/repos/fixture",
-      objective: "Retry a repaired executor throw",
-      now: NOW,
-    });
-    db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-    ).run("thrown-tick-run");
-    const claim = claimRunnableWorkflowStep(db, {
-      runId: "thrown-tick-run",
-      stepId: "preflight",
-      holder: "fixture-worker",
-      leaseExpiresAt: NOW + 30_000,
-      now: NOW,
-    });
-    if (!claim.ok) throw new Error(claim.reason);
-
-    let repaired = false;
-    const registry = new Map();
-    expect(
-      registerExecutor(registry, "fixture-executor", {
-        name: "fixture-executor",
-        configSchema: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-        tick: (
-          context: ExecutorTickContext<
-            Record<string, never>,
-            Record<string, never>
-          >,
-        ) => {
-          if (!repaired) throw new Error("broken executor implementation");
-          return completeRegisteredExecutorTick(context, "repaired throw");
-        },
-      }),
-    ).toBeNull();
-    const dispatch = createRegisteredExecutorWorkflowDispatch(
-      executeWorkflowStepDispatch,
-      { registry },
-    );
-    await dispatch(claim.claim, {
-      db,
-      workerId: "fixture-worker",
-      now: NOW + 1,
-    });
-    expect(
-      db
-        .prepare(
-          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
-        )
-        .get("thrown-tick-run"),
-    ).toEqual({ recovery_code: "executor_threw" });
-
-    repaired = true;
-    expect(
-      clearWorkflowRunManualRecoveryGuarded(db, {
+  it.each([
+    "executor_threw",
+    "tool_adapter_unavailable",
+    "delegate_handoff_failed",
+    "delegate_handoff_recovery_required",
+    "external_state_unreadable",
+    "external_state_inconsistent",
+  ])(
+    "retries a %s invocation after the delegated runtime is repaired",
+    async (recoveryCode) => {
+      const definition = fixtureDefinition({});
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
         runId: "thrown-tick-run",
-        now: NOW + 2,
-      }),
-    ).toMatchObject({
-      ok: true,
-      retryPrepared: {
+        repoPath: "/repos/fixture",
+        objective: "Retry a repaired executor throw",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run("thrown-tick-run");
+      const claim = claimRunnableWorkflowStep(db, {
+        runId: "thrown-tick-run",
         stepId: "preflight",
-        recoveryCode: "executor_threw",
-      },
-    });
-    await runWorkflowSchedulerOnceAsync({
-      db,
-      workerId: "fixture-worker",
-      dispatch,
-      now: () => NOW + 3,
-    });
-    expect(
-      db
-        .prepare(
-          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
-        )
-        .get("thrown-tick-run"),
-    ).toEqual({ state: "succeeded", attempt: 2 });
-    db.close();
-  });
+        holder: "fixture-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+
+      let repaired = false;
+      const registry = new Map();
+      expect(
+        registerExecutor(registry, "fixture-executor", {
+          name: "fixture-executor",
+          configSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          tick: (
+            context: ExecutorTickContext<
+              Record<string, never>,
+              Record<string, never>
+            >,
+          ) => {
+            if (!repaired) throw new Error("broken executor implementation");
+            return completeRegisteredExecutorTick(context, "repaired throw");
+          },
+        }),
+      ).toBeNull();
+      const dispatch = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        { registry },
+      );
+      await dispatch(claim.claim, {
+        db,
+        workerId: "fixture-worker",
+        now: NOW + 1,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+          )
+          .get("thrown-tick-run"),
+      ).toEqual({ recovery_code: "executor_threw" });
+      if (recoveryCode !== "executor_threw") {
+        db.prepare(
+          `UPDATE executor_rounds
+            SET recovery_code = ?
+          WHERE round_id = (
+            SELECT round_id
+              FROM executor_rounds
+             WHERE workflow_run_id = ?
+             ORDER BY round_index DESC
+             LIMIT 1
+          )`,
+        ).run(recoveryCode, "thrown-tick-run");
+      }
+
+      repaired = true;
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId: "thrown-tick-run",
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId: "preflight",
+          recoveryCode,
+        },
+      });
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "fixture-worker",
+        dispatch,
+        now: () => NOW + 3,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get("thrown-tick-run"),
+      ).toEqual({ state: "succeeded", attempt: 2 });
+      db.close();
+    },
+  );
 
   it("durably settles hostile values thrown by executor ticks", async () => {
     const definition = fixtureDefinition({});

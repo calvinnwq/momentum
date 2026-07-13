@@ -517,15 +517,13 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
 
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
   const outputLines = toNoMistakesOutputLines(output);
-  if (hasActiveNoMistakesGateOrFinding(outputLines)) return null;
-  if (hasBlockingNoMistakesStatusOrOutcome(outputLines)) return null;
-  if (hasContradictoryNoMistakesSuccessEvidence(outputLines)) return null;
-
-  if (outputLines.some((line) => isChecksPassedOutcomeLine(line))) {
-    return classifyLegacyNoMistakesTerminalEvidence(
-      "no-mistakes reached checks-passed; treating the PR as terminal success for this workflow while no-mistakes continues any upstream monitoring.",
-    );
-  }
+  const hasActiveEvidence = hasActiveNoMistakesGateOrFinding(outputLines);
+  const hasBlockingEvidence = hasBlockingNoMistakesStatusOrOutcome(outputLines);
+  const hasContradictoryEvidence =
+    hasContradictoryNoMistakesSuccessEvidence(outputLines);
+  const checksPassed = outputLines.some((line) =>
+    isChecksPassedOutcomeLine(line),
+  );
 
   const stillMonitoring = outputLines.some(
     (line) =>
@@ -534,39 +532,54 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
         /\bci\/running\b/.test(line) ||
         /\bstill (reports|shows).*running\b/.test(line)),
   );
-  if (!stillMonitoring) return null;
-
   const cleanPr = outputLines.some((line) =>
     isCleanPullRequestEvidenceLine(line),
   );
-  if (!cleanPr) return null;
-
   const greenChecks = outputLines.some((line) =>
     isGreenChecksEvidenceLine(line),
   );
-  if (!greenChecks) return null;
-
-  return classifyLegacyNoMistakesTerminalEvidence(
-    "no-mistakes is still monitoring upstream, but the pull request is clean and checks are green; treating this as terminal success for this workflow.",
-  );
-}
-
-function classifyLegacyNoMistakesTerminalEvidence(
-  summary: string,
-): string | null {
+  const terminalSummary = checksPassed
+    ? "no-mistakes reached checks-passed; treating the PR as terminal success for this workflow while no-mistakes continues any upstream monitoring."
+    : stillMonitoring && cleanPr && greenChecks
+      ? "no-mistakes is still monitoring upstream, but the pull request is clean and checks are green; treating this as terminal success for this workflow."
+      : null;
+  const terminalCandidate =
+    terminalSummary !== null &&
+    !hasActiveEvidence &&
+    !hasBlockingEvidence &&
+    !hasContradictoryEvidence;
   const decision = classifyDelegateSupervisorState({
     externalRunId: "legacy-live-wrapper",
     branch: "legacy-live-wrapper",
     headSha: "0".repeat(40),
-    activeStep: null,
-    stepStatus: "completed",
-    findings: [],
+    activeStep: hasActiveEvidence ? "legacy-live-wrapper" : null,
+    stepStatus: hasBlockingEvidence
+      ? "failed"
+      : hasContradictoryEvidence
+        ? "blocked"
+        : terminalCandidate
+          ? "completed"
+          : "running",
+    findings: hasActiveEvidence
+      ? [
+          {
+            externalId: "active-no-mistakes-evidence",
+            title: "no-mistakes still reports an active gate or finding",
+            severity: null,
+            detail: null,
+          },
+        ]
+      : [],
     selectedFindingIds: [],
     decisions: [],
     prUrl: null,
-    ciState: "passed",
+    ciState: hasContradictoryEvidence
+      ? "failed"
+      : checksPassed || greenChecks
+        ? "passed"
+        : "pending",
   });
-  return decision.classification === "complete" ? summary : null;
+  return decision.classification === "complete" ? terminalSummary : null;
 }
 
 function toNoMistakesOutputLines(output: string): string[] {

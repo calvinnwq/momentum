@@ -231,6 +231,11 @@ describe("live run-level recovery classifications (M9)", () => {
       "command_timed_out",
       "output_overflow",
       "executor_threw",
+      "tool_adapter_unavailable",
+      "delegate_handoff_failed",
+      "delegate_handoff_recovery_required",
+      "external_state_unreadable",
+      "external_state_inconsistent",
       "manual_recovery_required",
     ]);
     // The full recovery.md render vocabulary is the M7 monitor codes plus the

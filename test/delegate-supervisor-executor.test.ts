@@ -8,6 +8,7 @@ import {
   createNoMistakesToolAdapter,
   parseNoMistakesAxiStatus,
   parseNoMistakesLaunchIdentity,
+  settleNoMistakesHandoffState,
 } from "../src/adapters/no-mistakes-tool-adapter.js";
 import {
   classifyDelegateSupervisorState,
@@ -451,7 +452,72 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
-  it("refuses a fresh attempt while a prior handoff intent is unresolved", async () => {
+  it("settles terminal state captured by the handoff without polling again", async () => {
+    const { db, invocation } = openDelegateDb();
+    let reads = 0;
+    const completed = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: completed.externalRunId,
+          branch: completed.branch,
+          headSha: completed.headSha,
+        },
+        summary: "checks passed during handoff",
+        terminalState: {
+          value: completed,
+          digest: "sha256:checks-passed-handoff",
+        },
+      }),
+      readExternalState: () => {
+        reads += 1;
+        throw new Error("terminal handoff evidence must not be downgraded");
+      },
+    };
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      maxTicks: 2,
+      now: () => 6,
+    });
+    expect(reads).toBe(0);
+    expect(result.invocation.state).toBe("succeeded");
+    expect(result.lastRound).toMatchObject({
+      classification: "complete",
+      state: "succeeded",
+      inputDigest: "sha256:checks-passed-handoff",
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const retried = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: {} },
+      now: () => 7,
+    });
+    expect(retried.invocation.state).toBe("succeeded");
+    expect(retried.lastRound).toMatchObject({
+      classification: "complete",
+      inputDigest: "sha256:checks-passed-handoff",
+    });
+    expect(reads).toBe(0);
+    db.close();
+  });
+
+  it("recovers a prior-attempt handoff intent without launching again", async () => {
     const { db, invocation } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
@@ -519,15 +585,29 @@ describe("delegate-supervisor SDK executor", () => {
         WHERE invocation_id = ?`,
     ).run(invocation.invocationId);
     let handoffs = 0;
+    let recoveries = 0;
     const adapter: DelegateSupervisorToolAdapter = {
       name: "no-mistakes",
       handoff: () => {
         handoffs += 1;
         throw new Error("prior unresolved intent must prevent launch");
       },
-      readExternalState: () => {
-        throw new Error("prior unresolved intent must prevent polling");
+      recoverHandoff: () => {
+        recoveries += 1;
+        return {
+          externalIdentity: {
+            externalRunId: "nm-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "reattached prior-attempt handoff",
+        };
       },
+      readExternalState: () => ({
+        ok: true,
+        value: state(),
+        digest: "sha256:recovered-status",
+      }),
     };
     const result = await driveExecutorTicks({
       db,
@@ -538,10 +618,104 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
     expect(handoffs).toBe(0);
+    expect(recoveries).toBe(1);
     expect(result.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+      recoveryCode: null,
+    });
+    expect(
+      createDurableExecutorEnvelope({
+        db,
+        invocationId: invocation.invocationId,
+      })
+        .snapshot()
+        .currentRound?.checkpoints.map(({ stage }) => stage),
+    ).toEqual([
+      "delegate_handoff_intent",
+      "delegate_handoff_completed",
+      "classified",
+    ]);
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 3, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const retried = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 7,
+    });
+    expect(recoveries).toBe(1);
+    expect(retried.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+    });
+    db.close();
+  });
+
+  it("reattaches a completed handoff when retrying an external-state read", async () => {
+    const { db, invocation } = openDelegateDb();
+    let handoffs = 0;
+    let reads = 0;
+    const handoff = {
+      externalIdentity: {
+        externalRunId: "nm-run-1",
+        branch: "feature/delegate-supervisor",
+        headSha: HEAD,
+      },
+      summary: "correlated delegated run",
+    };
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => {
+        handoffs += 1;
+        return handoff;
+      },
+      readExternalState: () => {
+        reads += 1;
+        return reads === 1
+          ? {
+              ok: false,
+              error: "external status is temporarily unreadable",
+            }
+          : {
+              ok: true,
+              value: state(),
+              digest: "sha256:resumed-status",
+            };
+      },
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    };
+    const parked = await driveExecutorTicks({ ...input, maxTicks: 2 });
+    expect(parked.lastRound).toMatchObject({
       state: "manual_recovery_required",
-      classification: "manual_recovery_required",
-      recoveryCode: "delegate_handoff_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const retried = await driveExecutorTicks(input);
+
+    expect(handoffs).toBe(1);
+    expect(reads).toBe(2);
+    expect(retried.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+      recoveryCode: null,
     });
     db.close();
   });
@@ -1158,6 +1332,59 @@ describe("delegate-supervisor SDK executor", () => {
     });
     db.close();
   });
+
+  it.each([
+    {
+      relation: undefined,
+      expectedState: "manual_recovery_required",
+      expectedRecovery: "external_state_inconsistent",
+    },
+    {
+      relation: "verified_descendant" as const,
+      expectedState: "succeeded",
+      expectedRecovery: null,
+    },
+  ])(
+    "requires an adapter proof for changed external heads ($expectedState)",
+    async ({ relation, expectedState, expectedRecovery }) => {
+      const { db, invocation } = openDelegateDb();
+      const adapter: DelegateSupervisorToolAdapter = {
+        name: "ci-run",
+        handoff: () => ({
+          externalIdentity: {
+            externalRunId: "ci-42",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "CI run dispatched",
+        }),
+        readExternalState: () => ({
+          ok: true,
+          value: state({
+            externalRunId: "ci-42",
+            headSha: "b".repeat(40),
+            activeStep: null,
+            stepStatus: "completed",
+            ciState: "passed",
+          }),
+          digest: "sha256:ci-advanced",
+          ...(relation !== undefined ? { headRelation: relation } : {}),
+        }),
+      };
+      const result = await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor: new DelegateSupervisorExecutor(),
+        config: { tool: "ci-run" },
+        hostBindings: { tools: { "ci-run": adapter } },
+        maxTicks: 2,
+        now: () => 20,
+      });
+      expect(result.invocation.state).toBe(expectedState);
+      expect(result.lastRound?.recoveryCode).toBe(expectedRecovery);
+      db.close();
+    },
+  );
 });
 
 describe("no-mistakes tool adapter", () => {
@@ -1425,7 +1652,7 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
-  it("refuses status without the pinned head evidence", () => {
+  it("refuses status without current head evidence", () => {
     const parsed = parseStatus(
       [
         "run:",
@@ -1482,24 +1709,177 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
-  it("requires abbreviated heads to resolve exactly", () => {
+  it("treats an advanced external head as semantic progress", () => {
+    const advancedHead = "b".repeat(40);
     const parsed = parseNoMistakesAxiStatus(
       [
         "run:",
         '  id: "nm-run-1"',
         "  branch: feature/delegate-supervisor",
         "  status: completed",
-        "  head: aaaaaaaa",
+        "  head: bbbbbbbb",
         "outcome: passed",
       ].join("\n"),
       identity,
-      { resolveHeadSha: () => "a".repeat(8) + "b".repeat(32) },
+      {
+        resolveHeadSha: () => advancedHead,
+        isHeadDescendant: () => true,
+      },
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        headSha: advancedHead,
+        stepStatus: "completed",
+      },
+    });
+  });
+
+  it("preserves an unresolved abbreviated external head", () => {
+    const parsed = parseNoMistakesAxiStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: bbbbbbbb",
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    review,running,0,1000",
+      ].join("\n"),
+      identity,
+      {
+        resolveHeadSha: () => null,
+        isHeadDescendant: () => true,
+      },
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { headSha: "bbbbbbbb", stepStatus: "running" },
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(classifyDelegateSupervisorState(parsed.value).classification).toBe(
+      "continue",
+    );
+  });
+
+  it("rejects a changed head outside the launch ancestry", () => {
+    const parsed = parseNoMistakesAxiStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: bbbbbbbb",
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+      {
+        resolveHeadSha: () => "b".repeat(40),
+        isHeadDescendant: () => false,
+      },
     );
     expect(parsed).toEqual({
       ok: false,
-      error: `no-mistakes axi status head mismatch: expected ${HEAD}, observed aaaaaaaa`,
+      error: `no-mistakes axi status head bbbbbbbb is not a verified descendant of launch head ${HEAD}`,
     });
   });
+
+  it("preserves checks-passed handoff evidence when status still reports historical work", () => {
+    const status = parseNoMistakesAxiStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: bbbbbbbb",
+        '  findings: "3 awaiting, 1 auto-fix"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,running,0,1000",
+      ].join("\n"),
+      identity,
+      {
+        resolveHeadSha: () => "b".repeat(40),
+        isHeadDescendant: () => true,
+      },
+    );
+    if (!status.ok) throw new Error(status.error);
+    expect(status.value.findings).toEqual([
+      expect.objectContaining({
+        externalId: "active-findings",
+        detail:
+          "aggregate run findings remain, but every current step row reports zero findings",
+      }),
+    ]);
+    expect(classifyDelegateSupervisorState(status.value).classification).toBe(
+      "continue",
+    );
+
+    const settled = settleNoMistakesHandoffState(status, true);
+    expect(settled.value).toMatchObject({
+      headSha: "b".repeat(40),
+      activeStep: null,
+      stepStatus: "completed",
+      findings: [],
+      decisions: [],
+      ciState: "passed",
+    });
+    expect(classifyDelegateSupervisorState(settled.value).classification).toBe(
+      "complete",
+    );
+  });
+
+  it.each([
+    state({ activeStep: null, stepStatus: "failed", ciState: "failed" }),
+    state({ activeStep: null, stepStatus: "cancelled" }),
+    state({
+      activeStep: "review",
+      stepStatus: "awaiting_decision",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "choose a disposition",
+          allowedActions: ["approve"],
+          recommendedAction: "approve",
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    }),
+    state({
+      findings: [
+        {
+          externalId: "current-finding",
+          title: "current finding",
+          severity: null,
+          detail: null,
+        },
+      ],
+    }),
+    state({ ciState: "failed" }),
+  ])("does not overwrite contradictory current status evidence", (value) => {
+    const read = { ok: true as const, value, digest: "sha256:current-status" };
+    expect(settleNoMistakesHandoffState(read, true)).toBe(read);
+  });
+
+  it.each(["passed", "none"] as const)(
+    "preserves terminal handoff evidence while status still monitors with %s CI",
+    (ciState) => {
+      const read = {
+        ok: true as const,
+        value: state({ ciState }),
+        digest: `sha256:monitoring-${ciState}`,
+      };
+      const settled = settleNoMistakesHandoffState(read, true);
+      expect(settled.value).toMatchObject({
+        activeStep: null,
+        stepStatus: "completed",
+        ciState,
+      });
+      expect(
+        classifyDelegateSupervisorState(settled.value).classification,
+      ).toBe("complete");
+    },
+  );
 
   it("gives blocking outcomes and current CI evidence precedence", () => {
     const failed = parseStatus(

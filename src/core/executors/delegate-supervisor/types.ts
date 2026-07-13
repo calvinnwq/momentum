@@ -64,12 +64,16 @@ export type DelegateSupervisorExternalIdentity = Pick<
   "externalRunId" | "branch" | "headSha"
 >;
 
+export type DelegateSupervisorHeadRelation = "verified_descendant";
+
 export type DelegateSupervisorExternalStateRead =
   | {
       ok: true;
       value: DelegateSupervisorExternalState;
       /** Digest of the exact external bytes or response that produced value. */
       digest: string;
+      /** Required when value.headSha differs from the handoff launch head. */
+      headRelation?: DelegateSupervisorHeadRelation;
     }
   | { ok: false; error: string };
 
@@ -86,6 +90,12 @@ export type DelegateSupervisorHandoff = {
   externalIdentity: DelegateSupervisorExternalIdentity;
   summary: string;
   artifactPaths?: readonly string[];
+  /** Terminal evidence observed during handoff; later ticks must not downgrade it. */
+  terminalState?: {
+    value: DelegateSupervisorExternalState;
+    digest: string;
+    headRelation?: DelegateSupervisorHeadRelation;
+  };
 };
 
 export type DelegateSupervisorToolContext = {

@@ -165,7 +165,10 @@ only handoff, interrupted-handoff recovery, and canonical state normalization;
 portable step config selects it with `tool`, so adding a tool does not add an
 executor family or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
-launch. The single-shot lifecycle (`one-shot` and `script` in the current
+launch. The external run id and branch are stable correlation identity; an
+observed head may advance as the delegated tool commits fixes and counts as
+semantic progress only when the adapter supplies a `verified_descendant` proof from the launch commit. Terminal state captured during handoff remains authoritative
+across later ticks and process restart. The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
@@ -417,6 +420,7 @@ The wrapper checks the filtered child environment, executable agent path, no-mis
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
 The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `no-mistakes` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
+That terminal handoff evidence is persisted before supervision and is not downgraded by a later status view that still reports monitoring or historical findings.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
 The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the invocation in manual recovery so operators inspect the external run before clearing recovery.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.

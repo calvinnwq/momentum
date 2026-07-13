@@ -100,26 +100,42 @@ export class DelegateSupervisorExecutor implements Executor<
     const attemptRounds = context.state.rounds.filter(
       ({ round }) => round.attempt === context.state.invocation.attempt,
     );
-    const unresolvedPriorIntent = [...context.state.rounds]
+    const priorRounds = context.state.rounds.filter(
+      ({ round }) => round.attempt < context.state.invocation.attempt,
+    );
+    const priorHandoff = findHandoff(priorRounds);
+    const latestPriorHandoffRoundIndex = [...priorRounds]
+      .reverse()
+      .find(({ checkpoints }) =>
+        checkpoints.some((checkpoint) => checkpoint.stage === HANDOFF_STAGE),
+      )?.round.roundIndex;
+    const unresolvedPriorIntent = [...priorRounds]
       .reverse()
       .find(
         ({ round, checkpoints }) =>
-          round.attempt < context.state.invocation.attempt &&
+          round.roundIndex > (latestPriorHandoffRoundIndex ?? -1) &&
           checkpoints.some(
             (checkpoint) => checkpoint.stage === HANDOFF_INTENT_STAGE,
           ) &&
           !checkpoints.some((checkpoint) => checkpoint.stage === HANDOFF_STAGE),
       );
     if (attemptRounds.length === 0 && unresolvedPriorIntent !== undefined) {
-      const roundId = startRound(
+      return this.handoff(
         context,
-        "running",
-        "Reconciling unresolved delegated handoff evidence from a prior attempt.",
+        adapter,
+        unresolvedPriorIntent.round.attempt,
       );
-      return recoveryResult(
-        roundId,
-        "delegate_handoff_recovery_required",
-        `Prior attempt ${unresolvedPriorIntent.round.attempt} contains a delegated handoff intent without a correlated completion; refusing a fresh launch until that external side effect is reconciled.`,
+    }
+    if (attemptRounds.length === 0 && priorHandoff.status === "invalid") {
+      return invalidCompletionEvidenceResult(context, priorHandoff);
+    }
+    if (attemptRounds.length === 0 && priorHandoff.status === "valid") {
+      return this.supervise(
+        context,
+        adapter,
+        priorHandoff.value,
+        attemptRounds,
+        true,
       );
     }
     const legacyCompletion = findLegacyLiveStepCompletion(attemptRounds);
@@ -167,6 +183,7 @@ export class DelegateSupervisorExecutor implements Executor<
       DelegateSupervisorHostBindings
     >,
     adapter: DelegateSupervisorToolAdapter | undefined,
+    recoveringAttempt?: number,
   ): Promise<ExecutorTickResult> {
     const active = context.state.currentRound;
     const roundId =
@@ -178,11 +195,21 @@ export class DelegateSupervisorExecutor implements Executor<
     const roundBeforeHandoff = context.envelope
       .snapshot()
       .rounds.find(({ round }) => round.roundId === roundId);
-    const recoveringInterruptedHandoff =
+    const hasCurrentHandoffIntent =
       roundBeforeHandoff?.checkpoints.some(
         (checkpoint) => checkpoint.stage === HANDOFF_INTENT_STAGE,
       ) ?? false;
-    if (!recoveringInterruptedHandoff) {
+    const recoveringInterruptedHandoff =
+      recoveringAttempt !== undefined || hasCurrentHandoffIntent;
+    if (adapter === undefined) {
+      context.hostBindings.settleHandoff?.(false);
+      return recoveryResult(
+        roundId,
+        "tool_adapter_unavailable",
+        `No delegate-supervisor tool adapter is registered for ${JSON.stringify(context.config.tool)}.`,
+      );
+    }
+    if (!hasCurrentHandoffIntent) {
       const sequence = roundBeforeHandoff?.checkpoints.length ?? 0;
       context.envelope.recordCheckpoint(roundId, {
         checkpointId: `${roundId}-${HANDOFF_INTENT_STAGE}`,
@@ -192,16 +219,9 @@ export class DelegateSupervisorExecutor implements Executor<
           tool: context.config.tool,
           invocationId: context.state.invocation.invocationId,
           attempt: context.state.invocation.attempt,
+          ...(recoveringAttempt !== undefined ? { recoveringAttempt } : {}),
         }),
       });
-    }
-    if (adapter === undefined) {
-      context.hostBindings.settleHandoff?.(false);
-      return recoveryResult(
-        roundId,
-        "tool_adapter_unavailable",
-        `No delegate-supervisor tool adapter is registered for ${JSON.stringify(context.config.tool)}.`,
-      );
     }
     let handoff: DelegateSupervisorHandoff;
     try {
@@ -231,47 +251,7 @@ export class DelegateSupervisorExecutor implements Executor<
       );
     }
     try {
-      const beforeEvidence = context.envelope
-        .snapshot()
-        .rounds.find(({ round }) => round.roundId === roundId);
-      const existingArtifactIds = new Set(
-        beforeEvidence?.artifacts.map((artifact) => artifact.artifactId) ?? [],
-      );
-      const existingArtifactPaths = new Set(
-        beforeEvidence?.artifacts.map((artifact) => artifact.path) ?? [],
-      );
-      for (const [index, artifactPath] of (
-        handoff.artifactPaths ?? []
-      ).entries()) {
-        const artifactId = `${roundId}-handoff-artifact-${index}`;
-        if (
-          existingArtifactIds.has(artifactId) ||
-          existingArtifactPaths.has(artifactPath)
-        ) {
-          continue;
-        }
-        context.envelope.recordArtifact(roundId, {
-          artifactId,
-          artifactClass: "logs",
-          path: artifactPath,
-          digest: null,
-          description: `Delegated ${adapter.name} handoff evidence.`,
-        });
-      }
-      context.envelope.recordRoundProgress(roundId, {
-        observation: {
-          phase: "capturing_result",
-          summary: handoff.summary,
-        },
-        checkpoints: [
-          {
-            checkpointId: `${roundId}-${HANDOFF_STAGE}`,
-            sequence: beforeEvidence?.checkpoints.length ?? 0,
-            stage: HANDOFF_STAGE,
-            detail: JSON.stringify(handoff),
-          },
-        ],
-      });
+      this.recordHandoffEvidence(context, adapter.name, roundId, handoff, true);
       context.hostBindings.settleHandoff?.(true);
     } catch (error) {
       context.hostBindings.settleHandoff?.(false);
@@ -296,6 +276,7 @@ export class DelegateSupervisorExecutor implements Executor<
     adapter: DelegateSupervisorToolAdapter | undefined,
     handoff: DelegateSupervisorHandoff,
     attemptRounds: readonly ExecutorRoundEnvelopeSnapshot[],
+    reattachingPriorHandoff = false,
   ): Promise<ExecutorTickResult> {
     const active = context.state.currentRound;
     const roundId =
@@ -308,7 +289,17 @@ export class DelegateSupervisorExecutor implements Executor<
             "mirroring_external_state",
             "Reading delegated external state.",
           );
-    if (adapter === undefined) {
+    if (reattachingPriorHandoff) {
+      this.recordHandoffEvidence(
+        context,
+        adapter?.name ?? context.config.tool,
+        roundId,
+        handoff,
+        false,
+      );
+      context.hostBindings.settleHandoff?.(true);
+    }
+    if (adapter === undefined && handoff.terminalState === undefined) {
       return recoveryResult(
         roundId,
         "tool_adapter_unavailable",
@@ -319,20 +310,24 @@ export class DelegateSupervisorExecutor implements Executor<
     context.signal.throwIfAborted();
     const observedAt = context.hostBindings.now?.() ?? Date.now();
     let read;
-    try {
-      read = await adapter.readExternalState({
-        invocation: context.state.invocation,
-        config: context.config,
-        signal: context.signal,
-        handoff,
-      });
-    } catch (error) {
-      if (context.signal.aborted && error === context.signal.reason)
-        throw error;
-      read = {
-        ok: false as const,
-        error: `Delegated external-state read failed: ${errorMessage(error)}`,
-      };
+    if (handoff.terminalState !== undefined) {
+      read = { ok: true as const, ...handoff.terminalState };
+    } else {
+      try {
+        read = await adapter!.readExternalState({
+          invocation: context.state.invocation,
+          config: context.config,
+          signal: context.signal,
+          handoff,
+        });
+      } catch (error) {
+        if (context.signal.aborted && error === context.signal.reason)
+          throw error;
+        read = {
+          ok: false as const,
+          error: `Delegated external-state read failed: ${errorMessage(error)}`,
+        };
+      }
     }
 
     if (!read.ok) {
@@ -357,6 +352,7 @@ export class DelegateSupervisorExecutor implements Executor<
     const identityMismatch = compareIdentity(
       handoff.externalIdentity,
       read.value,
+      read.headRelation,
     );
     if (identityMismatch !== null) {
       decision = classifyDelegateSupervisorInconsistent(identityMismatch);
@@ -400,6 +396,59 @@ export class DelegateSupervisorExecutor implements Executor<
       observedAt,
     );
     return tickResult(roundId, decision);
+  }
+
+  private recordHandoffEvidence(
+    context: ExecutorTickContext<
+      DelegateSupervisorConfig,
+      DelegateSupervisorHostBindings
+    >,
+    adapterName: string,
+    roundId: string,
+    handoff: DelegateSupervisorHandoff,
+    capturingResult: boolean,
+  ): void {
+    const beforeEvidence = context.envelope
+      .snapshot()
+      .rounds.find(({ round }) => round.roundId === roundId);
+    const existingArtifactIds = new Set(
+      beforeEvidence?.artifacts.map((artifact) => artifact.artifactId) ?? [],
+    );
+    const existingArtifactPaths = new Set(
+      beforeEvidence?.artifacts.map((artifact) => artifact.path) ?? [],
+    );
+    for (const [index, artifactPath] of (
+      handoff.artifactPaths ?? []
+    ).entries()) {
+      const artifactId = `${roundId}-handoff-artifact-${index}`;
+      if (
+        existingArtifactIds.has(artifactId) ||
+        existingArtifactPaths.has(artifactPath)
+      ) {
+        continue;
+      }
+      context.envelope.recordArtifact(roundId, {
+        artifactId,
+        artifactClass: "logs",
+        path: artifactPath,
+        digest: null,
+        description: `Delegated ${adapterName} handoff evidence.`,
+      });
+    }
+    context.envelope.recordRoundProgress(roundId, {
+      observation: {
+        ...(capturingResult ? { phase: "capturing_result" as const } : {}),
+        summary: handoff.summary,
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-${HANDOFF_STAGE}`,
+          sequence: beforeEvidence?.checkpoints.length ?? 0,
+          stage: HANDOFF_STAGE,
+          detail: JSON.stringify(handoff),
+        },
+      ],
+    });
   }
 }
 
@@ -840,11 +889,18 @@ function countUnresolvedPriorDecisions(
 function compareIdentity(
   expected: DelegateSupervisorExternalIdentity,
   actual: DelegateSupervisorExternalIdentity,
+  headRelation?: string,
 ): string | null {
-  for (const key of ["externalRunId", "branch", "headSha"] as const) {
+  for (const key of ["externalRunId", "branch"] as const) {
     if (expected[key] !== actual[key]) {
       return `delegated external identity mismatch for ${key}: expected ${expected[key]}, observed ${actual[key]}`;
     }
+  }
+  if (
+    expected.headSha !== actual.headSha &&
+    headRelation !== "verified_descendant"
+  ) {
+    return `delegated external identity mismatch for headSha: expected ${expected.headSha}, observed unverified ${actual.headSha}`;
   }
   return null;
 }
@@ -858,6 +914,25 @@ function assertHandoff(value: DelegateSupervisorHandoff): void {
     value.externalIdentity === null
   ) {
     throw new Error("tool adapter returned an invalid handoff envelope");
+  }
+  if (value.terminalState !== undefined) {
+    if (
+      typeof value.terminalState !== "object" ||
+      value.terminalState === null ||
+      typeof value.terminalState.digest !== "string" ||
+      value.terminalState.digest.trim().length === 0 ||
+      classifyDelegateSupervisorState(value.terminalState.value)
+        .classification !== "complete" ||
+      compareIdentity(
+        value.externalIdentity,
+        value.terminalState.value,
+        value.terminalState.headRelation,
+      ) !== null
+    ) {
+      throw new Error(
+        "tool adapter returned invalid terminal handoff evidence",
+      );
+    }
   }
   for (const key of ["externalRunId", "branch", "headSha"] as const) {
     if (

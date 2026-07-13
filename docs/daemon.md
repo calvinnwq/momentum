@@ -331,9 +331,11 @@ If the no-mistakes runner profile is missing, malformed, lacks the selected agen
 For current coding definitions, the implementation and no-mistakes steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
 The implementation adapter performs the configured live-wrapper handoff once, records a normalized terminal external-state artifact, and lets a later bounded tick corroborate it.
 The no-mistakes adapter uses the configured wrapper command for the initial `axi run` handoff, then invokes that validated executable as `axi status --run <external-run-id>` with the same filtered child environment on later ticks.
-Status read-back must match the pinned run id, branch, and resolved full head SHA.
+Status read-back must match the pinned run id and branch.
+The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
 Unreadable status, identity drift, pending CI behind a terminal claim, active findings, or unresolved decisions fail closed instead of settling success.
 The daemon stores `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
+When the initial handoff already proves checks passed, that terminal state is stored with the handoff and reused directly instead of being replaced by a lagging monitoring snapshot.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 
