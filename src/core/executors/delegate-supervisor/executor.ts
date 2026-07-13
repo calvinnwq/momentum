@@ -7,7 +7,17 @@ import type {
   ExecutorTickContext,
   ExecutorTickResult,
 } from "../sdk/types.js";
-import { isTerminalExecutorRoundState } from "../loop/reducer.js";
+import {
+  EXECUTOR_COMPLETION_CLASSIFICATIONS,
+  EXECUTOR_HUMAN_GATE_TYPES,
+  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ROUND_STATES,
+  executorInvocationStateForClassification,
+  isExecutorHumanGateCompatibleWithClassification,
+  isExecutorRecoveryCodeCompatibleWithClassification,
+  isExecutorRoundStateCompatibleWithClassification,
+  isTerminalExecutorRoundState,
+} from "../loop/reducer.js";
 import {
   classifyDelegateSupervisorInconsistent,
   classifyDelegateSupervisorState,
@@ -62,6 +72,11 @@ type LegacyLiveStepDecision = Pick<
   | "reason"
 >;
 
+type DurableCheckpointRead<T> =
+  | { status: "absent" }
+  | { status: "valid"; roundId: string; value: T }
+  | { status: "invalid"; roundId: string; reason: string };
+
 /** SDK-native executor that composes one bounded handoff with repeated polls. */
 export class DelegateSupervisorExecutor implements Executor<
   DelegateSupervisorConfig,
@@ -106,18 +121,24 @@ export class DelegateSupervisorExecutor implements Executor<
       );
     }
     const legacyCompletion = findLegacyLiveStepCompletion(attemptRounds);
-    if (legacyCompletion !== null) {
+    if (legacyCompletion.status === "invalid") {
+      return invalidCompletionEvidenceResult(context, legacyCompletion);
+    }
+    if (legacyCompletion.status === "valid") {
       context.hostBindings.settleHandoff?.(
-        legacyCompletion.decision.recommendation === "complete" ||
-          legacyCompletion.decision.recommendation === "failed",
+        legacyCompletion.value.recommendation === "complete" ||
+          legacyCompletion.value.recommendation === "failed",
       );
       return {
         roundId: legacyCompletion.roundId,
-        ...legacyCompletion.decision,
+        ...legacyCompletion.value,
       };
     }
     const handoffRecord = findHandoff(attemptRounds);
-    if (handoffRecord === null) {
+    if (handoffRecord.status === "invalid") {
+      return invalidCompletionEvidenceResult(context, handoffRecord);
+    }
+    if (handoffRecord.status === "absent") {
       return this.handoff(context, adapter);
     }
     if (
@@ -132,15 +153,10 @@ export class DelegateSupervisorExecutor implements Executor<
         recommendedInvocationState: "running",
         recoveryCode: null,
         humanGate: null,
-        reason: handoffRecord.handoff.summary,
+        reason: handoffRecord.value.summary,
       };
     }
-    return this.supervise(
-      context,
-      adapter,
-      handoffRecord.handoff,
-      attemptRounds,
-    );
+    return this.supervise(context, adapter, handoffRecord.value, attemptRounds);
   }
 
   private async handoff(
@@ -635,41 +651,134 @@ function resolveToolAdapter(
 
 function findHandoff(
   rounds: readonly ExecutorRoundEnvelopeSnapshot[],
-): { roundId: string; handoff: DelegateSupervisorHandoff } | null {
-  for (const { round, checkpoints } of [...rounds].reverse()) {
-    const checkpoint = [...checkpoints]
-      .reverse()
-      .find(({ stage }) => stage === HANDOFF_STAGE);
-    if (checkpoint?.detail === null || checkpoint === undefined) continue;
-    try {
-      const parsed = JSON.parse(checkpoint.detail) as DelegateSupervisorHandoff;
-      assertHandoff(parsed);
-      return { roundId: round.roundId, handoff: parsed };
-    } catch {
-      return null;
-    }
-  }
-  return null;
+): DurableCheckpointRead<DelegateSupervisorHandoff> {
+  return findDurableCheckpoint(rounds, HANDOFF_STAGE, (detail) => {
+    const parsed = JSON.parse(detail) as DelegateSupervisorHandoff;
+    assertHandoff(parsed);
+    return parsed;
+  });
 }
 
 function findLegacyLiveStepCompletion(
   rounds: readonly ExecutorRoundEnvelopeSnapshot[],
-): { roundId: string; decision: LegacyLiveStepDecision } | null {
+): DurableCheckpointRead<LegacyLiveStepDecision> {
+  return findDurableCheckpoint(
+    rounds,
+    "mechanism_completed",
+    parseLegacyLiveStepDecision,
+  );
+}
+
+function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
+  const parsed: unknown = JSON.parse(detail);
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("legacy mechanism completion is not an object");
+  }
+  const record = parsed as Record<string, unknown>;
+  const recommendation = record["recommendation"];
+  const roundState = record["recommendedRoundState"];
+  const invocationState = record["recommendedInvocationState"];
+  const recoveryCode = record["recoveryCode"];
+  const humanGate = record["humanGate"];
+  if (!includes(EXECUTOR_COMPLETION_CLASSIFICATIONS, recommendation)) {
+    throw new Error("legacy mechanism completion recommendation is invalid");
+  }
+  if (!includes(EXECUTOR_ROUND_STATES, roundState)) {
+    throw new Error("legacy mechanism completion round state is invalid");
+  }
+  if (!includes(EXECUTOR_INVOCATION_STATES, invocationState)) {
+    throw new Error("legacy mechanism completion invocation state is invalid");
+  }
+  if (recoveryCode !== null && typeof recoveryCode !== "string") {
+    throw new Error("legacy mechanism completion recovery code is invalid");
+  }
+  if (humanGate !== null && !includes(EXECUTOR_HUMAN_GATE_TYPES, humanGate)) {
+    throw new Error("legacy mechanism completion human gate is invalid");
+  }
+  if (typeof record["reason"] !== "string") {
+    throw new Error("legacy mechanism completion reason is invalid");
+  }
+  if (
+    invocationState !==
+      executorInvocationStateForClassification(recommendation) ||
+    !isExecutorRoundStateCompatibleWithClassification(
+      recommendation,
+      roundState,
+    ) ||
+    !isExecutorRecoveryCodeCompatibleWithClassification(
+      recommendation,
+      recoveryCode,
+    ) ||
+    !isExecutorHumanGateCompatibleWithClassification(recommendation, humanGate)
+  ) {
+    throw new Error("legacy mechanism completion fields are inconsistent");
+  }
+  return parsed as LegacyLiveStepDecision;
+}
+
+function includes<T extends string>(
+  values: readonly T[],
+  value: unknown,
+): value is T {
+  return typeof value === "string" && values.some((item) => item === value);
+}
+
+function findDurableCheckpoint<T>(
+  rounds: readonly ExecutorRoundEnvelopeSnapshot[],
+  stage: string,
+  parse: (detail: string) => T,
+): DurableCheckpointRead<T> {
   for (const snapshot of [...rounds].reverse()) {
     const checkpoint = [...snapshot.checkpoints]
       .reverse()
-      .find(({ stage }) => stage === "mechanism_completed");
-    if (checkpoint?.detail === null || checkpoint === undefined) continue;
+      .find((candidate) => candidate.stage === stage);
+    if (checkpoint === undefined) continue;
+    if (checkpoint.detail === null) {
+      return {
+        status: "invalid",
+        roundId: snapshot.round.roundId,
+        reason: `${stage} checkpoint detail is missing`,
+      };
+    }
     try {
       return {
+        status: "valid",
         roundId: snapshot.round.roundId,
-        decision: JSON.parse(checkpoint.detail) as LegacyLiveStepDecision,
+        value: parse(checkpoint.detail),
       };
-    } catch {
-      return null;
+    } catch (error) {
+      return {
+        status: "invalid",
+        roundId: snapshot.round.roundId,
+        reason: errorMessage(error),
+      };
     }
   }
-  return null;
+  return { status: "absent" };
+}
+
+function invalidCompletionEvidenceResult(
+  context: ExecutorTickContext<
+    DelegateSupervisorConfig,
+    DelegateSupervisorHostBindings
+  >,
+  evidence: Extract<DurableCheckpointRead<unknown>, { status: "invalid" }>,
+): ExecutorTickResult {
+  context.hostBindings.settleHandoff?.(false);
+  const active = context.state.currentRound;
+  const roundId =
+    active !== null && !isTerminalExecutorRoundState(active.round.state)
+      ? active.round.roundId
+      : startRound(
+          context,
+          "running",
+          "Inspecting unreadable delegated completion evidence.",
+        );
+  return recoveryResult(
+    roundId,
+    "delegate_handoff_recovery_required",
+    `Durable delegated completion evidence in round ${evidence.roundId} is unreadable: ${evidence.reason}; refusing to repeat delegated external work.`,
+  );
 }
 
 function latestMirroredCheckpoint(

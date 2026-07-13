@@ -9,7 +9,10 @@ import {
   parseNoMistakesAxiStatus,
   parseNoMistakesLaunchIdentity,
 } from "../src/adapters/no-mistakes-tool-adapter.js";
-import { classifyDelegateSupervisorState } from "../src/core/executors/delegate-supervisor/classifier.js";
+import {
+  classifyDelegateSupervisorState,
+  delegateSupervisorProgressDigest,
+} from "../src/core/executors/delegate-supervisor/classifier.js";
 import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
@@ -88,6 +91,66 @@ function state(
 
 function writeState(statePath: string, value: DelegateSupervisorExternalState) {
   fs.writeFileSync(statePath, JSON.stringify(value));
+}
+
+function seedCurrentRoundCheckpoint(
+  db: MomentumDb,
+  invocation: ExecutorInvocationRecord,
+  stage: string,
+  detail: string | null,
+): string {
+  const roundId = seedRound(db, invocation, 0);
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId: invocation.invocationId,
+    now: () => 5,
+  });
+  envelope.facade.recordCheckpoint(roundId, {
+    checkpointId: `${roundId}-${stage}`,
+    sequence: 0,
+    stage,
+    detail,
+  });
+  return roundId;
+}
+
+function seedRound(
+  db: MomentumDb,
+  invocation: ExecutorInvocationRecord,
+  roundIndex: number,
+): string {
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId: invocation.invocationId,
+    now: () => 5,
+  });
+  const roundId = `${invocation.invocationId}::round-${roundIndex + 1}`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    executorFamily: invocation.executorFamily,
+    attempt: invocation.attempt,
+    roundIndex,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: null,
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  return roundId;
 }
 
 describe("delegate-supervisor SDK executor", () => {
@@ -179,6 +242,106 @@ describe("delegate-supervisor SDK executor", () => {
     });
     expect(handoffs).toBe(0);
     expect(settled).toBe(true);
+    db.close();
+  });
+
+  it.each([
+    ["delegated handoff", "delegate_handoff_completed", "not-json"],
+    ["legacy mechanism completion", "mechanism_completed", "not-json"],
+    ["legacy mechanism completion structure", "mechanism_completed", "null"],
+  ])(
+    "fails closed on malformed %s evidence without repeating handoff",
+    async (_label, stage, detail) => {
+      const { db, invocation } = openDelegateDb();
+      seedCurrentRoundCheckpoint(db, invocation, stage, detail);
+      let handoffs = 0;
+      let settled: boolean | undefined;
+      const result = await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor: new DelegateSupervisorExecutor(),
+        config: { tool: "no-mistakes" },
+        hostBindings: {
+          tools: {
+            "no-mistakes": {
+              name: "no-mistakes",
+              handoff: () => {
+                handoffs += 1;
+                throw new Error(
+                  "corrupt completion evidence must not relaunch",
+                );
+              },
+              readExternalState: () => {
+                throw new Error("corrupt completion evidence must not poll");
+              },
+            },
+          },
+          settleHandoff: (provenClean: boolean) => {
+            settled = provenClean;
+          },
+        },
+        now: () => 6,
+      });
+      expect(result.lastRound).toMatchObject({
+        state: "manual_recovery_required",
+        classification: "manual_recovery_required",
+        recoveryCode: "delegate_handoff_recovery_required",
+      });
+      expect(handoffs).toBe(0);
+      expect(settled).toBe(false);
+      db.close();
+    },
+  );
+
+  it("uses the active round to report corrupt evidence from a prior round", async () => {
+    const { db, invocation } = openDelegateDb();
+    const priorRoundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      "null",
+    );
+    updateExecutorRound(db, priorRoundId, {
+      toState: "capturing_result",
+    });
+    updateExecutorRound(db, priorRoundId, {
+      toState: "succeeded",
+      classification: "complete",
+      executorRecommendation: "complete",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 5,
+    });
+    const activeRoundId = seedRound(db, invocation, 1);
+    let handoffs = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("corrupt prior evidence must not relaunch");
+            },
+            readExternalState: () => {
+              throw new Error("corrupt prior evidence must not poll");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(result.lastRound).toMatchObject({
+      roundId: activeRoundId,
+      state: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      recoveryCode: "delegate_handoff_recovery_required",
+    });
+    expect(handoffs).toBe(0);
     db.close();
   });
 
@@ -696,7 +859,42 @@ describe("delegate-supervisor SDK executor", () => {
   it("parks unchanged semantic progress after the four-minute stall boundary", async () => {
     const { db, invocation, root } = openDelegateDb();
     const statePath = path.join(root, "no-mistakes-state.json");
-    writeState(statePath, state());
+    const initialState = state({
+      findings: [
+        {
+          externalId: "finding-b",
+          title: "Finding B",
+          severity: "warning",
+          detail: "Second finding",
+        },
+        {
+          externalId: "finding-a",
+          title: "Finding A",
+          severity: "error",
+          detail: "First finding",
+        },
+      ],
+      selectedFindingIds: ["finding-b", "finding-a"],
+      decisions: [
+        {
+          externalId: "decision-b",
+          summary: "Second decision",
+          allowedActions: ["reject", "approve"],
+          recommendedAction: "approve",
+          chosenAction: null,
+          resolution: null,
+        },
+        {
+          externalId: "decision-a",
+          summary: "First decision",
+          allowedActions: ["skip", "retry"],
+          recommendedAction: "retry",
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    });
+    writeState(statePath, initialState);
     const adapter = createNoMistakesToolAdapter({
       handoff: () => ({
         externalIdentity: {
@@ -727,6 +925,45 @@ describe("delegate-supervisor SDK executor", () => {
       hostBindings: { tools, now: () => 20 },
       now: () => 20,
     });
+    const reorderedState = state({
+      findings: [
+        {
+          detail: "First finding",
+          severity: "error",
+          title: "Finding A",
+          externalId: "finding-a",
+        },
+        {
+          detail: "Second finding",
+          severity: "warning",
+          title: "Finding B",
+          externalId: "finding-b",
+        },
+      ],
+      selectedFindingIds: ["finding-a", "finding-b"],
+      decisions: [
+        {
+          resolution: null,
+          chosenAction: null,
+          recommendedAction: "retry",
+          allowedActions: ["retry", "skip"],
+          summary: "First decision",
+          externalId: "decision-a",
+        },
+        {
+          resolution: null,
+          chosenAction: null,
+          recommendedAction: "approve",
+          allowedActions: ["approve", "reject"],
+          summary: "Second decision",
+          externalId: "decision-b",
+        },
+      ],
+    });
+    expect(delegateSupervisorProgressDigest(reorderedState)).toBe(
+      delegateSupervisorProgressDigest(initialState),
+    );
+    writeState(statePath, reorderedState);
     const stalledAt = 20 + DELEGATE_SUPERVISOR_STALL_AFTER_MS;
     const stalled = await driveExecutorTicks({
       db,

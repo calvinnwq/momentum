@@ -306,11 +306,31 @@ export function delegateSupervisorProgressDigest(
     headSha: state.headSha,
     activeStep: state.activeStep,
     stepStatus: state.stepStatus,
-    findings: state.findings,
-    selectedFindingIds: state.selectedFindingIds,
-    decisions: state.decisions,
+    findings: state.findings
+      .map((finding) => ({
+        externalId: finding.externalId,
+        title: finding.title,
+        severity: finding.severity ?? null,
+        detail: finding.detail ?? null,
+      }))
+      .sort((left, right) => compareStrings(left.externalId, right.externalId)),
+    selectedFindingIds: [...state.selectedFindingIds].sort(compareStrings),
+    decisions: state.decisions
+      .map((decision) => ({
+        externalId: decision.externalId,
+        summary: decision.summary,
+        allowedActions: [...decision.allowedActions].sort(compareStrings),
+        recommendedAction: decision.recommendedAction ?? null,
+        chosenAction: decision.chosenAction ?? null,
+        resolution: decision.resolution ?? null,
+      }))
+      .sort((left, right) => compareStrings(left.externalId, right.externalId)),
     prUrl: state.prUrl,
     ciState: state.ciState,
   };
   return `sha256:${crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex")}`;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
