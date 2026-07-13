@@ -133,7 +133,9 @@ function findUnreadableReason(
     }
     if (
       decision.allowedActions.length === 0 ||
-      decision.allowedActions.some((action: unknown) => !isNonBlank(action))
+      decision.allowedActions.some(
+        (action: unknown) => !isNonBlank(action) || action.trim() !== action,
+      )
     ) {
       return `decision ${decision.externalId} offers no canonical allowed actions`;
     }

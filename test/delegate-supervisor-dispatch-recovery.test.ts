@@ -235,6 +235,42 @@ function reopenInterruptedHandoff(
   ).run(runId);
 }
 
+function reopenCompletedHandoff(
+  db: ReturnType<typeof openDb>,
+  runId: string,
+  stepId: string,
+): void {
+  const round = db
+    .prepare(
+      "SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? AND attempt = 1",
+    )
+    .get(runId) as { round_id: string };
+  db.prepare(
+    "DELETE FROM executor_checkpoints WHERE round_id = ? AND stage NOT IN ('delegate_handoff_intent', 'delegate_handoff_completed')",
+  ).run(round.round_id);
+  db.prepare(
+    `UPDATE executor_rounds
+        SET state = 'running', classification = NULL, recovery_code = NULL,
+            human_gate = NULL, finished_at = NULL
+      WHERE round_id = ?`,
+  ).run(round.round_id);
+  db.prepare(
+    `UPDATE executor_invocations
+        SET state = 'running', finished_at = NULL
+      WHERE workflow_run_id = ?`,
+  ).run(runId);
+  db.prepare(
+    `UPDATE workflow_steps
+        SET state = 'approved', finished_at = NULL
+      WHERE run_id = ? AND step_id = ?`,
+  ).run(runId, stepId);
+  db.prepare(
+    `UPDATE workflow_runs
+        SET state = 'approved', finished_at = NULL
+      WHERE id = ?`,
+  ).run(runId);
+}
+
 describe("profile-backed delegate handoff artifacts", () => {
   it("namespaces attempt-one artifacts by step", async () => {
     const dataDir = tempDir();
@@ -358,6 +394,60 @@ describe("profile-backed delegate handoff artifacts", () => {
       phase: "finalized",
       externalState: { stepStatus: "completed" },
     });
+    db.close();
+  });
+
+  it("refuses a completed generic handoff after repository HEAD advances", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    const runId = "delegate-completed-head-drift";
+    const stepId = "implementation";
+    const profilePath = writeProfile(tempDir());
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+    const delegatedHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+    fs.writeFileSync(path.join(repoPath, "external-change.txt"), "drift\n");
+    runGit(repoPath, ["add", "external-change.txt"]);
+    runGit(repoPath, ["commit", "--quiet", "-m", "test: advance head"]);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).not.toBe(delegatedHead);
+    reopenCompletedHandoff(db, runId, stepId);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 3,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "manual_recovery_required" });
+    expect(
+      db
+        .prepare(
+          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+        )
+        .get(runId),
+    ).toEqual({ recovery_code: "external_state_unreadable" });
     db.close();
   });
 

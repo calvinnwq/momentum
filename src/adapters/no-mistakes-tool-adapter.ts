@@ -89,7 +89,7 @@ export function settleNoMistakesHandoffState(
 ): SuccessfulNoMistakesExternalStateRead {
   if (
     terminalProofHeadSha === null ||
-    !commitIdentitiesMatch(terminalProofHeadSha, read.value.headSha)
+    !exactCommitIdentitiesMatch(terminalProofHeadSha, read.value.headSha)
   ) {
     return read;
   }
@@ -124,6 +124,16 @@ export function settleNoMistakesHandoffState(
       ? { headRelation: read.headRelation }
       : {}),
   };
+}
+
+function exactCommitIdentitiesMatch(left: string, right: string): boolean {
+  const normalizedLeft = left.toLowerCase();
+  const normalizedRight = right.toLowerCase();
+  return (
+    /^[0-9a-f]{40}$/.test(normalizedLeft) &&
+    /^[0-9a-f]{40}$/.test(normalizedRight) &&
+    normalizedLeft === normalizedRight
+  );
 }
 
 /** Match equal full SHAs or one valid full-to-abbreviated prefix pair. */

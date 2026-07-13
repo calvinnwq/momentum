@@ -1878,14 +1878,13 @@ describe("no-mistakes tool adapter", () => {
     expect(settleNoMistakesHandoffState(read, HEAD)).toBe(read);
   });
 
-  it("applies terminal handoff proof across abbreviated commit identity", () => {
+  it("does not settle terminal handoff proof from an abbreviated commit identity", () => {
     const read = {
       ok: true as const,
       value: state({ ciState: "passed" }),
       digest: "sha256:resolved-head-status",
     };
-    const settled = settleNoMistakesHandoffState(read, HEAD.slice(0, 8));
-    expect(settled.value.stepStatus).toBe("completed");
+    expect(settleNoMistakesHandoffState(read, HEAD.slice(0, 8))).toBe(read);
   });
 
   it("does not override pending CI at the terminal proof head", () => {
@@ -2238,6 +2237,29 @@ describe("no-mistakes tool adapter", () => {
               allowedActions: ["approve"],
               chosenAction: "reject",
               resolution: "rejected",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+  });
+
+  it("routes non-canonical decision actions to unreadable recovery", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          stepStatus: "awaiting_decision",
+          decisions: [
+            {
+              externalId: "review-1",
+              summary: "choose the review disposition",
+              allowedActions: [" approve "],
+              recommendedAction: " approve ",
+              chosenAction: null,
+              resolution: null,
             },
           ],
         }),
