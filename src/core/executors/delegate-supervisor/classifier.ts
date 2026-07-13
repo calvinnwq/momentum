@@ -99,6 +99,7 @@ function findUnreadableReason(
     }
     findingIds.add(finding.externalId);
   }
+  const selectedFindingIds = new Set<string>();
   for (const selectedId of state.selectedFindingIds) {
     if (!isNonBlank(selectedId)) {
       return "a selected finding id is blank or not a string";
@@ -106,6 +107,10 @@ function findUnreadableReason(
     if (!findingIds.has(selectedId)) {
       return `selected finding id ${selectedId} references no surfaced finding`;
     }
+    if (selectedFindingIds.has(selectedId)) {
+      return `duplicate selected finding id ${selectedId}`;
+    }
+    selectedFindingIds.add(selectedId);
   }
 
   const decisionIds = new Set<string>();
@@ -161,6 +166,13 @@ function findUnreadableReason(
       if (value !== undefined && value !== null && typeof value !== "string") {
         return `decision ${decision.externalId} ${field} is not a string`;
       }
+    }
+    if (
+      decision.chosenAction !== undefined &&
+      decision.chosenAction !== null &&
+      !decision.allowedActions.includes(decision.chosenAction)
+    ) {
+      return `decision ${decision.externalId} chose an action it does not allow`;
     }
     decisionIds.add(decision.externalId);
   }

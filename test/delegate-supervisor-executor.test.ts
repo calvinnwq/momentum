@@ -1774,4 +1774,47 @@ describe("no-mistakes tool adapter", () => {
       recoveryCode: "external_state_inconsistent",
     });
   });
+
+  it("refuses a chosen action outside the decision's allowed actions", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          activeStep: null,
+          stepStatus: "completed",
+          ciState: "passed",
+          decisions: [
+            {
+              externalId: "review-1",
+              summary: "choose the review disposition",
+              allowedActions: ["approve"],
+              chosenAction: "reject",
+              resolution: "rejected",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+  });
+
+  it("refuses duplicate selected finding ids", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          findings: [
+            {
+              externalId: "review-1",
+              title: "unresolved review finding",
+            },
+          ],
+          selectedFindingIds: ["review-1", "review-1"],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+  });
 });
