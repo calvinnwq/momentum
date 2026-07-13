@@ -123,7 +123,9 @@ Native workflow runs that execute through a configured live-wrapper profile use 
 Imported workflow runs use the directory derived from their source artifact path.
 The ordinary live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
 Delegate-supervisor steps write their result, log, verification, and external-state evidence beneath `delegate/<step-id>/`, with later attempts beneath that step directory's `attempt-<n>/` child.
-Each delegated step writes its atomic `delegate-handoff.json` receipt at the step-scoped delegate root so an interrupted or retried attempt can reattach only its correlated external run instead of launching another one.
+Each delegated step writes its atomic schema-version-1 `delegate-handoff.json` receipt at the step-scoped delegate root so an interrupted or retried attempt can reattach only its correlated external run instead of launching another one.
+No-mistakes receipts record `launching` before the wrapper starts and `launched` after its run identity is durable.
+Other profile-backed delegate receipts progress through launch, wrapper completion, reset or commit preparation, and finalization phases, carrying the result digest plus repository base/tree/message proof required to recognize an already-completed mutation safely.
 When that run directory resolves inside the repository, daemon and watch dispatch require it to be ignored by git before the wrapper starts; otherwise the step is parked for manual recovery with `invalid_input` instead of risking evidence files being swept into a Momentum commit.
 
 ## OpenClaw supervisor state files

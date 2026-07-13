@@ -145,6 +145,9 @@ A successful handoff records the pinned external run id and branch, the launch h
 The profile-backed host releases repository ownership only after that handoff evidence is durable.
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
+The profile-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
+It accepts recovery only when the original launch log yields the correlated run identity, a completed reset matches the recorded base tree, or a commit matches the recorded parent, tree, message, and clean worktree.
+Missing receipts or mismatched branch, result, worktree, or commit evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
 
 Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
@@ -160,7 +163,8 @@ Each unchanged running read still refreshes durable liveness, but it carries for
 After four minutes without semantic progress or terminal evidence, the invocation enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
 Terminal success requires the handoff run id and branch to match, no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
-Terminal evidence captured by the handoff is persisted in the same envelope and cannot be downgraded by a lagging later status response.
+Terminal evidence captured by the handoff is persisted in the same envelope and cannot be downgraded by a lagging later status response for the same commit.
+It does not override pending CI or settle a different descendant commit.
 Unreadable state, cancelled state, contradictory completion, and identity drift require manual recovery rather than optimistic retry or success.
 `blocked` and `failed` external states remain distinct terminal recommendations with `external_state_blocked` and `external_run_failed` recovery codes.
 

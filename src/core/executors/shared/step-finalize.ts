@@ -93,13 +93,14 @@ export type FinalizeWorkflowStepInput = {
   verificationTimeoutSec: number;
   verificationLogPath: string;
   /**
-   * Ownership proof called immediately before each commit/reset mutation. A
-   * failed check returns `repo_lock_lost` so callers can enter recovery instead
-   * of mutating after losing the repo/workflow lease.
+   * Ownership proof called with the pending mutation immediately before each
+   * commit or reset. A failed check returns `repo_lock_lost` so callers can
+   * enter recovery instead of mutating after losing the repo/workflow lease.
    */
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /** Forwarded commit-intent persistence hook; rejection preserves changes. */
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;
@@ -186,11 +187,12 @@ export type FinalizeWorkflowStepFromResultFileInput = {
   verificationLogPath: string;
   /**
    * Forwarded to {@link finalizeWorkflowStep} to prove ownership before every
-   * commit/reset mutation and surface `repo_lock_lost` on failure.
+   * named commit or reset mutation and surface `repo_lock_lost` on failure.
    */
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /** Forwarded commit-intent persistence hook; rejection preserves changes. */
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;

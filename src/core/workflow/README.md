@@ -109,6 +109,8 @@ rather than escaping across the scheduler boundary. `dispatch/retry.ts` reopens
 the same deterministic invocation with the next attempt. Ordinary live-wrapper
 evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
 evidence is first isolated beneath `delegate/<step-id>/`.
+The step-scoped `delegate-handoff.json` receipt records no-mistakes launch intent before process start and generic delegate reset or commit intent before repository mutation.
+Retry recovery accepts only correlated launch output or exact result, base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,

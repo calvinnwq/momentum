@@ -30,6 +30,11 @@ export type CommitInput = {
   repoPath: string;
   baseHead: string;
   commit: CommitIntent;
+  /**
+   * Persist caller-owned commit intent after staging and tree creation but
+   * before `git commit`. Rejection preserves the verified staged worktree and
+   * returns `precommit_rejected` so recovery can prove or resume the mutation.
+   */
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;

@@ -130,6 +130,8 @@ edge: it hands off to no-mistakes, preserves terminal handoff evidence, and read
 durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
 recorded `no-mistakes` invocations remain readable.
+The profile-backed host writes its step-scoped receipt before no-mistakes launch and before delegated reset or commit mutation.
+Interrupted recovery requires correlated launch output or exact result and repository proof, so a missing or mismatched receipt preserves the worktree and cannot create a duplicate external run.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 

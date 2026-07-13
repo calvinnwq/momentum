@@ -27,12 +27,16 @@ export type FinalizeIterationInput = {
   verificationLogPath: string;
   /**
    * Optional ownership proof for callers that hold an external repo/workflow
-   * lease. It is called immediately before each commit/reset mutation; failure
-   * aborts the transaction with `ownership_lost` before mutating git.
+   * lease. It receives the pending mutation immediately before each commit or
+   * reset; failure aborts with `ownership_lost` before mutating git.
    */
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /**
+   * Persist the exact staged tree and commit message before commit mutation.
+   * A rejection preserves verified changes instead of automatically resetting.
+   */
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;

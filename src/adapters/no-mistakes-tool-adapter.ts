@@ -18,6 +18,7 @@ export type NoMistakesToolAdapterOptions = {
   handoff: (
     context: DelegateSupervisorToolContext,
   ) => DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
+  /** Reattach an interrupted launch from correlated durable evidence. */
   recoverHandoff?: (
     context: DelegateSupervisorToolContext,
   ) => DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
@@ -125,6 +126,7 @@ export function settleNoMistakesHandoffState(
   };
 }
 
+/** Match equal full SHAs or one valid full-to-abbreviated prefix pair. */
 export function commitIdentitiesMatch(left: string, right: string): boolean {
   const normalizedLeft = left.toLowerCase();
   const normalizedRight = right.toLowerCase();

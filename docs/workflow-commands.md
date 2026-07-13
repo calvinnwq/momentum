@@ -2383,9 +2383,12 @@ The initial dispatcher pass may perform the durable handoff and first read as tw
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
 
-Terminal success requires the observed external run id, branch, and head SHA to match the handoff plus no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Terminal success requires the observed external run id and branch to match the handoff, while the head must either match the launch head or carry adapter-verified descendant proof.
+It also requires no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
+The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.
+On a later attempt, receipt recovery accepts only correlated launch output or exact completed-reset/commit proof and otherwise refuses a duplicate launch while preserving the worktree.
 GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.
 
 ## `workflow run logs`

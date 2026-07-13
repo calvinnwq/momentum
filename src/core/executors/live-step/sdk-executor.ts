@@ -17,9 +17,11 @@ export type LiveStepRepoSafetyHostBinding = {
   verificationCommands: readonly string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  /** Prove repository ownership immediately before the named mutation. */
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /** Persist the staged tree/message receipt before a delegated commit. */
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;

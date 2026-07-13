@@ -337,7 +337,10 @@ Status read-back must match the pinned run id and branch.
 The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
 Unreadable status, identity drift, pending CI behind a terminal claim, active findings, or unresolved decisions fail closed instead of settling success.
 The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
-Generic live-wrapper receipts bind the result, prepared Git tree, commit message, and base commit so a retry can reconstruct a completed commit without launching the tool again.
+For no-mistakes, the receipt records a `launching` intent before the wrapper starts and a `launched` identity after the external run id is known.
+An interrupted `launching` receipt may recover that identity only from its correlated executor log; a missing or mismatched receipt fails closed without launching no-mistakes again.
+Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
+A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again; branch, result, worktree, or receipt drift fails closed and preserves the worktree for inspection.
 When the initial no-mistakes handoff already proves checks passed, that terminal state is stored for its exact commit and reused directly only while current status reports passed or absent CI rather than pending CI.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:

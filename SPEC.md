@@ -165,7 +165,10 @@ only handoff, interrupted-handoff recovery, and canonical state normalization;
 portable step config selects it with `tool`, so adding a tool does not add an
 executor family or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
-launch. The external run id and branch are stable correlation identity; an
+launch.
+The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
+Recovery accepts only correlated launch output or an exact result, base, tree, and commit-message or completed-reset proof; missing or mismatched evidence preserves the worktree and forbids a duplicate launch.
+The external run id and branch are stable correlation identity; an
 observed head may advance as the delegated tool commits fixes and counts as
 semantic progress only when the adapter supplies a `verified_descendant` proof from the launch commit. Terminal state captured during handoff remains authoritative
 across later ticks and process restart. The single-shot lifecycle (`one-shot` and `script` in the current
