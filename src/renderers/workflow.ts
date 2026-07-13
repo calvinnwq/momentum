@@ -1811,7 +1811,11 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
   if (round.verificationStatus === "failed") {
     return "verification_failed";
   }
-  if (round.commitSha !== null || round.classification === "complete") {
+  if (
+    round.state === "succeeded" ||
+    round.commitSha !== null ||
+    round.classification === "complete"
+  ) {
     return "successful";
   }
   if (round.state === "failed" || round.classification === "failed") {

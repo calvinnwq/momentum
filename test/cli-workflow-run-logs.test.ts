@@ -548,6 +548,16 @@ describe("momentum workflow run logs", () => {
           "successful"
         ],
         [
+          "successful-continuation",
+          {
+            state: "succeeded",
+            classification: "continue",
+            commitSha: null,
+            verificationStatus: null
+          },
+          "successful"
+        ],
+        [
           "failed",
           {
             state: "failed",
@@ -673,6 +683,7 @@ describe("momentum workflow run logs", () => {
     expect(payload.rounds.map((round) => [round.summary, round.outcome])).toEqual(
       [
         ["successful", "successful"],
+        ["successful-continuation", "successful"],
         ["failed", "failed"],
         ["no-op", "no_op"],
         ["invalid-result", "invalid_result"],
