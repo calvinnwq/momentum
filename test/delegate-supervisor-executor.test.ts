@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +11,8 @@ import {
   parseNoMistakesLaunchIdentity,
   settleNoMistakesHandoffState,
 } from "../src/adapters/no-mistakes-tool-adapter.js";
+import { createPersistedProfileDelegateToolAdapter } from "../src/adapters/profile-backed-delegate-tool-adapter.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../src/adapters/live-step-wrapper.js";
 import {
   classifyDelegateSupervisorState,
   delegateSupervisorProgressDigest,
@@ -246,6 +249,240 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("replays legacy completion from a prior attempt without relaunching", async () => {
+    const { db, invocation } = openDelegateDb();
+    const roundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      JSON.stringify({
+        recommendation: "complete",
+        recommendedRoundState: "succeeded",
+        recommendedInvocationState: "succeeded",
+        recoveryCode: null,
+        humanGate: null,
+        reason: "legacy wrapper completed cleanly",
+      }),
+    );
+    updateExecutorRound(db, roundId, { toState: "capturing_result" });
+    updateExecutorRound(db, roundId, {
+      toState: "succeeded",
+      classification: "complete",
+      executorRecommendation: "complete",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 5,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const activeReplayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
+    let handoffs = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("legacy completion must not relaunch");
+            },
+            readExternalState: () => {
+              throw new Error("legacy completion must not poll");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(handoffs).toBe(0);
+    expect(result.lastRound).toMatchObject({
+      roundId: activeReplayRoundId,
+      classification: "complete",
+      recoveryCode: null,
+      state: "succeeded",
+      summary: "legacy wrapper completed cleanly",
+    });
+    expect(result.invocation).toMatchObject({ state: "succeeded", attempt: 2 });
+    expect(
+      createDurableExecutorEnvelope({
+        db,
+        invocationId: invocation.invocationId,
+      }).snapshot().rounds,
+    ).toHaveLength(2);
+    db.close();
+  });
+
+  it("consumes a prior nonterminal legacy completion before handoff", async () => {
+    const { db, invocation } = openDelegateDb();
+    const legacyRoundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      JSON.stringify({
+        recommendation: "continue",
+        recommendedRoundState: "succeeded",
+        recommendedInvocationState: "running",
+        recoveryCode: null,
+        humanGate: null,
+        reason: "legacy wrapper requested another round",
+      }),
+    );
+    updateExecutorRound(db, legacyRoundId, { toState: "capturing_result" });
+    updateExecutorRound(db, legacyRoundId, {
+      toState: "succeeded",
+      classification: "continue",
+      executorRecommendation: "continue",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 5,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    let handoffs = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              return {
+                externalIdentity: {
+                  externalRunId: "nm-run-2",
+                  branch: "feature/delegate-supervisor",
+                  headSha: HEAD,
+                },
+                summary: "new delegated handoff",
+              };
+            },
+            readExternalState: () => {
+              throw new Error("handoff should finish before polling");
+            },
+          },
+        },
+      },
+      maxTicks: 2,
+      now: () => 6,
+    });
+    expect(handoffs).toBe(1);
+    expect(result.lastRound).toMatchObject({
+      classification: "continue",
+      state: "succeeded",
+      summary: "new delegated handoff",
+    });
+    const rounds = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    }).snapshot().rounds;
+    expect(rounds).toHaveLength(3);
+    expect(
+      rounds[1]?.checkpoints.some(
+        (checkpoint) =>
+          checkpoint.stage === "delegate_legacy_completion_replayed",
+      ),
+    ).toBe(true);
+    db.close();
+  });
+
+  it("prefers newer delegated handoff evidence over legacy completion", async () => {
+    const { db, invocation } = openDelegateDb();
+    const legacyRoundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      JSON.stringify({
+        recommendation: "complete",
+        recommendedRoundState: "succeeded",
+        recommendedInvocationState: "succeeded",
+        recoveryCode: null,
+        humanGate: null,
+        reason: "stale legacy completion",
+      }),
+    );
+    updateExecutorRound(db, legacyRoundId, { toState: "capturing_result" });
+    updateExecutorRound(db, legacyRoundId, {
+      toState: "succeeded",
+      classification: "complete",
+      executorRecommendation: "complete",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 5,
+    });
+    const handoffRoundId = seedRound(db, invocation, 1);
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 6,
+    });
+    envelope.facade.recordCheckpoint(handoffRoundId, {
+      checkpointId: `${handoffRoundId}-delegate_handoff_completed`,
+      sequence: 0,
+      stage: "delegate_handoff_completed",
+      detail: JSON.stringify({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "newer delegated handoff",
+      }),
+    });
+    updateExecutorRound(db, handoffRoundId, { toState: "capturing_result" });
+    updateExecutorRound(db, handoffRoundId, {
+      toState: "succeeded",
+      classification: "continue",
+      executorRecommendation: "continue",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 6,
+    });
+    let reads = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              throw new Error("newer handoff must not relaunch");
+            },
+            readExternalState: () => {
+              reads += 1;
+              return {
+                ok: true,
+                value: state(),
+                digest: "sha256:newer-handoff-status",
+              };
+            },
+          },
+        },
+      },
+      now: () => 7,
+    });
+
+    expect(reads).toBe(1);
+    expect(result.invocation.state).toBe("running");
+    expect(result.lastRound).toMatchObject({ classification: "continue" });
+    db.close();
+  });
+
   it.each([
     ["delegated handoff", "delegate_handoff_completed", "not-json"],
     ["legacy mechanism completion", "mechanism_completed", "not-json"],
@@ -452,7 +689,7 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
-  it("settles terminal state captured by the handoff without polling again", async () => {
+  it("settles cached terminal state only after fresh adapter corroboration", async () => {
     const { db, invocation } = openDelegateDb();
     let reads = 0;
     const completed = state({
@@ -476,7 +713,11 @@ describe("delegate-supervisor SDK executor", () => {
       }),
       readExternalState: () => {
         reads += 1;
-        throw new Error("terminal handoff evidence must not be downgraded");
+        return {
+          ok: true,
+          value: state({ ciState: "passed" }),
+          digest: "sha256:fresh-head-corroboration",
+        };
       },
     };
     const result = await driveExecutorTicks({
@@ -488,12 +729,12 @@ describe("delegate-supervisor SDK executor", () => {
       maxTicks: 2,
       now: () => 6,
     });
-    expect(reads).toBe(0);
+    expect(reads).toBe(1);
     expect(result.invocation.state).toBe("succeeded");
     expect(result.lastRound).toMatchObject({
       classification: "complete",
       state: "succeeded",
-      inputDigest: "sha256:checks-passed-handoff",
+      inputDigest: expect.stringMatching(/^sha256:/),
     });
     db.prepare(
       `UPDATE executor_invocations
@@ -508,12 +749,67 @@ describe("delegate-supervisor SDK executor", () => {
       hostBindings: { tools: {} },
       now: () => 7,
     });
-    expect(retried.invocation.state).toBe("succeeded");
+    expect(retried.invocation.state).toBe("manual_recovery_required");
     expect(retried.lastRound).toMatchObject({
-      classification: "complete",
-      inputDigest: "sha256:checks-passed-handoff",
+      classification: "manual_recovery_required",
+      recoveryCode: "tool_adapter_unavailable",
     });
-    expect(reads).toBe(0);
+    expect(reads).toBe(1);
+    db.close();
+  });
+
+  it("does not replace a fresh terminal failure with cached success", async () => {
+    const { db, invocation } = openDelegateDb();
+    let reads = 0;
+    const completed = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: completed.externalRunId,
+          branch: completed.branch,
+          headSha: completed.headSha,
+        },
+        summary: "checks passed during handoff",
+        terminalState: {
+          value: completed,
+          digest: "sha256:cached-terminal",
+        },
+      }),
+      readExternalState: () => {
+        reads += 1;
+        return {
+          ok: true,
+          value: state({
+            activeStep: null,
+            stepStatus: "failed",
+            ciState: "failed",
+          }),
+          digest: "sha256:fresh-terminal-failure",
+        };
+      },
+    };
+
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      maxTicks: 2,
+      now: () => 6,
+    });
+
+    expect(reads).toBe(1);
+    expect(result.invocation.state).toBe("failed");
+    expect(result.lastRound).toMatchObject({
+      classification: "failed",
+      recoveryCode: "external_run_failed",
+    });
     db.close();
   });
 
@@ -716,6 +1012,134 @@ describe("delegate-supervisor SDK executor", () => {
       state: "succeeded",
       classification: "continue",
       recoveryCode: null,
+    });
+    db.close();
+  });
+
+  it("resets the semantic stall window for a new retry attempt", async () => {
+    const { db, invocation } = openDelegateDb();
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: state(),
+        digest: "sha256:unchanged-retry-status",
+      }),
+    };
+    const executor = new DelegateSupervisorExecutor();
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter }, now: () => 1 },
+      now: () => 1,
+    });
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter }, now: () => 2 },
+      now: () => 2,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const retriedAt = DELEGATE_SUPERVISOR_STALL_AFTER_MS + 10;
+
+    const retried = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: { "no-mistakes": adapter },
+        now: () => retriedAt,
+      },
+      now: () => retriedAt,
+    });
+
+    expect(retried.invocation.state).toBe("running");
+    expect(retried.lastRound).toMatchObject({
+      classification: "continue",
+      recoveryCode: null,
+    });
+    db.close();
+  });
+
+  it("carries prior-attempt mirrored decisions into terminal corroboration", async () => {
+    const { db, invocation } = openDelegateDb();
+    let external = state({
+      stepStatus: "awaiting_decision",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "Choose a review disposition",
+          allowedActions: ["approve", "reject"],
+          recommendedAction: "approve",
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: "sha256:decision-history",
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    };
+    await driveExecutorTicks(input);
+    const gated = await driveExecutorTicks(input);
+    expect(gated.invocation.state).toBe("waiting_operator");
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    external = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+      decisions: [],
+    });
+
+    const retried = await driveExecutorTicks(input);
+
+    expect(retried.invocation.state).toBe("manual_recovery_required");
+    expect(retried.lastRound).toMatchObject({
+      recoveryCode: "external_state_inconsistent",
+      summary: expect.stringContaining(
+        "previously mirrored decision(s) remain unresolved",
+      ),
     });
     db.close();
   });
@@ -943,6 +1367,69 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const completed = await driveExecutorTicks(input);
     expect(completed.invocation.state).toBe("succeeded");
+    db.close();
+  });
+
+  it("synthesizes an approval decision alongside resolved history", async () => {
+    const { db, invocation } = openDelegateDb();
+    const external = state({
+      activeStep: "publish",
+      stepStatus: "awaiting_approval",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "Review completed",
+          allowedActions: ["approve"],
+          recommendedAction: "approve",
+          chosenAction: "approve",
+          resolution: "approved",
+        },
+      ],
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: "sha256:approval-with-history",
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 10,
+    };
+    await driveExecutorTicks(input);
+    const gated = await driveExecutorTicks(input);
+
+    expect(gated.invocation.state).toBe("waiting_operator");
+    const decisions = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    }).snapshot().currentRound?.decisions;
+    expect(decisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          externalRef: "review",
+          resolution: "approved",
+        }),
+        expect.objectContaining({
+          externalRef: "delegate-supervisor:synthetic-approval-gate",
+          resolution: null,
+        }),
+      ]),
+    );
     db.close();
   });
 
@@ -1434,6 +1921,96 @@ describe("delegate-supervisor SDK executor", () => {
   });
 });
 
+describe("profile-backed persisted delegate state", () => {
+  it.each(["symbolic link", "oversized file", "named pipe"])(
+    "rejects a %s before reading external-state bytes",
+    async (artifactKind) => {
+      const { db, invocation, root } = openDelegateDb();
+      const statePath = path.join(root, "delegate-external-state.json");
+      if (artifactKind === "symbolic link") {
+        const targetPath = path.join(root, "external-state-target.json");
+        writeState(targetPath, state());
+        fs.symlinkSync(targetPath, statePath);
+      } else if (artifactKind === "oversized file") {
+        fs.writeFileSync(statePath, "{}");
+        fs.truncateSync(statePath, LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1);
+      } else {
+        execFileSync("mkfifo", [statePath]);
+      }
+      const adapter = createPersistedProfileDelegateToolAdapter({
+        tool: "gnhf",
+        repoPath: root,
+        command: "/bin/false",
+        argsPrefix: [],
+        env: {},
+      });
+
+      const read = await adapter.readExternalState({
+        invocation,
+        config: { tool: "gnhf" },
+        signal: new AbortController().signal,
+        handoff: {
+          externalIdentity: {
+            externalRunId: "gnhf-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "persisted handoff",
+          artifactPaths: [statePath],
+        },
+      });
+
+      expect(read).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(
+          "delegated external state is not a bounded regular file",
+        ),
+      });
+      db.close();
+    },
+  );
+
+  it("does not refresh no-mistakes state through a symbolic link", async () => {
+    const { db, invocation, root } = openDelegateDb();
+    const targetPath = path.join(root, "protected-target.json");
+    const original = JSON.stringify({ protected: true });
+    fs.writeFileSync(targetPath, original);
+    const statePath = path.join(root, "delegate-external-state.json");
+    fs.symlinkSync(targetPath, statePath);
+    const adapter = createPersistedProfileDelegateToolAdapter({
+      tool: "no-mistakes",
+      repoPath: root,
+      command: "/bin/sh",
+      argsPrefix: [
+        "-c",
+        `printf 'run:\n  id: "nm-run-1"\n  branch: feature/delegate-supervisor\n  status: running\n  head: ${HEAD}\nsteps[1]{step,status,findings,duration_ms}:\n  review,running,0,1\n'`,
+      ],
+      env: {},
+    });
+
+    await expect(
+      adapter.readExternalState({
+        invocation,
+        config: { tool: "no-mistakes" },
+        signal: new AbortController().signal,
+        handoff: {
+          externalIdentity: {
+            externalRunId: "nm-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "persisted handoff",
+          artifactPaths: [statePath],
+        },
+      }),
+    ).rejects.toThrow(
+      "previous delegated external state is unreadable: delegated external state is not a bounded regular file",
+    );
+    expect(fs.readFileSync(targetPath, "utf8")).toBe(original);
+    db.close();
+  });
+});
+
 describe("no-mistakes tool adapter", () => {
   const identity = {
     externalRunId: "nm-run-1",
@@ -1450,6 +2027,25 @@ describe("no-mistakes tool adapter", () => {
         abbreviatedHead === HEAD.slice(0, abbreviatedHead.length) ? HEAD : null,
       ...options,
     });
+
+  it.each([HEAD.slice(0, 8), "x".repeat(40)])(
+    "requires a canonical full commit SHA before terminal classification",
+    (headSha) => {
+      expect(
+        classifyDelegateSupervisorState(
+          state({
+            headSha,
+            activeStep: null,
+            stepStatus: "completed",
+            ciState: "passed",
+          }),
+        ),
+      ).toMatchObject({
+        classification: "manual_recovery_required",
+        recoveryCode: "external_state_unreadable",
+      });
+    },
+  );
 
   it("reads launch identity without treating the bounded gate as status", () => {
     expect(

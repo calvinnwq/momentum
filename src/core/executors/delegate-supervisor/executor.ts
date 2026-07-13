@@ -37,8 +37,9 @@ export const DELEGATE_SUPERVISOR_EXECUTOR_NAME = "delegate-supervisor";
 /** Maximum unchanged semantic-progress window before manual recovery. */
 export const DELEGATE_SUPERVISOR_STALL_AFTER_MS = 4 * 60 * 1000;
 
-const HANDOFF_STAGE = "delegate_handoff_completed";
+export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
 const HANDOFF_INTENT_STAGE = "delegate_handoff_intent";
+const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
 const MIRRORED_STAGE = "delegate_external_state_mirrored";
 const SYNTHETIC_APPROVAL_EXTERNAL_ID =
   "delegate-supervisor:synthetic-approval-gate";
@@ -76,8 +77,23 @@ type LegacyLiveStepDecision = Pick<
 
 type DurableCheckpointRead<T> =
   | { status: "absent" }
-  | { status: "valid"; roundId: string; value: T }
-  | { status: "invalid"; roundId: string; reason: string };
+  | {
+      status: "valid";
+      roundId: string;
+      position: DurableCheckpointPosition;
+      value: T;
+    }
+  | {
+      status: "invalid";
+      roundId: string;
+      position: DurableCheckpointPosition;
+      reason: string;
+    };
+
+type DurableCheckpointPosition = {
+  roundIndex: number;
+  sequence: number;
+};
 
 /** SDK-native executor that composes one bounded handoff with repeated polls. */
 export class DelegateSupervisorExecutor implements Executor<
@@ -103,11 +119,40 @@ export class DelegateSupervisorExecutor implements Executor<
     const priorRounds = context.state.rounds.filter(
       ({ round }) => round.attempt < context.state.invocation.attempt,
     );
+    const legacyCompletion = findLegacyLiveStepCompletion(context.state.rounds);
+    const latestDelegateEvidence = latestCheckpointPosition(
+      context.state.rounds,
+      new Set([
+        HANDOFF_INTENT_STAGE,
+        DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+        LEGACY_COMPLETION_REPLAYED_STAGE,
+      ]),
+    );
+    if (
+      legacyCompletion.status !== "absent" &&
+      (latestDelegateEvidence === null ||
+        !isCheckpointAfter(latestDelegateEvidence, legacyCompletion.position))
+    ) {
+      if (legacyCompletion.status === "invalid") {
+        return invalidCompletionEvidenceResult(context, legacyCompletion);
+      }
+      const fromPriorAttempt = !attemptRounds.some(
+        ({ round }) => round.roundId === legacyCompletion.roundId,
+      );
+      return replayLegacyCompletion(
+        context,
+        legacyCompletion,
+        fromPriorAttempt,
+      );
+    }
     const priorHandoff = findHandoff(priorRounds);
     const latestPriorHandoffRoundIndex = [...priorRounds]
       .reverse()
       .find(({ checkpoints }) =>
-        checkpoints.some((checkpoint) => checkpoint.stage === HANDOFF_STAGE),
+        checkpoints.some(
+          (checkpoint) =>
+            checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+        ),
       )?.round.roundIndex;
     const unresolvedPriorIntent = [...priorRounds]
       .reverse()
@@ -117,7 +162,10 @@ export class DelegateSupervisorExecutor implements Executor<
           checkpoints.some(
             (checkpoint) => checkpoint.stage === HANDOFF_INTENT_STAGE,
           ) &&
-          !checkpoints.some((checkpoint) => checkpoint.stage === HANDOFF_STAGE),
+          !checkpoints.some(
+            (checkpoint) =>
+              checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+          ),
       );
     if (attemptRounds.length === 0 && unresolvedPriorIntent !== undefined) {
       return this.handoff(
@@ -134,23 +182,10 @@ export class DelegateSupervisorExecutor implements Executor<
         context,
         adapter,
         priorHandoff.value,
+        context.state.rounds,
         attemptRounds,
         true,
       );
-    }
-    const legacyCompletion = findLegacyLiveStepCompletion(attemptRounds);
-    if (legacyCompletion.status === "invalid") {
-      return invalidCompletionEvidenceResult(context, legacyCompletion);
-    }
-    if (legacyCompletion.status === "valid") {
-      context.hostBindings.settleHandoff?.(
-        legacyCompletion.value.recommendation === "complete" ||
-          legacyCompletion.value.recommendation === "failed",
-      );
-      return {
-        roundId: legacyCompletion.roundId,
-        ...legacyCompletion.value,
-      };
     }
     const handoffRecord = findHandoff(attemptRounds);
     if (handoffRecord.status === "invalid") {
@@ -174,7 +209,13 @@ export class DelegateSupervisorExecutor implements Executor<
         reason: handoffRecord.value.summary,
       };
     }
-    return this.supervise(context, adapter, handoffRecord.value, attemptRounds);
+    return this.supervise(
+      context,
+      adapter,
+      handoffRecord.value,
+      context.state.rounds,
+      attemptRounds,
+    );
   }
 
   private async handoff(
@@ -275,7 +316,8 @@ export class DelegateSupervisorExecutor implements Executor<
     >,
     adapter: DelegateSupervisorToolAdapter | undefined,
     handoff: DelegateSupervisorHandoff,
-    attemptRounds: readonly ExecutorRoundEnvelopeSnapshot[],
+    decisionHistoryRounds: readonly ExecutorRoundEnvelopeSnapshot[],
+    progressRounds: readonly ExecutorRoundEnvelopeSnapshot[],
     reattachingPriorHandoff = false,
   ): Promise<ExecutorTickResult> {
     const active = context.state.currentRound;
@@ -299,7 +341,7 @@ export class DelegateSupervisorExecutor implements Executor<
       );
       context.hostBindings.settleHandoff?.(true);
     }
-    if (adapter === undefined && handoff.terminalState === undefined) {
+    if (adapter === undefined) {
       return recoveryResult(
         roundId,
         "tool_adapter_unavailable",
@@ -310,24 +352,40 @@ export class DelegateSupervisorExecutor implements Executor<
     context.signal.throwIfAborted();
     const observedAt = context.hostBindings.now?.() ?? Date.now();
     let read;
-    if (handoff.terminalState !== undefined) {
-      read = { ok: true as const, ...handoff.terminalState };
-    } else {
-      try {
-        read = await adapter!.readExternalState({
-          invocation: context.state.invocation,
-          config: context.config,
-          signal: context.signal,
-          handoff,
-        });
-      } catch (error) {
-        if (context.signal.aborted && error === context.signal.reason)
-          throw error;
-        read = {
-          ok: false as const,
-          error: `Delegated external-state read failed: ${errorMessage(error)}`,
-        };
-      }
+    try {
+      read = await adapter.readExternalState({
+        invocation: context.state.invocation,
+        config: context.config,
+        signal: context.signal,
+        handoff,
+      });
+    } catch (error) {
+      if (context.signal.aborted && error === context.signal.reason)
+        throw error;
+      read = {
+        ok: false as const,
+        error: `Delegated external-state read failed: ${errorMessage(error)}`,
+      };
+    }
+    if (
+      read.ok &&
+      handoff.terminalState !== undefined &&
+      isLaggingTerminalCorroboration(read.value, handoff.terminalState.value)
+    ) {
+      read = {
+        ok: true as const,
+        ...handoff.terminalState,
+        digest: `sha256:${crypto
+          .createHash("sha256")
+          .update(
+            JSON.stringify({
+              terminalDigest: handoff.terminalState.digest,
+              corroborationDigest: read.digest,
+              value: handoff.terminalState.value,
+            }),
+          )
+          .digest("hex")}`,
+      };
     }
 
     if (!read.ok) {
@@ -358,7 +416,7 @@ export class DelegateSupervisorExecutor implements Executor<
       decision = classifyDelegateSupervisorInconsistent(identityMismatch);
     }
     const priorUnresolved = countUnresolvedPriorDecisions(
-      attemptRounds,
+      decisionHistoryRounds,
       read.value,
     );
     if (decision.classification === "complete" && priorUnresolved > 0) {
@@ -367,7 +425,7 @@ export class DelegateSupervisorExecutor implements Executor<
       );
     }
 
-    const previous = latestMirroredCheckpoint(attemptRounds);
+    const previous = latestMirroredCheckpoint(progressRounds);
     const progressAt =
       previous !== null && previous.progressDigest === progressDigest
         ? previous.progressAt
@@ -444,9 +502,9 @@ export class DelegateSupervisorExecutor implements Executor<
       },
       checkpoints: [
         {
-          checkpointId: `${roundId}-${HANDOFF_STAGE}`,
+          checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_HANDOFF_STAGE}`,
           sequence: beforeEvidence?.checkpoints.length ?? 0,
-          stage: HANDOFF_STAGE,
+          stage: DELEGATE_SUPERVISOR_HANDOFF_STAGE,
           detail: JSON.stringify(handoff),
         },
       ],
@@ -578,9 +636,15 @@ function mirrorEvidence(
       ...projection,
     });
   }
+  const hasUnresolvedDecision = state.decisions.some(
+    (decision) =>
+      typeof decision.resolution !== "string" ||
+      decision.resolution.trim().length === 0,
+  );
   const decisions =
-    state.stepStatus === "awaiting_approval" && state.decisions.length === 0
+    state.stepStatus === "awaiting_approval" && !hasUnresolvedDecision
       ? [
+          ...state.decisions,
           {
             externalId: SYNTHETIC_APPROVAL_EXTERNAL_ID,
             summary: "Approve the delegated tool boundary.",
@@ -705,11 +769,15 @@ function resolveToolAdapter(
 function findHandoff(
   rounds: readonly ExecutorRoundEnvelopeSnapshot[],
 ): DurableCheckpointRead<DelegateSupervisorHandoff> {
-  return findDurableCheckpoint(rounds, HANDOFF_STAGE, (detail) => {
-    const parsed = JSON.parse(detail) as DelegateSupervisorHandoff;
-    assertHandoff(parsed);
-    return parsed;
-  });
+  return findDurableCheckpoint(
+    rounds,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    (detail) => {
+      const parsed = JSON.parse(detail) as DelegateSupervisorHandoff;
+      assertHandoff(parsed);
+      return parsed;
+    },
+  );
 }
 
 function findLegacyLiveStepCompletion(
@@ -790,6 +858,10 @@ function findDurableCheckpoint<T>(
       return {
         status: "invalid",
         roundId: snapshot.round.roundId,
+        position: {
+          roundIndex: snapshot.round.roundIndex,
+          sequence: checkpoint.sequence,
+        },
         reason: `${stage} checkpoint detail is missing`,
       };
     }
@@ -797,17 +869,125 @@ function findDurableCheckpoint<T>(
       return {
         status: "valid",
         roundId: snapshot.round.roundId,
+        position: {
+          roundIndex: snapshot.round.roundIndex,
+          sequence: checkpoint.sequence,
+        },
         value: parse(checkpoint.detail),
       };
     } catch (error) {
       return {
         status: "invalid",
         roundId: snapshot.round.roundId,
+        position: {
+          roundIndex: snapshot.round.roundIndex,
+          sequence: checkpoint.sequence,
+        },
         reason: errorMessage(error),
       };
     }
   }
   return { status: "absent" };
+}
+
+function latestCheckpointPosition(
+  rounds: readonly ExecutorRoundEnvelopeSnapshot[],
+  stages: ReadonlySet<string>,
+): DurableCheckpointPosition | null {
+  let latest: DurableCheckpointPosition | null = null;
+  for (const snapshot of rounds) {
+    for (const checkpoint of snapshot.checkpoints) {
+      if (!stages.has(checkpoint.stage)) continue;
+      const candidate = {
+        roundIndex: snapshot.round.roundIndex,
+        sequence: checkpoint.sequence,
+      };
+      if (latest === null || isCheckpointAfter(candidate, latest)) {
+        latest = candidate;
+      }
+    }
+  }
+  return latest;
+}
+
+function isCheckpointAfter(
+  candidate: DurableCheckpointPosition,
+  reference: DurableCheckpointPosition,
+): boolean {
+  return (
+    candidate.roundIndex > reference.roundIndex ||
+    (candidate.roundIndex === reference.roundIndex &&
+      candidate.sequence > reference.sequence)
+  );
+}
+
+function replayLegacyCompletion(
+  context: ExecutorTickContext<
+    DelegateSupervisorConfig,
+    DelegateSupervisorHostBindings
+  >,
+  completion: Extract<
+    DurableCheckpointRead<LegacyLiveStepDecision>,
+    { status: "valid" }
+  >,
+  fromPriorAttempt: boolean,
+): ExecutorTickResult {
+  context.hostBindings.settleHandoff?.(
+    completion.value.recommendation === "complete" ||
+      completion.value.recommendation === "failed",
+  );
+  const active = context.state.currentRound;
+  const reusableActiveRound =
+    fromPriorAttempt &&
+    active !== null &&
+    active.round.attempt === context.state.invocation.attempt &&
+    (active.round.state === "running" ||
+      active.round.state === "capturing_result")
+      ? active.round
+      : null;
+  if (
+    fromPriorAttempt &&
+    active !== null &&
+    active.round.attempt === context.state.invocation.attempt &&
+    !isTerminalExecutorRoundState(active.round.state) &&
+    reusableActiveRound === null
+  ) {
+    throw new Error(
+      `legacy completion cannot replay into active ${active.round.state} round ${active.round.roundId}`,
+    );
+  }
+  const roundId =
+    reusableActiveRound !== null
+      ? reusableActiveRound.roundId
+      : fromPriorAttempt
+        ? startRound(context, "running", completion.value.reason)
+        : completion.roundId;
+  if (fromPriorAttempt) {
+    if (reusableActiveRound?.state !== "capturing_result") {
+      context.envelope.observeRound(roundId, {
+        phase: "capturing_result",
+        summary: completion.value.reason,
+      });
+    }
+  }
+  if (completion.value.recommendation === "continue") {
+    const replayRound = context.envelope
+      .snapshot()
+      .rounds.find(({ round }) => round.roundId === roundId);
+    const sequence =
+      Math.max(
+        -1,
+        ...(replayRound?.checkpoints.map((checkpoint) => checkpoint.sequence) ??
+          []),
+      ) + 1;
+    context.envelope.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-${LEGACY_COMPLETION_REPLAYED_STAGE}`,
+      sequence,
+      stage: LEGACY_COMPLETION_REPLAYED_STAGE,
+      detail: JSON.stringify({ sourceRoundId: completion.roundId }),
+    });
+  }
+  return { roundId, ...completion.value };
 }
 
 function invalidCompletionEvidenceResult(
@@ -905,6 +1085,27 @@ function compareIdentity(
     return `delegated external identity mismatch for headSha: expected ${expected.headSha}, observed unverified ${actual.headSha}`;
   }
   return null;
+}
+
+function isLaggingTerminalCorroboration(
+  observed: DelegateSupervisorExternalState,
+  terminal: DelegateSupervisorExternalState,
+): boolean {
+  return (
+    /^[0-9a-f]{40}$/.test(observed.headSha) &&
+    observed.externalRunId === terminal.externalRunId &&
+    observed.branch === terminal.branch &&
+    observed.headSha === terminal.headSha &&
+    observed.stepStatus === "running" &&
+    (observed.ciState === "passed" || observed.ciState === "none") &&
+    observed.findings.length === 0 &&
+    observed.selectedFindingIds.length === 0 &&
+    observed.decisions.every(
+      (decision) =>
+        typeof decision.resolution === "string" &&
+        decision.resolution.trim().length > 0,
+    )
+  );
 }
 
 function assertHandoff(value: DelegateSupervisorHandoff): void {

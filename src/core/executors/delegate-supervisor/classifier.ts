@@ -11,6 +11,7 @@ import {
 } from "./types.js";
 
 const COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
+const FULL_COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 const STATUS_SET: ReadonlySet<string> = new Set(
   DELEGATE_SUPERVISOR_EXTERNAL_STATUSES,
 );
@@ -265,6 +266,11 @@ export function classifyDelegateSupervisorState(
         `${subject} run was cancelled before reliable completion; inspect the external run before retrying`,
       );
     case "completed": {
+      if (!FULL_COMMIT_SHA_RE.test(state.headSha)) {
+        return classifyDelegateSupervisorUnreadable(
+          `${subject} completed state requires a full 40-character head SHA`,
+        );
+      }
       if (state.findings.length > 0 || state.selectedFindingIds.length > 0) {
         return manualRecovery(
           "external_state_inconsistent",

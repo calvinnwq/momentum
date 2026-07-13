@@ -53,10 +53,12 @@ import {
 } from "../leases.js";
 import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
 import {
+  listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
+import { DELEGATE_SUPERVISOR_HANDOFF_STAGE } from "../../executors/delegate-supervisor/executor.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
   reconcileDispatchedWorkflowStep,
@@ -1221,17 +1223,27 @@ function isRegisteredSdkContinuation(
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
     rounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(db, invocation.state, rounds.at(-1))
+    isResumableRegisteredSdkTick(db, invocation, rounds.at(-1))
   );
 }
 
 function isResumableRegisteredSdkTick(
   db: MomentumDb,
-  invocationState: string,
+  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
   round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
 ): boolean {
-  if (invocationState !== "running" || round === undefined) return false;
+  if (invocation.state !== "running" || round === undefined) return false;
   if (round.classification === "continue") return true;
+  if (
+    invocation.executorFamily === "delegate-supervisor" &&
+    (round.state === "running" || round.state === "capturing_result") &&
+    round.classification === null &&
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    )
+  ) {
+    return true;
+  }
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1276,11 +1288,7 @@ function buildActiveSubworkflowClaim(
       : listExecutorRoundsForInvocation(db, invocation.invocationId);
   const resumableSdkTick =
     invocationRounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(
-      db,
-      invocation?.state ?? "missing",
-      invocationRounds.at(-1),
-    );
+    isResumableRegisteredSdkTick(db, invocation!, invocationRounds.at(-1));
   if (
     invocation === undefined ||
     (invocation.executorFamily !== "subworkflow" && !resumableSdkTick) ||

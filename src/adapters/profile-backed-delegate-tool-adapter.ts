@@ -843,15 +843,60 @@ function fileDigest(filePath: string): string | null {
 }
 
 function readBoundedResultFile(filePath: string): Buffer {
-  const stat = fs.lstatSync(filePath);
-  if (
-    stat.isSymbolicLink() ||
-    !stat.isFile() ||
-    stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES
-  ) {
-    throw new Error("result is not a bounded regular file");
+  return readBoundedRegularFile(filePath, "result");
+}
+
+function readBoundedRegularFile(filePath: string, description: string): Buffer {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(
+      filePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ELOOP"
+    ) {
+      throw new Error(`${description} is not a bounded regular file`);
+    }
+    throw error;
   }
-  return fs.readFileSync(filePath);
+  try {
+    const pathStat = fs.lstatSync(filePath);
+    const descriptorStat = fs.fstatSync(descriptor);
+    if (
+      pathStat.isSymbolicLink() ||
+      !pathStat.isFile() ||
+      !descriptorStat.isFile() ||
+      pathStat.dev !== descriptorStat.dev ||
+      pathStat.ino !== descriptorStat.ino ||
+      descriptorStat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES
+    ) {
+      throw new Error(`${description} is not a bounded regular file`);
+    }
+    const raw = Buffer.allocUnsafe(LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1);
+    let offset = 0;
+    while (offset < raw.length) {
+      const bytesRead = fs.readSync(
+        descriptor,
+        raw,
+        offset,
+        raw.length - offset,
+        null,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
+      throw new Error(`${description} is not a bounded regular file`);
+    }
+    return raw.subarray(0, offset);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -879,6 +924,9 @@ export function createPersistedProfileDelegateToolAdapter(input: {
           env: input.env,
           statePath: delegateStatePath(handoff.artifactPaths),
           expected: handoff.externalIdentity,
+          ...(handoff.terminalState !== undefined
+            ? { terminalProofHeadSha: handoff.terminalState.value.headSha }
+            : {}),
         }),
     });
   }
@@ -929,13 +977,15 @@ function createProfileNoMistakesToolAdapter(
       headSha: launchingReceipt.headSha,
     });
     if (!launchIdentity.ok) throw new Error(launchIdentity.error);
+    const terminalProofHeadSha =
+      finalized.ok && finalized.result.state === "succeeded"
+        ? resolveTerminalProofHead(input.repoPath, launchIdentity.value.headSha)
+        : undefined;
     const launchedReceipt: NoMistakesDelegateReceipt = {
       ...launchingReceipt,
       phase: "launched",
       externalIdentity: launchIdentity.value,
-      ...(finalized.ok && finalized.result.state === "succeeded"
-        ? { terminalProofHeadSha: launchIdentity.value.headSha }
-        : {}),
+      ...(terminalProofHeadSha !== undefined ? { terminalProofHeadSha } : {}),
     };
     writeJsonAtomically(input.handoffReceiptPath, launchedReceipt);
     writeProvisionalNoMistakesState(
@@ -952,14 +1002,9 @@ function createProfileNoMistakesToolAdapter(
     if (!status.ok) throw new Error(status.error);
     const observed = settleNoMistakesHandoffState(
       status,
-      finalized.ok && finalized.result.state === "succeeded"
-        ? launchIdentity.value.headSha
-        : null,
+      terminalProofHeadSha ?? null,
     );
-    fs.writeFileSync(
-      launchingReceipt.statePath,
-      JSON.stringify(observed.value),
-    );
+    writeJsonAtomically(launchingReceipt.statePath, observed.value);
     const artifactPaths = [
       launchingReceipt.statePath,
       input.handoffReceiptPath,
@@ -1013,6 +1058,9 @@ function createProfileNoMistakesToolAdapter(
         env: input.statusEnv,
         statePath: delegateStatePath(handoff.artifactPaths),
         expected: handoff.externalIdentity,
+        ...(handoff.terminalState !== undefined
+          ? { terminalProofHeadSha: handoff.terminalState.value.headSha }
+          : {}),
       }),
   });
 }
@@ -1103,7 +1151,7 @@ function recoverNoMistakesHandoff(
   ) {
     return null;
   }
-  fs.writeFileSync(receipt.statePath, JSON.stringify(observed.value));
+  writeJsonAtomically(receipt.statePath, observed.value);
   const terminal =
     classifyDelegateSupervisorState(observed.value).classification ===
       "complete" &&
@@ -1331,7 +1379,7 @@ function writeProvisionalNoMistakesState(
     prUrl: null,
     ciState: "pending",
   };
-  fs.writeFileSync(statePath, JSON.stringify(state));
+  writeJsonAtomically(statePath, state);
 }
 
 function writeJsonAtomically(filePath: string, value: unknown): void {
@@ -1359,6 +1407,7 @@ function refreshNoMistakesState(input: {
     branch: string;
     headSha: string;
   };
+  terminalProofHeadSha?: string;
 }): ReturnType<typeof parseNoMistakesAxiStatus> {
   const previousState = readPreviousDelegateState(input.statePath);
   const status = readNoMistakesStatus({
@@ -1366,8 +1415,21 @@ function refreshNoMistakesState(input: {
     ...(previousState !== undefined ? { previousState } : {}),
   });
   if (!status.ok) throw new Error(status.error);
-  fs.writeFileSync(input.statePath, JSON.stringify(status.value));
-  return status;
+  if (
+    input.terminalProofHeadSha !== undefined &&
+    (!/^[0-9a-f]{40}$/.test(input.terminalProofHeadSha) ||
+      !delegateStateHeadMatchesRepo(input.repoPath, input.terminalProofHeadSha))
+  ) {
+    throw new Error(
+      `no-mistakes terminal proof head ${input.terminalProofHeadSha} does not match the current repository head`,
+    );
+  }
+  const observed = settleNoMistakesHandoffState(
+    status,
+    input.terminalProofHeadSha ?? null,
+  );
+  writeJsonAtomically(input.statePath, observed.value);
+  return observed;
 }
 
 function readNoMistakesStatus(input: {
@@ -1465,11 +1527,40 @@ function readPreviousDelegateState(
 ): DelegateSupervisorExternalState | undefined {
   try {
     return JSON.parse(
-      fs.readFileSync(statePath, "utf8"),
+      readBoundedRegularFile(statePath, "delegated external state").toString(
+        "utf8",
+      ),
     ) as DelegateSupervisorExternalState;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return undefined;
+    }
+    throw new Error(
+      `previous delegated external state is unreadable: ${errorMessage(error)}`,
+    );
   }
+}
+
+function resolveTerminalProofHead(
+  repoPath: string,
+  launchHead: string,
+): string {
+  const currentHead = resolveCurrentHead(repoPath, "");
+  if (
+    !/^[0-9a-f]{40}$/.test(currentHead) ||
+    (currentHead !== launchHead &&
+      !isGitDescendant(repoPath, launchHead, currentHead))
+  ) {
+    throw new Error(
+      "successful no-mistakes finalization did not produce a repository head descended from its launch identity",
+    );
+  }
+  return currentHead;
 }
 
 function resolveGitCommit(
@@ -1527,7 +1618,7 @@ function readPersistedDelegateState(
     };
   }
   try {
-    const raw = fs.readFileSync(statePath);
+    const raw = readBoundedRegularFile(statePath, "delegated external state");
     return {
       ok: true,
       value: JSON.parse(

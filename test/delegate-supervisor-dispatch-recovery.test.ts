@@ -80,17 +80,24 @@ JSON`;
   return profilePath;
 }
 
-function writeNoMistakesProfile(profileDir: string): {
+function writeNoMistakesProfile(
+  profileDir: string,
+  statusMode: "completed" | "lagging" = "completed",
+): {
   profilePath: string;
   wrapperConfigPath: string;
 } {
   const executablePath = path.join(profileDir, "no-mistakes");
+  const statusOutput =
+    statusMode === "lagging"
+      ? `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: running\n  head: %s\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`
+      : `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`;
   fs.writeFileSync(
     executablePath,
     `#!/bin/sh
 branch=$(git branch --show-current)
 head=$(git rev-parse HEAD)
-printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"
+${statusOutput}
 `,
   );
   fs.chmodSync(executablePath, 0o755);
@@ -639,6 +646,66 @@ describe("profile-backed delegate handoff artifacts", () => {
       db.close();
     },
   );
+
+  it("binds lagging no-mistakes terminal proof to post-finalization HEAD", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    const runId = "no-mistakes-post-finalization-head";
+    const stepId = "no-mistakes";
+    const profile = writeNoMistakesProfile(tempDir(), "lagging");
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+      tool: "no-mistakes",
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+
+    const currentHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+    const receipt = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          repoPath,
+          ".agent-workflows",
+          runId,
+          "delegate",
+          stepId,
+          "delegate-handoff.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      headSha: string;
+      terminalProofHeadSha: string;
+    };
+    expect(receipt.headSha).not.toBe(currentHead);
+    expect(receipt.terminalProofHeadSha).toBe(currentHead);
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded" });
+    db.close();
+  });
 
   it("migrates a correlated legacy run-root state artifact", async () => {
     const dataDir = tempDir();
