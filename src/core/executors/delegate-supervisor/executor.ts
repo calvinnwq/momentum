@@ -367,25 +367,38 @@ export class DelegateSupervisorExecutor implements Executor<
         error: `Delegated external-state read failed: ${errorMessage(error)}`,
       };
     }
-    if (
-      read.ok &&
-      handoff.terminalState !== undefined &&
-      isLaggingTerminalCorroboration(read.value, handoff.terminalState.value)
-    ) {
-      read = {
-        ok: true as const,
-        ...handoff.terminalState,
-        digest: `sha256:${crypto
-          .createHash("sha256")
-          .update(
-            JSON.stringify({
-              terminalDigest: handoff.terminalState.digest,
-              corroborationDigest: read.digest,
-              value: handoff.terminalState.value,
-            }),
-          )
-          .digest("hex")}`,
-      };
+    if (read.ok) {
+      const validation = classifyDelegateSupervisorState(read.value);
+      if (validation.recoveryCode === "external_state_unreadable") {
+        observeDecision(
+          context,
+          roundId,
+          validation,
+          read.digest,
+          null,
+          observedAt,
+        );
+        return tickResult(roundId, validation);
+      }
+      if (
+        handoff.terminalState !== undefined &&
+        isLaggingTerminalCorroboration(read.value, handoff.terminalState.value)
+      ) {
+        read = {
+          ok: true as const,
+          ...handoff.terminalState,
+          digest: `sha256:${crypto
+            .createHash("sha256")
+            .update(
+              JSON.stringify({
+                terminalDigest: handoff.terminalState.digest,
+                corroborationDigest: read.digest,
+                value: handoff.terminalState.value,
+              }),
+            )
+            .digest("hex")}`,
+        };
+      }
     }
 
     if (!read.ok) {

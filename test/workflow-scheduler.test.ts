@@ -1821,6 +1821,12 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           summary: "handoff evidence persisted",
         }),
       });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
       const recorder = recordingDispatch();
 
       const result = runWorkflowSchedulerOnce({
@@ -1831,8 +1837,20 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       });
 
       expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(result.claim.lease.holder).toBe("scheduler-1");
     } finally {
       db.close();
     }

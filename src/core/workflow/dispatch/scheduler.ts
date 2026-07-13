@@ -656,14 +656,22 @@ function tryParkStaleRunningDispatchLease(
       db,
       deriveDispatchInvocationId(candidate.runId, runningStep.stepId),
     );
-    // Only the established subworkflow lane auto-reattaches after lease expiry.
-    // A registered SDK `continue` round is re-driven while its lease is fresh;
-    // after daemon downtime makes that lease stale, preserve the existing
-    // fail-closed recovery policy until stale-invocation adoption is landed.
+    const invocationRounds =
+      invocation === undefined
+        ? []
+        : listExecutorRoundsForInvocation(db, invocation.invocationId);
     if (
       invocation !== undefined &&
       invocation.executorFamily === "subworkflow" &&
       !isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+    if (
+      invocation !== undefined &&
+      invocationRounds[0]?.roundIndex === 0 &&
+      isCheckpointedDelegateHandoff(db, invocation, invocationRounds.at(-1))
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1234,16 +1242,7 @@ function isResumableRegisteredSdkTick(
 ): boolean {
   if (invocation.state !== "running" || round === undefined) return false;
   if (round.classification === "continue") return true;
-  if (
-    invocation.executorFamily === "delegate-supervisor" &&
-    (round.state === "running" || round.state === "capturing_result") &&
-    round.classification === null &&
-    listExecutorCheckpointsForRound(db, round.roundId).some(
-      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    )
-  ) {
-    return true;
-  }
+  if (isCheckpointedDelegateHandoff(db, invocation, round)) return true;
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1254,6 +1253,23 @@ function isResumableRegisteredSdkTick(
       ((round.state === "succeeded" || round.state === "failed") &&
         (round.classification === "approval_required" ||
           round.classification === "operator_decision_required")))
+  );
+}
+
+function isCheckpointedDelegateHandoff(
+  db: MomentumDb,
+  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
+  round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
+): boolean {
+  return (
+    invocation.state === "running" &&
+    invocation.executorFamily === "delegate-supervisor" &&
+    round !== undefined &&
+    (round.state === "running" || round.state === "capturing_result") &&
+    round.classification === null &&
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    )
   );
 }
 

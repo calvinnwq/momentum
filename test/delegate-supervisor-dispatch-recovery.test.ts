@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
+import { createProfileBackedDelegateToolAdapter } from "../src/adapters/profile-backed-delegate-tool-adapter.js";
 import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
@@ -279,6 +280,96 @@ function reopenCompletedHandoff(
 }
 
 describe("profile-backed delegate handoff artifacts", () => {
+  it.each(["gnhf", "no-mistakes"] as const)(
+    "rejects a symbolic-link %s handoff receipt",
+    async (tool) => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "symlink-receipt");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const realReceiptPath = path.join(root, "real-receipt.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const invocationId = "symlink-receipt::step::dispatch";
+      const receipt =
+        tool === "gnhf"
+          ? {
+              schemaVersion: 1,
+              tool,
+              invocationId,
+              attempt: 1,
+              phase: "launched",
+              baseHead: headSha,
+              branch,
+              statePath,
+              resultJsonPath,
+              executorLogPath,
+              verificationLogPath,
+              preexistingResultDigest: null,
+            }
+          : {
+              schemaVersion: 1,
+              invocationId,
+              attempt: 1,
+              phase: "launched",
+              branch,
+              headSha,
+              statePath,
+              resultJsonPath,
+              executorLogPath,
+              externalIdentity: {
+                externalRunId: "nm-run-1",
+                branch,
+                headSha,
+              },
+            };
+      fs.writeFileSync(realReceiptPath, JSON.stringify(receipt));
+      fs.symlinkSync(realReceiptPath, handoffReceiptPath);
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool,
+        invocationId,
+        attempt: 1,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+        },
+        run: () => {
+          throw new Error("unexpected launch");
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        Promise.resolve().then(() =>
+          adapter.recoverHandoff!({
+            invocation: {} as never,
+            config: { tool },
+            signal: new AbortController().signal,
+          }),
+        ),
+      ).rejects.toThrow(/not a bounded regular file/);
+    },
+  );
+
   it("namespaces attempt-one artifacts by step", async () => {
     const dataDir = tempDir();
     const repoPath = initRepo();
@@ -679,19 +770,15 @@ describe("profile-backed delegate handoff artifacts", () => {
     });
 
     const currentHead = runGit(repoPath, ["rev-parse", "HEAD"]);
-    const receipt = JSON.parse(
-      fs.readFileSync(
-        path.join(
-          repoPath,
-          ".agent-workflows",
-          runId,
-          "delegate",
-          stepId,
-          "delegate-handoff.json",
-        ),
-        "utf8",
-      ),
-    ) as {
+    const receiptPath = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+      "delegate-handoff.json",
+    );
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as {
       headSha: string;
       terminalProofHeadSha: string;
     };
@@ -704,6 +791,123 @@ describe("profile-backed delegate handoff artifacts", () => {
         )
         .get(runId),
     ).toEqual({ state: "succeeded" });
+    fs.rmSync(
+      path.join(path.dirname(receiptPath), "delegate-external-state.json"),
+    );
+    reopenInterruptedHandoff(db, runId, stepId);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 3,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoPath,
+          ".agent-workflows",
+          runId,
+          "no-mistakes-launch-count",
+        ),
+        "utf8",
+      ),
+    ).toBe("1\n");
+    db.close();
+  });
+
+  it("recovers a no-mistakes commit from prepared finalization evidence", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    const runId = "no-mistakes-prepared-commit-recovery";
+    const stepId = "no-mistakes";
+    const profile = writeNoMistakesProfile(tempDir(), "lagging");
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+      tool: "no-mistakes",
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+
+    const stepRoot = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const committedHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+    expect(receipt["expectedTree"]).toBe(
+      runGit(repoPath, ["rev-parse", `${committedHead}^{tree}`]),
+    );
+    expect(receipt["expectedMessage"]).toBe(
+      runGit(repoPath, ["show", "-s", "--format=%B", committedHead]),
+    );
+    receipt["phase"] = "finalizing";
+    delete receipt["terminalProofHeadSha"];
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+    fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+    reopenInterruptedHandoff(db, runId, stepId);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 3,
+    });
+
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(committedHead);
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
+      phase: "launched",
+      terminalProofHeadSha: committedHead,
+    });
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoPath,
+          ".agent-workflows",
+          runId,
+          "no-mistakes-launch-count",
+        ),
+        "utf8",
+      ),
+    ).toBe("1\n");
     db.close();
   });
 

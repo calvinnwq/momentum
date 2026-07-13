@@ -88,7 +88,7 @@ type NoMistakesDelegateReceipt = {
   schemaVersion: 1;
   invocationId: string;
   attempt: number;
-  phase: "launching" | "launched";
+  phase: "launching" | "finalizing" | "launched";
   branch: string;
   headSha: string;
   statePath: string;
@@ -99,6 +99,8 @@ type NoMistakesDelegateReceipt = {
     branch: string;
     headSha: string;
   };
+  expectedTree?: string;
+  expectedMessage?: string;
   terminalProofHeadSha?: string;
 };
 
@@ -534,7 +536,12 @@ function readLiveWrapperDelegateReceipt(
 ): LiveWrapperDelegateReceipt {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(input.handoffReceiptPath, "utf8"));
+    parsed = JSON.parse(
+      readBoundedRegularFile(
+        input.handoffReceiptPath,
+        "delegated handoff receipt",
+      ).toString("utf8"),
+    );
   } catch (error) {
     throw new Error(
       `interrupted ${input.tool} handoff receipt is unreadable: ${errorMessage(error)}`,
@@ -961,28 +968,50 @@ function createProfileNoMistakesToolAdapter(
       executorLogPath: input.executorLogPath,
     };
     writeJsonAtomically(input.handoffReceiptPath, launchingReceipt);
-    const finalized = finalizeLiveStepResult(
-      await input.run(),
-      input.repoPath,
-      input.repoSafety,
-    );
-    if (!isProvenClean(finalized)) {
-      throw new Error(
-        finalized.ok ? finalized.result.summary : finalized.error,
-      );
-    }
+    const raw = await input.run();
     const launchIdentity = readNoMistakesLaunchIdentity({
       executorLogPath: launchingReceipt.executorLogPath,
       branch: launchingReceipt.branch,
       headSha: launchingReceipt.headSha,
     });
     if (!launchIdentity.ok) throw new Error(launchIdentity.error);
+    let preparedReceipt: NoMistakesDelegateReceipt = {
+      ...launchingReceipt,
+      externalIdentity: launchIdentity.value,
+    };
+    const finalized = finalizeLiveStepResult(raw, input.repoPath, {
+      ...input.repoSafety,
+      beforeCommit: (evidence) => {
+        const prepared = input.repoSafety.beforeCommit?.(evidence);
+        if (prepared?.ok === false) return prepared;
+        preparedReceipt = {
+          ...preparedReceipt,
+          phase: "finalizing",
+          expectedTree: evidence.expectedTree,
+          expectedMessage: evidence.message,
+        };
+        try {
+          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+          };
+        }
+      },
+    });
+    if (!isProvenClean(finalized)) {
+      throw new Error(
+        finalized.ok ? finalized.result.summary : finalized.error,
+      );
+    }
     const terminalProofHeadSha =
       finalized.ok && finalized.result.state === "succeeded"
         ? resolveTerminalProofHead(input.repoPath, launchIdentity.value.headSha)
         : undefined;
     const launchedReceipt: NoMistakesDelegateReceipt = {
-      ...launchingReceipt,
+      ...preparedReceipt,
       phase: "launched",
       externalIdentity: launchIdentity.value,
       ...(terminalProofHeadSha !== undefined ? { terminalProofHeadSha } : {}),
@@ -1089,6 +1118,9 @@ function recoverNoMistakesHandoff(
     };
     writeJsonAtomically(input.handoffReceiptPath, receipt);
   }
+  if (receipt.phase === "finalizing") {
+    receipt = recoverPreparedNoMistakesCommit(input, receipt);
+  }
   const expected = receipt.externalIdentity!;
   const currentBranch = resolveDelegateBranch(input.repoPath);
   if (expected.branch !== currentBranch) {
@@ -1179,7 +1211,10 @@ function readNoMistakesHandoffReceipt(
 ): NoMistakesDelegateReceipt {
   try {
     const stored = JSON.parse(
-      fs.readFileSync(input.handoffReceiptPath, "utf8"),
+      readBoundedRegularFile(
+        input.handoffReceiptPath,
+        "no-mistakes handoff receipt",
+      ).toString("utf8"),
     ) as Partial<NoMistakesDelegateReceipt>;
     if (
       (stored.schemaVersion !== undefined && stored.schemaVersion !== 1) ||
@@ -1218,12 +1253,18 @@ function readNoMistakesHandoffReceipt(
       ...(stored.externalIdentity !== undefined
         ? { externalIdentity: stored.externalIdentity }
         : {}),
+      ...(stored.expectedTree !== undefined
+        ? { expectedTree: stored.expectedTree }
+        : {}),
+      ...(stored.expectedMessage !== undefined
+        ? { expectedMessage: stored.expectedMessage }
+        : {}),
       ...(stored.terminalProofHeadSha !== undefined
         ? { terminalProofHeadSha: stored.terminalProofHeadSha }
         : {}),
     };
     if (
-      !["launching", "launched"].includes(receipt.phase) ||
+      !["launching", "finalizing", "launched"].includes(receipt.phase) ||
       receipt.branch.length === 0 ||
       !/^[0-9a-f]{40}$/.test(receipt.headSha) ||
       [receipt.statePath, receipt.resultJsonPath, receipt.executorLogPath].some(
@@ -1236,7 +1277,16 @@ function readNoMistakesHandoffReceipt(
     ) {
       throw new Error("stored handoff receipt is incomplete");
     }
-    if (receipt.phase === "launched") {
+    if (receipt.phase === "finalizing") {
+      if (
+        typeof receipt.expectedTree !== "string" ||
+        !/^[0-9a-f]{40}$/.test(receipt.expectedTree) ||
+        typeof receipt.expectedMessage !== "string"
+      ) {
+        throw new Error("stored handoff finalization receipt is incomplete");
+      }
+    }
+    if (receipt.phase === "finalizing" || receipt.phase === "launched") {
       const identity = receipt.externalIdentity;
       if (
         identity === undefined ||
@@ -1244,10 +1294,15 @@ function readNoMistakesHandoffReceipt(
         identity.branch !== receipt.branch ||
         !commitIdentitiesMatch(identity.headSha, receipt.headSha) ||
         (receipt.terminalProofHeadSha !== undefined &&
-          !commitIdentitiesMatch(
+          (!delegateStateHeadMatchesRepo(
+            input.repoPath,
             receipt.terminalProofHeadSha,
-            identity.headSha,
-          ))
+          ) ||
+            !isGitDescendant(
+              input.repoPath,
+              identity.headSha,
+              receipt.terminalProofHeadSha,
+            )))
       ) {
         throw new Error("stored handoff identity is incomplete");
       }
@@ -1257,6 +1312,96 @@ function readNoMistakesHandoffReceipt(
     throw new Error(
       `stored no-mistakes handoff is unreadable: ${errorMessage(error)}`,
     );
+  }
+}
+
+function recoverPreparedNoMistakesCommit(
+  input: ProfileBackedDelegateToolInput,
+  receipt: NoMistakesDelegateReceipt,
+): NoMistakesDelegateReceipt {
+  const currentHead = resolveCurrentHead(input.repoPath, "");
+  let terminalProofHeadSha: string;
+  if (currentHead !== receipt.headSha) {
+    if (!isRecoveredNoMistakesCommit(input.repoPath, currentHead, receipt)) {
+      throw new Error(
+        "interrupted no-mistakes handoff repository state does not match its durable finalization receipt",
+      );
+    }
+    terminalProofHeadSha = currentHead;
+  } else {
+    const ownership = input.repoSafety.beforeGitMutation?.("commit");
+    if (ownership?.ok === false) throw new Error(ownership.error);
+    const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
+    const commit = commitVerifiedChanges({
+      repoPath: input.repoPath,
+      baseHead: receipt.headSha,
+      commit: runnerResult.commit,
+      beforeCommit: (evidence) =>
+        evidence.expectedTree === receipt.expectedTree &&
+        evidence.message === receipt.expectedMessage
+          ? { ok: true }
+          : {
+              ok: false,
+              error:
+                "delegated prepared commit no longer matches its durable finalization receipt",
+            },
+    });
+    if (!commit.ok) throw new Error(commit.error);
+    terminalProofHeadSha = commit.commitSha;
+  }
+  terminalProofHeadSha = resolveTerminalProofHead(
+    input.repoPath,
+    receipt.headSha,
+  );
+  const recovered = {
+    ...receipt,
+    phase: "launched" as const,
+    terminalProofHeadSha,
+  };
+  writeJsonAtomically(input.handoffReceiptPath, recovered);
+  return recovered;
+}
+
+function isRecoveredNoMistakesCommit(
+  repoPath: string,
+  currentHead: string,
+  receipt: NoMistakesDelegateReceipt,
+): boolean {
+  if (
+    receipt.expectedTree === undefined ||
+    receipt.expectedMessage === undefined
+  ) {
+    return false;
+  }
+  try {
+    const parent = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", `${currentHead}^`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    const tree = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", `${currentHead}^{tree}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    const message = execFileSync(
+      "git",
+      ["-C", repoPath, "show", "-s", "--format=%B", currentHead],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trimEnd();
+    const status = execFileSync(
+      "git",
+      ["-C", repoPath, "status", "--porcelain", "--untracked-files=all"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return (
+      parent === receipt.headSha &&
+      tree === receipt.expectedTree &&
+      message === receipt.expectedMessage &&
+      status.length === 0
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -1272,7 +1417,10 @@ function migrateLegacyNoMistakesReceipt(
   let stored: unknown;
   try {
     stored = JSON.parse(
-      fs.readFileSync(input.legacyPaths.handoffReceiptPath, "utf8"),
+      readBoundedRegularFile(
+        input.legacyPaths.handoffReceiptPath,
+        "legacy no-mistakes handoff receipt",
+      ).toString("utf8"),
     );
   } catch {
     return;

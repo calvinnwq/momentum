@@ -758,6 +758,55 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("classifies malformed terminal corroboration as unreadable", async () => {
+    const { db, invocation } = openDelegateDb();
+    const completed = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: completed.externalRunId,
+          branch: completed.branch,
+          headSha: completed.headSha,
+        },
+        summary: "checks passed during handoff",
+        terminalState: {
+          value: completed,
+          digest: "sha256:cached-terminal",
+        },
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: {
+          ...state({ ciState: "passed" }),
+          decisions: null,
+        } as unknown as DelegateSupervisorExternalState,
+        digest: "sha256:malformed-corroboration",
+      }),
+    };
+
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      maxTicks: 2,
+      now: () => 6,
+    });
+
+    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.lastRound).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+    db.close();
+  });
+
   it("does not replace a fresh terminal failure with cached success", async () => {
     const { db, invocation } = openDelegateDb();
     let reads = 0;
