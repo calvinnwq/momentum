@@ -11,7 +11,7 @@ import {
   insertExecutorDecision,
   insertExecutorFinding,
   insertExecutorInvocation,
-  insertExecutorRound
+  insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -19,7 +19,7 @@ import type {
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
   ExecutorInvocationRecord,
-  ExecutorRoundRecord
+  ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
@@ -52,15 +52,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -76,13 +76,13 @@ function makeInvocation(runId: string): ExecutorInvocationRecord {
     attempt: 1,
     startedAt: 10,
     heartbeatAt: 10,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
 function makeRound(
   runId: string,
-  overrides: Partial<ExecutorRoundRecord> = {}
+  overrides: Partial<ExecutorRoundRecord> = {},
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
@@ -116,13 +116,13 @@ function makeRound(
         command: "pnpm test",
         exitCode: 0,
         durationMs: 1200,
-        timedOut: false
-      }
+        timedOut: false,
+      },
     ],
     commitSha: "abc123",
     recoveryCode: null,
     humanGate: null,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -133,7 +133,7 @@ function makeArtifact(runId: string): ExecutorArtifactRecord {
     artifactClass: "verification_output",
     path: `/runs/${runId}/round-1/verify.txt`,
     digest: "sha256:verify",
-    description: "verification output"
+    description: "verification output",
   };
 }
 
@@ -143,7 +143,7 @@ function makeCheckpoint(): ExecutorCheckpointRecord {
     roundId: "round-1",
     sequence: 0,
     stage: "verify",
-    detail: "pnpm test passed"
+    detail: "pnpm test passed",
   };
 }
 
@@ -155,7 +155,7 @@ function makeFinding(): ExecutorFindingRecord {
     title: "missing evidence",
     detail: "round evidence was not attached",
     selected: true,
-    externalRef: "nomistakes:F-1"
+    externalRef: "nomistakes:F-1",
   };
 }
 
@@ -168,7 +168,7 @@ function makeDecision(): ExecutorDecisionRecord {
     recommendedAction: "retry",
     chosenAction: "retry",
     resolution: "delegated:within-envelope",
-    externalRef: "nomistakes:D-1"
+    externalRef: "nomistakes:D-1",
   };
 }
 
@@ -177,12 +177,12 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, objective, issue_scope_json, route_json,
         needs_manual_recovery, created_at, updated_at)
-       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-       VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+       VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
   ).run(runId);
   insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
   insertExecutorRound(db, makeRound(runId), { now: 1 });
@@ -198,14 +198,14 @@ function seedRunDetailCategories(db: MomentumDb, runId: string): void {
        (run_id, boundary, actor, phrase, artifact_path, artifact_digest,
         recorded_at, discharged_at, created_at, updated_at)
        VALUES (?, 'implementation', 'calvin', 'approve implementation',
-        '/runs/approval.json', 'sha256:approval', 11, NULL, 11, 11)`
+        '/runs/approval.json', 'sha256:approval', 11, NULL, 11, 11)`,
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
        VALUES (?, 'managed-step', 'worker-1', 12, 9999999999999, 12,
-        NULL, 'auto-release', 12, 12)`
+        NULL, 'auto-release', 12, 12)`,
   ).run(runId);
   insertWorkflowGate(
     db,
@@ -217,9 +217,9 @@ function seedRunDetailCategories(db: MomentumDb, runId: string): void {
       reason: "operator must approve external apply",
       allowedActions: ["approve", "reject"],
       recommendedAction: "approve",
-      policyEnvelope: []
+      policyEnvelope: [],
     },
-    { now: 13 }
+    { now: 13 },
   );
 }
 
@@ -228,7 +228,7 @@ describe("momentum workflow run logs", () => {
     const result = await run(["--help"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "momentum workflow run logs <run-id> [--data-dir <path>] [--json]"
+      "momentum workflow run logs <run-id> [--data-dir <path>] [--json]",
     );
     expect(result.stderr).toBe("");
   });
@@ -241,14 +241,14 @@ describe("momentum workflow run logs", () => {
       "logs",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run logs",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -261,7 +261,7 @@ describe("momentum workflow run logs", () => {
       "cwfp-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -269,7 +269,7 @@ describe("momentum workflow run logs", () => {
       ok: false,
       command: "workflow run logs",
       code: "run_not_found",
-      runId: "cwfp-missing"
+      runId: "cwfp-missing",
     });
   });
 
@@ -284,7 +284,7 @@ describe("momentum workflow run logs", () => {
       "cwfp-db-failed",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -294,7 +294,7 @@ describe("momentum workflow run logs", () => {
       command: "workflow run logs",
       code: "data_dir_failed",
       dataDir,
-      runId: "cwfp-db-failed"
+      runId: "cwfp-db-failed",
     });
   });
 
@@ -307,11 +307,11 @@ describe("momentum workflow run logs", () => {
       "cwfp-x",
       "extra",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for workflow run logs: extra"
+      "Unexpected argument for workflow run logs: extra",
     );
   });
 
@@ -332,7 +332,7 @@ describe("momentum workflow run logs", () => {
       "cwfp-logs01",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -369,17 +369,17 @@ describe("momentum workflow run logs", () => {
         summary: string | null;
         keyLearnings: string[];
         learnings: string[];
-      nativeRoundEvidence: {
-        schema: string;
-        summary: string | null;
-        keyChanges: string[];
-        learnings: string[];
-        completionRecommendation: string;
-        daemonClassification: string | null;
-        verificationResult: {
-          status: string;
-          commands: unknown[];
-        };
+        nativeRoundEvidence: {
+          schema: string;
+          summary: string | null;
+          keyChanges: string[];
+          learnings: string[];
+          completionRecommendation: string;
+          daemonClassification: string | null;
+          verificationResult: {
+            status: string;
+            commands: unknown[];
+          };
           artifacts: Array<{
             class: string;
             path: string;
@@ -415,14 +415,14 @@ describe("momentum workflow run logs", () => {
     expect(payload.approvals).toEqual([
       expect.objectContaining({
         boundary: "implementation",
-        actor: "calvin"
-      })
+        actor: "calvin",
+      }),
     ]);
     expect(payload.leases).toEqual([
       expect.objectContaining({
         leaseKind: "managed-step",
-        holder: "worker-1"
-      })
+        holder: "worker-1",
+      }),
     ]);
     expect(payload.gates).toEqual([
       expect.objectContaining({
@@ -432,9 +432,9 @@ describe("momentum workflow run logs", () => {
         recommendedActionPolicy: expect.objectContaining({
           action: "approval_decision",
           authority: "human_required",
-          risk: "medium"
-        })
-      })
+          risk: "medium",
+        }),
+      }),
     ]);
     expect(payload.invocations).toEqual([
       expect.objectContaining({
@@ -445,18 +445,18 @@ describe("momentum workflow run logs", () => {
         state: "running",
         startedAt: 10,
         heartbeatAt: 10,
-        finishedAt: null
-      })
+        finishedAt: null,
+      }),
     ]);
     expect(payload.rounds).toHaveLength(1);
     const round = payload.rounds[0]!;
     expect(round.roundId).toBe("round-1");
     expect(round.summary).toBe("implemented the slice");
     expect(round.keyLearnings).toEqual([
-      "operator readback needs durable learnings"
+      "operator readback needs durable learnings",
     ]);
     expect(round.learnings).toEqual([
-      "operator readback needs durable learnings"
+      "operator readback needs durable learnings",
     ]);
     expect(round.nativeRoundEvidence).toEqual({
       schema: "momentum.native-goal-loop.round-result.v1",
@@ -472,27 +472,27 @@ describe("momentum workflow run logs", () => {
             command: "pnpm test",
             exitCode: 0,
             durationMs: 1200,
-            timedOut: false
-          }
-        ]
+            timedOut: false,
+          },
+        ],
       },
       artifacts: [
         {
           class: "verification_output",
           path: "/runs/cwfp-logs01/round-1/verify.txt",
-          digest: "sha256:verify"
-        }
+          digest: "sha256:verify",
+        },
       ],
       checkpoints: [
         {
           stage: "verify",
-          detail: "pnpm test passed"
-        }
+          detail: "pnpm test passed",
+        },
       ],
       changedFiles: ["src/core/workflow/run/logs.ts"],
       commitSha: "abc123",
       recoveryReason: null,
-      remainingWork: ["wire additional consumers"]
+      remainingWork: ["wire additional consumers"],
     });
     expect(round.verificationStatus).toBe("passed");
     expect(round.commitSha).toBe("abc123");
@@ -515,12 +515,12 @@ describe("momentum workflow run logs", () => {
         `INSERT INTO workflow_runs
            (id, state, source, plan_json, objective, issue_scope_json, route_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
       insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
 
@@ -528,13 +528,15 @@ describe("momentum workflow run logs", () => {
         [
           string,
           Partial<ExecutorRoundRecord>,
-          | "successful"
-          | "failed"
-          | "no_op"
-          | "invalid_result"
-          | "verification_failed"
-          | "manual_recovery"
-          | "operator_decision_required"
+          (
+            | "successful"
+            | "failed"
+            | "no_op"
+            | "invalid_result"
+            | "verification_failed"
+            | "manual_recovery"
+            | "operator_decision_required"
+          ),
         ]
       > = [
         [
@@ -543,9 +545,9 @@ describe("momentum workflow run logs", () => {
             state: "succeeded",
             classification: "complete",
             commitSha: "abc123",
-            verificationStatus: "passed"
+            verificationStatus: "passed",
           },
-          "successful"
+          "successful",
         ],
         [
           "successful-continuation",
@@ -553,9 +555,9 @@ describe("momentum workflow run logs", () => {
             state: "succeeded",
             classification: "continue",
             commitSha: null,
-            verificationStatus: null
+            verificationStatus: null,
           },
-          "successful"
+          "successful",
         ],
         [
           "failed",
@@ -563,9 +565,9 @@ describe("momentum workflow run logs", () => {
             state: "failed",
             classification: "continue",
             commitSha: null,
-            verificationStatus: null
+            verificationStatus: null,
           },
-          "failed"
+          "failed",
         ],
         [
           "no-op",
@@ -575,9 +577,9 @@ describe("momentum workflow run logs", () => {
             commitSha: null,
             verificationStatus: "skipped",
             recoveryCode: "nothing_to_commit",
-            humanGate: "manual_recovery_required"
+            humanGate: "manual_recovery_required",
           },
-          "no_op"
+          "no_op",
         ],
         [
           "invalid-result",
@@ -587,9 +589,9 @@ describe("momentum workflow run logs", () => {
             commitSha: null,
             verificationStatus: null,
             recoveryCode: "result_invalid",
-            humanGate: "manual_recovery_required"
+            humanGate: "manual_recovery_required",
           },
-          "invalid_result"
+          "invalid_result",
         ],
         [
           "verification-failed",
@@ -597,9 +599,9 @@ describe("momentum workflow run logs", () => {
             state: "failed",
             classification: "continue",
             commitSha: null,
-            verificationStatus: "failed"
+            verificationStatus: "failed",
           },
-          "verification_failed"
+          "verification_failed",
         ],
         [
           "manual-recovery",
@@ -609,9 +611,9 @@ describe("momentum workflow run logs", () => {
             commitSha: null,
             verificationStatus: null,
             recoveryCode: "head_mismatch",
-            humanGate: "manual_recovery_required"
+            humanGate: "manual_recovery_required",
           },
-          "manual_recovery"
+          "manual_recovery",
         ],
         [
           "manual-recovery-after-verification-failed",
@@ -621,9 +623,9 @@ describe("momentum workflow run logs", () => {
             commitSha: null,
             verificationStatus: "failed",
             recoveryCode: "reset_failed",
-            humanGate: "manual_recovery_required"
+            humanGate: "manual_recovery_required",
           },
-          "manual_recovery"
+          "manual_recovery",
         ],
         [
           "operator-gated-after-progress",
@@ -632,9 +634,9 @@ describe("momentum workflow run logs", () => {
             classification: "operator_decision_required",
             commitSha: "abc123",
             verificationStatus: "passed",
-            humanGate: "quota_exhausted"
+            humanGate: "quota_exhausted",
           },
-          "operator_decision_required"
+          "operator_decision_required",
         ],
         [
           "operator-gated-after-verification-failed",
@@ -643,10 +645,10 @@ describe("momentum workflow run logs", () => {
             classification: "operator_decision_required",
             commitSha: "abc123",
             verificationStatus: "failed",
-            humanGate: "quota_exhausted"
+            humanGate: "quota_exhausted",
           },
-          "operator_decision_required"
-        ]
+          "operator_decision_required",
+        ],
       ];
 
       cases.forEach(([id, overrides], index) => {
@@ -657,9 +659,9 @@ describe("momentum workflow run logs", () => {
             roundIndex: index,
             summary: id,
             changedFiles: [],
-            ...overrides
+            ...overrides,
           }),
-          { now: index + 1 }
+          { now: index + 1 },
         );
       });
     } finally {
@@ -673,36 +675,30 @@ describe("momentum workflow run logs", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
       rounds: Array<{ summary: string | null; outcome: string }>;
     };
-    expect(payload.rounds.map((round) => [round.summary, round.outcome])).toEqual(
+    expect(
+      payload.rounds.map((round) => [round.summary, round.outcome]),
+    ).toEqual([
+      ["successful", "successful"],
+      ["successful-continuation", "successful"],
+      ["failed", "failed"],
+      ["no-op", "no_op"],
+      ["invalid-result", "invalid_result"],
+      ["verification-failed", "verification_failed"],
+      ["manual-recovery", "manual_recovery"],
+      ["manual-recovery-after-verification-failed", "manual_recovery"],
+      ["operator-gated-after-progress", "operator_decision_required"],
       [
-        ["successful", "successful"],
-        ["successful-continuation", "successful"],
-        ["failed", "failed"],
-        ["no-op", "no_op"],
-        ["invalid-result", "invalid_result"],
-        ["verification-failed", "verification_failed"],
-        ["manual-recovery", "manual_recovery"],
-        [
-          "manual-recovery-after-verification-failed",
-          "manual_recovery"
-        ],
-        [
-          "operator-gated-after-progress",
-          "operator_decision_required"
-        ],
-        [
-          "operator-gated-after-verification-failed",
-          "operator_decision_required"
-        ]
-      ]
-    );
+        "operator-gated-after-verification-failed",
+        "operator_decision_required",
+      ],
+    ]);
   });
 
   it("does not fabricate native round evidence before executor result capture", async () => {
@@ -714,12 +710,12 @@ describe("momentum workflow run logs", () => {
         `INSERT INTO workflow_runs
            (id, state, source, plan_json, objective, issue_scope_json, route_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
       insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
       insertExecutorRound(
@@ -740,9 +736,9 @@ describe("momentum workflow run logs", () => {
           verificationResults: [],
           commitSha: null,
           recoveryCode: null,
-          humanGate: null
+          humanGate: null,
         }),
-        { now: 1 }
+        { now: 1 },
       );
     } finally {
       db.close();
@@ -755,7 +751,7 @@ describe("momentum workflow run logs", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -769,7 +765,7 @@ describe("momentum workflow run logs", () => {
     expect(payload.rounds[0]).toMatchObject({
       executorRecommendation: null,
       classification: null,
-      nativeRoundEvidence: null
+      nativeRoundEvidence: null,
     });
   });
 
@@ -782,12 +778,12 @@ describe("momentum workflow run logs", () => {
         `INSERT INTO workflow_runs
            (id, state, source, plan_json, objective, issue_scope_json, route_json,
             needs_manual_recovery, created_at, updated_at)
-           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
       ).run(runId);
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
       insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
       insertExecutorRound(
@@ -796,9 +792,9 @@ describe("momentum workflow run logs", () => {
           classification: "operator_decision_required",
           humanGate: "quota_exhausted",
           commitSha: "abc123",
-          verificationStatus: "passed"
+          verificationStatus: "passed",
         }),
-        { now: 1 }
+        { now: 1 },
       );
     } finally {
       db.close();
@@ -811,7 +807,7 @@ describe("momentum workflow run logs", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(0);
@@ -828,8 +824,8 @@ describe("momentum workflow run logs", () => {
       outcome: "operator_decision_required",
       nativeRoundEvidence: {
         completionRecommendation: "continue",
-        daemonClassification: "operator_decision_required"
-      }
+        daemonClassification: "operator_decision_required",
+      },
     });
   });
 
@@ -849,7 +845,7 @@ describe("momentum workflow run logs", () => {
       "logs",
       "cwfp-logs-text",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
@@ -858,17 +854,19 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
     expect(result.stdout).toContain(
-      "learnings: operator readback needs durable learnings"
+      "learnings: operator readback needs durable learnings",
     );
-    expect(result.stdout).toContain("remaining work: wire additional consumers");
     expect(result.stdout).toContain(
-      "verification commands: pnpm test (exit=0, duration=1200ms, timedOut=false)"
+      "remaining work: wire additional consumers",
+    );
+    expect(result.stdout).toContain(
+      "verification commands: pnpm test (exit=0, duration=1200ms, timedOut=false)",
     );
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
     expect(result.stdout).toContain("Executor invocations: 1");
     expect(result.stdout).toContain(
-      "- inv-1 [implementation/running] attempt=1"
+      "- inv-1 [implementation/running] attempt=1",
     );
     expect(result.stdout).toContain("Approvals: 1");
     expect(result.stdout).toContain("Leases: 1");
@@ -881,11 +879,9 @@ describe("momentum workflow run logs", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithRound(db, "cwfp-logs-engine");
-      db.prepare(
-        "UPDATE workflow_runs SET route_json = ? WHERE id = ?"
-      ).run(
+      db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
         JSON.stringify({ implementationEngine: "native-goal-loop" }),
-        "cwfp-logs-engine"
+        "cwfp-logs-engine",
       );
     } finally {
       db.close();
@@ -897,7 +893,7 @@ describe("momentum workflow run logs", () => {
       "logs",
       "cwfp-logs-engine",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(0);
