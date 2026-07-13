@@ -121,21 +121,25 @@ executor consumed by the real-adapter registry.
 
 ## Ownership boundary with adapters
 
-`no-mistakes/mechanism.ts` is the runtime decision logic and lives here in core.
-The no-mistakes _external integration_ — `src/adapters/no-mistakes-executor.ts`
-and `src/adapters/no-mistakes-orchestrator.ts` — stays under `src/adapters/`
-because it drives the external no-mistakes tool. The
-`test/cli-import-boundaries.test.ts` adapter-ownership list pins that split.
+`delegate-supervisor/` owns the SDK executor, canonical external-state
+classification, semantic-progress heartbeat / stall logic, and evidence
+projection. `src/adapters/no-mistakes-tool-adapter.ts` is the narrow external
+edge: it hands off to no-mistakes and reads normalized state without owning
+durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
+compatibility callers of the same core classification authority while existing
+recorded `no-mistakes` invocations remain readable.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
-| Adapter edge                                                                                        | Disposition                                                                                                                                                                                           |
-| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                   | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                   |
-| `git-transaction.ts` → `runner/types.ts`                                                            | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                              |
-| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts` | Temporary, explicitly re-justified: the current mirror predates the SDK. It dissolves when supervision moves into the core `delegate-supervisor` lifecycle and the adapter shrinks to a tool adapter. |
-| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                              | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                     |
-| `runner/profile.ts`                                                                                 | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                   |
+| Adapter edge                                                                                        | Disposition                                                                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                   | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                        |
+| `git-transaction.ts` → `runner/types.ts`                                                            | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                   |
+| `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                     | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                     |
+| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts` | Temporary, explicitly re-justified: the current mirror predates the SDK. It dissolves when supervision moves into the core `delegate-supervisor` lifecycle and the adapter shrinks to a tool adapter.      |
+| `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`       | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals. |
+| `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                              | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                          |
+| `runner/profile.ts`                                                                                 | Compatibility support only; machine-local runner resolution folds into host bindings and is not portable step config or a third-party executor API.                                                        |
 
 `test/executor-sdk-import-boundaries.test.ts` pins this exact allowlist so no
 new adapter reverse dependency can appear without a named disposition. The end

@@ -66,6 +66,10 @@
  */
 
 import type { ExecutorRoundUpdate } from "../core/executors/loop/persist.js";
+import {
+  classifyDelegateSupervisorState,
+  classifyDelegateSupervisorUnreadable,
+} from "../core/executors/delegate-supervisor/classifier.js";
 import type {
   ExecutorCompletionClassification,
   ExecutorDecisionRecord,
@@ -75,7 +79,7 @@ import type {
   ExecutorInvocationState,
   ExecutorRoundRecord,
   ExecutorRoundState,
-  WorkflowExecutorFamily
+  WorkflowExecutorFamily,
 } from "../core/executors/loop/reducer.js";
 
 /**
@@ -95,14 +99,14 @@ export type NoMistakesExecutorFamily = typeof NO_MISTAKES_EXECUTOR_FAMILY;
  * hard-coding the family string at the call site.
  */
 export const NO_MISTAKES_EXECUTOR_FAMILIES = [
-  NO_MISTAKES_EXECUTOR_FAMILY
+  NO_MISTAKES_EXECUTOR_FAMILY,
 ] as const satisfies readonly WorkflowExecutorFamily[];
 
 /**
  * Whether an executor family is the one this adapter mirrors.
  */
 export function isNoMistakesExecutorFamily(
-  family: string
+  family: string,
 ): family is NoMistakesExecutorFamily {
   return family === NO_MISTAKES_EXECUTOR_FAMILY;
 }
@@ -120,7 +124,8 @@ export const NO_MISTAKES_EXTERNAL_STEP_STATUSES = [
   "awaiting_approval",
   "blocked",
   "failed",
-  "completed"
+  "cancelled",
+  "completed",
 ] as const;
 export type NoMistakesExternalStepStatus =
   (typeof NO_MISTAKES_EXTERNAL_STEP_STATUSES)[number];
@@ -136,7 +141,7 @@ export const NO_MISTAKES_CI_STATES = [
   "passed",
   "failed",
   "pending",
-  "none"
+  "none",
 ] as const;
 export type NoMistakesCiState = (typeof NO_MISTAKES_CI_STATES)[number];
 
@@ -161,7 +166,7 @@ export const NO_MISTAKES_RECOVERY_CODES = [
   "external_run_failed",
   "external_state_blocked",
   "external_state_inconsistent",
-  "external_state_unreadable"
+  "external_state_unreadable",
 ] as const;
 export type NoMistakesRecoveryCode =
   (typeof NO_MISTAKES_RECOVERY_CODES)[number];
@@ -232,113 +237,6 @@ export type NoMistakesMirrorDecision = {
   reason: string;
 };
 
-const STEP_STATUS_SET: ReadonlySet<string> = new Set(
-  NO_MISTAKES_EXTERNAL_STEP_STATUSES
-);
-const CI_STATE_SET: ReadonlySet<string> = new Set(NO_MISTAKES_CI_STATES);
-const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
-
-/** A non-empty, non-whitespace string. */
-function isNonBlank(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-/**
- * The single manual-recovery decision the mirror settles into whenever it cannot
- * trust the snapshot. `recoveryCode` distinguishes an unreadable snapshot from a
- * self-contradictory one; both demand operator inspection before the workflow can
- * proceed, so both carry the `manual_recovery_required` classification, round
- * state, invocation state, and gate.
- */
-function manualRecovery(
-  recoveryCode: Extract<
-    NoMistakesRecoveryCode,
-    "external_state_unreadable" | "external_state_inconsistent"
-  >,
-  reason: string
-): NoMistakesMirrorDecision {
-  return {
-    classification: "manual_recovery_required",
-    roundState: "manual_recovery_required",
-    invocationState: "manual_recovery_required",
-    humanGate: "manual_recovery_required",
-    recoveryCode,
-    reason
-  };
-}
-
-/**
- * Find the first structural reason the snapshot cannot be trusted at all, or
- * `null` when it is well-formed. This is the "don't blindly trust" guard: it
- * rejects malformed identity, dangling selected findings, empty finding titles,
- * decisions with no allowed actions, duplicate ids, and unknown enum values
- * before any status-specific classification runs.
- */
-function findUnreadableReason(state: NoMistakesExternalState): string | null {
-  if (!isNonBlank(state.externalRunId)) {
-    return "external run id is missing";
-  }
-  if (!isNonBlank(state.branch)) {
-    return "branch is missing";
-  }
-  if (typeof state.headSha !== "string" || !COMMIT_SHA_RE.test(state.headSha)) {
-    return "head SHA is not a 40-character hex SHA";
-  }
-  if (!STEP_STATUS_SET.has(state.stepStatus)) {
-    return `unknown external step status ${String(state.stepStatus)}`;
-  }
-  if (!CI_STATE_SET.has(state.ciState)) {
-    return `unknown external CI state ${String(state.ciState)}`;
-  }
-
-  const findingIds = new Set<string>();
-  for (const finding of state.findings) {
-    if (!isNonBlank(finding.externalId)) {
-      return "a finding is missing its external id";
-    }
-    if (!isNonBlank(finding.title)) {
-      return `finding ${finding.externalId} is missing its title`;
-    }
-    if (findingIds.has(finding.externalId)) {
-      return `duplicate finding id ${finding.externalId}`;
-    }
-    findingIds.add(finding.externalId);
-  }
-
-  for (const selectedId of state.selectedFindingIds) {
-    if (!findingIds.has(selectedId)) {
-      return `selected finding id ${selectedId} references no surfaced finding`;
-    }
-  }
-
-  const decisionIds = new Set<string>();
-  for (const decision of state.decisions) {
-    if (!isNonBlank(decision.externalId)) {
-      return "a decision is missing its external id";
-    }
-    if (!isNonBlank(decision.summary)) {
-      return `decision ${decision.externalId} is missing its summary`;
-    }
-    if (decision.allowedActions.length === 0) {
-      return `decision ${decision.externalId} offers no allowed actions`;
-    }
-    if (decision.allowedActions.some((action) => !isNonBlank(action))) {
-      return `decision ${decision.externalId} offers a blank allowed action`;
-    }
-    if (decisionIds.has(decision.externalId)) {
-      return `duplicate decision id ${decision.externalId}`;
-    }
-    decisionIds.add(decision.externalId);
-  }
-
-  return null;
-}
-
-/** Whether a decision has been settled (an operator or delegated-policy outcome). */
-function isResolved(decision: NoMistakesExternalDecision): boolean {
-  return isNonBlank(decision.resolution);
-}
-
 /**
  * Classify one mirrored no-mistakes snapshot into a daemon decision. Pure and
  * total: the same snapshot always yields the same decision, and *any* input —
@@ -350,121 +248,12 @@ function isResolved(decision: NoMistakesExternalDecision): boolean {
  * See the module doc for the per-status classification boundaries.
  */
 export function decideNoMistakesMirror(
-  state: NoMistakesExternalState
+  state: NoMistakesExternalState,
 ): NoMistakesMirrorDecision {
-  const unreadable = findUnreadableReason(state);
-  if (unreadable !== null) {
-    return manualRecovery(
-      "external_state_unreadable",
-      `external no-mistakes state is unreadable: ${unreadable}`
-    );
-  }
-
-  switch (state.stepStatus) {
-    case "running":
-      return {
-        classification: "continue",
-        roundState: "mirroring_external_state",
-        invocationState: "running",
-        humanGate: null,
-        recoveryCode: null,
-        reason: "external no-mistakes run is still in progress; keep mirroring"
-      };
-
-    case "awaiting_decision": {
-      if (state.decisions.length === 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          "external no-mistakes run is awaiting_decision but surfaced no decision"
-        );
-      }
-      const unresolved = state.decisions.filter(
-        (decision) => !isResolved(decision)
-      );
-      if (unresolved.length === 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          "external no-mistakes run is awaiting_decision but surfaced no unresolved decision"
-        );
-      }
-      return {
-        classification: "operator_decision_required",
-        roundState: "waiting_operator",
-        invocationState: "waiting_operator",
-        humanGate: "operator_decision_required",
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run surfaced a decision; pausing for an operator decision"
-      };
-    }
-
-    case "awaiting_approval":
-      return {
-        classification: "approval_required",
-        roundState: "waiting_operator",
-        invocationState: "waiting_operator",
-        humanGate: "approval_required",
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run reached an approval boundary; pausing for approval"
-      };
-
-    case "blocked":
-      return {
-        classification: "blocked",
-        roundState: "blocked",
-        invocationState: "blocked",
-        humanGate: "external_state_required",
-        recoveryCode: "external_state_blocked",
-        reason:
-          "external no-mistakes run is blocked on external state; resolve it and re-run"
-      };
-
-    case "failed":
-      return {
-        classification: "failed",
-        roundState: "failed",
-        invocationState: "failed",
-        humanGate: null,
-        recoveryCode: "external_run_failed",
-        reason: "external no-mistakes run failed"
-      };
-
-    case "completed": {
-      if (state.ciState === "failed" || state.ciState === "pending") {
-        return manualRecovery(
-          "external_state_inconsistent",
-          `external no-mistakes run claims completed but CI is ${state.ciState}`
-        );
-      }
-      const unresolved = state.decisions.filter(
-        (decision) => !isResolved(decision)
-      );
-      if (unresolved.length > 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          `external no-mistakes run claims completed but ${unresolved.length} decision(s) are unresolved`
-        );
-      }
-      return {
-        classification: "complete",
-        roundState: "succeeded",
-        invocationState: "succeeded",
-        humanGate: null,
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run completed with passing CI and resolved decisions"
-      };
-    }
-
-    default:
-      // Unreachable: findUnreadableReason already rejected any status outside the
-      // enum. Kept for totality so the switch never silently falls through.
-      return manualRecovery(
-        "external_state_unreadable",
-        `unknown external step status ${String(state.stepStatus)}`
-      );
-  }
+  return classifyDelegateSupervisorState(
+    state,
+    "external no-mistakes",
+  ) as NoMistakesMirrorDecision;
 }
 
 /**
@@ -484,9 +273,11 @@ export function decideNoMistakesMirror(
  * verbatim as the decision reason rather than re-prefixed.
  */
 export function decideNoMistakesUnreadable(
-  reason: string
+  reason: string,
 ): NoMistakesMirrorDecision {
-  return manualRecovery("external_state_unreadable", reason);
+  return classifyDelegateSupervisorUnreadable(
+    reason,
+  ) as NoMistakesMirrorDecision;
 }
 
 /**
@@ -500,7 +291,7 @@ export function decideNoMistakesUnreadable(
 export function noMistakesInvocationId(
   workflowRunId: string,
   stepRunId: string,
-  attempt: number
+  attempt: number,
 ): string {
   return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR_FAMILY}::${attempt}`;
 }
@@ -543,13 +334,13 @@ export type PlanNoMistakesInvocationInput = {
  * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh invocation.
  */
 export function planNoMistakesInvocation(
-  input: PlanNoMistakesInvocationInput
+  input: PlanNoMistakesInvocationInput,
 ): ExecutorInvocationRecord {
   return {
     invocationId: noMistakesInvocationId(
       input.workflowRunId,
       input.stepRunId,
-      input.attempt
+      input.attempt,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
@@ -559,7 +350,7 @@ export function planNoMistakesInvocation(
     attempt: input.attempt,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
@@ -617,12 +408,12 @@ export type PlanNoMistakesRoundStartInput = {
  * round must inherit the family {@link planNoMistakesInvocation} establishes.
  */
 export function planNoMistakesRoundStart(
-  input: PlanNoMistakesRoundStartInput
+  input: PlanNoMistakesRoundStartInput,
 ): ExecutorRoundRecord {
   const { invocation, runtime } = input;
   if (!isNoMistakesExecutorFamily(invocation.executorFamily)) {
     throw new Error(
-      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`
+      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`,
     );
   }
   return {
@@ -654,7 +445,7 @@ export function planNoMistakesRoundStart(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
@@ -702,14 +493,14 @@ export type NoMistakesRoundPersistencePlan = {
  * signal it mirrored this poll. Pure: no SQLite, no file system.
  */
 export function noMistakesRoundUpdate(
-  decision: NoMistakesMirrorDecision
+  decision: NoMistakesMirrorDecision,
 ): ExecutorRoundUpdate {
   return {
     toState: decision.roundState,
     classification: decision.classification,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
-    summary: decision.reason
+    summary: decision.reason,
   };
 }
 
@@ -723,7 +514,7 @@ export function noMistakesRoundUpdate(
  * — it is total, never throwing on untrusted external evidence.
  */
 export function planNoMistakesRoundPersistence(
-  input: PlanNoMistakesRoundPersistenceInput
+  input: PlanNoMistakesRoundPersistenceInput,
 ): NoMistakesRoundPersistencePlan {
   const decision = decideNoMistakesMirror(input.state);
   return { decision, roundUpdate: noMistakesRoundUpdate(decision) };
@@ -751,7 +542,7 @@ export type PlanNoMistakesRoundFindingsInput = {
  * file system.
  */
 export function planNoMistakesRoundFindings(
-  input: PlanNoMistakesRoundFindingsInput
+  input: PlanNoMistakesRoundFindingsInput,
 ): ExecutorFindingRecord[] {
   const selected = new Set(input.selectedFindingIds);
   return input.findings.map((finding) => ({
@@ -761,7 +552,7 @@ export function planNoMistakesRoundFindings(
     title: finding.title,
     detail: finding.detail ?? null,
     selected: selected.has(finding.externalId),
-    externalRef: `nomistakes:${finding.externalId}`
+    externalRef: `nomistakes:${finding.externalId}`,
   }));
 }
 
@@ -786,7 +577,7 @@ export type PlanNoMistakesRoundDecisionsInput = {
  * drives — the external decision. Pure: no SQLite, no file system.
  */
 export function planNoMistakesRoundDecisions(
-  input: PlanNoMistakesRoundDecisionsInput
+  input: PlanNoMistakesRoundDecisionsInput,
 ): ExecutorDecisionRecord[] {
   return input.decisions.map((decision) => ({
     decisionId: `${input.roundId}-decision-${decision.externalId}`,
@@ -796,6 +587,6 @@ export function planNoMistakesRoundDecisions(
     recommendedAction: decision.recommendedAction ?? null,
     chosenAction: decision.chosenAction ?? null,
     resolution: decision.resolution ?? null,
-    externalRef: `nomistakes:${decision.externalId}`
+    externalRef: `nomistakes:${decision.externalId}`,
   }));
 }

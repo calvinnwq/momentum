@@ -1,0 +1,1540 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import {
+  createNoMistakesToolAdapter,
+  parseNoMistakesAxiStatus,
+  parseNoMistakesLaunchIdentity,
+} from "../src/adapters/no-mistakes-tool-adapter.js";
+import { classifyDelegateSupervisorState } from "../src/core/executors/delegate-supervisor/classifier.js";
+import {
+  DelegateSupervisorExecutor,
+  DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
+  DELEGATE_SUPERVISOR_STALL_AFTER_MS,
+} from "../src/core/executors/delegate-supervisor/executor.js";
+import type {
+  DelegateSupervisorExternalState,
+  DelegateSupervisorToolAdapter,
+} from "../src/core/executors/delegate-supervisor/types.js";
+import {
+  insertExecutorInvocation,
+  updateExecutorInvocationState,
+  updateExecutorRound,
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
+import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
+
+const roots: string[] = [];
+const HEAD = "a".repeat(40);
+
+afterEach(() => {
+  for (const root of roots.splice(0)) {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function openDelegateDb(): {
+  db: MomentumDb;
+  invocation: ExecutorInvocationRecord;
+  root: string;
+} {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "delegate-supervisor-"));
+  roots.push(root);
+  const db = openDb(root);
+  db.prepare(
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
+  ).run();
+  db.prepare(
+    `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
+     VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
+  ).run();
+  const invocation: ExecutorInvocationRecord = {
+    invocationId: "run-1::step-1::dispatch",
+    workflowRunId: "run-1",
+    stepRunId: "step-1",
+    stepKey: "no-mistakes",
+    executorFamily: "delegate-supervisor",
+    state: "running",
+    attempt: 1,
+    startedAt: 1,
+    heartbeatAt: 1,
+    finishedAt: null,
+  };
+  insertExecutorInvocation(db, invocation, { now: 1 });
+  return { db, invocation, root };
+}
+
+function state(
+  overrides: Partial<DelegateSupervisorExternalState> = {},
+): DelegateSupervisorExternalState {
+  return {
+    externalRunId: "nm-run-1",
+    branch: "feature/delegate-supervisor",
+    headSha: HEAD,
+    activeStep: "review",
+    stepStatus: "running",
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    prUrl: "https://example.test/pull/1",
+    ciState: "pending",
+    ...overrides,
+  };
+}
+
+function writeState(statePath: string, value: DelegateSupervisorExternalState) {
+  fs.writeFileSync(statePath, JSON.stringify(value));
+}
+
+describe("delegate-supervisor SDK executor", () => {
+  it("settles a legacy completed live-step checkpoint without repeating handoff", async () => {
+    const { db, invocation } = openDelegateDb();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 5,
+    });
+    const roundId = `${invocation.invocationId}::round-1`;
+    envelope.facade.startRound({
+      roundId,
+      invocationId: invocation.invocationId,
+      workflowRunId: invocation.workflowRunId,
+      stepRunId: invocation.stepRunId,
+      stepKey: invocation.stepKey,
+      executorFamily: invocation.executorFamily,
+      attempt: invocation.attempt,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordRoundProgress(roundId, {
+      observation: {
+        phase: "capturing_result",
+        summary: "legacy wrapper completed cleanly",
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-legacy-complete`,
+          sequence: 0,
+          stage: "mechanism_completed",
+          detail: JSON.stringify({
+            recommendation: "complete",
+            recommendedRoundState: "succeeded",
+            recommendedInvocationState: "succeeded",
+            recoveryCode: null,
+            humanGate: null,
+            reason: "legacy wrapper completed cleanly",
+          }),
+        },
+      ],
+    });
+    let handoffs = 0;
+    let settled: boolean | undefined;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("legacy replay must not hand off again");
+            },
+            readExternalState: () => ({
+              ok: false,
+              error: "legacy replay must not read external state",
+            }),
+          },
+        },
+        settleHandoff: (provenClean: boolean) => {
+          settled = provenClean;
+        },
+      },
+      now: () => 6,
+    });
+    expect(result.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "complete",
+      recoveryCode: null,
+    });
+    expect(handoffs).toBe(0);
+    expect(settled).toBe(true);
+    db.close();
+  });
+
+  it("recovers an interrupted handoff intent without launching again", async () => {
+    const { db, invocation, root } = openDelegateDb();
+    const evidencePath = path.join(root, "handoff.log");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 5,
+    });
+    const roundId = `${invocation.invocationId}::round-1`;
+    envelope.facade.startRound({
+      roundId,
+      invocationId: invocation.invocationId,
+      workflowRunId: invocation.workflowRunId,
+      stepRunId: invocation.stepRunId,
+      stepKey: invocation.stepKey,
+      executorFamily: invocation.executorFamily,
+      attempt: invocation.attempt,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: "handoff interrupted",
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-delegate_handoff_intent`,
+      sequence: 0,
+      stage: "delegate_handoff_intent",
+      detail: JSON.stringify({
+        tool: "no-mistakes",
+        invocationId: invocation.invocationId,
+        attempt: invocation.attempt,
+      }),
+    });
+    envelope.facade.recordArtifact(roundId, {
+      artifactId: `${roundId}-handoff-artifact-0`,
+      artifactClass: "logs",
+      path: evidencePath,
+      digest: null,
+      description: "partially persisted handoff evidence",
+    });
+    let handoffs = 0;
+    let recoveries = 0;
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => {
+        handoffs += 1;
+        throw new Error("interrupted handoff must not launch again");
+      },
+      recoverHandoff: () => {
+        recoveries += 1;
+        return {
+          externalIdentity: {
+            externalRunId: "nm-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "reattached interrupted handoff",
+          artifactPaths: [evidencePath],
+        };
+      },
+      readExternalState: () => {
+        throw new Error("first resumed tick only settles handoff");
+      },
+    };
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    });
+    expect(handoffs).toBe(0);
+    expect(recoveries).toBe(1);
+    expect(result.lastRound).toMatchObject({
+      roundId,
+      state: "succeeded",
+      classification: "continue",
+    });
+    const resumed = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    }).snapshot();
+    expect(resumed.rounds).toHaveLength(1);
+    expect(resumed.currentRound?.artifacts).toHaveLength(1);
+    expect(
+      resumed.currentRound?.checkpoints.map((checkpoint) => checkpoint.stage),
+    ).toEqual([
+      "delegate_handoff_intent",
+      "delegate_handoff_completed",
+      "classified",
+    ]);
+    db.close();
+  });
+
+  it("refuses a fresh attempt while a prior handoff intent is unresolved", async () => {
+    const { db, invocation } = openDelegateDb();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 5,
+    });
+    const priorRoundId = `${invocation.invocationId}::round-1`;
+    envelope.facade.startRound({
+      roundId: priorRoundId,
+      invocationId: invocation.invocationId,
+      workflowRunId: invocation.workflowRunId,
+      stepRunId: invocation.stepRunId,
+      stepKey: invocation.stepKey,
+      executorFamily: invocation.executorFamily,
+      attempt: 1,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: "handoff intent persisted",
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordCheckpoint(priorRoundId, {
+      checkpointId: `${priorRoundId}-delegate_handoff_intent`,
+      sequence: 0,
+      stage: "delegate_handoff_intent",
+      detail: JSON.stringify({
+        tool: "no-mistakes",
+        invocationId: invocation.invocationId,
+        attempt: 1,
+      }),
+    });
+    envelope.applyDaemonDecision(
+      {
+        roundId: priorRoundId,
+        classification: "manual_recovery_required",
+        executorRecommendation: "manual_recovery_required",
+        roundState: "manual_recovery_required",
+        invocationState: "manual_recovery_required",
+        recoveryCode: "executor_threw",
+        humanGate: "manual_recovery_required",
+      },
+      {
+        classificationCheckpoint: {
+          checkpointId: `${priorRoundId}-classified`,
+          sequence: 1,
+          stage: "classified",
+          detail: "interrupted after external launch",
+        },
+      },
+    );
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    let handoffs = 0;
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => {
+        handoffs += 1;
+        throw new Error("prior unresolved intent must prevent launch");
+      },
+      readExternalState: () => {
+        throw new Error("prior unresolved intent must prevent polling");
+      },
+    };
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    });
+    expect(handoffs).toBe(0);
+    expect(result.lastRound).toMatchObject({
+      state: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      recoveryCode: "delegate_handoff_recovery_required",
+    });
+    db.close();
+  });
+
+  it("finishes an interrupted checkpointed handoff round before supervision", async () => {
+    const { db, invocation } = openDelegateDb();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 5,
+    });
+    const roundId = `${invocation.invocationId}::round-1`;
+    envelope.facade.startRound({
+      roundId,
+      invocationId: invocation.invocationId,
+      workflowRunId: invocation.workflowRunId,
+      stepRunId: invocation.stepRunId,
+      stepKey: invocation.stepKey,
+      executorFamily: invocation.executorFamily,
+      attempt: invocation.attempt,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordRoundProgress(roundId, {
+      observation: {
+        phase: "capturing_result",
+        summary: "no-mistakes accepted the delegated run",
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-handoff`,
+          sequence: 0,
+          stage: "delegate_handoff_completed",
+          detail: JSON.stringify({
+            externalIdentity: {
+              externalRunId: "nm-run-1",
+              branch: "feature/delegate-supervisor",
+              headSha: HEAD,
+            },
+            summary: "no-mistakes accepted the delegated run",
+          }),
+        },
+      ],
+    });
+    let handoffs = 0;
+    let settled = 0;
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => {
+        handoffs += 1;
+        throw new Error("checkpointed handoff must not repeat");
+      },
+      readExternalState: () => ({
+        ok: true,
+        value: state({ stepStatus: "completed", ciState: "passed" }),
+        digest: "sha256:terminal",
+      }),
+    };
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: { "no-mistakes": adapter },
+        settleHandoff: (provenClean: boolean) => {
+          expect(provenClean).toBe(true);
+          settled += 1;
+        },
+      },
+      maxTicks: 2,
+      now: () => 6,
+    });
+    expect(result.invocation.state).toBe("succeeded");
+    expect(handoffs).toBe(0);
+    expect(settled).toBe(1);
+    db.close();
+  });
+
+  it("hands off to no-mistakes, mirrors progress rounds, and corroborates terminal success", async () => {
+    const { db, invocation, root } = openDelegateDb();
+    const statePath = path.join(root, "no-mistakes-state.json");
+    writeState(statePath, state());
+    let handoffs = 0;
+    const adapter = createNoMistakesToolAdapter({
+      handoff: () => {
+        handoffs += 1;
+        return {
+          externalIdentity: {
+            externalRunId: "nm-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "no-mistakes accepted the delegated run",
+          artifactPaths: [statePath],
+        };
+      },
+      statePath: () => statePath,
+    });
+    const executor = new DelegateSupervisorExecutor();
+    const bindings = { tools: new Map([[adapter.name, adapter]]) };
+
+    const handedOff = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: bindings,
+      now: () => 10,
+    });
+    expect(handoffs).toBe(1);
+    expect(handedOff.invocation.state).toBe("running");
+    expect(handedOff.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+    });
+
+    const mirrored = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { ...bindings, now: () => 20 },
+      now: () => 20,
+    });
+    expect(mirrored.invocation.state).toBe("running");
+    expect(mirrored.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+      inputDigest: expect.stringMatching(/^sha256:/),
+      resultDigest: expect.stringMatching(/^sha256:/),
+      heartbeatAt: 20,
+    });
+
+    writeState(
+      statePath,
+      state({
+        activeStep: null,
+        stepStatus: "completed",
+        ciState: "passed",
+      }),
+    );
+    const completed = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { ...bindings, now: () => 30 },
+      now: () => 30,
+    });
+    expect(handoffs).toBe(1);
+    expect(completed.invocation.state).toBe("succeeded");
+    expect(completed.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "complete",
+      verificationStatus: null,
+      commitSha: HEAD,
+    });
+    expect(completed.ticks).toHaveLength(1);
+    db.close();
+  });
+
+  it("does not retain a synthetic approval after the gate clears", async () => {
+    const { db, invocation } = openDelegateDb();
+    let external = state({
+      activeStep: "review",
+      stepStatus: "awaiting_approval",
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: "sha256:approval-transition",
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 10,
+    };
+    await driveExecutorTicks(input);
+    const gated = await driveExecutorTicks(input);
+    expect(gated.invocation.state).toBe("waiting_operator");
+    external = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+    });
+    updateExecutorRound(db, gated.lastRound!.roundId, {
+      toState: "running",
+      classification: null,
+      executorRecommendation: null,
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: null,
+    });
+    updateExecutorInvocationState(db, invocation.invocationId, "running", {
+      finishedAt: null,
+    });
+    const completed = await driveExecutorTicks(input);
+    expect(completed.invocation.state).toBe("succeeded");
+    db.close();
+  });
+
+  it("versions resolved decision evidence when a gated round resumes", async () => {
+    const { db, invocation } = openDelegateDb();
+    let external = state({
+      activeStep: "review",
+      stepStatus: "awaiting_decision",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "choose review disposition",
+          allowedActions: ["approve"],
+          recommendedAction: "approve",
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: "sha256:decision-transition",
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 10,
+    };
+    await driveExecutorTicks(input);
+    const gated = await driveExecutorTicks(input);
+    expect(gated.invocation.state).toBe("waiting_operator");
+    external = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "choose review disposition",
+          allowedActions: ["approve"],
+          recommendedAction: "approve",
+          chosenAction: "approve",
+          resolution: "approved",
+        },
+      ],
+    });
+    updateExecutorRound(db, gated.lastRound!.roundId, {
+      toState: "running",
+      classification: null,
+      executorRecommendation: null,
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: null,
+    });
+    updateExecutorInvocationState(db, invocation.invocationId, "running", {
+      finishedAt: null,
+    });
+    const completed = await driveExecutorTicks(input);
+    expect(completed.invocation.state).toBe("succeeded");
+    const decisions = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    }).snapshot().currentRound?.decisions;
+    expect(decisions).toHaveLength(2);
+    expect(decisions?.at(-1)).toMatchObject({
+      externalRef: "review",
+      chosenAction: "approve",
+      resolution: "approved",
+    });
+    db.close();
+  });
+
+  it("parks unchanged semantic progress after the four-minute stall boundary", async () => {
+    const { db, invocation, root } = openDelegateDb();
+    const statePath = path.join(root, "no-mistakes-state.json");
+    writeState(statePath, state());
+    const adapter = createNoMistakesToolAdapter({
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "handoff complete",
+      }),
+      statePath: () => statePath,
+    });
+    const executor = new DelegateSupervisorExecutor();
+    const tools = new Map([[adapter.name, adapter]]);
+
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools, now: () => 10 },
+      now: () => 10,
+    });
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools, now: () => 20 },
+      now: () => 20,
+    });
+    const stalledAt = 20 + DELEGATE_SUPERVISOR_STALL_AFTER_MS;
+    const stalled = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools, now: () => stalledAt },
+      now: () => stalledAt,
+    });
+    expect(stalled.invocation.state).toBe("manual_recovery_required");
+    expect(stalled.lastRound).toMatchObject({
+      state: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+      humanGate: "manual_recovery_required",
+    });
+    db.close();
+  });
+
+  it("refuses a completed claim contradicted by pending CI", async () => {
+    const { db, invocation } = openDelegateDb();
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: state({ stepStatus: "completed", ciState: "pending" }),
+        digest: "sha256:pending-ci",
+      }),
+    };
+    const executor = new DelegateSupervisorExecutor();
+    const bindings = { tools: { "no-mistakes": adapter }, now: () => 20 };
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: bindings,
+      now: () => 10,
+    });
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: bindings,
+      now: () => 20,
+    });
+    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.lastRound?.recoveryCode).toBe("external_state_inconsistent");
+    db.close();
+  });
+
+  it("routes malformed adapter containers to unreadable recovery", async () => {
+    const { db, invocation } = openDelegateDb();
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: {
+          ...state(),
+          findings: undefined,
+        } as unknown as DelegateSupervisorExternalState,
+        digest: "sha256:malformed",
+      }),
+    };
+    const executor = new DelegateSupervisorExecutor();
+    const bindings = { tools: new Map([[adapter.name, adapter]]) };
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: bindings,
+      now: () => 10,
+    });
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: bindings,
+      now: () => 20,
+    });
+    expect(result.lastRound).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+    db.close();
+  });
+
+  it("propagates cancellation raised while reading delegated state", async () => {
+    const { db, invocation } = openDelegateDb();
+    const controller = new AbortController();
+    const reason = new Error("daemon claim cancelled");
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => {
+        controller.abort(reason);
+        return Promise.reject(reason);
+      },
+    };
+    const executor = new DelegateSupervisorExecutor();
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: new Map([[adapter.name, adapter]]) },
+      signal: controller.signal,
+      now: () => 10,
+    };
+    await driveExecutorTicks(input);
+    await expect(driveExecutorTicks(input)).rejects.toBe(reason);
+    expect(
+      createDurableExecutorEnvelope({
+        db,
+        invocationId: invocation.invocationId,
+      }).snapshot().invocation.state,
+    ).toBe("running");
+    db.close();
+  });
+
+  it("supervises a second tool through adapter registration and portable config only", async () => {
+    const { db, invocation } = openDelegateDb();
+    const ciAdapter: DelegateSupervisorToolAdapter = {
+      name: "ci-run",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "ci-42",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "CI run dispatched",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: state({
+          externalRunId: "ci-42",
+          activeStep: null,
+          stepStatus: "completed",
+          ciState: "passed",
+        }),
+        digest: "sha256:ci-42",
+      }),
+    };
+    const executor = new DelegateSupervisorExecutor();
+    const hostBindings = { tools: new Map([[ciAdapter.name, ciAdapter]]) };
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "ci-run" },
+      hostBindings,
+      now: () => 10,
+    });
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor,
+      config: { tool: "ci-run" },
+      hostBindings,
+      now: () => 20,
+    });
+    expect(result.invocation.state).toBe("succeeded");
+    expect(DELEGATE_SUPERVISOR_CONFIG_SCHEMA.properties.tool).toEqual({
+      type: "string",
+      minLength: 1,
+    });
+    db.close();
+  });
+});
+
+describe("no-mistakes tool adapter", () => {
+  const identity = {
+    externalRunId: "nm-run-1",
+    branch: "feature/delegate-supervisor",
+    headSha: HEAD,
+  };
+  const parseStatus = (
+    raw: string,
+    expected: typeof identity,
+    options: { previousState?: DelegateSupervisorExternalState } = {},
+  ) =>
+    parseNoMistakesAxiStatus(raw, expected, {
+      resolveHeadSha: (abbreviatedHead) =>
+        abbreviatedHead === HEAD.slice(0, abbreviatedHead.length) ? HEAD : null,
+      ...options,
+    });
+
+  it("reads launch identity without treating the bounded gate as status", () => {
+    expect(
+      parseNoMistakesLaunchIdentity(
+        [
+          "run:",
+          '  id: "nm-run-1"',
+          "gate: ci",
+          "help[1]: inspect with `no-mistakes axi status --run nm-run-1`",
+        ].join("\n"),
+        { branch: identity.branch, headSha: identity.headSha },
+      ),
+    ).toEqual({ ok: true, value: identity });
+  });
+
+  it("normalizes axi status into canonical delegated state", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,awaiting_approval,1,1000",
+        "gate:",
+        "  step: ci",
+        "  status: awaiting_approval",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "awaiting_approval",
+        activeStep: "ci",
+        ciState: "pending",
+        prUrl: "https://example.test/pull/1",
+      },
+    });
+  });
+
+  it("lets current gates override stale checks-passed output", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  findings: 1 awaiting",
+        "outcome: checks-passed",
+        "gate:",
+        "  step: review",
+        "  status: awaiting_approval",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "awaiting_approval",
+        ciState: "pending",
+        findings: [{ externalId: "active-findings" }],
+      },
+    });
+  });
+
+  it("preserves cancellation and decision gates for supervisor policy", () => {
+    const cancelled = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: cancelled",
+        "  head: aaaaaaaa",
+      ].join("\n"),
+      identity,
+    );
+    expect(cancelled).toMatchObject({
+      ok: true,
+      value: { stepStatus: "cancelled" },
+    });
+
+    const decision = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "gate:",
+        "  step: review",
+        "  status: awaiting_decision",
+        "  summary: choose the review disposition",
+        "help[1]: Run `no-mistakes axi respond --action approve`",
+      ].join("\n"),
+      identity,
+    );
+    expect(decision).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "awaiting_decision",
+        decisions: [
+          {
+            summary: "choose the review disposition",
+            allowedActions: ["approve"],
+          },
+        ],
+      },
+    });
+  });
+
+  it("carries resolution evidence forward when a decision step completes", () => {
+    const gated = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "gate:",
+        "  step: review",
+        "  status: awaiting_decision",
+        "help[1]: Run `no-mistakes axi respond --action approve`",
+      ].join("\n"),
+      identity,
+    );
+    if (!gated.ok) throw new Error(gated.error);
+    const completed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    review,completed,0,1000",
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+      { previousState: gated.value },
+    );
+    expect(completed).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "completed",
+        decisions: [
+          {
+            externalId: "review",
+            chosenAction: "external_resolution",
+            resolution:
+              "no-mistakes step review completed after its decision gate",
+          },
+        ],
+      },
+    });
+  });
+
+  it("preserves a resolved decision when a later decision gate appears", () => {
+    const firstGate = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "gate:",
+        "  step: review",
+        "  status: awaiting_decision",
+        "help[1]: Run `no-mistakes axi respond --action approve`",
+      ].join("\n"),
+      identity,
+    );
+    if (!firstGate.ok) throw new Error(firstGate.error);
+    const secondGate = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,completed,0,1000",
+        "    publish,awaiting_decision,0,0",
+        "gate:",
+        "  step: publish",
+        "  status: awaiting_decision",
+        "help[1]: Run `no-mistakes axi respond --action publish`",
+      ].join("\n"),
+      identity,
+      { previousState: firstGate.value },
+    );
+    expect(secondGate).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "awaiting_decision",
+        decisions: [
+          {
+            externalId: "review",
+            chosenAction: "external_resolution",
+            resolution:
+              "no-mistakes step review completed after its decision gate",
+          },
+          {
+            externalId: "publish",
+            chosenAction: null,
+            resolution: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("does not carry decisions from a different external run", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+      {
+        previousState: state({
+          externalRunId: "nm-run-from-prior-attempt",
+          decisions: [
+            {
+              externalId: "review",
+              summary: "old decision",
+              allowedActions: ["approve"],
+              recommendedAction: "approve",
+              chosenAction: null,
+              resolution: null,
+            },
+          ],
+        }),
+      },
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "completed", decisions: [] },
+    });
+  });
+
+  it("refuses status without the pinned head evidence", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error:
+        "no-mistakes axi status did not report run id, branch, status, and head",
+    });
+  });
+
+  it("does not infer absent checks from missing CI and PR evidence", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "completed", ciState: "pending", prUrl: null },
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(classifyDelegateSupervisorState(parsed.value)).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+    });
+  });
+
+  it("fails closed on unknown status vocabulary", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: surprisingly_done",
+        "  head: aaaaaaaa",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error:
+        "no-mistakes axi status reported unknown run status surprisingly_done",
+    });
+  });
+
+  it("requires abbreviated heads to resolve exactly", () => {
+    const parsed = parseNoMistakesAxiStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+      { resolveHeadSha: () => "a".repeat(8) + "b".repeat(32) },
+    );
+    expect(parsed).toEqual({
+      ok: false,
+      error: `no-mistakes axi status head mismatch: expected ${HEAD}, observed aaaaaaaa`,
+    });
+  });
+
+  it("gives blocking outcomes and current CI evidence precedence", () => {
+    const failed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+        "outcome: failed",
+      ].join("\n"),
+      identity,
+    );
+    expect(failed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "failed", ciState: "passed" },
+    });
+
+    const stalePassed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,pending,0,1000",
+        "outcome: checks-passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(stalePassed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "running", ciState: "pending" },
+    });
+  });
+
+  it("preserves ungated phase changes as supervisor progress", () => {
+    const review = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,running,0,1000",
+        "    test,pending,0,0",
+      ].join("\n"),
+      identity,
+    );
+    const test = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,completed,0,1000",
+        "    test,running,0,1000",
+      ].join("\n"),
+      identity,
+    );
+    expect(review).toMatchObject({ ok: true, value: { activeStep: "review" } });
+    expect(test).toMatchObject({ ok: true, value: { activeStep: "test" } });
+  });
+
+  it("normalizes explicitly skipped checks as absent", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,skipped,0,1000",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "completed", ciState: "none" },
+    });
+  });
+
+  it("accepts the terminal passed outcome", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "completed", ciState: "passed" },
+    });
+  });
+
+  it("settles clean green monitoring as terminal success", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  clean: true",
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "completed", ciState: "passed" },
+    });
+  });
+
+  it("ignores clean PR evidence nested under historical sections", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+        "history:",
+        "  clean: true",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "running" },
+    });
+  });
+
+  it("keeps polling a running run when a step row reports findings", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  clean: true",
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,completed,1,1000",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "running",
+        findings: [{ externalId: "active-findings" }],
+      },
+    });
+  });
+
+  it("preserves completed status when terminal findings remain", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "  findings: 1 unresolved",
+        "outcome: passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        stepStatus: "completed",
+        findings: [{ externalId: "active-findings" }],
+      },
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(classifyDelegateSupervisorState(parsed.value)).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+    });
+  });
+
+  it("keeps dirty or draft pull requests nonterminal", () => {
+    for (const prEvidence of ["  draft: true", "  merge_state: dirty"]) {
+      const parsed = parseStatus(
+        [
+          "run:",
+          '  id: "nm-run-1"',
+          "  branch: feature/delegate-supervisor",
+          "  status: completed",
+          "  head: aaaaaaaa",
+          '  pr: "https://example.test/pull/1"',
+          prEvidence,
+          "  steps[1]{step,status,findings,duration_ms}:",
+          "    ci,completed,0,1000",
+          "outcome: checks-passed",
+        ].join("\n"),
+        identity,
+      );
+      expect(parsed).toMatchObject({
+        ok: true,
+        value: { stepStatus: "blocked", ciState: "passed" },
+      });
+    }
+  });
+
+  it("preserves the raw refresh digest through the adapter boundary", async () => {
+    const refreshed = {
+      ok: true as const,
+      value: state(),
+      digest: "sha256:raw-axi-status",
+    };
+    const adapter = createNoMistakesToolAdapter({
+      handoff: () => ({ externalIdentity: identity, summary: "handed off" }),
+      statePath: () => "unused",
+      refreshState: () => refreshed,
+      read: () => {
+        throw new Error("normalized fallback should not run after refresh");
+      },
+    });
+    const { invocation, db } = openDelegateDb();
+    await expect(
+      adapter.readExternalState({
+        invocation,
+        config: { tool: "no-mistakes" },
+        signal: new AbortController().signal,
+        handoff: { externalIdentity: identity, summary: "handed off" },
+      }),
+    ).resolves.toEqual(refreshed);
+    db.close();
+  });
+
+  it("refuses terminal completion while active findings remain", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          stepStatus: "completed",
+          ciState: "passed",
+          findings: [
+            {
+              externalId: "review-1",
+              title: "unresolved review finding",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+    });
+  });
+});

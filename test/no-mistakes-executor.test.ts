@@ -6,7 +6,7 @@ import {
   EXECUTOR_INVOCATION_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorInvocation,
-  transitionExecutorRound
+  transitionExecutorRound,
 } from "../src/core/executors/loop/reducer.js";
 import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
 import {
@@ -26,13 +26,13 @@ import {
   planNoMistakesRoundFindings,
   planNoMistakesRoundPersistence,
   planNoMistakesRoundStart,
-  type NoMistakesExternalState
+  type NoMistakesExternalState,
 } from "../src/adapters/no-mistakes-executor.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
 const INVOCATION_TERMINAL_SET = new Set<string>(
-  EXECUTOR_INVOCATION_TERMINAL_STATES
+  EXECUTOR_INVOCATION_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
@@ -44,7 +44,7 @@ const HEAD_SHA = "a".repeat(40);
  * fields under test.
  */
 function externalState(
-  overrides: Partial<NoMistakesExternalState> = {}
+  overrides: Partial<NoMistakesExternalState> = {},
 ): NoMistakesExternalState {
   return {
     externalRunId: "nm-run-1",
@@ -53,13 +53,18 @@ function externalState(
     activeStep: "review",
     stepStatus: "running",
     findings: [
-      { externalId: "F-1", severity: "high", title: "missing test", detail: "x" }
+      {
+        externalId: "F-1",
+        severity: "high",
+        title: "missing test",
+        detail: "x",
+      },
     ],
     selectedFindingIds: ["F-1"],
     decisions: [],
     prUrl: "https://github.com/x/y/pull/1",
     ciState: "pending",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -92,16 +97,17 @@ describe("no-mistakes external vocabulary", () => {
         "awaiting_approval",
         "awaiting_decision",
         "blocked",
+        "cancelled",
         "completed",
         "failed",
-        "running"
-      ].sort()
+        "running",
+      ].sort(),
     );
   });
 
   it("pins the CI states it can mirror", () => {
     expect([...NO_MISTAKES_CI_STATES].sort()).toEqual(
-      ["failed", "none", "passed", "pending"].sort()
+      ["failed", "none", "passed", "pending"].sort(),
     );
   });
 
@@ -111,8 +117,8 @@ describe("no-mistakes external vocabulary", () => {
         "external_run_failed",
         "external_state_blocked",
         "external_state_inconsistent",
-        "external_state_unreadable"
-      ].sort()
+        "external_state_unreadable",
+      ].sort(),
     );
   });
 });
@@ -120,7 +126,7 @@ describe("no-mistakes external vocabulary", () => {
 describe("decideNoMistakesMirror — still running", () => {
   it("keeps mirroring an in-progress external run without a gate", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "running" })
+      externalState({ stepStatus: "running" }),
     );
     expect(decision.classification).toBe("continue");
     expect(decision.roundState).toBe("mirroring_external_state");
@@ -141,10 +147,10 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
             externalId: "D-1",
             summary: "merge now or hold for review",
             allowedActions: ["merge", "hold"],
-            recommendedAction: "hold"
-          }
-        ]
-      })
+            recommendedAction: "hold",
+          },
+        ],
+      }),
     );
     expect(decision.classification).toBe("operator_decision_required");
     expect(decision.roundState).toBe("waiting_operator");
@@ -155,7 +161,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
 
   it("surfaces an approval boundary as a durable waiting_operator gate", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "awaiting_approval" })
+      externalState({ stepStatus: "awaiting_approval" }),
     );
     expect(decision.classification).toBe("approval_required");
     expect(decision.roundState).toBe("waiting_operator");
@@ -166,7 +172,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
 
   it("never auto-resolves a decision: an awaiting_decision with no surfaced decision is inconsistent", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "awaiting_decision", decisions: [] })
+      externalState({ stepStatus: "awaiting_decision", decisions: [] }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
@@ -183,10 +189,10 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
             summary: "merge now or hold for review",
             allowedActions: ["merge", "hold"],
             chosenAction: "merge",
-            resolution: "operator:merge"
-          }
-        ]
-      })
+            resolution: "operator:merge",
+          },
+        ],
+      }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
@@ -200,16 +206,18 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
       externalState({
         stepStatus: "completed",
         ciState: "passed",
+        findings: [],
+        selectedFindingIds: [],
         decisions: [
           {
             externalId: "D-1",
             summary: "hold for review",
             allowedActions: ["merge", "hold"],
             chosenAction: "merge",
-            resolution: "operator:merge"
-          }
-        ]
-      })
+            resolution: "operator:merge",
+          },
+        ],
+      }),
     );
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
@@ -223,8 +231,10 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
       externalState({
         stepStatus: "completed",
         ciState: "none",
-        decisions: []
-      })
+        findings: [],
+        selectedFindingIds: [],
+        decisions: [],
+      }),
     );
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
@@ -235,23 +245,25 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
       externalState({
         stepStatus: "completed",
         ciState: "passed",
+        findings: [],
+        selectedFindingIds: [],
         decisions: [
           {
             externalId: "D-1",
             summary: "apply low-risk fix",
             allowedActions: ["apply", "hold"],
             chosenAction: "apply",
-            resolution: "delegated:within-envelope"
-          }
-        ]
-      })
+            resolution: "delegated:within-envelope",
+          },
+        ],
+      }),
     );
     expect(decision.classification).toBe("complete");
   });
 
   it("refuses to trust a completed claim while CI is still failing", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "completed", ciState: "failed" })
+      externalState({ stepStatus: "completed", ciState: "failed" }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
@@ -260,7 +272,7 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
 
   it("refuses to trust a completed claim while CI is still pending", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "completed", ciState: "pending" })
+      externalState({ stepStatus: "completed", ciState: "pending" }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
@@ -275,10 +287,10 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
           {
             externalId: "D-1",
             summary: "merge now or hold",
-            allowedActions: ["merge", "hold"]
-          }
-        ]
-      })
+            allowedActions: ["merge", "hold"],
+          },
+        ],
+      }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
@@ -288,7 +300,7 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
 describe("decideNoMistakesMirror — failure and blockage", () => {
   it("mirrors an external failure as a failed round", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "failed" })
+      externalState({ stepStatus: "failed" }),
     );
     expect(decision.classification).toBe("failed");
     expect(decision.roundState).toBe("failed");
@@ -299,7 +311,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
 
   it("mirrors an external blockage as a blocked round awaiting external state", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "blocked" })
+      externalState({ stepStatus: "blocked" }),
     );
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
@@ -312,7 +324,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
 describe("decideNoMistakesMirror — untrusted external evidence routes to manual recovery", () => {
   it("rejects a malformed head SHA", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ headSha: "not-a-sha" })
+      externalState({ headSha: "not-a-sha" }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_unreadable");
@@ -321,7 +333,7 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
 
   it("rejects an empty external run id", () => {
     const decision = decideNoMistakesMirror(
-      externalState({ externalRunId: "  " })
+      externalState({ externalRunId: "  " }),
     );
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
@@ -330,8 +342,8 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
     const decision = decideNoMistakesMirror(
       externalState({
         findings: [{ externalId: "F-1", title: "a" }],
-        selectedFindingIds: ["F-2"]
-      })
+        selectedFindingIds: ["F-2"],
+      }),
     );
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
@@ -340,8 +352,8 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
     const decision = decideNoMistakesMirror(
       externalState({
         findings: [{ externalId: "F-1", title: "  " }],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
@@ -350,8 +362,8 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
     const decision = decideNoMistakesMirror(
       externalState({
         stepStatus: "awaiting_decision",
-        decisions: [{ externalId: "D-1", summary: "x", allowedActions: [] }]
-      })
+        decisions: [{ externalId: "D-1", summary: "x", allowedActions: [] }],
+      }),
     );
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
@@ -361,9 +373,9 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
       externalState({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "x", allowedActions: ["  ", "\t"] }
-        ]
-      })
+          { externalId: "D-1", summary: "x", allowedActions: ["  ", "\t"] },
+        ],
+      }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_unreadable");
@@ -374,10 +386,10 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
       externalState({
         findings: [
           { externalId: "F-1", title: "a" },
-          { externalId: "F-1", title: "b" }
+          { externalId: "F-1", title: "b" },
         ],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     );
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
@@ -385,8 +397,8 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
   it("does not blindly trust an unknown external step status", () => {
     const decision = decideNoMistakesMirror(
       externalState({
-        stepStatus: "totally_made_up" as NoMistakesExternalState["stepStatus"]
-      })
+        stepStatus: "totally_made_up" as NoMistakesExternalState["stepStatus"],
+      }),
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_unreadable");
@@ -407,11 +419,11 @@ describe("decideNoMistakesMirror — totality", () => {
                   {
                     externalId: "D-1",
                     summary: "decide",
-                    allowedActions: ["a", "b"]
-                  }
+                    allowedActions: ["a", "b"],
+                  },
                 ]
-              : []
-        })
+              : [],
+        }),
       );
       expect(COMPLETION_SET.has(decision.classification)).toBe(true);
       if (decision.humanGate !== null) {
@@ -421,14 +433,14 @@ describe("decideNoMistakesMirror — totality", () => {
       // state must be reachable from there.
       const roundHop = transitionExecutorRound(
         "mirroring_external_state",
-        decision.roundState
+        decision.roundState,
       );
       expect(roundHop.ok).toBe(true);
       // The mirror invocation runs; every decided invocation state must be
       // reachable from running.
       const invocationHop = transitionExecutorInvocation(
         "running",
-        decision.invocationState
+        decision.invocationState,
       );
       expect(invocationHop.ok).toBe(true);
       expect(decision.reason.length).toBeGreaterThan(0);
@@ -436,7 +448,9 @@ describe("decideNoMistakesMirror — totality", () => {
   });
 
   it("only ever settles into terminal states that are actually terminal", () => {
-    const terminal = decideNoMistakesMirror(externalState({ stepStatus: "failed" }));
+    const terminal = decideNoMistakesMirror(
+      externalState({ stepStatus: "failed" }),
+    );
     expect(ROUND_TERMINAL_SET.has(terminal.roundState)).toBe(true);
     expect(INVOCATION_TERMINAL_SET.has(terminal.invocationState)).toBe(true);
   });
@@ -445,10 +459,10 @@ describe("decideNoMistakesMirror — totality", () => {
 describe("noMistakesInvocationId / noMistakesRoundId", () => {
   it("embeds the step-run identity, the family, and the attempt", () => {
     expect(noMistakesInvocationId("run1", "step1", 0)).toBe(
-      "run1::step1::no-mistakes::0"
+      "run1::step1::no-mistakes::0",
     );
     expect(noMistakesInvocationId("run1", "step1", 2)).toBe(
-      "run1::step1::no-mistakes::2"
+      "run1::step1::no-mistakes::2",
     );
   });
 
@@ -471,10 +485,15 @@ describe("planNoMistakesRoundFindings", () => {
     const records = planNoMistakesRoundFindings({
       roundId: "round-0",
       findings: [
-        { externalId: "F-1", severity: "high", title: "missing test", detail: "x" },
-        { externalId: "F-2", title: "naming nit" }
+        {
+          externalId: "F-1",
+          severity: "high",
+          title: "missing test",
+          detail: "x",
+        },
+        { externalId: "F-2", title: "naming nit" },
       ],
-      selectedFindingIds: ["F-1"]
+      selectedFindingIds: ["F-1"],
     });
     expect(records).toEqual([
       {
@@ -484,7 +503,7 @@ describe("planNoMistakesRoundFindings", () => {
         title: "missing test",
         detail: "x",
         selected: true,
-        externalRef: "nomistakes:F-1"
+        externalRef: "nomistakes:F-1",
       },
       {
         findingId: "round-0-finding-F-2",
@@ -493,8 +512,8 @@ describe("planNoMistakesRoundFindings", () => {
         title: "naming nit",
         detail: null,
         selected: false,
-        externalRef: "nomistakes:F-2"
-      }
+        externalRef: "nomistakes:F-2",
+      },
     ]);
   });
 
@@ -503,8 +522,8 @@ describe("planNoMistakesRoundFindings", () => {
       planNoMistakesRoundFindings({
         roundId: "round-0",
         findings: [],
-        selectedFindingIds: []
-      })
+        selectedFindingIds: [],
+      }),
     ).toEqual([]);
   });
 });
@@ -520,14 +539,14 @@ describe("planNoMistakesRoundDecisions", () => {
           allowedActions: ["merge", "hold"],
           recommendedAction: "hold",
           chosenAction: "hold",
-          resolution: "delegated:within-envelope"
+          resolution: "delegated:within-envelope",
         },
         {
           externalId: "D-2",
           summary: "apply low-risk fix",
-          allowedActions: ["apply", "skip"]
-        }
-      ]
+          allowedActions: ["apply", "skip"],
+        },
+      ],
     });
     expect(records).toEqual([
       {
@@ -538,7 +557,7 @@ describe("planNoMistakesRoundDecisions", () => {
         recommendedAction: "hold",
         chosenAction: "hold",
         resolution: "delegated:within-envelope",
-        externalRef: "nomistakes:D-1"
+        externalRef: "nomistakes:D-1",
       },
       {
         decisionId: "round-0-decision-D-2",
@@ -548,14 +567,14 @@ describe("planNoMistakesRoundDecisions", () => {
         recommendedAction: null,
         chosenAction: null,
         resolution: null,
-        externalRef: "nomistakes:D-2"
-      }
+        externalRef: "nomistakes:D-2",
+      },
     ]);
   });
 
   it("returns no records when the external run surfaced no decisions", () => {
     expect(
-      planNoMistakesRoundDecisions({ roundId: "round-0", decisions: [] })
+      planNoMistakesRoundDecisions({ roundId: "round-0", decisions: [] }),
     ).toEqual([]);
   });
 });
@@ -567,10 +586,10 @@ describe("planNoMistakesInvocation", () => {
       stepRunId: "step1",
       stepKey: "no-mistakes",
       attempt: 0,
-      startedAt: 1000
+      startedAt: 1000,
     });
     expect(invocation.invocationId).toBe(
-      noMistakesInvocationId("run1", "step1", 0)
+      noMistakesInvocationId("run1", "step1", 0),
     );
     expect(invocation.workflowRunId).toBe("run1");
     expect(invocation.stepRunId).toBe("step1");
@@ -589,14 +608,14 @@ describe("planNoMistakesInvocation", () => {
       stepRunId: "step1",
       stepKey: "no-mistakes",
       attempt: 0,
-      startedAt: 1
+      startedAt: 1,
     });
     const second = planNoMistakesInvocation({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
       attempt: 1,
-      startedAt: 2
+      startedAt: 2,
     });
     expect(first.invocationId).not.toBe(second.invocationId);
     expect(second.attempt).toBe(1);
@@ -608,14 +627,14 @@ describe("planNoMistakesInvocation", () => {
       stepRunId: "step1",
       stepKey: "no-mistakes",
       attempt: 0,
-      startedAt: 1
+      startedAt: 1,
     });
     const decision = decideNoMistakesMirror(
-      externalState({ stepStatus: "failed" })
+      externalState({ stepStatus: "failed" }),
     );
     const transition = transitionExecutorInvocation(
       invocation.state,
-      decision.invocationState
+      decision.invocationState,
     );
     expect(transition.ok).toBe(true);
     expect(INVOCATION_TERMINAL_SET.has(decision.invocationState)).toBe(true);
@@ -629,7 +648,7 @@ describe("planNoMistakesRoundStart", () => {
       stepRunId: "step1",
       stepKey: "no-mistakes",
       attempt: 0,
-      startedAt: 1000
+      startedAt: 1000,
     });
   }
 
@@ -639,9 +658,9 @@ describe("planNoMistakesRoundStart", () => {
       runtime: {
         inputDigest: "sha256:abc",
         artifactRoot: "/tmp/run1/step1",
-        logPaths: ["/tmp/run1/step1/mirror.log"]
+        logPaths: ["/tmp/run1/step1/mirror.log"],
       },
-      startedAt: 2000
+      startedAt: 2000,
     });
 
     expect(round.roundId).toBe(noMistakesRoundId(invocation().invocationId));
@@ -675,7 +694,7 @@ describe("planNoMistakesRoundStart", () => {
     const round = planNoMistakesRoundStart({
       invocation: invocation(),
       runtime: { inputDigest: null, artifactRoot: null },
-      startedAt: 2000
+      startedAt: 2000,
     });
     expect(round.agentProvider).toBeNull();
     expect(round.model).toBeNull();
@@ -689,8 +708,8 @@ describe("planNoMistakesRoundStart", () => {
       planNoMistakesRoundStart({
         invocation: foreign,
         runtime: { inputDigest: null, artifactRoot: null },
-        startedAt: 2000
-      })
+        startedAt: 2000,
+      }),
     ).toThrow(/non-no-mistakes family/);
   });
 
@@ -698,7 +717,7 @@ describe("planNoMistakesRoundStart", () => {
     const round = planNoMistakesRoundStart({
       invocation: invocation(),
       runtime: { inputDigest: null, artifactRoot: null },
-      startedAt: 2000
+      startedAt: 2000,
     });
     for (const stepStatus of NO_MISTAKES_EXTERNAL_STEP_STATUSES) {
       const decision = decideNoMistakesMirror(
@@ -707,9 +726,15 @@ describe("planNoMistakesRoundStart", () => {
           ciState: stepStatus === "completed" ? "passed" : "pending",
           decisions:
             stepStatus === "awaiting_decision"
-              ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
-              : []
-        })
+              ? [
+                  {
+                    externalId: "D-1",
+                    summary: "decide",
+                    allowedActions: ["a"],
+                  },
+                ]
+              : [],
+        }),
       );
       const hop = transitionExecutorRound(round.state, decision.roundState);
       expect(hop.ok).toBe(true);
@@ -739,10 +764,10 @@ describe("planNoMistakesRoundPersistence", () => {
         stepRunId: "step1",
         stepKey: "no-mistakes",
         attempt: 0,
-        startedAt: 1
+        startedAt: 1,
       }),
       runtime: { inputDigest: null, artifactRoot: null },
-      startedAt: 2
+      startedAt: 2,
     });
     const plan = planFor({ stepStatus: "running" });
     const hop = transitionExecutorRound(round.state, plan.roundUpdate.toState);
@@ -753,8 +778,12 @@ describe("planNoMistakesRoundPersistence", () => {
     const plan = planFor({
       stepStatus: "awaiting_decision",
       decisions: [
-        { externalId: "D-1", summary: "merge or hold", allowedActions: ["merge", "hold"] }
-      ]
+        {
+          externalId: "D-1",
+          summary: "merge or hold",
+          allowedActions: ["merge", "hold"],
+        },
+      ],
     });
     expect(plan.roundUpdate.toState).toBe("waiting_operator");
     expect(plan.roundUpdate.classification).toBe("operator_decision_required");
@@ -770,7 +799,13 @@ describe("planNoMistakesRoundPersistence", () => {
   });
 
   it("completes a corroborated run into a succeeded round", () => {
-    const plan = planFor({ stepStatus: "completed", ciState: "passed", decisions: [] });
+    const plan = planFor({
+      stepStatus: "completed",
+      ciState: "passed",
+      findings: [],
+      selectedFindingIds: [],
+      decisions: [],
+    });
     expect(plan.roundUpdate.toState).toBe("succeeded");
     expect(plan.roundUpdate.classification).toBe("complete");
     expect(plan.roundUpdate.recoveryCode).toBeNull();
@@ -808,10 +843,12 @@ describe("planNoMistakesRoundPersistence", () => {
         decisions:
           stepStatus === "awaiting_decision"
             ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
-            : []
+            : [],
       });
       expect(plan.roundUpdate.toState).toBe(plan.decision.roundState);
-      expect(plan.roundUpdate.classification).toBe(plan.decision.classification);
+      expect(plan.roundUpdate.classification).toBe(
+        plan.decision.classification,
+      );
       expect(plan.roundUpdate.recoveryCode).toBe(plan.decision.recoveryCode);
       expect(plan.roundUpdate.humanGate).toBe(plan.decision.humanGate);
     }
@@ -820,7 +857,9 @@ describe("planNoMistakesRoundPersistence", () => {
 
 describe("noMistakesRoundUpdate", () => {
   it("projects a decision into the round patch fields verbatim", () => {
-    const decision = decideNoMistakesMirror(externalState({ stepStatus: "running" }));
+    const decision = decideNoMistakesMirror(
+      externalState({ stepStatus: "running" }),
+    );
     const update = noMistakesRoundUpdate(decision);
     expect(update.toState).toBe(decision.roundState);
     expect(update.classification).toBe(decision.classification);
@@ -839,7 +878,7 @@ describe("noMistakesRoundUpdate", () => {
         decisions:
           stepStatus === "awaiting_decision"
             ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
-            : []
+            : [],
       });
       const plan = planNoMistakesRoundPersistence({ state });
       // One source of truth: the persistence plan's patch is this projection of
@@ -852,7 +891,7 @@ describe("noMistakesRoundUpdate", () => {
 describe("decideNoMistakesUnreadable", () => {
   it("routes an external-state read failure to manual recovery as unreadable evidence", () => {
     const decision = decideNoMistakesUnreadable(
-      "external no-mistakes state file is unreadable: ENOENT"
+      "external no-mistakes state file is unreadable: ENOENT",
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.roundState).toBe("manual_recovery_required");
@@ -862,21 +901,21 @@ describe("decideNoMistakesUnreadable", () => {
     // The reader's error is already a full sentence; it is preserved verbatim as
     // the decision reason rather than double-prefixed.
     expect(decision.reason).toBe(
-      "external no-mistakes state file is unreadable: ENOENT"
+      "external no-mistakes state file is unreadable: ENOENT",
     );
   });
 
   it("settles identically to a semantically unreadable snapshot (one classification authority)", () => {
     const fromReadFailure = decideNoMistakesUnreadable("bad bytes");
     const fromBadSnapshot = decideNoMistakesMirror(
-      externalState({ headSha: "not-a-sha" })
+      externalState({ headSha: "not-a-sha" }),
     );
     // A reader IO/JSON failure and a semantically broken snapshot are both
     // untrusted external evidence and settle the same way (modulo the reason).
     expect(fromReadFailure.classification).toBe(fromBadSnapshot.classification);
     expect(fromReadFailure.roundState).toBe(fromBadSnapshot.roundState);
     expect(fromReadFailure.invocationState).toBe(
-      fromBadSnapshot.invocationState
+      fromBadSnapshot.invocationState,
     );
     expect(fromReadFailure.humanGate).toBe(fromBadSnapshot.humanGate);
     expect(fromReadFailure.recoveryCode).toBe(fromBadSnapshot.recoveryCode);

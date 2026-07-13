@@ -153,9 +153,16 @@ Host-owned repo-local log and result paths are excluded from the ignored-path ba
 Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
 Directory-only mode or timestamp mutations therefore cannot evade the baseline.
 Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
-Agent-loop will repeat bounded runner rounds, and
-delegate-supervisor will poll a tool adapter across ticks when those lifecycle
-classes land. The single-shot lifecycle (`one-shot` and `script` in the current
+Agent-loop will repeat bounded runner rounds. `delegate-supervisor` composes one
+tool-adapter handoff with repeated bounded external-state reads across SDK
+ticks. The executor, not the adapter, owns durable rounds, semantic progress
+heartbeats, four-minute stall recovery, finding and decision projection,
+identity corroboration, and terminal classification. A tool adapter supplies
+only handoff, interrupted-handoff recovery, and canonical state normalization;
+portable step config selects it with `tool`, so adding a tool does not add an
+executor family or durable schema value. Recovery after a persisted handoff
+intent must reconcile durable tool evidence or fail closed before another
+launch. The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
@@ -406,9 +413,9 @@ For the `no-mistakes` step, the wrapper config must include a `runner_profile` b
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
 The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
-For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
+For the `no-mistakes` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
-The no-mistakes mirror preserves the raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and preserves the last heartbeat while that semantic digest is unchanged; after four minutes without fresh progress or terminal evidence it parks the round in manual recovery so operators inspect the external run before clearing recovery.
+The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the invocation in manual recovery so operators inspect the external run before clearing recovery.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed no-mistakes row.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.

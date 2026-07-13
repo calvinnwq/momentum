@@ -46,6 +46,11 @@ export type RegisteredExecutorWorkflowDispatchOptions = {
   unavailableReasons?: ReadonlyMap<string, string>;
   resolveHostBindings?: RegisteredExecutorHostBindingsResolver;
   maxTicks?: number;
+  resolveMaxTicks?: (input: {
+    executorName: string;
+    invocation: Readonly<{ invocationId: string; attempt: number }>;
+    context: WorkflowStepDispatchContext;
+  }) => number;
   signal?: AbortSignal;
 };
 
@@ -175,7 +180,14 @@ export function createRegisteredExecutorWorkflowDispatch(
             executor,
             config,
             hostBindings,
-            maxTicks: options.maxTicks ?? 1,
+            maxTicks:
+              options.resolveMaxTicks?.({
+                executorName: runtime.executorName,
+                invocation: before,
+                context,
+              }) ??
+              options.maxTicks ??
+              1,
             now: logicalNow,
             signal,
             authorizeWrite: leaseGuard.authorize,
@@ -236,8 +248,11 @@ function settleHostBindingsAfterFailure(
   hostBindings: Readonly<unknown>,
 ): string | null {
   if (hostBindings === null || typeof hostBindings !== "object") return null;
-  const settle = (hostBindings as { settleRepoOwnership?: unknown })
-    .settleRepoOwnership;
+  const bindings = hostBindings as {
+    settleRepoOwnership?: unknown;
+    settleHandoff?: unknown;
+  };
+  const settle = bindings.settleRepoOwnership ?? bindings.settleHandoff;
   if (typeof settle === "function") {
     try {
       settle(false);

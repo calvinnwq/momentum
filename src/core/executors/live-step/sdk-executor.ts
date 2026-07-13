@@ -6,6 +6,7 @@ import type {
   ExecutorTickContext,
   ExecutorTickResult,
 } from "../sdk/types.js";
+import { DELEGATE_SUPERVISOR_CONFIG_SCHEMA } from "../delegate-supervisor/executor.js";
 import type {
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorErrorCode,
@@ -179,15 +180,6 @@ const EMPTY_CONFIG_SCHEMA = {
   additionalProperties: false,
 } as const satisfies ExecutorConfigSchema;
 
-const DELEGATE_SUPERVISOR_CONFIG_SCHEMA = {
-  type: "object",
-  properties: {
-    tool: { type: "string", enum: ["gnhf", "no-mistakes"] },
-  },
-  required: ["tool"],
-  additionalProperties: false,
-} as const satisfies ExecutorConfigSchema;
-
 /** Current built-in schemas used by the profile-backed compatibility bridge. */
 export function liveStepBuiltInConfigSchema(
   name: string,
@@ -249,7 +241,7 @@ function parseDurableDecision(detail: string): DurableLiveStepDecision {
   return parsed;
 }
 
-function finalizeLiveStepResult(
+export function finalizeLiveStepResult(
   result: WorkflowStepExecutorDispatchResult,
   repoPath: string,
   safety: LiveStepRepoSafetyHostBinding | undefined,
@@ -436,7 +428,9 @@ function artifactClassForPath(
   return "result_document";
 }
 
-function isProvenClean(result: WorkflowStepExecutorDispatchResult): boolean {
+export function isProvenClean(
+  result: WorkflowStepExecutorDispatchResult,
+): boolean {
   return (
     result.ok &&
     (result.result.state === "succeeded" || result.result.state === "failed")

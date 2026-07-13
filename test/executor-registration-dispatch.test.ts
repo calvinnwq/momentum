@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
 import { runCli } from "../src/cli.js";
-import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
+import {
+  resolveDaemonWorkflowStepDispatch,
+  resolveProfileBackedDelegateToolStepKind,
+} from "../src/core/daemon/workflow-dispatch.js";
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
 import {
@@ -42,6 +45,18 @@ afterEach(() => {
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
+});
+
+describe("profile-backed delegated tool dispatch", () => {
+  it("selects the live-wrapper kind from portable tool config", () => {
+    expect(resolveProfileBackedDelegateToolStepKind("gnhf")).toBe(
+      "implementation",
+    );
+    expect(resolveProfileBackedDelegateToolStepKind("no-mistakes")).toBe(
+      "no-mistakes",
+    );
+    expect(resolveProfileBackedDelegateToolStepKind("custom-tool")).toBeNull();
+  });
 });
 
 function tempDir(): string {
@@ -1906,7 +1921,11 @@ describe("executor registration and SDK dispatch", () => {
     ).toBeNull();
     const dispatch = createRegisteredExecutorWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, maxTicks: 2 },
+      {
+        registry,
+        resolveMaxTicks: ({ executorName }) =>
+          executorName === "fixture-executor" ? 2 : 1,
+      },
     );
     await dispatch(claim.claim, {
       db,

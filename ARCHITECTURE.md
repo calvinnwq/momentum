@@ -33,8 +33,9 @@ opening helpers, git transactions, Linear HTTP / source / external-update
 adapters and refresh clients, trusted-shell / ACP runner-config parsers kept
 for stored-goal recovery rendering, live wrapper / harness-probe adapters for
 OpenClaw-facing execution, the opt-in coding-workflow live-wrapper CLI adapter,
-OpenClaw watch-process adapter, and no-mistakes executor / orchestrator
-wrappers.
+OpenClaw watch-process adapter, and delegated-tool adapters such as the
+no-mistakes handoff / state-reader edge. The reusable supervision lifecycle
+lives in `src/core/executors/delegate-supervisor/` behind the executor SDK.
 
 ## Deeper Contracts
 

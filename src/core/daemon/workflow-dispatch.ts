@@ -1,8 +1,14 @@
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
+import {
+  createNoMistakesToolAdapter,
+  parseNoMistakesAxiStatus,
+  parseNoMistakesLaunchIdentity,
+} from "../../adapters/no-mistakes-tool-adapter.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
@@ -43,10 +49,21 @@ import {
   resolveDaemonExecutorRegistry,
 } from "../executors/sdk/daemon-config.js";
 import {
+  finalizeLiveStepResult,
+  isProvenClean,
   LiveStepSdkExecutor,
   liveStepBuiltInConfigSchema,
   type LiveStepSdkHostBindings,
 } from "../executors/live-step/sdk-executor.js";
+import {
+  DelegateSupervisorExecutor,
+  DELEGATE_SUPERVISOR_EXECUTOR_NAME,
+} from "../executors/delegate-supervisor/executor.js";
+import type {
+  DelegateSupervisorExternalState,
+  DelegateSupervisorHostBindings,
+  DelegateSupervisorToolAdapter,
+} from "../executors/delegate-supervisor/types.js";
 import type { Executor } from "../executors/sdk/types.js";
 import type { ExecutorRegistryLoadResult } from "../executors/sdk/registry.js";
 import {
@@ -58,6 +75,10 @@ import {
   resolveDaemonLiveWrapperProfile,
   DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR,
 } from "../workflow/live-wrapper/daemon-profile.js";
+import {
+  buildCodingWorkflowChildEnv,
+  loadCodingWorkflowWrapperConfig,
+} from "../workflow/live-wrapper/coding-workflow.js";
 import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dispatch/dogfood.js";
 import {
   createExternalApplyWorkflowDispatch,
@@ -95,7 +116,10 @@ import {
 } from "../executors/loop/persist.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
-import { dispatchWorkflowStepExecutor } from "../workflow/step/executor.js";
+import {
+  dispatchWorkflowStepExecutor,
+  type WorkflowStepExecutorKind,
+} from "../workflow/step/executor.js";
 import {
   WORKFLOW_RECOVERY_CLASSIFICATIONS,
   writeWorkflowRecoveryArtifactInRunDir,
@@ -176,6 +200,7 @@ export function resolveDaemonWorkflowStepDispatch(
     const resolveHostBindings = createLiveStepHostBindingsResolver(
       env,
       liveRegistry,
+      profile.profile,
     );
     legacy = {
       ok: true,
@@ -184,6 +209,17 @@ export function resolveDaemonWorkflowStepDispatch(
           createRegisteredExecutorWorkflowDispatch(baseDispatch, {
             registry,
             resolveHostBindings,
+            // A delegated handoff is one durable SDK round; allow only that
+            // executor to perform its first bounded read under the same claim.
+            resolveMaxTicks: ({ executorName, invocation, context }) =>
+              executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
+              !hasCompletedDelegateHandoff(
+                context.db,
+                invocation.invocationId,
+                invocation.attempt,
+              )
+                ? 2
+                : 1,
           }),
           env,
           deps,
@@ -220,6 +256,7 @@ export function resolveDaemonWorkflowStepDispatch(
       ? createLiveStepHostBindingsResolver(
           env,
           buildRealWorkflowStepExecutorRegistry({ profile: profile.profile }),
+          profile.profile,
         )
       : undefined;
   return {
@@ -267,14 +304,17 @@ export function resolveDaemonWorkflowStepDispatch(
 function buildProfileBackedSdkExecutors(): Executor[] {
   return WORKFLOW_EXECUTOR_FAMILIES.filter(
     (name) => name !== "external-apply" && name !== "subworkflow",
-  ).map(
-    (name) => new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
+  ).map((name) =>
+    name === "delegate-supervisor"
+      ? new DelegateSupervisorExecutor()
+      : new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
   );
 }
 
 function createLiveStepHostBindingsResolver(
   env: Record<string, string | undefined>,
   liveRegistry: ReturnType<typeof buildRealWorkflowStepExecutorRegistry>,
+  profile: LiveWrapperProfile,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -282,8 +322,13 @@ function createLiveStepHostBindingsResolver(
     executor: Executor;
     executorName: string;
     config: Readonly<Record<string, unknown>>;
-  }): LiveStepSdkHostBindings | Record<string, never> => {
-    if (!(input.executor instanceof LiveStepSdkExecutor)) return {};
+  }):
+    | LiveStepSdkHostBindings
+    | DelegateSupervisorHostBindings
+    | Record<string, never> => {
+    const isLiveStep = input.executor instanceof LiveStepSdkExecutor;
+    const isDelegate = input.executor instanceof DelegateSupervisorExecutor;
+    if (!isLiveStep && !isDelegate) return {};
     const { claim, context } = input;
     const provenance = loadDispatchedStepRunProvenance(context.db, claim.runId);
     if (provenance === undefined) {
@@ -308,7 +353,17 @@ function createLiveStepHostBindingsResolver(
     );
     if (invocation === undefined)
       throw new Error("dispatch_invocation_not_found");
+    const delegateTool = isDelegate
+      ? resolveDelegateToolName(input.config)
+      : undefined;
+    const delegateStepKind = isDelegate
+      ? resolveProfileBackedDelegateToolStepKind(delegateTool!)
+      : null;
+    if (isDelegate && delegateStepKind === null) {
+      return { tools: new Map() };
+    }
     if (
+      isLiveStep &&
       hasCompletedLiveStepMechanism(
         context.db,
         invocation.invocationId,
@@ -330,6 +385,57 @@ function createLiveStepHostBindingsResolver(
           );
         },
         ...(settleRepoOwnership !== undefined ? { settleRepoOwnership } : {}),
+      };
+    }
+    if (
+      isDelegate &&
+      hasCompletedLiveStepMechanism(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      )
+    ) {
+      const settleHandoff = recoverCompletedLiveStepRepoOwnership(
+        context.db,
+        claim.runId,
+        claim.stepId,
+        invocation.attempt,
+        context.now,
+      );
+      return {
+        tools: new Map(),
+        ...(settleHandoff !== undefined ? { settleHandoff } : {}),
+      };
+    }
+    const noMistakesRuntime =
+      delegateTool === "no-mistakes"
+        ? resolveNoMistakesStatusRuntime(env, profile)
+        : undefined;
+    if (
+      isDelegate &&
+      hasCompletedDelegateHandoff(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      )
+    ) {
+      const adapter = createPersistedProfileDelegateToolAdapter({
+        tool: delegateTool!,
+        repoPath: resolved.exec.repoPath,
+        command: noMistakesRuntime?.command ?? "no-mistakes",
+        argsPrefix: noMistakesRuntime?.argsPrefix ?? [],
+        env: noMistakesRuntime?.env ?? {},
+      });
+      const settleHandoff = recoverCompletedLiveStepRepoOwnership(
+        context.db,
+        claim.runId,
+        claim.stepId,
+        invocation.attempt,
+        context.now,
+      );
+      return {
+        tools: new Map([[adapter.name, adapter]]),
+        ...(settleHandoff !== undefined ? { settleHandoff } : {}),
       };
     }
     const safety = resolveDaemonDispatchedRepoSafety(
@@ -404,8 +510,9 @@ function createLiveStepHostBindingsResolver(
       ),
       beforeGitMutation: repoOwnership.authorizeMutation,
     };
+    const dispatchKind = isDelegate ? delegateStepKind! : step.kind;
     const executorInput = buildDispatchedStepExecutorInput(
-      step.kind,
+      dispatchKind,
       claim.runId,
       claim.stepId,
       {
@@ -419,6 +526,39 @@ function createLiveStepHostBindingsResolver(
       },
       selection.selection,
     );
+    if (isDelegate) {
+      const statePath = path.join(runDir, "delegate-external-state.json");
+      const handoffReceiptPath = path.join(
+        safety.runDir,
+        "delegate-handoff.json",
+      );
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: delegateTool!,
+        invocationId: invocation.invocationId,
+        attempt,
+        branch: resolveDelegateBranch(safety.repoPath),
+        headSha: repoSafety.baseHead,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath: safety.repoPath,
+        repoSafety,
+        statusCommand: noMistakesRuntime?.command ?? "no-mistakes",
+        statusArgsPrefix: noMistakesRuntime?.argsPrefix ?? [],
+        statusEnv: noMistakesRuntime?.env ?? {},
+        run: () =>
+          dispatchWorkflowStepExecutor(
+            dispatchKind,
+            executorInput,
+            liveRegistry,
+          ),
+      });
+      return {
+        tools: new Map([[adapter.name, adapter]]),
+        settleHandoff: repoOwnership.settle,
+      };
+    }
     return {
       repoPath: safety.repoPath,
       repoSafety,
@@ -475,6 +615,659 @@ function hasCompletedLiveStepMechanism(
         (checkpoint) => checkpoint.stage === "mechanism_completed",
       ),
     );
+}
+
+function hasCompletedDelegateHandoff(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): boolean {
+  return listExecutorRoundsForInvocation(db, invocationId)
+    .filter((round) => round.attempt === attempt)
+    .some((round) =>
+      listExecutorCheckpointsForRound(db, round.roundId).some(
+        (checkpoint) => checkpoint.stage === "delegate_handoff_completed",
+      ),
+    );
+}
+
+function resolveDelegateToolName(
+  config: Readonly<Record<string, unknown>>,
+): string {
+  const tool = config["tool"];
+  if (typeof tool !== "string" || tool.trim().length === 0) {
+    throw new RegisteredExecutorHostBindingsError(
+      "invalid_input",
+      "delegate-supervisor config requires a non-empty tool name",
+    );
+  }
+  return tool;
+}
+
+export function resolveProfileBackedDelegateToolStepKind(
+  tool: string,
+): WorkflowStepExecutorKind | null {
+  switch (tool) {
+    case "gnhf":
+      return "implementation";
+    case "no-mistakes":
+      return "no-mistakes";
+    default:
+      return null;
+  }
+}
+
+function resolveNoMistakesStatusRuntime(
+  daemonEnv: Record<string, string | undefined>,
+  profile: LiveWrapperProfile,
+): {
+  command: string;
+  argsPrefix: readonly string[];
+  env: Record<string, string | undefined>;
+} {
+  const outerWrapper = profile.wrappers.get("no-mistakes");
+  if (outerWrapper === undefined) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      "no-mistakes live-wrapper config is unavailable for status polling",
+    );
+  }
+  const wrapperEnv: NodeJS.ProcessEnv = {};
+  for (const key of outerWrapper.envAllow) {
+    const value = daemonEnv[key];
+    if (value !== undefined) wrapperEnv[key] = value;
+  }
+  const loaded = loadCodingWorkflowWrapperConfig({
+    env: wrapperEnv,
+    readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
+  });
+  if (!loaded.ok) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      loaded.error,
+    );
+  }
+  const stepConfig = loaded.config.steps["no-mistakes"];
+  const argsPrefix =
+    stepConfig?.command !== undefined &&
+    path.basename(stepConfig.command) === "no-mistakes"
+      ? []
+      : stepConfig?.command !== undefined &&
+          path.basename(stepConfig.command) === "env" &&
+          stepConfig.args[0] !== undefined &&
+          path.basename(stepConfig.args[0]) === "no-mistakes"
+        ? [stepConfig.args[0]]
+        : null;
+  if (stepConfig?.command === undefined || argsPrefix === null) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      "no-mistakes status polling requires the validated no-mistakes executable from the coding-wrapper config",
+    );
+  }
+  return {
+    command: stepConfig.command,
+    argsPrefix,
+    env: buildCodingWorkflowChildEnv(wrapperEnv, stepConfig.envAllow),
+  };
+}
+
+function resolveDelegateBranch(repoPath: string): string {
+  try {
+    const branch = execFileSync(
+      "git",
+      ["-C", repoPath, "branch", "--show-current"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return branch.length > 0 ? branch : "detached-head";
+  } catch {
+    return "unknown-branch";
+  }
+}
+
+type ProfileBackedDelegateToolInput = {
+  tool: string;
+  invocationId: string;
+  attempt: number;
+  branch: string;
+  headSha: string;
+  statePath: string;
+  handoffReceiptPath: string;
+  resultJsonPath: string;
+  executorLogPath: string;
+  repoPath: string;
+  repoSafety: LiveStepSdkHostBindings["repoSafety"];
+  run: LiveStepSdkHostBindings["run"];
+  statusCommand: string;
+  statusArgsPrefix: readonly string[];
+  statusEnv: Record<string, string | undefined>;
+};
+
+function createProfileBackedDelegateToolAdapter(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorToolAdapter {
+  return input.tool === "no-mistakes"
+    ? createProfileNoMistakesToolAdapter(input)
+    : createLiveWrapperDelegateToolAdapter(input);
+}
+
+function createLiveWrapperDelegateToolAdapter(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorToolAdapter {
+  return {
+    name: input.tool,
+    handoff: async () => {
+      const finalized = finalizeLiveStepResult(
+        await input.run(),
+        input.repoPath,
+        input.repoSafety,
+      );
+      if (!isProvenClean(finalized) || !finalized.ok) {
+        throw new Error(
+          finalized.ok
+            ? (finalized.result.errorMessage ?? finalized.result.summary)
+            : finalized.error,
+        );
+      }
+      const identity = {
+        externalRunId: input.invocationId,
+        branch: resolveDelegateBranch(input.repoPath),
+        headSha: resolveCurrentHead(input.repoPath, input.headSha),
+      };
+      const externalState: DelegateSupervisorExternalState = {
+        ...identity,
+        activeStep: null,
+        stepStatus:
+          finalized.result.state === "succeeded" ? "completed" : "failed",
+        findings: [],
+        selectedFindingIds: [],
+        decisions: [],
+        prUrl: null,
+        ciState: "none",
+      };
+      fs.writeFileSync(input.statePath, JSON.stringify(externalState));
+      const artifactPaths = [
+        input.statePath,
+        input.resultJsonPath,
+        input.executorLogPath,
+        ...finalized.result.artifacts.map((artifact) => artifact.path),
+      ].filter((value, index, values) => values.indexOf(value) === index);
+      return {
+        externalIdentity: identity,
+        summary: finalized.result.summary,
+        artifactPaths,
+      };
+    },
+    recoverHandoff: () => {
+      const recovered = readPersistedDelegateState([input.statePath]);
+      if (!recovered.ok) {
+        throw new Error(
+          `interrupted ${input.tool} handoff cannot be safely reconciled: ${recovered.error}`,
+        );
+      }
+      return {
+        externalIdentity: {
+          externalRunId: recovered.value.externalRunId,
+          branch: recovered.value.branch,
+          headSha: recovered.value.headSha,
+        },
+        summary: `recovered completed ${input.tool} handoff from durable state`,
+        artifactPaths: [
+          input.statePath,
+          input.resultJsonPath,
+          input.executorLogPath,
+        ],
+      };
+    },
+    readExternalState: ({ handoff }) =>
+      readPersistedDelegateState(handoff.artifactPaths),
+  };
+}
+
+function createPersistedProfileDelegateToolAdapter(input: {
+  tool: string;
+  repoPath: string;
+  command: string;
+  argsPrefix: readonly string[];
+  env: Record<string, string | undefined>;
+}): DelegateSupervisorToolAdapter {
+  if (input.tool === "no-mistakes") {
+    return createNoMistakesToolAdapter({
+      handoff: () => {
+        throw new Error("durable no-mistakes handoff must not be repeated");
+      },
+      statePath: ({ handoff }) => delegateStatePath(handoff.artifactPaths),
+      refreshState: ({ handoff }) =>
+        refreshNoMistakesState({
+          repoPath: input.repoPath,
+          command: input.command,
+          argsPrefix: input.argsPrefix,
+          env: input.env,
+          statePath: delegateStatePath(handoff.artifactPaths),
+          expected: handoff.externalIdentity,
+        }),
+    });
+  }
+  return {
+    name: input.tool,
+    handoff: () => {
+      throw new Error("durable delegated handoff must not be repeated");
+    },
+    readExternalState: ({ handoff }) =>
+      readPersistedDelegateState(handoff.artifactPaths),
+  };
+}
+
+function createProfileNoMistakesToolAdapter(
+  input: ProfileBackedDelegateToolInput,
+): DelegateSupervisorToolAdapter {
+  const handoff = async () => {
+    const recovered = recoverNoMistakesHandoff(input);
+    if (recovered !== null) return recovered;
+    const finalized = finalizeLiveStepResult(
+      await input.run(),
+      input.repoPath,
+      input.repoSafety,
+    );
+    if (!isProvenClean(finalized)) {
+      throw new Error(
+        finalized.ok ? finalized.result.summary : finalized.error,
+      );
+    }
+    const launchIdentity = readNoMistakesLaunchIdentity({
+      executorLogPath: input.executorLogPath,
+      branch: input.branch,
+      headSha: resolveCurrentHead(input.repoPath, input.headSha),
+    });
+    if (!launchIdentity.ok) throw new Error(launchIdentity.error);
+    writeJsonAtomically(input.handoffReceiptPath, {
+      invocationId: input.invocationId,
+      attempt: input.attempt,
+      externalIdentity: launchIdentity.value,
+    });
+    writeProvisionalNoMistakesState(input.statePath, launchIdentity.value);
+    const status = readNoMistakesStatus({
+      repoPath: input.repoPath,
+      command: input.statusCommand,
+      argsPrefix: input.statusArgsPrefix,
+      env: input.statusEnv,
+      expected: launchIdentity.value,
+    });
+    if (!status.ok) throw new Error(status.error);
+    fs.writeFileSync(input.statePath, JSON.stringify(status.value));
+    const artifactPaths = [
+      input.statePath,
+      input.handoffReceiptPath,
+      input.resultJsonPath,
+      input.executorLogPath,
+      ...(finalized.ok
+        ? finalized.result.artifacts.map((artifact) => artifact.path)
+        : []),
+    ].filter((value, index, values) => values.indexOf(value) === index);
+    return {
+      externalIdentity: {
+        externalRunId: status.value.externalRunId,
+        branch: status.value.branch,
+        headSha: status.value.headSha,
+      },
+      summary: finalized.ok
+        ? finalized.result.summary
+        : "no-mistakes accepted the delegated run",
+      artifactPaths,
+    };
+  };
+  const recoverHandoff = async () => {
+    const recovered = recoverNoMistakesHandoff(input);
+    if (recovered === null) {
+      throw new Error(
+        "interrupted no-mistakes handoff has no durable receipt or launch identity; refusing to launch again",
+      );
+    }
+    return recovered;
+  };
+  return createNoMistakesToolAdapter({
+    handoff,
+    recoverHandoff,
+    statePath: () => input.statePath,
+    refreshState: ({ handoff }) =>
+      refreshNoMistakesState({
+        repoPath: input.repoPath,
+        command: input.statusCommand,
+        argsPrefix: input.statusArgsPrefix,
+        env: input.statusEnv,
+        statePath: input.statePath,
+        expected: handoff.externalIdentity,
+      }),
+  });
+}
+
+function recoverNoMistakesHandoff(input: ProfileBackedDelegateToolInput): {
+  externalIdentity: {
+    externalRunId: string;
+    branch: string;
+    headSha: string;
+  };
+  summary: string;
+  artifactPaths: string[];
+} | null {
+  const receiptExists = fs.existsSync(input.handoffReceiptPath);
+  let receiptAttemptHint: number | null = null;
+  if (receiptExists) {
+    try {
+      const hint = JSON.parse(
+        fs.readFileSync(input.handoffReceiptPath, "utf8"),
+      ) as { attempt?: unknown };
+      if (typeof hint.attempt === "number" && Number.isInteger(hint.attempt)) {
+        receiptAttemptHint = hint.attempt;
+      }
+    } catch {
+      // The full validator below will preserve the fail-closed diagnostic.
+    }
+  }
+  const preferCurrentAttemptLog =
+    !receiptExists ||
+    (receiptAttemptHint !== null && receiptAttemptHint < input.attempt);
+  if (preferCurrentAttemptLog && fs.existsSync(input.executorLogPath)) {
+    const launchIdentity = readNoMistakesLaunchIdentity({
+      executorLogPath: input.executorLogPath,
+      branch: resolveDelegateBranch(input.repoPath),
+      headSha: resolveCurrentHead(input.repoPath, input.headSha),
+    });
+    if (!launchIdentity.ok) {
+      throw new Error(
+        `durable no-mistakes launch evidence cannot be reconciled: ${launchIdentity.error}`,
+      );
+    }
+    writeJsonAtomically(input.handoffReceiptPath, {
+      invocationId: input.invocationId,
+      attempt: input.attempt,
+      externalIdentity: launchIdentity.value,
+    });
+  }
+  if (!fs.existsSync(input.handoffReceiptPath)) return null;
+  let expected: {
+    externalRunId: string;
+    branch: string;
+    headSha: string;
+  };
+  let receiptAttempt: number;
+  try {
+    const stored = JSON.parse(
+      fs.readFileSync(input.handoffReceiptPath, "utf8"),
+    ) as {
+      invocationId?: unknown;
+      attempt?: unknown;
+      externalIdentity?: {
+        externalRunId?: unknown;
+        branch?: unknown;
+        headSha?: unknown;
+      };
+    };
+    const identity = stored.externalIdentity;
+    if (
+      typeof stored.attempt !== "number" ||
+      !Number.isInteger(stored.attempt) ||
+      stored.attempt < 1 ||
+      stored.attempt > input.attempt ||
+      (stored.attempt === input.attempt &&
+        stored.invocationId !== input.invocationId) ||
+      identity === undefined ||
+      typeof identity.externalRunId !== "string" ||
+      typeof identity.branch !== "string" ||
+      typeof identity.headSha !== "string"
+    ) {
+      throw new Error("stored handoff identity is incomplete");
+    }
+    expected = {
+      externalRunId: identity.externalRunId,
+      branch: identity.branch,
+      headSha: identity.headSha,
+    };
+    receiptAttempt = stored.attempt;
+  } catch (error) {
+    throw new Error(
+      `stored no-mistakes handoff is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const currentBranch = resolveDelegateBranch(input.repoPath);
+  const currentHead = resolveCurrentHead(input.repoPath, "");
+  if (expected.branch !== currentBranch || expected.headSha !== currentHead) {
+    throw new Error(
+      `stored no-mistakes handoff does not match current repo identity: expected ${currentBranch}/${currentHead}, stored ${expected.branch}/${expected.headSha}`,
+    );
+  }
+  const previousState = readPreviousDelegateState(input.statePath);
+  const status = readNoMistakesStatus({
+    repoPath: input.repoPath,
+    command: input.statusCommand,
+    argsPrefix: input.statusArgsPrefix,
+    env: input.statusEnv,
+    expected,
+    ...(previousState !== undefined ? { previousState } : {}),
+  });
+  if (!status.ok) throw new Error(status.error);
+  if (
+    receiptAttempt < input.attempt &&
+    (status.value.stepStatus === "failed" ||
+      status.value.stepStatus === "cancelled")
+  ) {
+    return null;
+  }
+  fs.writeFileSync(input.statePath, JSON.stringify(status.value));
+  return {
+    externalIdentity: expected,
+    summary: "reattached the correlated no-mistakes run",
+    artifactPaths: [
+      input.statePath,
+      input.handoffReceiptPath,
+      input.resultJsonPath,
+      input.executorLogPath,
+    ],
+  };
+}
+
+function readNoMistakesLaunchIdentity(input: {
+  executorLogPath: string;
+  branch: string;
+  headSha: string;
+}): ReturnType<typeof parseNoMistakesLaunchIdentity> {
+  try {
+    const raw = fs.readFileSync(input.executorLogPath, "utf8");
+    return parseNoMistakesLaunchIdentity(raw, {
+      branch: input.branch,
+      headSha: input.headSha,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `no-mistakes launch evidence is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function writeProvisionalNoMistakesState(
+  statePath: string,
+  identity: {
+    externalRunId: string;
+    branch: string;
+    headSha: string;
+  },
+): void {
+  const state: DelegateSupervisorExternalState = {
+    ...identity,
+    activeStep: null,
+    stepStatus: "running",
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    prUrl: null,
+    ciState: "pending",
+  };
+  fs.writeFileSync(statePath, JSON.stringify(state));
+}
+
+function writeJsonAtomically(filePath: string, value: unknown): void {
+  const temporaryPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify(value), {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    fs.renameSync(temporaryPath, filePath);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
+function refreshNoMistakesState(input: {
+  repoPath: string;
+  command: string;
+  argsPrefix: readonly string[];
+  env: Record<string, string | undefined>;
+  statePath: string;
+  expected: {
+    externalRunId: string;
+    branch: string;
+    headSha: string;
+  };
+}): ReturnType<typeof parseNoMistakesAxiStatus> {
+  const previousState = readPreviousDelegateState(input.statePath);
+  const status = readNoMistakesStatus({
+    ...input,
+    ...(previousState !== undefined ? { previousState } : {}),
+  });
+  if (!status.ok) throw new Error(status.error);
+  fs.writeFileSync(input.statePath, JSON.stringify(status.value));
+  return status;
+}
+
+function readNoMistakesStatus(input: {
+  repoPath: string;
+  command: string;
+  argsPrefix: readonly string[];
+  env: Record<string, string | undefined>;
+  expected: {
+    externalRunId: string;
+    branch: string;
+    headSha: string;
+  };
+  previousState?: DelegateSupervisorExternalState;
+}): ReturnType<typeof parseNoMistakesAxiStatus> {
+  try {
+    const raw = execFileSync(
+      input.command,
+      [
+        ...input.argsPrefix,
+        "axi",
+        "status",
+        "--run",
+        input.expected.externalRunId,
+      ],
+      {
+        cwd: input.repoPath,
+        env: input.env as NodeJS.ProcessEnv,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    return parseNoMistakesAxiStatus(raw, input.expected, {
+      resolveHeadSha: (abbreviatedHead) =>
+        resolveGitCommit(input.repoPath, abbreviatedHead),
+      ...(input.previousState !== undefined
+        ? { previousState: input.previousState }
+        : {}),
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `no-mistakes axi status failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function readPreviousDelegateState(
+  statePath: string,
+): DelegateSupervisorExternalState | undefined {
+  try {
+    return JSON.parse(
+      fs.readFileSync(statePath, "utf8"),
+    ) as DelegateSupervisorExternalState;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveGitCommit(
+  repoPath: string,
+  abbreviatedHead: string,
+): string | null {
+  try {
+    const resolved = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "--verify", `${abbreviatedHead}^{commit}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return /^[0-9a-f]{40}$/i.test(resolved) ? resolved.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function delegateStatePath(
+  artifactPaths: readonly string[] | undefined,
+): string {
+  const statePath = artifactPaths?.find((candidate) =>
+    candidate.endsWith("delegate-external-state.json"),
+  );
+  if (statePath === undefined) {
+    throw new Error("delegated handoff has no external-state artifact pointer");
+  }
+  return statePath;
+}
+
+function resolveCurrentHead(repoPath: string, fallback: string): string {
+  try {
+    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    return /^[0-9a-f]{40}$/.test(head) ? head : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readPersistedDelegateState(
+  artifactPaths: readonly string[] | undefined,
+):
+  | { ok: true; value: DelegateSupervisorExternalState; digest: string }
+  | { ok: false; error: string } {
+  const statePath = artifactPaths?.find((candidate) =>
+    candidate.endsWith("delegate-external-state.json"),
+  );
+  if (statePath === undefined) {
+    return {
+      ok: false,
+      error: "delegated handoff has no external-state artifact pointer",
+    };
+  }
+  try {
+    const raw = fs.readFileSync(statePath);
+    return {
+      ok: true,
+      value: JSON.parse(
+        raw.toString("utf8"),
+      ) as DelegateSupervisorExternalState,
+      digest: `sha256:${crypto.createHash("sha256").update(raw).digest("hex")}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `delegated external-state artifact is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 function writeLiveStepHostRecoveryArtifact(input: {

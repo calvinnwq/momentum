@@ -23,6 +23,7 @@ import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../../../shared/process-limits.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
+import { classifyDelegateSupervisorState } from "../../executors/delegate-supervisor/classifier.js";
 import type {
   CommitIntent,
   CommitType,
@@ -262,7 +263,7 @@ export function runCodingWorkflowLiveWrapper(
     );
   }
 
-  const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
+  const childEnv = buildCodingWorkflowChildEnv(deps.env, stepConfig.envAllow);
   if (stepKind === "no-mistakes") {
     const runnerProfilePreflight = preflightNoMistakesRunnerProfile(
       stepConfig,
@@ -521,9 +522,9 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
   if (hasContradictoryNoMistakesSuccessEvidence(outputLines)) return null;
 
   if (outputLines.some((line) => isChecksPassedOutcomeLine(line))) {
-    return [
+    return classifyLegacyNoMistakesTerminalEvidence(
       "no-mistakes reached checks-passed; treating the PR as terminal success for this workflow while no-mistakes continues any upstream monitoring.",
-    ].join(" ");
+    );
   }
 
   const stillMonitoring = outputLines.some(
@@ -545,9 +546,27 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
   );
   if (!greenChecks) return null;
 
-  return [
+  return classifyLegacyNoMistakesTerminalEvidence(
     "no-mistakes is still monitoring upstream, but the pull request is clean and checks are green; treating this as terminal success for this workflow.",
-  ].join(" ");
+  );
+}
+
+function classifyLegacyNoMistakesTerminalEvidence(
+  summary: string,
+): string | null {
+  const decision = classifyDelegateSupervisorState({
+    externalRunId: "legacy-live-wrapper",
+    branch: "legacy-live-wrapper",
+    headSha: "0".repeat(40),
+    activeStep: null,
+    stepStatus: "completed",
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    prUrl: null,
+    ciState: "passed",
+  });
+  return decision.classification === "complete" ? summary : null;
 }
 
 function toNoMistakesOutputLines(output: string): string[] {
@@ -2748,7 +2767,7 @@ function resolveConfiguredResultPath(
   return { ok: true };
 }
 
-function buildChildEnv(
+export function buildCodingWorkflowChildEnv(
   env: NodeJS.ProcessEnv,
   envAllow: readonly string[],
 ): NodeJS.ProcessEnv {

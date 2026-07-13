@@ -130,6 +130,15 @@ It returns a recommendation, suggested round and invocation states, a recovery c
 Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
 The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
+The built-in `delegate-supervisor` uses the same interface. Its portable config
+is `{ "tool": "<adapter-name>" }`; adapters implement only a bounded handoff and
+canonical external-state read. The executor owns mirrored evidence, findings,
+decisions, heartbeats, stall detection, and corroborated settlement. Tool names
+are adapter registrations, not executor names or schema enum values, so another
+tool can be added without changing workflow schema. Before calling a tool, the
+executor persists a handoff intent; after interruption, the adapter must recover
+from durable tool evidence or fail closed instead of launching again.
+
 Third-party modules loaded only through `MOMENTUM_EXECUTOR_CONFIG` currently receive an empty `hostBindings` object.
 The public registration surface does not inject machine-local commands, credentials, or clients into those modules.
 Profile-backed built-ins use Momentum's internal host-binding resolver for live-wrapper execution.
