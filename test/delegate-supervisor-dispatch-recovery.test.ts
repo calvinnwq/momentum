@@ -11,6 +11,7 @@ import type { WorkflowDefinition } from "../src/core/workflow/definition/definit
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
+import { CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR } from "../src/core/workflow/live-wrapper/coding-workflow.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 
@@ -79,16 +80,85 @@ JSON`;
   return profilePath;
 }
 
-function definition(stepKeys: string[]): WorkflowDefinition {
+function writeNoMistakesProfile(profileDir: string): {
+  profilePath: string;
+  wrapperConfigPath: string;
+} {
+  const executablePath = path.join(profileDir, "no-mistakes");
+  fs.writeFileSync(
+    executablePath,
+    `#!/bin/sh
+branch=$(git branch --show-current)
+head=$(git rev-parse HEAD)
+printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"
+`,
+  );
+  fs.chmodSync(executablePath, 0o755);
+  const wrapperConfigPath = path.join(profileDir, "wrapper-config.json");
+  fs.writeFileSync(
+    wrapperConfigPath,
+    JSON.stringify({
+      steps: {
+        "no-mistakes": {
+          command: executablePath,
+          args: [],
+          cwd: "repo",
+          timeout_sec: 5,
+          env_allow: ["HOME", "PATH"],
+          runner_profile: {
+            interface: "axi",
+            stdin: "closed",
+            agent: "claude",
+            required_env: ["HOME", "PATH"],
+            agent_path: "/bin/sh",
+          },
+          commit: { type: "test", subject: "run no-mistakes" },
+        },
+      },
+    }),
+  );
+  const launchScript = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/no-mistakes-launch-count"
+count=0
+test ! -f "$count_file" || count=$(cat "$count_file")
+printf '%s\n' "$((count + 1))" > "$count_file"
+printf 'validated\n' > "$MOMENTUM_REPO_PATH/no-mistakes.txt"
+printf 'run:\n  id: "nm-run-1"\n'
+cat > "$MOMENTUM_RESULT_PATH" <<JSON
+{"success":true,"summary":"no-mistakes launched","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"launch no-mistakes","body":"","breaking":false}}
+JSON`;
+  const profilePath = path.join(profileDir, "profile.json");
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "no-mistakes-recovery-test",
+      wrappers: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", launchScript],
+          cwd: "iteration",
+          timeout_sec: 5,
+          env_allow: [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR, "HOME", "PATH"],
+          result_file: "result.json",
+        },
+      },
+    }),
+  );
+  return { profilePath, wrapperConfigPath };
+}
+
+function definition(
+  stepKeys: string[],
+  tool: "gnhf" | "no-mistakes" = "gnhf",
+): WorkflowDefinition {
   return {
     key: "delegate-recovery",
     title: "Delegate Recovery",
     version: 1,
     steps: stepKeys.map((key, order) => ({
       key,
-      kind: "implementation",
+      kind: tool === "gnhf" ? "implementation" : "no-mistakes",
       executor: "delegate-supervisor",
-      config: { tool: "gnhf" },
+      config: { tool },
       order,
       required: true,
     })),
@@ -100,9 +170,10 @@ function prepareRun(input: {
   repoPath: string;
   runId: string;
   stepKeys: string[];
+  tool?: "gnhf" | "no-mistakes";
 }) {
   const db = openDb(input.dataDir);
-  const workflow = definition(input.stepKeys);
+  const workflow = definition(input.stepKeys, input.tool);
   persistWorkflowDefinition(db, workflow, { now: NOW });
   persistWorkflowRunStart(db, {
     definition: workflow,
@@ -289,6 +360,195 @@ describe("profile-backed delegate handoff artifacts", () => {
     });
     db.close();
   });
+
+  it("recovers a completed reset from its durable reset intent", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    const runId = "delegate-reset-recovery";
+    const stepId = "implementation";
+    const profilePath = writeProfile(tempDir());
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+    const stepRoot = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const baseHead = String(receipt["baseHead"]);
+    runGit(repoPath, ["reset", "--hard", baseHead]);
+    delete receipt["externalState"];
+    receipt["phase"] = "resetting";
+    receipt["expectedTree"] = runGit(repoPath, [
+      "rev-parse",
+      `${baseHead}^{tree}`,
+    ]);
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+    fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+    reopenInterruptedHandoff(db, runId, stepId);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 3,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "failed", attempt: 2 });
+    expect(
+      fs.readFileSync(
+        path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
+        "utf8",
+      ),
+    ).toBe("1\n");
+    expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
+      phase: "finalized",
+      externalState: { stepStatus: "failed", headSha: baseHead },
+    });
+    db.close();
+  });
+
+  it.each([
+    {
+      recoveryMode: "launching receipt",
+      removeReceipt: false,
+      expectedState: "succeeded",
+    },
+    {
+      recoveryMode: "missing receipt",
+      removeReceipt: true,
+      expectedState: "manual_recovery_required",
+    },
+  ] as const)(
+    "handles no-mistakes interruption with $recoveryMode",
+    async ({ removeReceipt, expectedState }) => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = removeReceipt
+        ? "no-mistakes-missing-receipt-recovery"
+        : "no-mistakes-launch-recovery";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(tempDir());
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      const env = {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      };
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        env,
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+      const stepRoot = path.join(
+        repoPath,
+        ".agent-workflows",
+        runId,
+        "delegate",
+        stepId,
+      );
+      const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      const receipt = JSON.parse(
+        fs.readFileSync(receiptPath, "utf8"),
+      ) as Record<string, unknown>;
+      const interruptedExecutorLogPath = receipt["executorLogPath"];
+      expect(receipt).toMatchObject({ schemaVersion: 1, phase: "launched" });
+      if (removeReceipt) {
+        fs.rmSync(receiptPath);
+      } else {
+        receipt["phase"] = "launching";
+        delete receipt["externalIdentity"];
+        delete receipt["terminalProofHeadSha"];
+        fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+      }
+      fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+      reopenInterruptedHandoff(db, runId, stepId);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 3,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: expectedState, attempt: 2 });
+      expect(
+        fs.readFileSync(
+          path.join(
+            repoPath,
+            ".agent-workflows",
+            runId,
+            "no-mistakes-launch-count",
+          ),
+          "utf8",
+        ),
+      ).toBe("1\n");
+      if (removeReceipt) {
+        expect(fs.existsSync(receiptPath)).toBe(false);
+      } else {
+        expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
+          phase: "launched",
+          attempt: 1,
+          externalIdentity: { externalRunId: "nm-run-1" },
+          executorLogPath: interruptedExecutorLogPath,
+        });
+      }
+      db.close();
+    },
+  );
 
   it("migrates a correlated legacy run-root state artifact", async () => {
     const dataDir = tempDir();

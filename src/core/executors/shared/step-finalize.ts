@@ -97,7 +97,9 @@ export type FinalizeWorkflowStepInput = {
    * failed check returns `repo_lock_lost` so callers can enter recovery instead
    * of mutating after losing the repo/workflow lease.
    */
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;
@@ -186,7 +188,9 @@ export type FinalizeWorkflowStepFromResultFileInput = {
    * Forwarded to {@link finalizeWorkflowStep} to prove ownership before every
    * commit/reset mutation and surface `repo_lock_lost` on failure.
    */
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;

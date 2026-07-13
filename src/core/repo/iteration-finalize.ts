@@ -30,7 +30,9 @@ export type FinalizeIterationInput = {
    * lease. It is called immediately before each commit/reset mutation; failure
    * aborts the transaction with `ownership_lost` before mutating git.
    */
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;
@@ -98,7 +100,7 @@ export function finalizeIteration(
 
   if (!runnerSuccess) {
     writeVerificationSkipNote(verificationLogPath, "runner reported failure");
-    const ownership = checkOwnership(input);
+    const ownership = checkOwnership(input, "reset");
     if (ownership !== null) return ownership;
     const reset = resetToBase({ repoPath, baseHead });
     if (!reset.ok) {
@@ -120,7 +122,7 @@ export function finalizeIteration(
   });
 
   if (!verification.ok) {
-    const ownership = checkOwnership(input);
+    const ownership = checkOwnership(input, "reset");
     if (ownership !== null) return ownership;
     const reset = resetToBase({ repoPath, baseHead });
     if (!reset.ok) {
@@ -134,7 +136,7 @@ export function finalizeIteration(
     return { outcome: "reset_verification_failure", verification, reset };
   }
 
-  const ownership = checkOwnership(input);
+  const ownership = checkOwnership(input, "commit");
   if (ownership !== null) return ownership;
 
   const commit = commitVerifiedChanges({
@@ -148,7 +150,7 @@ export function finalizeIteration(
 
   if (!commit.ok) {
     if (shouldResetAfterCommitFailure(commit.code)) {
-      const resetOwnership = checkOwnership(input);
+      const resetOwnership = checkOwnership(input, "reset");
       if (resetOwnership !== null) return resetOwnership;
       const reset = resetToBase({ repoPath, baseHead });
       return { outcome: "commit_failed", verification, commit, reset };
@@ -161,9 +163,10 @@ export function finalizeIteration(
 
 function checkOwnership(
   input: FinalizeIterationInput,
+  mutation: "commit" | "reset",
 ): Extract<FinalizeIterationResult, { outcome: "ownership_lost" }> | null {
   if (input.beforeGitMutation === undefined) return null;
-  const check = input.beforeGitMutation();
+  const check = input.beforeGitMutation(mutation);
   if (check.ok) return null;
   return { outcome: "ownership_lost", error: check.error };
 }

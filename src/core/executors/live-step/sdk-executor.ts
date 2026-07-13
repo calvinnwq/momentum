@@ -17,7 +17,9 @@ export type LiveStepRepoSafetyHostBinding = {
   verificationCommands: readonly string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
   beforeCommit?: (evidence: {
     expectedTree: string;
     message: string;
@@ -254,7 +256,7 @@ export function finalizeLiveStepResult(
   if (!result.ok || safety === undefined || result.result.state === "skipped") {
     return result;
   }
-  const ownership = safety.beforeGitMutation?.();
+  const ownership = safety.beforeGitMutation?.("commit");
   const finalize: FinalizeWorkflowStepFromResultFileResult =
     ownership?.ok === false
       ? { outcome: "repo_lock_lost", error: ownership.error }
