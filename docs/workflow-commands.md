@@ -292,6 +292,7 @@ Behaviour:
   When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured profile-backed step wrappers after the scaffold is created.
   An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
   A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
+  A successful no-mistakes handoff with no repository changes is accepted only after verification proves the worktree clean; failed verification still rejects it.
   The delegate invocation and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
@@ -2385,18 +2386,22 @@ Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery an
 The current coding definition uses `delegate-supervisor` with portable `tool` config for both GNHF implementation and no-mistakes validation.
 The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
-The initial dispatcher pass may perform the durable handoff and first read as two ticks under the same workflow claim, while later passes perform one tick.
+Only the invocation's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
+Later passes and every retry attempt perform one tick, including a retry that launches a fresh external run, and continuation-only daemon cycles wait the configured poll interval before another read.
 If the claim is lost after durable handoff evidence exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
 A retry preserves a valid non-terminal correlated handoff and decision history but starts a fresh semantic-progress window for the new attempt.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+A local wrapper-finalization failure does not establish that the correlated external run failed.
+The retry reads and reattaches that run when it is still running or complete, and launches again only after matching failed or cancelled external state.
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
 Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
 It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
+A lagging `running` read can corroborate cached terminal state only when it reports no active step, no findings or selected findings, no unresolved decisions, and passed or absent CI.
 Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
 The supervisor reserves its synthetic approval identity and offers `approve` / `reject`; only the latest resolved `approve` allows later terminal completion.
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.

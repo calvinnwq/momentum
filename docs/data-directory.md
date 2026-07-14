@@ -52,6 +52,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
 - `repo_locks` - per-repo exclusion lease held across a goal iteration or a live-wrapper workflow dispatch that may mutate git.
   Workflow dispatch locks are released after a proven-clean commit / reset / reconciliation outcome or by an operator-guarded recovery clear that atomically prepares the matching attempt for retry, while stored goal-iteration manual-recovery locks are also released by `recovery clear`.
+  A profile-backed dispatch lock covers at least the longest configured wrapper/probe execution window plus the full verification-command budget, so a bounded delegate handoff cannot outlive its repository ownership.
   Workflow dispatch locks reuse the legacy identity columns (`goal_id` = run id, `job_id` = dispatch invocation id, `iteration` = attempt) so the active-per-repo-root index remains the exclusion primitive.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
 - `source_items` — durable rows for external tracker items (linked or unlinked) seen by source adapters.
@@ -97,6 +98,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   Retryable delegate-supervisor adapter, handoff, unreadable or inconsistent external-state, and cleared external-blocker outcomes use the same incremented-attempt path.
   A valid non-terminal correlated handoff and prior decisions remain durable across that retry, while an unresolved handoff intent must be reconciled before another external launch.
   For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+  A local wrapper-finalization failure is reconciled by reading the correlated run first; a running or completed run is reattached, and only a matching failed or cancelled run permits relaunch.
   Retry preparation releases only the matching invocation attempt's `needs_manual_recovery` repo locks in the same transaction as the clear, so a refused clear rolls both changes back.
   If an interrupted native `no-mistakes` wrapper left a failed step but the external no-mistakes run later proves success, guarded `clear-recovery` can instead stamp operator evidence on the failed `no-mistakes` step and re-derive the run without opening generic terminal-run mutation.
   `workflow run watch --once` does not create the first scaffold for an approved `merge-cleanup` or `linear-refresh` tail step; it leaves that side-effecting dispatch on a human-required operator-decision path.
@@ -106,6 +108,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   The dispatcher creates the first pending round scaffold (`<invocation-id>::round-1`) before any later executor work is driven; that scaffold freezes agent / model / effort metadata from the selected route when a native coding run has `route.steps`, but carries no result, artifact, verification, commit, or recovery evidence until an executor, configured daemon/watch live-wrapper profile, the daemon's external-apply adapter, an internal subworkflow mirror, or deliberate test/dogfood terminalizer fills it.
   Live-wrapper-owned rounds filled by a configured daemon/watch profile can include `verification-log` artifact paths or precise recovery codes from result parsing, moved HEAD, lost dispatch lease, git, commit, or reset failures.
   A `delegate-supervisor` handoff normally completes one durable round, and each normal continuation read completes another; a round reopened after gate resolution resumes in place.
+  Only the invocation's first completed handoff may receive an immediate second read in the same dispatcher pass; later passes and retry attempts perform one tick and continuation-only daemon cycles wait the configured poll interval.
   If the process stops after durable handoff evidence exists but before classification, the unclassified running, capturing-result, or `mirroring_external_state` round remains resumable under the same invocation and does not authorize another handoff.
   A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
   Each read keeps the raw response digest in `inputDigest`, stores its semantic progress digest in `resultDigest`, refreshes durable liveness, and carries the last semantic-progress time across rounds.

@@ -224,13 +224,15 @@ When `delegate-supervisor` sees the same running semantic progress digest for fo
 The raw external-state digest still updates in `inputDigest`, the semantic digest remains in `resultDigest`, and the last semantic-progress time carries across the bounded poll rounds.
 Clear recovery only after the delegated external run produces fresh progress or terminal evidence.
 When no-mistakes instead reports `checks-passed`, or is still monitoring while current pull request evidence is clean and checks are green or explicitly absent, the tool adapter normalizes a completed external state and the delegate supervisor records success instead of entering this recovery lane, unless current output also shows a blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state.
-That completion requires a full 40-character SHA matching the repository's current `HEAD`; cached handoff proof settles only after a fresh status read corroborates the same run, branch, exact head, clean findings/decisions, and passed or absent CI.
+That completion requires a full 40-character SHA matching the repository's current `HEAD`; cached handoff proof settles only after a fresh status read corroborates the same run, branch, exact head, no active step, clean findings/decisions, and passed or absent CI.
 Delegate handoff failures use `tool_adapter_unavailable`, `delegate_handoff_failed`, or `delegate_handoff_recovery_required`.
 Unreadable, contradictory, cancelled, identity-mismatched, or stalled external state uses `external_state_unreadable` or `external_state_inconsistent` and must be inspected before guarded recovery clear.
 An invocation settled with `external_state_blocked` is retryable only after the external blocker clears.
 Guarded clear may open a later invocation attempt, but an unresolved prior handoff intent is reconciled before the adapter may launch anything again.
 The later attempt retains a valid non-terminal correlated handoff and prior decisions but starts a fresh four-minute semantic-stall window.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+A local wrapper-finalization failure does not establish that external outcome.
+The newer attempt first reads the correlated external run and reattaches it when it is still running or has completed; only a matching failed or cancelled state permits a fresh launch.
 For no-mistakes, a durable `launching` receipt reads the original executor log only to correlate the external run id; launch-only evidence has no wrapper-finalization authority and requires operator inspection even when the repository is still clean at the launch head.
 For another profile-backed delegate, recovery recognizes an already-completed reset only when the worktree matches the recorded base tree, and recognizes or recreates a commit only when the bounded regular result's exact digest plus its parent, tree, message, and clean-worktree proof match the receipt.
 Symbolic links, oversized evidence, named pipes, missing digests, and changed result bytes fail closed; persisted external-state files pass the same bounded regular-file check before read or refresh.

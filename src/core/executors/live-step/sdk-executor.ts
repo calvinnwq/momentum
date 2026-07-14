@@ -249,7 +249,11 @@ function parseDurableDecision(detail: string): DurableLiveStepDecision {
   return parsed;
 }
 
-/** Finalize one profile-backed result through shared repo safety. */
+/**
+ * Finalize one profile-backed result through shared repo safety.
+ * Callers may accept a verified clean worktree with nothing to commit when the
+ * delegated tool's successful handoff is itself the intended evidence.
+ */
 export function finalizeLiveStepResult(
   result: WorkflowStepExecutorDispatchResult,
   repoPath: string,

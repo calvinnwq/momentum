@@ -117,6 +117,8 @@ After durable handoff evidence exists, an unclassified running, capturing-result
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 A valid non-terminal handoff is reused across retry attempts.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+A local wrapper-finalization failure first triggers a correlated status read on the newer attempt; a running or completed run is reattached rather than relaunched.
+Only the invocation's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,

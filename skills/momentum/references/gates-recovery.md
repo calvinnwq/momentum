@@ -70,6 +70,8 @@ For `tool_adapter_unavailable`, `delegate_handoff_failed`,
 log, mirrored state, and external tool before clearing recovery.
 Prove whether a correlated external run already launched, and never relaunch
 from missing or ambiguous evidence.
+Treat a local wrapper-finalization failure as local evidence only.
+Read and reattach the correlated external run when it is still running or complete, and permit a fresh launch only after the same run is conclusively failed or cancelled.
 Restore the adapter or reconcile the same external run until the supervisor can
 read and classify it safely.
 For `external_state_blocked`, clear recovery only after the external blocker is

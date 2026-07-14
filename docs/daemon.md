@@ -93,6 +93,7 @@ readiness probe.
 `workflowStepsDispatched` counts workflow scheduler ticks whose top-level code
 is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
+A continuation-only registered-executor tick still counts as `dispatched`, but it also increments `idleCycles` and waits the configured poll interval before the next external-state read.
 For a valid executor identity, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
@@ -128,6 +129,7 @@ unverifiable changes when safe, and records `verification.log` as round evidence
 before the dispatch scaffold is terminalized.
 For a delegate-supervisor handoff, the daemon runs the same safe finalization but
 stores the wrapper result as durable handoff and terminal-candidate evidence.
+For no-mistakes, a successful result that leaves a verified clean worktree with no changes to commit is valid handoff evidence; failed verification still rejects the handoff.
 The invocation and step do not terminalize or reconcile until a later external-state read receives a daemon-accepted terminal classification.
 The verification commands and timeout resolve per the repo policy precedence:
 the linked goal's stored verification when the run carries a legacy goal, then
@@ -181,12 +183,12 @@ Node already attempted to load or evaluate, restart the daemon before clearing r
 the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are normally driven one bounded tick per daemon scheduler
 pass, and a `continue` recommendation leaves the invocation resumable for the
-next pass.
-A new profile-backed delegate handoff may receive a second bounded tick in its
-initial pass so fresh external state corroborates the durable handoff
-immediately.
+next pass after the configured poll interval.
+Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
+Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
+The profile-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
 
 ### Workflow live-wrapper profile
 

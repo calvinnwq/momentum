@@ -119,9 +119,9 @@ the same deterministic invocation reopens with an incremented attempt.
 The daemon SDK driver normally applies one bounded tick per scheduler pass and
 rechecks non-terminal invocations, so single-round and multi-round executors
 share one driving loop.
-A new delegate-supervisor handoff may use a second bounded tick in its initial
-pass so the first external-state read follows the durable handoff immediately;
-later passes return to one tick.
+The first delegate-supervisor handoff completed anywhere in an invocation may use a second bounded tick in that initial pass so the first external-state read follows the durable handoff immediately.
+Later passes and every retry attempt use one tick, even when a conclusively failed or cancelled prior external run allows the retry to launch a fresh run.
+Continuation-only passes observe the daemon poll interval before the next external-state read.
 If a crash leaves an unclassified running, capturing-result, or
 `mirroring_external_state` round with durable handoff evidence, stale
 auto-release dispatch-lease recovery releases the abandoned lease and makes
@@ -143,8 +143,10 @@ semantic-stall window for the new attempt.
 A valid non-terminal handoff is reused.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior
 external run remains evidence but permits one fresh launch on the newer attempt.
+Local wrapper-finalization failure alone is not external terminal evidence: the newer attempt first reads the correlated run and reattaches it when it is still running or has completed.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
+The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
 
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
@@ -179,6 +181,7 @@ executor family or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
+Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit, while failed verification still rejects the handoff.
 Correlated no-mistakes launch output identifies an interrupted external run but does not make a launch-only receipt recoverable without durable wrapper-finalization proof.
 Generic reset or commit recovery additionally requires a bounded regular result whose exact digest matches the receipt plus matching base, tree, commit-message, and clean-worktree proof; symbolic links and missing or mismatched evidence preserve the worktree and forbid a duplicate launch.
 Completed profile-backed state is accepted only while its full 40-character head
@@ -190,6 +193,7 @@ Terminal state captured during handoff is a durable settlement candidate, not
 authority by itself: a fresh adapter read must corroborate the same run, branch,
 and exact full head SHA with passed or absent CI, no active findings, and no
 unresolved decisions.
+A lagging `running` read can provide that corroboration only when it also reports no active step.
 Pending CI, another head, or unreadable corroboration fails closed rather than
 settling cached success.
 No-mistakes normalization rejects ambiguous current AXI fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside the canonical steps table.

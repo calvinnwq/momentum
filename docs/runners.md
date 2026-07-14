@@ -51,6 +51,7 @@ The dependency-free `RunnerResult` types plus their parser and normalizers under
 For ordinary live-wrapper-owned dispatched steps, the document is not terminal evidence by itself: after a successful wrapper process, Momentum parses the result, runs repo-safety finalization, verifies, commits or resets, and only then terminalizes the executor round for reconciliation.
 For profile-backed delegate-supervisor steps, the same document is input to safe handoff finalization, not terminal delegate authority.
 Its finalized result becomes durable handoff and candidate evidence, and a later external-state read must receive a daemon-accepted terminal classification before the invocation and step reconcile.
+The no-mistakes handoff may report success without repository changes; Momentum accepts that no-change result only after verification proves the worktree clean, and a verification failure still rejects it.
 The result JSON is written at `$MOMENTUM_RESULT_PATH`:
 
 ```json

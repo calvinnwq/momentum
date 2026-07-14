@@ -86,7 +86,10 @@ type SuccessfulNoMistakesExternalStateRead = Extract<
 const CLEARED_CURRENT_STEP_FINDINGS_DETAIL =
   "aggregate run findings remain, but every current step row reports zero findings";
 
-/** Preserve terminal evidence returned by `axi run` even when `axi status` lags. */
+/**
+ * Preserve terminal evidence returned by `axi run` only when a lagging
+ * `axi status` view reports no active step or other clean-state blocker.
+ */
 export function settleNoMistakesHandoffState(
   read: SuccessfulNoMistakesExternalStateRead,
   terminalProofHeadSha: string | null,
