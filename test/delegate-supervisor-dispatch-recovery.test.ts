@@ -86,9 +86,11 @@ function writeNoMistakesProfile(
   profileDir: string,
   statusMode: "completed" | "lagging" | "blocked" = "completed",
   launchIdentityMode: "valid" | "missing" = "valid",
+  launchDelaySec = 0,
 ): {
   profilePath: string;
   wrapperConfigPath: string;
+  executablePath: string;
 } {
   const executablePath = path.join(profileDir, "no-mistakes");
   const statusOutput =
@@ -141,6 +143,7 @@ ${statusOutput}
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
 printf '%s\n' "$((count + 1))" > "$count_file"
+${launchDelaySec > 0 ? `/bin/sleep ${launchDelaySec}` : ""}
 ${launchMutation}
 ${launchOutput}
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
@@ -163,7 +166,7 @@ JSON`;
       },
     }),
   );
-  return { profilePath, wrapperConfigPath };
+  return { profilePath, wrapperConfigPath, executablePath };
 }
 
 function definition(
@@ -213,12 +216,13 @@ function claimStep(
   runId: string,
   stepId: string,
   now: number,
+  leaseDurationMs = 30_000,
 ) {
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: "delegate-test-worker",
-    leaseExpiresAt: now + 30_000,
+    leaseExpiresAt: now + leaseDurationMs,
     now,
   });
   if (!claim.ok) throw new Error(claim.reason);
@@ -1816,7 +1820,70 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
       db.close();
     });
 
-    it("prepares a fresh attempt after a blocked external run is cleared", async () => {
+    it("keeps repo ownership for the bounded delegated handoff", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      fs.writeFileSync(
+        path.join(repoPath, "MOMENTUM.md"),
+        "---\nverification:\n  - /usr/bin/true\nverification_timeout_sec: 1\n---\n",
+      );
+      runGit(repoPath, ["add", "MOMENTUM.md"]);
+      runGit(repoPath, ["commit", "--quiet", "-m", "test: verify handoff"]);
+      const runId = "no-mistakes-long-handoff-lock";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(
+        tempDir(),
+        "completed",
+        "valid",
+        1.8,
+      );
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+        },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW, 500), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      const lock = db
+        .prepare(
+          "SELECT state, acquired_at, heartbeat_at FROM repo_locks WHERE goal_id = ?",
+        )
+        .get(runId) as {
+        state: string;
+        acquired_at: number;
+        heartbeat_at: number;
+      };
+      expect(lock.state).toBe("released");
+      expect(lock.heartbeat_at - lock.acquired_at).toBeGreaterThan(1_500);
+      db.close();
+    });
+
+    it("polls once when a blocked external handoff is retried", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();
       const runId = "no-mistakes-blocked-attempt-retry";
@@ -1882,6 +1949,24 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           .get(runId, stepId),
       ).toEqual({ state: "approved" });
 
+      const statusCountPath = path.join(
+        repoPath,
+        ".agent-workflows",
+        runId,
+        "status-count",
+      );
+      fs.writeFileSync(
+        profile.executablePath,
+        `#!/bin/sh
+count=0
+test ! -f '${statusCountPath}' || count=$(cat '${statusCountPath}')
+printf '%s\n' "$((count + 1))" > '${statusCountPath}'
+branch=$(git branch --show-current)
+head=$(git rev-parse HEAD)
+printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"
+`,
+      );
+
       await resolved.dispatch(claimStep(db, runId, stepId, NOW + 3), {
         db,
         workerId: "delegate-test-worker",
@@ -1894,6 +1979,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           )
           .get(runId),
       ).toEqual({ state: "blocked", attempt: 2 });
+      expect(fs.readFileSync(statusCountPath, "utf8")).toBe("1\n");
       db.close();
     });
 

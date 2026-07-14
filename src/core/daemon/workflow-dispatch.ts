@@ -206,10 +206,9 @@ export function resolveDaemonWorkflowStepDispatch(
             // executor to perform its first bounded read under the same claim.
             resolveMaxTicks: ({ executorName, invocation, context }) =>
               executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
-              !hasCompletedDelegateHandoff(
+              !hasAnyCompletedDelegateHandoff(
                 context.db,
                 invocation.invocationId,
-                invocation.attempt,
               )
                 ? 2
                 : 1,
@@ -491,6 +490,7 @@ function createLiveStepHostBindingsResolver(
       repoPath: safety.repoPath,
       attempt,
       repoSafety: safety.repoSafety,
+      runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
     });
     if (!repoOwnership.ok) {
       throw new RegisteredExecutorHostBindingsError(
@@ -631,6 +631,17 @@ function hasCompletedDelegateHandoff(
     );
 }
 
+function hasAnyCompletedDelegateHandoff(
+  db: MomentumDb,
+  invocationId: string,
+): boolean {
+  return listExecutorRoundsForInvocation(db, invocationId).some((round) =>
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) => checkpoint.stage === "delegate_handoff_completed",
+    ),
+  );
+}
+
 function resolveDelegateToolName(
   config: Readonly<Record<string, unknown>>,
 ): string {
@@ -766,11 +777,16 @@ function acquireLiveStepRepoOwnership(input: {
   repoPath: string;
   attempt: number;
   repoSafety: DispatchedStepRepoSafetyContext;
+  runnerWindowMs: number;
 }): LiveStepRepoOwnership {
   const { claim, context, repoPath, attempt, repoSafety } = input;
   const wallClockOffset = context.now - Date.now();
   const now = () => Date.now() + wallClockOffset;
-  const extensionMs = liveStepOwnershipExtensionMs(claim, repoSafety);
+  const extensionMs = liveStepOwnershipExtensionMs(
+    claim,
+    repoSafety,
+    input.runnerWindowMs,
+  );
   const acquiredAt = now();
   const acquired = acquireRepoLock(context.db, {
     repoRoot: repoSafety.repoRoot ?? repoPath,
@@ -841,6 +857,7 @@ function acquireLiveStepRepoOwnership(input: {
 function liveStepOwnershipExtensionMs(
   claim: Parameters<AsyncWorkflowStepDispatch>[0],
   repoSafety: DispatchedStepRepoSafetyContext,
+  runnerWindowMs: number,
 ): number {
   const leaseDurationMs = Math.max(
     1,
@@ -850,7 +867,7 @@ function liveStepOwnershipExtensionMs(
     Math.max(1, repoSafety.verificationCommands.length) *
     repoSafety.verificationTimeoutSec *
     1000;
-  return leaseDurationMs + verificationWindowMs;
+  return Math.max(leaseDurationMs, runnerWindowMs) + verificationWindowMs;
 }
 
 function resolveDaemonDispatchedRepoSafety(
