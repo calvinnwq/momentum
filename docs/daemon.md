@@ -339,14 +339,17 @@ The implementation adapter performs the configured live-wrapper handoff once, re
 The no-mistakes adapter uses the configured wrapper command for the initial `axi run` handoff, then invokes that validated executable as `axi status --run <external-run-id>` with the same filtered child environment on later ticks.
 Status read-back must match the pinned run id and branch.
 The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
-Unreadable status, identity drift, pending CI behind a terminal claim, active findings, or unresolved decisions fail closed instead of settling success.
+Only canonical current AXI sections and a validated steps table contribute status; duplicate or conflicting scalar fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside that table fail closed.
+Unreadable status, identity drift, pending CI behind a terminal claim, an active step, active findings, or unresolved decisions fail closed instead of settling success.
 The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
-For no-mistakes, the receipt records a `launching` intent before the wrapper starts and a `launched` identity after the external run id is known.
-An interrupted `launching` receipt may recover that identity only from its correlated executor log; a missing or mismatched receipt fails closed without launching no-mistakes again.
+For no-mistakes, the receipt records `launching` before the wrapper starts, `resetting` or `finalizing` before repository mutation, `failed` after an unsuccessful finalization, and `launched` only after successful wrapper finalization and external identity capture.
+An interrupted `launching` receipt reads its original executor log only to corroborate exactly one canonical current run id; historical or duplicate identities provide no authority, and even with a clean unchanged repository the missing wrapper-finalization proof fails closed without reattaching or launching no-mistakes again.
 Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
-A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again; branch, result, worktree, receipt, or current repository `HEAD` drift fails closed and preserves the worktree for inspection.
+A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again only when the current bounded regular result file has the receipt's exact digest; symbolic links and branch, result, worktree, receipt, or current repository `HEAD` drift fail closed and preserve the worktree for inspection.
 When the initial no-mistakes handoff already proves checks passed, that terminal candidate is stored with a full 40-character SHA for the post-finalization repository `HEAD`.
 It settles only after a fresh status read corroborates the same run, branch, and exact head with passed or absent CI, no active findings, and no unresolved decisions; pending CI or another head fails closed.
+Approval boundaries use a supervisor-owned `approve` / `reject` decision that external state cannot forge; only the latest resolved `approve` permits later completion.
+On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 

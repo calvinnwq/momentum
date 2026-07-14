@@ -213,6 +213,7 @@ PR-state readback, expected-head, cleanup-branch, or mergeability checks,
 `workflow run clear-recovery` prepares the step for a scheduler retry after the operator repairs the environment or target state.
 The clear output includes `retryPrepared`; the previous failed executor round remains durable, and an already-terminal successful step is only reattached/reconciled, not rerun.
 Before the step row is reopened for retry, Momentum preserves the previous `step_started` or `step_failed` transition as a workflow event so cursor replay does not lose the overwritten state.
+For a retryable dispatched attempt, the same transaction releases only that invocation attempt's repo locks in `needs_manual_recovery`; if the clear later refuses or fails, retry preparation and lock release roll back together.
 For `no-mistakes`, the coding-workflow wrapper also parks known external runner
 lifecycle failures in this same retryable recovery lane: missing branch-start /
 gate state and current run status or outcome evidence showing cancellation
@@ -228,8 +229,9 @@ Delegate handoff failures use `tool_adapter_unavailable`, `delegate_handoff_fail
 Unreadable, contradictory, cancelled, identity-mismatched, or stalled external state uses `external_state_unreadable` or `external_state_inconsistent` and must be inspected before guarded recovery clear.
 Guarded clear may open a later invocation attempt, but an unresolved prior handoff intent is reconciled before the adapter may launch anything again.
 The later attempt retains the correlated handoff and prior decisions but starts a fresh four-minute semantic-stall window.
-For no-mistakes, a durable `launching` receipt can recover the external run id from its original correlated executor log; a missing receipt or uncorrelated launch output fails closed without relaunch.
-For another profile-backed delegate, recovery recognizes an already-completed reset only when the worktree matches the recorded base tree, and recognizes or recreates a commit only when its result, parent, tree, message, and clean-worktree proof match the receipt.
+For no-mistakes, a durable `launching` receipt reads the original executor log only to correlate the external run id; launch-only evidence has no wrapper-finalization authority and requires operator inspection even when the repository is still clean at the launch head.
+For another profile-backed delegate, recovery recognizes an already-completed reset only when the worktree matches the recorded base tree, and recognizes or recreates a commit only when the bounded regular result's exact digest plus its parent, tree, message, and clean-worktree proof match the receipt.
+Symbolic links, oversized evidence, named pipes, missing digests, and changed result bytes fail closed; persisted external-state files pass the same bounded regular-file check before read or refresh.
 Finalized state must also name the exact full SHA at the repository's current `HEAD`.
 Any mismatch preserves the current worktree for inspection instead of resetting it or repeating the delegated tool.
 If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves success, operators may reconcile the failed `no-mistakes` step with either legacy `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.

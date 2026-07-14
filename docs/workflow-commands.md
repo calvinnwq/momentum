@@ -945,6 +945,7 @@ Behaviour:
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
+  The same transaction releases only the retrying invocation attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
@@ -2387,12 +2388,15 @@ A retry preserves the correlated handoff and decision history but starts a fresh
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
 Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
-It also requires no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
 Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
+The supervisor reserves its synthetic approval identity and offers `approve` / `reject`; only the latest resolved `approve` allows later terminal completion.
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
 The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.
-On a later attempt, receipt recovery accepts only correlated launch output or exact completed-reset/commit proof and otherwise refuses a duplicate launch while preserving the worktree.
+For no-mistakes, correlated launch output identifies a launch-only external run but cannot authorize reattachment without wrapper-finalization proof.
+For other profile-backed tools, recovery requires the bounded regular result's exact receipt digest plus completed-reset or parent/tree/message/clean-worktree commit proof; symbolic links or any mismatch refuse a duplicate launch while preserving the worktree.
+No-mistakes status normalization accepts only canonical current AXI fields and a validated steps table, so ambiguous fields, malformed or duplicate rows, unknown statuses, and out-of-table CI evidence fail closed.
 GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.
 
 ## `workflow run logs`

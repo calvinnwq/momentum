@@ -146,7 +146,10 @@ The profile-backed host releases repository ownership only after that handoff ev
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
 The profile-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
-It accepts recovery only when the original launch log yields the correlated run identity, a completed reset matches the recorded base tree, or a commit matches the recorded parent, tree, message, and clean worktree.
+An interrupted no-mistakes `launching` receipt reads the original executor log only to corroborate exactly one canonical current run id; historical sections are ignored, duplicate identities fail closed, and without durable wrapper-finalization proof the receipt never becomes authority to reattach or relaunch.
+Generic profile-backed recovery accepts a completed reset or commit only when the current result file is a bounded regular file whose exact digest matches the receipt and the recorded base, tree, commit message, and clean-worktree proof also match.
+Delegate receipts, result documents, persisted external-state documents, and no-mistakes launch logs must be bounded regular files; symbolic links, oversized files, named pipes, and path substitution fail closed before evidence is read or refreshed.
+Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; invocation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
 Finalized profile-backed state must also carry a full 40-character head SHA that matches the repository's current `HEAD`.
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
@@ -156,9 +159,11 @@ A later attempt reuses the latest valid handoff and prior decision history rathe
 Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
 The external run id and branch remain the stable correlation identity; exact launch head matching is the default, while an adapter may mark a changed head as `verified_descendant` after proving the tool committed forward from the launch commit.
 The external status is one of `running`, `awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, `cancelled`, or `completed`; CI is `passed`, `failed`, `pending`, or `none`.
+The no-mistakes adapter accepts only the canonical current AXI sections and validated steps-table shape, ignores explicitly historical sections, and rejects duplicate or conflicting scalar fields, duplicate or malformed step rows, unknown step statuses, and CI evidence outside that table.
 Momentum rejects malformed state, run or branch identity drift, selected findings without matching surfaced findings, invalid decision action sets, external decisions that use the supervisor-reserved synthetic approval id, and completed claims that still have an active step, findings, unresolved current or previously mirrored decisions, or pending/failed CI.
 Every allowed action must be a unique non-blank canonical string without surrounding whitespace, and any recommended or chosen action must belong to that set.
 An approval or decision state is projected into durable executor decisions and a round-scoped workflow gate.
+The supervisor owns the synthetic approval decision with `approve` and `reject` actions; only the latest resolved `approve` permits later terminal completion, while an unresolved or rejected supervisor approval makes a completed external claim inconsistent.
 Findings and decision revisions are append-only projections keyed by their external identities.
 
 Every accepted read stores the digest of the raw adapter response in `inputDigest` and a stable semantic-state digest in `resultDigest`.

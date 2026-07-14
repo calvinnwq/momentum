@@ -110,7 +110,8 @@ the same deterministic invocation with the next attempt. Ordinary live-wrapper
 evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
 evidence is first isolated beneath `delegate/<step-id>/`.
 The step-scoped `delegate-handoff.json` receipt records no-mistakes launch intent before process start and generic delegate reset or commit intent before repository mutation.
-Retry recovery accepts only correlated launch output or exact result, base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
+Correlated no-mistakes launch output cannot recover a launch-only receipt without wrapper-finalization proof.
+Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
 Finalized profile-backed delegate state must match the repository's current full `HEAD`.
 After a durable `delegate_handoff_completed` checkpoint, an unclassified running or capturing-result round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 

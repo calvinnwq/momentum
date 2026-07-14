@@ -173,7 +173,8 @@ executor family or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
-Recovery accepts only correlated launch output or an exact result, base, tree, and commit-message or completed-reset proof; missing or mismatched evidence preserves the worktree and forbids a duplicate launch.
+Correlated no-mistakes launch output identifies an interrupted external run but does not make a launch-only receipt recoverable without durable wrapper-finalization proof.
+Generic reset or commit recovery additionally requires a bounded regular result whose exact digest matches the receipt plus matching base, tree, commit-message, and clean-worktree proof; symbolic links and missing or mismatched evidence preserve the worktree and forbid a duplicate launch.
 Completed profile-backed state is accepted only while its full 40-character head
 SHA matches the repository's current `HEAD`.
 The external run id and branch are stable correlation identity; an
@@ -185,6 +186,8 @@ and exact full head SHA with passed or absent CI, no active findings, and no
 unresolved decisions.
 Pending CI, another head, or unreadable corroboration fails closed rather than
 settling cached success.
+No-mistakes normalization rejects ambiguous current AXI fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside the canonical steps table.
+The supervisor reserves its synthetic approval identity, and only the latest resolved `approve` action authorizes completion after an approval boundary.
 The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping

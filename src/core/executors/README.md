@@ -131,8 +131,10 @@ durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
 recorded `no-mistakes` invocations remain readable.
 The profile-backed host writes its step-scoped receipt before no-mistakes launch and before delegated reset or commit mutation.
-Interrupted recovery requires correlated launch output or exact result and repository proof, so a missing or mismatched receipt preserves the worktree and cannot create a duplicate external run.
+Correlated no-mistakes launch output identifies a possible external run but cannot recover a launch-only receipt without wrapper-finalization proof.
+Generic interrupted recovery requires a bounded regular result whose exact digest matches the receipt plus exact repository proof, so symbolic links and missing or mismatched evidence preserve the worktree and cannot create a duplicate external run.
 Finalized profile-backed state is bound to the repository's current full `HEAD`, and cached terminal handoff proof still requires a fresh clean read for the same run, branch, and exact head before settlement.
+Canonical no-mistakes normalization rejects ambiguous AXI fields and malformed steps tables, while the supervisor's reserved approval decision permits terminal completion only after its latest action is `approve`.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
