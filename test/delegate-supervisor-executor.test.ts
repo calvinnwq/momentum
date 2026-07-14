@@ -34,6 +34,8 @@ import {
 import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
+import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../src/core/workflow/dispatch/executor-gate.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
 const roots: string[] = [];
 const HEAD = "a".repeat(40);
@@ -688,6 +690,65 @@ describe("delegate-supervisor SDK executor", () => {
     ]);
     db.close();
   });
+
+  it.each([HEAD.slice(0, 8), "A".repeat(40)])(
+    "rejects a non-canonical handoff head SHA %s",
+    async (headSha) => {
+      const { db, invocation } = openDelegateDb();
+      let settled: boolean | undefined;
+      const result = await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor: new DelegateSupervisorExecutor(),
+        config: { tool: "no-mistakes" },
+        hostBindings: {
+          tools: {
+            "no-mistakes": {
+              name: "no-mistakes",
+              handoff: () => ({
+                externalIdentity: {
+                  externalRunId: "nm-run-1",
+                  branch: "feature/delegate-supervisor",
+                  headSha,
+                },
+                summary: "invalid handoff identity",
+              }),
+              readExternalState: () => {
+                throw new Error("invalid handoff must not be polled");
+              },
+            },
+          },
+          settleHandoff: (provenClean: boolean) => {
+            settled = provenClean;
+          },
+        },
+        now: () => 6,
+      });
+
+      expect(result.lastRound).toMatchObject({
+        state: "manual_recovery_required",
+        classification: "manual_recovery_required",
+        recoveryCode: "delegate_handoff_failed",
+      });
+      expect(result.ticks[0]?.reason).toEqual(
+        expect.stringContaining(
+          "must be a canonical full 40-character commit SHA",
+        ),
+      );
+      expect(settled).toBe(false);
+      expect(
+        createDurableExecutorEnvelope({
+          db,
+          invocationId: invocation.invocationId,
+        })
+          .snapshot()
+          .currentRound?.checkpoints.some(
+            ({ stage }) => stage === "delegate_handoff_completed",
+          ),
+      ).toBe(false);
+      db.close();
+    },
+  );
 
   it("settles cached terminal state only after fresh adapter corroboration", async () => {
     const { db, invocation } = openDelegateDb();
@@ -1369,7 +1430,107 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
-  it("does not retain a synthetic approval after the gate clears", async () => {
+  it.each([
+    {
+      action: "approve",
+      expectedState: "succeeded",
+      expectedRecovery: null,
+    },
+    {
+      action: "reject",
+      expectedState: "manual_recovery_required",
+      expectedRecovery: "external_state_inconsistent",
+    },
+  ])(
+    "requires approve to clear a durable synthetic approval ($action)",
+    async ({ action, expectedState, expectedRecovery }) => {
+      const { db, invocation } = openDelegateDb();
+      let external = state({
+        activeStep: "review",
+        stepStatus: "awaiting_approval",
+      });
+      const adapter: DelegateSupervisorToolAdapter = {
+        name: "no-mistakes",
+        handoff: () => ({
+          externalIdentity: {
+            externalRunId: external.externalRunId,
+            branch: external.branch,
+            headSha: external.headSha,
+          },
+          summary: "handoff complete",
+        }),
+        readExternalState: () => ({
+          ok: true,
+          value: external,
+          digest: "sha256:approval-transition",
+        }),
+      };
+      const input = {
+        db,
+        invocationId: invocation.invocationId,
+        executor: new DelegateSupervisorExecutor(),
+        config: { tool: "no-mistakes" },
+        hostBindings: { tools: { "no-mistakes": adapter } },
+        now: () => 10,
+      };
+      await driveExecutorTicks(input);
+      const gated = await driveExecutorTicks(input);
+      expect(gated.invocation.state).toBe("waiting_operator");
+      const approval = createDurableExecutorEnvelope({
+        db,
+        invocationId: invocation.invocationId,
+      })
+        .snapshot()
+        .currentRound?.decisions.find(
+          ({ externalRef }) =>
+            externalRef === "delegate-supervisor:synthetic-approval-gate",
+        );
+      expect(approval).toBeDefined();
+      const gateId = `${approval!.decisionId}::gate`;
+      insertWorkflowGate(
+        db,
+        {
+          gateId,
+          workflowRunId: invocation.workflowRunId,
+          stepRunId: invocation.stepRunId,
+          invocationId: invocation.invocationId,
+          roundId: gated.lastRound!.roundId,
+          targetScope: "round",
+          gateType: "approval_required",
+          reason: approval!.summary,
+          evidence: approval!.decisionId,
+          allowedActions: approval!.allowedActions,
+          recommendedAction: approval!.recommendedAction,
+          policyEnvelope: [],
+        },
+        { now: 11 },
+      );
+      resolveWorkflowGateAndResumeRegisteredExecutor(
+        db,
+        gateId,
+        {
+          action,
+          actor: "test-operator",
+          mode: "operator",
+          resolutionNote: action === "approve" ? "approved" : "rejected",
+        },
+        { now: 12 },
+      );
+      external = state({
+        activeStep: null,
+        stepStatus: "completed",
+        ciState: "passed",
+      });
+
+      const completed = await driveExecutorTicks(input);
+
+      expect(completed.invocation.state).toBe(expectedState);
+      expect(completed.lastRound?.recoveryCode).toBe(expectedRecovery);
+      db.close();
+    },
+  );
+
+  it("uses the latest synthetic approval when a rejected boundary is presented again", async () => {
     const { db, invocation } = openDelegateDb();
     let external = state({
       activeStep: "review",
@@ -1388,7 +1549,7 @@ describe("delegate-supervisor SDK executor", () => {
       readExternalState: () => ({
         ok: true,
         value: external,
-        digest: "sha256:approval-transition",
+        digest: "sha256:approval-represented",
       }),
     };
     const input = {
@@ -1400,26 +1561,85 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 10,
     };
     await driveExecutorTicks(input);
-    const gated = await driveExecutorTicks(input);
-    expect(gated.invocation.state).toBe("waiting_operator");
+    await driveExecutorTicks(input);
+
+    const resolveCurrentApproval = (
+      action: "approve" | "reject",
+      now: number,
+    ) => {
+      const snapshot = createDurableExecutorEnvelope({
+        db,
+        invocationId: invocation.invocationId,
+      }).snapshot();
+      const round = snapshot.currentRound!;
+      const approval = [...round.decisions]
+        .reverse()
+        .find(
+          ({ chosenAction, externalRef }) =>
+            chosenAction === null &&
+            externalRef === "delegate-supervisor:synthetic-approval-gate",
+        )!;
+      const gateId = `${approval.decisionId}::gate`;
+      insertWorkflowGate(
+        db,
+        {
+          gateId,
+          workflowRunId: invocation.workflowRunId,
+          stepRunId: invocation.stepRunId,
+          invocationId: invocation.invocationId,
+          roundId: round.round.roundId,
+          targetScope: "round",
+          gateType: "approval_required",
+          reason: approval.summary,
+          evidence: approval.decisionId,
+          allowedActions: approval.allowedActions,
+          recommendedAction: approval.recommendedAction,
+          policyEnvelope: [],
+        },
+        { now },
+      );
+      resolveWorkflowGateAndResumeRegisteredExecutor(
+        db,
+        gateId,
+        {
+          action,
+          actor: "test-operator",
+          mode: "operator",
+          resolutionNote: action,
+        },
+        { now: now + 1 },
+      );
+    };
+
+    resolveCurrentApproval("reject", 11);
+    const represented = await driveExecutorTicks(input);
+    expect(represented.invocation.state).toBe("waiting_operator");
+    resolveCurrentApproval("approve", 13);
     external = state({
       activeStep: null,
       stepStatus: "completed",
       ciState: "passed",
     });
-    updateExecutorRound(db, gated.lastRound!.roundId, {
-      toState: "running",
-      classification: null,
-      executorRecommendation: null,
-      recoveryCode: null,
-      humanGate: null,
-      finishedAt: null,
-    });
-    updateExecutorInvocationState(db, invocation.invocationId, "running", {
-      finishedAt: null,
-    });
+
     const completed = await driveExecutorTicks(input);
+
     expect(completed.invocation.state).toBe("succeeded");
+    const approvalActions = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    })
+      .snapshot()
+      .rounds.flatMap(({ decisions }) =>
+        decisions
+          .filter(
+            ({ externalRef }) =>
+              externalRef === "delegate-supervisor:synthetic-approval-gate",
+          )
+          .map(({ chosenAction }) => chosenAction),
+      );
+    expect(approvalActions).toEqual(
+      expect.arrayContaining(["reject", "approve"]),
+    );
     db.close();
   });
 
@@ -2793,6 +3013,149 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
+  it.each([
+    {
+      name: "a malformed row",
+      table: [
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,failed,0",
+        "    ci,completed,0,1000",
+      ],
+      error: "no-mistakes axi status reported a malformed steps table row",
+    },
+    {
+      name: "a mismatched declared row count",
+      table: [
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+      ],
+      error:
+        "no-mistakes axi status steps table declared 2 rows but reported 1",
+    },
+    {
+      name: "a malformed declaration",
+      table: [
+        "  steps[2] {step,status,findings,duration_ms}:",
+        "    review,failed,0,1000",
+        "    ci,completed,0,1000",
+      ],
+      error: "no-mistakes axi status reported a malformed steps table",
+    },
+    {
+      name: "an unknown row status",
+      table: [
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    review,garbage,0,1000",
+      ],
+      error: "no-mistakes axi status reported unknown step status garbage",
+    },
+    {
+      name: "noncanonical row casing",
+      table: [
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    Review,completed,0,1000",
+      ],
+      error: "no-mistakes axi status reported a malformed steps table row",
+    },
+    {
+      name: "a duplicate step identity",
+      table: [
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,pending,0,0",
+        "    review,completed,0,1000",
+      ],
+      error: "no-mistakes axi status reported duplicate step review",
+    },
+  ])("fails closed when a steps table contains $name", ({ table, error }) => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        ...table,
+        "outcome: checks-passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toEqual({ ok: false, error });
+  });
+
+  it.each([
+    {
+      name: "outcome",
+      extra: ["outcome: checks-passed", "outcome: failed"],
+      error:
+        "no-mistakes axi status reported ambiguous duplicate outcome fields",
+    },
+    {
+      name: "run status",
+      extra: ["  status: failed", "outcome: checks-passed"],
+      error:
+        "no-mistakes axi status reported ambiguous duplicate run.status fields",
+    },
+    {
+      name: "whitespace-variant run section",
+      extra: [
+        "run:   ",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: failed",
+        "  head: aaaaaaaa",
+        "outcome: checks-passed",
+      ],
+      error:
+        "no-mistakes axi status reported ambiguous noncanonical run section",
+    },
+    {
+      name: "contradictory clean aliases",
+      extra: ["  pr_clean: true", "  clean: false", "outcome: checks-passed"],
+      error:
+        "no-mistakes axi status reported ambiguous conflicting run clean aliases",
+    },
+    {
+      name: "duplicate clean fields",
+      extra: ["  clean: true", "  clean: false", "outcome: checks-passed"],
+      error:
+        "no-mistakes axi status reported ambiguous duplicate run.clean fields",
+    },
+  ])("rejects contradictory duplicate $name evidence", ({ extra, error }) => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        ...extra,
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toEqual({ ok: false, error });
+  });
+
+  it("derives CI status only from the validated steps table", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "  ci,completed,0,1000",
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,pending,0,1000",
+        "outcome: checks-passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "running", ciState: "pending" },
+    });
+  });
+
   it("preserves ungated phase changes as supervisor progress", () => {
     const review = parseStatus(
       [
@@ -2896,6 +3259,28 @@ describe("no-mistakes tool adapter", () => {
         "  steps[1]{step,status,findings,duration_ms}:",
         "    ci,completed,0,1000",
         "history:",
+        "  clean: true",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { stepStatus: "running" },
+    });
+  });
+
+  it("ignores clean PR evidence from unrelated current sections", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  steps[1]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+        "notes:",
         "  clean: true",
       ].join("\n"),
       identity,

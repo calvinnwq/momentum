@@ -1147,12 +1147,13 @@ function recoverNoMistakesHandoff(
         `durable no-mistakes launch evidence cannot be reconciled: ${launchIdentity.error}`,
       );
     }
-    receipt = {
-      ...receipt,
-      phase: "launched",
-      externalIdentity: launchIdentity.value,
-    };
-    writeJsonAtomically(input.handoffReceiptPath, receipt);
+    assertNoMistakesLaunchingRecoveryHasUnchangedRepo(
+      input.repoPath,
+      receipt.headSha,
+    );
+    throw new Error(
+      "interrupted no-mistakes launching receipt has correlated launch evidence but no durable wrapper-finalization proof; inspect the external run before clearing recovery",
+    );
   }
   if (receipt.phase === "finalizing") {
     receipt = recoverPreparedNoMistakesCommit(input, receipt);
@@ -1250,6 +1251,39 @@ function recoverNoMistakesHandoff(
         }
       : {}),
   };
+}
+
+function assertNoMistakesLaunchingRecoveryHasUnchangedRepo(
+  repoPath: string,
+  expectedHead: string,
+): void {
+  let status: string;
+  let head: string;
+  try {
+    status = execFileSync(
+      "git",
+      ["-C", repoPath, "status", "--porcelain", "--untracked-files=all"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    throw new Error(
+      `interrupted no-mistakes launching receipt repository state cannot be inspected: ${errorMessage(error)}`,
+    );
+  }
+  if (status.length > 0) {
+    throw new Error(
+      "interrupted no-mistakes launching receipt has unfinalized worktree changes; inspect the repository before clearing recovery",
+    );
+  }
+  if (head !== expectedHead) {
+    throw new Error(
+      `interrupted no-mistakes launching receipt has unfinalized HEAD ${head}; expected ${expectedHead}; inspect the repository before clearing recovery`,
+    );
+  }
 }
 
 function readNoMistakesHandoffReceipt(

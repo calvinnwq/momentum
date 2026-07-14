@@ -432,6 +432,18 @@ export class DelegateSupervisorExecutor implements Executor<
         `delegated external run claims completed but ${priorUnresolved} previously mirrored decision(s) remain unresolved`,
       );
     }
+    const supervisorApproval = blockingSupervisorApprovalDecision(
+      decisionHistoryRounds,
+    );
+    if (decision.classification === "complete" && supervisorApproval !== null) {
+      const disposition =
+        supervisorApproval.chosenAction === null
+          ? "remains unresolved"
+          : `was ${supervisorApproval.chosenAction}`;
+      decision = classifyDelegateSupervisorInconsistent(
+        `delegated external run claims completed but its supervisor approval ${disposition}; only approve permits completion`,
+      );
+    }
 
     const previous = latestMirroredCheckpoint(progressRounds);
     const progressAt =
@@ -1072,6 +1084,23 @@ function countUnresolvedPriorDecisions(
   ).length;
 }
 
+function blockingSupervisorApprovalDecision(
+  rounds: readonly ExecutorRoundEnvelopeSnapshot[],
+) {
+  for (const { decisions } of [...rounds].reverse()) {
+    const decision = [...decisions]
+      .reverse()
+      .find(
+        ({ externalRef }) =>
+          externalRef === DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
+      );
+    if (decision !== undefined) {
+      return decision.chosenAction === "approve" ? null : decision;
+    }
+  }
+  return null;
+}
+
 function compareIdentity(
   expected: DelegateSupervisorExternalIdentity,
   actual: DelegateSupervisorExternalIdentity,
@@ -1171,6 +1200,21 @@ function assertHandoff(value: DelegateSupervisorHandoff): void {
   ) {
     throw new Error("tool adapter returned an invalid handoff envelope");
   }
+  for (const key of ["externalRunId", "branch", "headSha"] as const) {
+    if (
+      typeof value.externalIdentity[key] !== "string" ||
+      value.externalIdentity[key].trim().length === 0
+    ) {
+      throw new Error(
+        `tool adapter handoff is missing externalIdentity.${key}`,
+      );
+    }
+  }
+  if (!/^[0-9a-f]{40}$/.test(value.externalIdentity.headSha)) {
+    throw new Error(
+      "tool adapter handoff externalIdentity.headSha must be a canonical full 40-character commit SHA",
+    );
+  }
   if (value.terminalState !== undefined) {
     if (
       typeof value.terminalState !== "object" ||
@@ -1187,16 +1231,6 @@ function assertHandoff(value: DelegateSupervisorHandoff): void {
     ) {
       throw new Error(
         "tool adapter returned invalid terminal handoff evidence",
-      );
-    }
-  }
-  for (const key of ["externalRunId", "branch", "headSha"] as const) {
-    if (
-      typeof value.externalIdentity[key] !== "string" ||
-      value.externalIdentity[key].trim().length === 0
-    ) {
-      throw new Error(
-        `tool adapter handoff is missing externalIdentity.${key}`,
       );
     }
   }

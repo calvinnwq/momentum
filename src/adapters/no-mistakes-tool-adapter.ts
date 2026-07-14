@@ -191,6 +191,13 @@ export function parseNoMistakesAxiStatus(
   options: ParseNoMistakesAxiStatusOptions = {},
 ): DelegateSupervisorExternalStateRead {
   const currentRaw = stripHistoricalToonSections(raw);
+  const scalarAmbiguity = findNoMistakesScalarAmbiguity(currentRaw);
+  if (scalarAmbiguity !== null) {
+    return {
+      ok: false,
+      error: `no-mistakes axi status reported ambiguous ${scalarAmbiguity}`,
+    };
+  }
   const runId = toonSectionScalar(currentRaw, "run", "id");
   const branch = toonSectionScalar(currentRaw, "run", "branch");
   const runStatus = toonSectionScalar(currentRaw, "run", "status");
@@ -276,7 +283,11 @@ export function parseNoMistakesAxiStatus(
       error: `no-mistakes axi status reported unknown gate status ${gateStatus}`,
     };
   }
-  const stepRows = parseNoMistakesStepRows(currentRaw);
+  const stepRowsRead = parseNoMistakesStepRows(currentRaw);
+  if (!stepRowsRead.ok) {
+    return stepRowsRead;
+  }
+  const stepRows = stepRowsRead.value;
   const activeStep =
     gateStep ??
     stepRows.find(
@@ -297,8 +308,7 @@ export function parseNoMistakesAxiStatus(
     hasContradictoryPullRequestEvidence(currentRaw);
   const hasCleanPullRequest = hasCleanPullRequestEvidence(currentRaw);
   const prUrl = toonSectionScalar(currentRaw, "run", "pr");
-  const ciStatus = /^\s*ci,(?<status>[^,\s]+)/m.exec(currentRaw)?.groups
-    ?.status;
+  const ciStatus = stepRows.find((row) => row.step === "ci")?.status;
   const blockingOutcome =
     outcome === "failed" || outcome === "cancelled" || outcome === "aborted";
   const terminalOutcomeClaim =
@@ -383,9 +393,7 @@ export function parseNoMistakesAxiStatus(
       ]
     : [];
   const completedSteps = new Set(
-    [...currentRaw.matchAll(/^\s+([^,\s]+),completed(?:,|$)/gm)].map(
-      (match) => match[1]!,
-    ),
+    stepRows.filter((row) => row.status === "completed").map((row) => row.step),
   );
   const previousState = options.previousState;
   const previousDecisions =
@@ -456,40 +464,203 @@ export function parseNoMistakesAxiStatus(
 }
 
 function hasContradictoryPullRequestEvidence(raw: string): boolean {
+  const draft = runSectionScalar(raw, ["is_draft", "draft"]);
+  const clean = runSectionScalar(raw, ["pr_clean", "clean"]);
+  const mergeState = runSectionScalar(raw, ["merge_state", "mergeable_state"]);
   return (
-    /^\s*(?:is[_ -]?draft|draft):\s*(?:true|yes|1|draft)\s*$/im.test(raw) ||
-    /^\s*(?:pr[_ -]?clean|clean):\s*(?:false|no|0|dirty|unknown)\s*$/im.test(
-      raw,
-    ) ||
-    /^\s*(?:merge[_ -]?state|mergeable[_ -]?state):\s*(?:behind|blocked|dirty|draft|has[_ -]?hooks|unknown|unstable)\s*$/im.test(
-      raw,
-    )
+    (draft !== null && /^(?:true|yes|1|draft)$/i.test(draft)) ||
+    (clean !== null && /^(?:false|no|0|dirty|unknown)$/i.test(clean)) ||
+    (mergeState !== null &&
+      /^(?:behind|blocked|dirty|draft|has[_ -]?hooks|unknown|unstable)$/i.test(
+        mergeState,
+      ))
   );
 }
 
 function hasCleanPullRequestEvidence(raw: string): boolean {
+  const clean = runSectionScalar(raw, ["pr_clean", "clean"]);
+  const mergeState = runSectionScalar(raw, ["merge_state", "mergeable_state"]);
   return (
-    /^\s*(?:pr[_ -]?clean|clean):\s*(?:true|yes|1|clean)\s*$/im.test(raw) ||
-    /^\s*(?:merge[_ -]?state|mergeable[_ -]?state):\s*(?:clean|mergeable|ready)\s*$/im.test(
-      raw,
-    )
+    (clean !== null && /^(?:true|yes|1|clean)$/i.test(clean)) ||
+    (mergeState !== null && /^(?:clean|mergeable|ready)$/i.test(mergeState))
   );
 }
 
-function parseNoMistakesStepRows(raw: string): Array<{
+function runSectionScalar(raw: string, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = toonSectionScalar(raw, "run", key);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+type NoMistakesStepRow = {
   step: string;
   status: string;
   findings: number;
-}> {
-  return [
-    ...raw.matchAll(
-      /^\s+(?<step>[a-z0-9_-]+),(?<status>[a-z0-9_-]+),(?<findings>\d+),[^,\s]+\s*$/gim,
-    ),
-  ].map((match) => ({
-    step: match.groups!.step!,
-    status: match.groups!.status!.toLowerCase(),
-    findings: Number(match.groups!.findings),
-  }));
+};
+
+function parseNoMistakesStepRows(
+  raw: string,
+): { ok: true; value: NoMistakesStepRow[] } | { ok: false; error: string } {
+  const lines = raw.split(/\r?\n/);
+  const rows: NoMistakesStepRow[] = [];
+  const stepIds = new Set<string>();
+  let tableCount = 0;
+  const tableHeaderPattern =
+    /^(?<indent>\s*)steps\[(?<count>\d+)\]\{(?<columns>[^}]*)\}:\s*$/;
+  const rowPattern =
+    /^(?<step>[a-z0-9_-]+),(?<status>[a-z0-9_-]+),(?<findings>\d+),[^,\s]+$/;
+  const allowedStatuses = new Set([
+    "pending",
+    "running",
+    "completed",
+    "skipped",
+    "failed",
+    "cancelled",
+    "blocked",
+    "awaiting_approval",
+    "awaiting_decision",
+  ]);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!/^\s*steps\s*\[/i.test(line)) continue;
+    const header = tableHeaderPattern.exec(line);
+    if (header === null) {
+      return {
+        ok: false,
+        error: "no-mistakes axi status reported a malformed steps table",
+      };
+    }
+    tableCount += 1;
+    if (tableCount > 1) {
+      return {
+        ok: false,
+        error: "no-mistakes axi status reported duplicate steps tables",
+      };
+    }
+    if (header.groups!.columns !== "step,status,findings,duration_ms") {
+      return {
+        ok: false,
+        error: "no-mistakes axi status reported a malformed steps table",
+      };
+    }
+    const declaredCount = Number(header.groups!.count);
+    if (!Number.isSafeInteger(declaredCount)) {
+      return {
+        ok: false,
+        error: "no-mistakes axi status reported an invalid steps table count",
+      };
+    }
+
+    const tableIndent = header.groups!.indent!.length;
+    const tableRows: NoMistakesStepRow[] = [];
+    for (let rowIndex = index + 1; rowIndex < lines.length; rowIndex += 1) {
+      const line = lines[rowIndex]!;
+      if (line.trim().length === 0) continue;
+      const rowIndent = line.length - line.trimStart().length;
+      if (rowIndent <= tableIndent) break;
+      const row = rowPattern.exec(line.trim());
+      if (row === null) {
+        return {
+          ok: false,
+          error: "no-mistakes axi status reported a malformed steps table row",
+        };
+      }
+      const step = row.groups!.step!;
+      const status = row.groups!.status!;
+      if (stepIds.has(step)) {
+        return {
+          ok: false,
+          error: `no-mistakes axi status reported duplicate step ${step}`,
+        };
+      }
+      if (!allowedStatuses.has(status)) {
+        return {
+          ok: false,
+          error: `no-mistakes axi status reported unknown step status ${status}`,
+        };
+      }
+      stepIds.add(step);
+      tableRows.push({
+        step,
+        status,
+        findings: Number(row.groups!.findings),
+      });
+    }
+    if (tableRows.length !== declaredCount) {
+      return {
+        ok: false,
+        error: `no-mistakes axi status steps table declared ${declaredCount} rows but reported ${tableRows.length}`,
+      };
+    }
+    rows.push(...tableRows);
+  }
+
+  return { ok: true, value: rows };
+}
+
+function findNoMistakesScalarAmbiguity(raw: string): string | null {
+  const lines = raw.split(/\r?\n/);
+  if (lines.filter((line) => /^outcome:\s*.+?\s*$/.test(line)).length > 1) {
+    return "duplicate outcome fields";
+  }
+  for (const [section, keys] of [
+    [
+      "run",
+      [
+        "id",
+        "branch",
+        "status",
+        "head",
+        "findings",
+        "pr",
+        "is_draft",
+        "draft",
+        "pr_clean",
+        "clean",
+        "merge_state",
+        "mergeable_state",
+      ],
+    ],
+    ["gate", ["status", "step", "summary"]],
+  ] as const) {
+    const declarations = lines.flatMap((line, index) =>
+      line.trim() === `${section}:` ? [{ index, line }] : [],
+    );
+    if (declarations.some(({ line }) => line !== `${section}:`)) {
+      return `noncanonical ${section} section`;
+    }
+    if (declarations.length > 1) return `duplicate ${section} sections`;
+    const sectionIndex = declarations[0]?.index;
+    if (sectionIndex === undefined) continue;
+    const counts = new Map<string, number>();
+    for (const line of lines.slice(sectionIndex + 1)) {
+      if (line.length > 0 && !/^\s/.test(line)) break;
+      for (const key of keys) {
+        if (new RegExp(`^\\s+${key}:\\s*.+?\\s*$`).test(line)) {
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+    const duplicate = keys.find((key) => (counts.get(key) ?? 0) > 1);
+    if (duplicate !== undefined) {
+      return `duplicate ${section}.${duplicate} fields`;
+    }
+    if (section === "run") {
+      for (const [label, aliases] of [
+        ["draft", ["is_draft", "draft"]],
+        ["clean", ["pr_clean", "clean"]],
+        ["merge state", ["merge_state", "mergeable_state"]],
+      ] as const) {
+        if (aliases.filter((key) => (counts.get(key) ?? 0) > 0).length > 1) {
+          return `conflicting run ${label} aliases`;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function stripHistoricalToonSections(raw: string): string {
@@ -521,11 +692,11 @@ function toonSectionScalar(
   key: string,
 ): string | null {
   const lines = raw.split(/\r?\n/);
-  const sectionIndex = lines.findIndex((line) => line.trim() === `${section}:`);
+  const sectionIndex = lines.findIndex((line) => line === `${section}:`);
   if (sectionIndex < 0) return null;
   for (const line of lines.slice(sectionIndex + 1)) {
     if (line.length > 0 && !/^\s/.test(line)) break;
-    const match = new RegExp(`^\\s+${key}:\\s*(.+?)\\s*$`).exec(line);
+    const match = new RegExp(`^  ${key}:\\s*(.+?)\\s*$`).exec(line);
     if (match?.[1] !== undefined) return unquote(match[1]);
   }
   return null;
