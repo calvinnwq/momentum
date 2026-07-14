@@ -9,8 +9,10 @@ import {
   getActiveRepoLock,
   getRepoLock,
   listStaleRepoLocks,
+  markRepoLockNeedsManualRecovery,
+  reclaimRepoLock,
   releaseRepoLock,
-  updateRepoLockHeartbeat
+  updateRepoLockHeartbeat,
 } from "../src/core/repo/locks.js";
 
 const tempRoots: string[] = [];
@@ -44,7 +46,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(out.ok).toBe(true);
       if (!out.ok) return;
@@ -79,7 +81,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(first.ok).toBe(true);
 
@@ -90,7 +92,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j2",
         leaseExpiresAt: 2_000,
-        now: 150
+        now: 150,
       });
       expect(second.ok).toBe(false);
       if (second.ok) return;
@@ -114,7 +116,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(first.ok).toBe(true);
       if (!first.ok) return;
@@ -122,7 +124,7 @@ describe("acquireRepoLock", () => {
       const release = releaseRepoLock(db, {
         lockId: first.lockId,
         now: 200,
-        recoveryStatus: "clean_exit"
+        recoveryStatus: "clean_exit",
       });
       expect(release.ok).toBe(true);
 
@@ -139,7 +141,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j2",
         leaseExpiresAt: 3_000,
-        now: 250
+        now: 250,
       });
       expect(second.ok).toBe(true);
     } finally {
@@ -158,19 +160,21 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
       if (!acquired.ok) return;
 
-      expect(releaseRepoLock(db, { lockId: acquired.lockId, now: 200 }).ok).toBe(
-        true
-      );
+      expect(
+        releaseRepoLock(db, { lockId: acquired.lockId, now: 200 }).ok,
+      ).toBe(true);
       // Second release does not flip state again.
-      expect(releaseRepoLock(db, { lockId: acquired.lockId, now: 300 }).ok).toBe(
-        false
+      expect(
+        releaseRepoLock(db, { lockId: acquired.lockId, now: 300 }).ok,
+      ).toBe(false);
+      expect(releaseRepoLock(db, { lockId: "missing", now: 300 }).ok).toBe(
+        false,
       );
-      expect(releaseRepoLock(db, { lockId: "missing", now: 300 }).ok).toBe(false);
     } finally {
       db.close();
     }
@@ -187,7 +191,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
       if (!acquired.ok) return;
@@ -195,13 +199,140 @@ describe("acquireRepoLock", () => {
       const beat = updateRepoLockHeartbeat(db, {
         lockId: acquired.lockId,
         heartbeatAt: 500,
-        leaseExpiresAt: 1_500
+        leaseExpiresAt: 1_500,
       });
       expect(beat.ok).toBe(true);
       const after = getRepoLock(db, acquired.lockId);
       expect(after?.heartbeat_at).toBe(500);
       expect(after?.lease_expires_at).toBe(1_500);
       expect(after?.updated_at).toBe(500);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reclaims only the exact active lock identity", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const acquired = acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 1_000,
+        now: 100,
+      });
+      expect(acquired.ok).toBe(true);
+      if (!acquired.ok) return;
+
+      expect(
+        reclaimRepoLock(db, {
+          lockId: acquired.lockId,
+          repoRoot: REPO_ROOT,
+          previousHolder: "worker-a",
+          holder: "worker-b",
+          goalId: "g1",
+          previousIteration: 2,
+          previousLeaseExpiresAt: 1_000,
+          iteration: 2,
+          jobId: "j1",
+          heartbeatAt: 1_100,
+          leaseExpiresAt: 2_000,
+        }).ok,
+      ).toBe(false);
+      expect(getRepoLock(db, acquired.lockId)?.holder).toBe("worker-a");
+
+      expect(
+        updateRepoLockHeartbeat(db, {
+          lockId: acquired.lockId,
+          holder: "worker-a",
+          iteration: 1,
+          heartbeatAt: 900,
+          leaseExpiresAt: 2_000,
+        }).ok,
+      ).toBe(true);
+      expect(
+        reclaimRepoLock(db, {
+          lockId: acquired.lockId,
+          repoRoot: REPO_ROOT,
+          previousHolder: "worker-a",
+          holder: "worker-a",
+          goalId: "g1",
+          previousIteration: 1,
+          previousLeaseExpiresAt: 1_000,
+          iteration: 2,
+          jobId: "j1",
+          heartbeatAt: 1_100,
+          leaseExpiresAt: 3_000,
+        }).ok,
+      ).toBe(false);
+      expect(
+        reclaimRepoLock(db, {
+          lockId: acquired.lockId,
+          repoRoot: REPO_ROOT,
+          previousHolder: "worker-a",
+          holder: "worker-a",
+          goalId: "g1",
+          previousIteration: 1,
+          previousLeaseExpiresAt: 2_000,
+          iteration: 2,
+          jobId: "j1",
+          heartbeatAt: 2_001,
+          leaseExpiresAt: 3_000,
+        }).ok,
+      ).toBe(true);
+      expect(getRepoLock(db, acquired.lockId)).toMatchObject({
+        holder: "worker-a",
+        iteration: 2,
+        acquired_at: 100,
+        heartbeat_at: 2_001,
+        lease_expires_at: 3_000,
+        updated_at: 2_001,
+      });
+      expect(
+        updateRepoLockHeartbeat(db, {
+          lockId: acquired.lockId,
+          holder: "worker-a",
+          iteration: 1,
+          heartbeatAt: 2_100,
+          leaseExpiresAt: 3_500,
+        }).ok,
+      ).toBe(false);
+      expect(
+        markRepoLockNeedsManualRecovery(db, {
+          lockId: acquired.lockId,
+          holder: "worker-a",
+          iteration: 1,
+          now: 2_200,
+        }).ok,
+      ).toBe(false);
+      expect(getRepoLock(db, acquired.lockId)).toMatchObject({
+        state: "active",
+        holder: "worker-a",
+        iteration: 2,
+        heartbeat_at: 2_001,
+        lease_expires_at: 3_000,
+        updated_at: 2_001,
+      });
+      expect(
+        releaseRepoLock(db, {
+          lockId: acquired.lockId,
+          holder: "worker-a",
+          iteration: 1,
+          now: 2_300,
+        }).ok,
+      ).toBe(false);
+      expect(getRepoLock(db, acquired.lockId)?.state).toBe("active");
+      expect(
+        releaseRepoLock(db, {
+          lockId: acquired.lockId,
+          holder: "worker-a",
+          iteration: 2,
+          now: 2_400,
+        }).ok,
+      ).toBe(true);
     } finally {
       db.close();
     }
@@ -218,7 +349,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
       if (!acquired.ok) return;
@@ -228,16 +359,16 @@ describe("acquireRepoLock", () => {
         updateRepoLockHeartbeat(db, {
           lockId: acquired.lockId,
           heartbeatAt: 300,
-          leaseExpiresAt: 2_000
-        }).ok
+          leaseExpiresAt: 2_000,
+        }).ok,
       ).toBe(false);
 
       expect(
         updateRepoLockHeartbeat(db, {
           lockId: "missing",
           heartbeatAt: 300,
-          leaseExpiresAt: 2_000
-        }).ok
+          leaseExpiresAt: 2_000,
+        }).ok,
       ).toBe(false);
     } finally {
       db.close();
@@ -255,7 +386,7 @@ describe("acquireRepoLock", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
       if (!acquired.ok) return;
@@ -264,8 +395,8 @@ describe("acquireRepoLock", () => {
         updateRepoLockHeartbeat(db, {
           lockId: acquired.lockId,
           heartbeatAt: 1_001,
-          leaseExpiresAt: 2_000
-        }).ok
+          leaseExpiresAt: 2_000,
+        }).ok,
       ).toBe(false);
 
       const after = getRepoLock(db, acquired.lockId);
@@ -286,24 +417,26 @@ describe("acquireRepoLock", () => {
         goalId: "g",
         iteration: 1,
         jobId: "j",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       };
       expect(() => acquireRepoLock(db, { ...base, repoRoot: "" })).toThrow(
-        /repoRoot/
+        /repoRoot/,
       );
       expect(() => acquireRepoLock(db, { ...base, holder: "" })).toThrow(
-        /holder/
+        /holder/,
       );
       expect(() => acquireRepoLock(db, { ...base, goalId: "" })).toThrow(
-        /goalId/
+        /goalId/,
       );
       expect(() => acquireRepoLock(db, { ...base, iteration: 0 })).toThrow(
-        /iteration/
+        /iteration/,
       );
-      expect(() => acquireRepoLock(db, { ...base, jobId: "" })).toThrow(/jobId/);
-      expect(() =>
-        acquireRepoLock(db, { ...base, leaseExpiresAt: 0 })
-      ).toThrow(/leaseExpiresAt/);
+      expect(() => acquireRepoLock(db, { ...base, jobId: "" })).toThrow(
+        /jobId/,
+      );
+      expect(() => acquireRepoLock(db, { ...base, leaseExpiresAt: 0 })).toThrow(
+        /leaseExpiresAt/,
+      );
     } finally {
       db.close();
     }
@@ -322,7 +455,7 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
 
@@ -345,7 +478,7 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 10_000,
-        now: 100
+        now: 100,
       });
       expect(listStaleRepoLocks(db, { now: 5_000 })).toEqual([]);
     } finally {
@@ -364,7 +497,7 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       expect(acquired.ok).toBe(true);
       if (!acquired.ok) return;
@@ -387,7 +520,7 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 2_000,
-        now: 100
+        now: 100,
       });
       acquireRepoLock(db, {
         repoRoot: "/tmp/repo-b",
@@ -396,13 +529,13 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j2",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
 
       const stale = listStaleRepoLocks(db, { now: 5_000 });
       expect(stale.map((row) => row.repo_root)).toEqual([
         "/tmp/repo-b",
-        "/tmp/repo-a"
+        "/tmp/repo-a",
       ]);
     } finally {
       db.close();
@@ -420,14 +553,14 @@ describe("listStaleRepoLocks", () => {
         iteration: 1,
         jobId: "j1",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
-      expect(
-        listStaleRepoLocks(db, { now: 1_500, graceMs: 1_000 })
-      ).toEqual([]);
+      expect(listStaleRepoLocks(db, { now: 1_500, graceMs: 1_000 })).toEqual(
+        [],
+      );
       const stale = listStaleRepoLocks(db, {
         now: 3_000,
-        graceMs: 1_000
+        graceMs: 1_000,
       });
       expect(stale.map((row) => row.repo_root)).toEqual([REPO_ROOT]);
     } finally {
@@ -439,14 +572,12 @@ describe("listStaleRepoLocks", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
+      expect(() => listStaleRepoLocks(db, { now: Number.NaN })).toThrow(/now/);
+      expect(() => listStaleRepoLocks(db, { now: 100, graceMs: -1 })).toThrow(
+        /graceMs/,
+      );
       expect(() =>
-        listStaleRepoLocks(db, { now: Number.NaN })
-      ).toThrow(/now/);
-      expect(() =>
-        listStaleRepoLocks(db, { now: 100, graceMs: -1 })
-      ).toThrow(/graceMs/);
-      expect(() =>
-        listStaleRepoLocks(db, { now: 100, graceMs: Number.NaN })
+        listStaleRepoLocks(db, { now: 100, graceMs: Number.NaN }),
       ).toThrow(/graceMs/);
     } finally {
       db.close();

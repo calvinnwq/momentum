@@ -12,11 +12,16 @@ import {
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
+  selectExecutorDecisionForHumanGate,
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import { createDurableExecutorEnvelope } from "./envelope.js";
-import type { Executor, ExecutorTickResult } from "./types.js";
+import {
+  EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
+  type Executor,
+  type ExecutorTickResult,
+} from "./types.js";
 
 export type DriveExecutorTicksInput = {
   db: MomentumDb;
@@ -84,6 +89,7 @@ export async function driveExecutorTicks(
         signal,
       });
       tick = validateExecutorTickResult(returned, envelope.snapshot());
+      persistHumanGateDecisionSelector(envelope, tick);
       const applied = envelope.applyDaemonDecision(
         {
           roundId: tick.roundId,
@@ -172,6 +178,37 @@ export async function driveExecutorTicks(
   return { invocation, ticks, lastRound };
 }
 
+function persistHumanGateDecisionSelector(
+  envelope: ReturnType<typeof createDurableExecutorEnvelope>,
+  tick: ExecutorTickResult,
+): void {
+  if (
+    tick.recommendation !== "approval_required" &&
+    tick.recommendation !== "operator_decision_required"
+  ) {
+    return;
+  }
+  const state = envelope.snapshot();
+  const current = state.currentRound;
+  if (current === null || current.round.roundId !== tick.roundId) return;
+  const decisionId =
+    typeof tick.humanGateDecisionId === "string"
+      ? tick.humanGateDecisionId
+      : null;
+  const detail = JSON.stringify({ decisionId });
+  const sequence =
+    Math.max(
+      -1,
+      ...current.checkpoints.map((checkpoint) => checkpoint.sequence),
+    ) + 1;
+  envelope.facade.recordCheckpoint(tick.roundId, {
+    checkpointId: `${tick.roundId}::${EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE}::${sequence}`,
+    sequence,
+    stage: EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
+    detail,
+  });
+}
+
 class ExecutorTickContractError extends Error {}
 
 function validateExecutorTickResult(
@@ -232,6 +269,17 @@ function validateExecutorTickResult(
   if (humanGate !== null && !includes(EXECUTOR_HUMAN_GATE_TYPES, humanGate)) {
     throw new ExecutorTickContractError("Executor tick humanGate is invalid.");
   }
+  const humanGateDecisionId = record["humanGateDecisionId"];
+  if (
+    humanGateDecisionId !== undefined &&
+    humanGateDecisionId !== null &&
+    (typeof humanGateDecisionId !== "string" ||
+      humanGateDecisionId.length === 0)
+  ) {
+    throw new ExecutorTickContractError(
+      "Executor tick humanGateDecisionId must be a non-empty string, null, or omitted.",
+    );
+  }
   if (typeof record["reason"] !== "string") {
     throw new ExecutorTickContractError(
       "Executor tick reason must be a string.",
@@ -260,7 +308,7 @@ function validateExecutorTickResult(
   if (
     (recommendation === "approval_required" ||
       recommendation === "operator_decision_required") &&
-    !hasResolvableCurrentExecutorDecision(state)
+    !hasResolvableCurrentExecutorDecision(state, humanGateDecisionId)
   ) {
     throw new ExecutorTickContractError(
       "Executor gate recommendations require an unresolved durable decision with canonical allowed actions and a valid recommendation.",
@@ -273,10 +321,12 @@ function hasResolvableCurrentExecutorDecision(
   state: ReturnType<
     ReturnType<typeof createDurableExecutorEnvelope>["snapshot"]
   >,
+  decisionId: unknown,
 ): boolean {
-  const decision = state.currentRound?.decisions
-    .filter((candidate) => candidate.chosenAction === null)
-    .at(-1);
+  const decision = selectExecutorDecisionForHumanGate(
+    state.currentRound?.decisions ?? [],
+    decisionId,
+  );
   if (decision === undefined || decision.allowedActions.length === 0) {
     return false;
   }

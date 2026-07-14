@@ -16,6 +16,7 @@ import {
   acquireRepoLock,
   getActiveRepoLockForJob,
   markRepoLockNeedsManualRecovery,
+  reclaimRepoLock,
   releaseRepoLock,
   updateRepoLockHeartbeat,
 } from "../repo/locks.js";
@@ -55,6 +56,8 @@ import {
 import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_EXECUTOR_NAME,
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
 } from "../executors/delegate-supervisor/executor.js";
 import type { DelegateSupervisorHostBindings } from "../executors/delegate-supervisor/types.js";
 import type { Executor } from "../executors/sdk/types.js";
@@ -102,11 +105,7 @@ import {
   deriveDispatchInvocationId,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
-import {
-  listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
-} from "../executors/loop/persist.js";
+import { loadExecutorInvocation } from "../executors/loop/persist.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
 import {
@@ -491,10 +490,17 @@ function createLiveStepHostBindingsResolver(
       attempt,
       repoSafety: safety.repoSafety,
       runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
+      reclaimHandoffAttempt: isDelegate
+        ? findInterruptedDelegateHandoffAttempt(
+            context.db,
+            invocation.invocationId,
+            attempt,
+          )
+        : undefined,
     });
     if (!repoOwnership.ok) {
       throw new RegisteredExecutorHostBindingsError(
-        "repo_lock_lost",
+        repoOwnership.recoveryCode,
         repoOwnership.error,
       );
     }
@@ -592,10 +598,17 @@ function recoverCompletedLiveStepRepoOwnership(
     if (settled) return;
     settled = true;
     if (provenClean) {
-      releaseRepoLock(db, { lockId: lock.id, now });
+      releaseRepoLock(db, {
+        lockId: lock.id,
+        holder: lock.holder,
+        iteration: lock.iteration,
+        now,
+      });
     } else {
       markRepoLockNeedsManualRecovery(db, {
         lockId: lock.id,
+        holder: lock.holder,
+        iteration: lock.iteration,
         now,
         recoveryStatus: `completed executor mechanism for ${runId}/${stepId} requires manual repository recovery`,
       });
@@ -608,13 +621,12 @@ function hasCompletedLiveStepMechanism(
   invocationId: string,
   attempt: number,
 ): boolean {
-  return listExecutorRoundsForInvocation(db, invocationId)
-    .filter((round) => round.attempt === attempt)
-    .some((round) =>
-      listExecutorCheckpointsForRound(db, round.roundId).some(
-        (checkpoint) => checkpoint.stage === "mechanism_completed",
-      ),
-    );
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    "mechanism_completed",
+    attempt,
+  );
 }
 
 function hasCompletedDelegateHandoff(
@@ -622,24 +634,82 @@ function hasCompletedDelegateHandoff(
   invocationId: string,
   attempt: number,
 ): boolean {
-  return listExecutorRoundsForInvocation(db, invocationId)
-    .filter((round) => round.attempt === attempt)
-    .some((round) =>
-      listExecutorCheckpointsForRound(db, round.roundId).some(
-        (checkpoint) => checkpoint.stage === "delegate_handoff_completed",
-      ),
-    );
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    attempt,
+  );
+}
+
+function findInterruptedDelegateHandoffAttempt(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): number | undefined {
+  const row = db
+    .prepare(
+      `SELECT intent_round.attempt AS attempt
+         FROM executor_rounds AS intent_round
+         JOIN executor_checkpoints AS intent
+           ON intent.round_id = intent_round.round_id
+        WHERE intent_round.invocation_id = ?
+          AND intent_round.attempt <= ?
+          AND intent.stage = ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM executor_rounds AS completed_round
+              JOIN executor_checkpoints AS completed
+                ON completed.round_id = completed_round.round_id
+             WHERE completed_round.invocation_id = intent_round.invocation_id
+               AND completed_round.round_index >= intent_round.round_index
+               AND completed.stage = ?
+          )
+        ORDER BY intent_round.round_index DESC
+        LIMIT 1`,
+    )
+    .get(
+      invocationId,
+      attempt,
+      DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    ) as { attempt: number } | undefined;
+  return row?.attempt;
 }
 
 function hasAnyCompletedDelegateHandoff(
   db: MomentumDb,
   invocationId: string,
 ): boolean {
-  return listExecutorRoundsForInvocation(db, invocationId).some((round) =>
-    listExecutorCheckpointsForRound(db, round.roundId).some(
-      (checkpoint) => checkpoint.stage === "delegate_handoff_completed",
-    ),
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
   );
+}
+
+function hasExecutorCheckpoint(
+  db: MomentumDb,
+  invocationId: string,
+  stage: string,
+  attempt?: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.invocation_id = ?
+          AND c.stage = ?
+          ${attempt === undefined ? "" : "AND r.attempt = ?"}
+        LIMIT 1`,
+    )
+    .get(
+      ...(attempt === undefined
+        ? [invocationId, stage]
+        : [invocationId, stage, attempt]),
+    );
+  return row !== undefined;
 }
 
 function resolveDelegateToolName(
@@ -769,7 +839,7 @@ type LiveStepRepoOwnership =
       authorizeMutation: () => { ok: true } | { ok: false; error: string };
       settle: (provenClean: boolean) => void;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; recoveryCode: string };
 
 function acquireLiveStepRepoOwnership(input: {
   claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -778,6 +848,7 @@ function acquireLiveStepRepoOwnership(input: {
   attempt: number;
   repoSafety: DispatchedStepRepoSafetyContext;
   runnerWindowMs: number;
+  reclaimHandoffAttempt: number | undefined;
 }): LiveStepRepoOwnership {
   const { claim, context, repoPath, attempt, repoSafety } = input;
   const wallClockOffset = context.now - Date.now();
@@ -788,20 +859,55 @@ function acquireLiveStepRepoOwnership(input: {
     input.runnerWindowMs,
   );
   const acquiredAt = now();
-  const acquired = acquireRepoLock(context.db, {
-    repoRoot: repoSafety.repoRoot ?? repoPath,
-    holder: context.workerId,
-    goalId: claim.runId,
-    iteration: attempt,
-    jobId: deriveDispatchInvocationId(claim.runId, claim.stepId),
-    leaseExpiresAt: acquiredAt + extensionMs,
-    now: acquiredAt,
-  });
-  if (!acquired.ok) {
-    return {
-      ok: false,
-      error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
-    };
+  const repoRoot = repoSafety.repoRoot ?? repoPath;
+  const jobId = deriveDispatchInvocationId(claim.runId, claim.stepId);
+  const existing =
+    input.reclaimHandoffAttempt !== undefined
+      ? getActiveRepoLockForJob(context.db, jobId)
+      : undefined;
+  const reclaimed =
+    existing !== undefined &&
+    input.reclaimHandoffAttempt !== undefined &&
+    existing.iteration >= input.reclaimHandoffAttempt &&
+    existing.iteration <= attempt &&
+    existing.lease_expires_at < acquiredAt &&
+    reclaimRepoLock(context.db, {
+      lockId: existing.id,
+      repoRoot,
+      previousHolder: existing.holder,
+      holder: context.workerId,
+      goalId: claim.runId,
+      previousIteration: existing.iteration,
+      previousLeaseExpiresAt: existing.lease_expires_at,
+      iteration: attempt,
+      jobId,
+      heartbeatAt: acquiredAt,
+      leaseExpiresAt: acquiredAt + extensionMs,
+    }).ok;
+  let lockId: string;
+  if (reclaimed && existing !== undefined) {
+    lockId = existing.id;
+  } else {
+    const acquired = acquireRepoLock(context.db, {
+      repoRoot,
+      holder: context.workerId,
+      goalId: claim.runId,
+      iteration: attempt,
+      jobId,
+      leaseExpiresAt: acquiredAt + extensionMs,
+      now: acquiredAt,
+    });
+    if (!acquired.ok) {
+      return {
+        ok: false,
+        error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
+        recoveryCode:
+          existing?.id === acquired.existing.id
+            ? "delegate_handoff_recovery_required"
+            : "repo_lock_lost",
+      };
+    }
+    lockId = acquired.lockId;
   }
   let settled = false;
   return {
@@ -823,7 +929,9 @@ function acquireLiveStepRepoOwnership(input: {
         };
       }
       const lockBeat = updateRepoLockHeartbeat(context.db, {
-        lockId: acquired.lockId,
+        lockId,
+        holder: context.workerId,
+        iteration: attempt,
         heartbeatAt: mutationAt,
         leaseExpiresAt: mutationAt + extensionMs,
       });
@@ -840,12 +948,16 @@ function acquireLiveStepRepoOwnership(input: {
       const settledAt = now();
       if (provenClean) {
         releaseRepoLock(context.db, {
-          lockId: acquired.lockId,
+          lockId,
+          holder: context.workerId,
+          iteration: attempt,
           now: settledAt,
         });
       } else {
         markRepoLockNeedsManualRecovery(context.db, {
-          lockId: acquired.lockId,
+          lockId,
+          holder: context.workerId,
+          iteration: attempt,
           now: settledAt,
           recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
         });

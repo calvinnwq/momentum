@@ -1097,6 +1097,164 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
       db.close();
     });
 
+    it("reclaims the matching repo lock for an interrupted handoff intent", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = "delegate-interrupted-intent-lock";
+      const stepId = "implementation";
+      const profilePath = writeProfile(tempDir());
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "original-worker",
+        now: NOW + 1,
+      });
+
+      const intentRound = db
+        .prepare(
+          `SELECT r.round_id AS roundId
+             FROM executor_rounds AS r
+             JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+            WHERE r.workflow_run_id = ?
+              AND c.stage = 'delegate_handoff_intent'`,
+        )
+        .get(runId) as { roundId: string };
+      for (const table of [
+        "executor_artifacts",
+        "executor_checkpoints",
+        "executor_findings",
+        "executor_decisions",
+      ]) {
+        db.prepare(
+          `DELETE FROM ${table}
+            WHERE round_id IN (
+              SELECT round_id FROM executor_rounds
+               WHERE workflow_run_id = ? AND round_id <> ?
+            )`,
+        ).run(runId, intentRound.roundId);
+      }
+      db.prepare(
+        "DELETE FROM executor_rounds WHERE workflow_run_id = ? AND round_id <> ?",
+      ).run(runId, intentRound.roundId);
+      db.prepare(
+        "DELETE FROM executor_checkpoints WHERE round_id = ? AND stage <> 'delegate_handoff_intent'",
+      ).run(intentRound.roundId);
+      db.prepare(
+        `UPDATE executor_rounds
+            SET state = 'running', classification = NULL,
+                executor_recommendation = NULL, finished_at = NULL
+          WHERE round_id = ?`,
+      ).run(intentRound.roundId);
+      db.prepare(
+        `UPDATE executor_invocations
+            SET state = 'running', attempt = 3, finished_at = NULL
+          WHERE workflow_run_id = ?`,
+      ).run(runId);
+      db.prepare(
+        `UPDATE workflow_steps
+            SET state = 'approved', finished_at = NULL
+          WHERE run_id = ? AND step_id = ?`,
+      ).run(runId, stepId);
+      db.prepare(
+        `UPDATE workflow_runs
+            SET state = 'approved', finished_at = NULL
+          WHERE id = ?`,
+      ).run(runId);
+      db.prepare(
+        `UPDATE repo_locks
+            SET state = 'active', holder = 'original-worker', released_at = NULL,
+                iteration = 2, lease_expires_at = ?, updated_at = ?
+          WHERE goal_id = ?`,
+      ).run(NOW + 120_000, NOW + 2, runId);
+
+      const freshLockClaim = claimStep(db, runId, stepId, NOW + 3);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'running' WHERE run_id = ? AND step_id = ?",
+      ).run(runId, stepId);
+      await resolved.dispatch(freshLockClaim, {
+        db,
+        workerId: "recovery-worker",
+        now: NOW + 4,
+      });
+
+      expect(
+        db
+          .prepare(
+            `SELECT i.state, r.recovery_code AS recoveryCode
+               FROM executor_invocations AS i
+               JOIN executor_rounds AS r ON r.invocation_id = i.invocation_id
+              WHERE i.workflow_run_id = ?
+              ORDER BY r.round_index DESC
+              LIMIT 1`,
+          )
+          .get(runId),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recoveryCode: "delegate_handoff_recovery_required",
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, holder, iteration FROM repo_locks WHERE goal_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        state: "active",
+        holder: "original-worker",
+        iteration: 2,
+      });
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 120_001,
+        }),
+      ).toMatchObject({ ok: true });
+      const staleLockClaim = claimStep(db, runId, stepId, NOW + 120_002);
+      await resolved.dispatch(staleLockClaim, {
+        db,
+        workerId: "recovery-worker",
+        now: NOW + 120_003,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        db
+          .prepare(
+            "SELECT state, holder, iteration FROM repo_locks WHERE goal_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        state: "released",
+        holder: "recovery-worker",
+        iteration: 4,
+      });
+      expect(
+        fs.readFileSync(
+          path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
+          "utf8",
+        ),
+      ).toBe("1\n");
+      db.close();
+    });
+
     it("refuses a completed generic handoff after repository HEAD advances", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();

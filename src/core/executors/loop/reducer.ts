@@ -605,3 +605,15 @@ export type ExecutorDecisionRecord = {
   resolution: string | null;
   externalRef?: string | null;
 };
+
+export function selectExecutorDecisionForHumanGate<
+  T extends { decisionId: string; chosenAction: string | null },
+>(decisions: readonly T[], decisionId: unknown): T | undefined {
+  const unresolved = decisions.filter(
+    (candidate) => candidate.chosenAction === null,
+  );
+  if (typeof decisionId === "string") {
+    return unresolved.find((candidate) => candidate.decisionId === decisionId);
+  }
+  return unresolved.at(-1);
+}

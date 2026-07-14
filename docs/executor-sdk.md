@@ -113,6 +113,7 @@ export const executor: Executor<Config, HostBindings> = {
       recommendedInvocationState: "succeeded",
       recoveryCode: null,
       humanGate: null,
+      humanGateDecisionId: null,
       reason: "The bounded review poll completed."
     };
   }
@@ -231,6 +232,9 @@ The daemon controller rejects a decision atomically unless its classification, i
 
 An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
 An `approval_required` or `operator_decision_required` recommendation must also name a current round with an unresolved durable executor decision and a non-empty allowed-action set.
+Set `humanGateDecisionId` to that decision's durable id when the executor must target a specific unresolved decision, such as a supervisor-owned approval among mirrored external decisions.
+The daemon persists the selector as round evidence before applying the gate classification so parking can resume safely after a crash.
+When the field is omitted or `null`, the dispatcher preserves the legacy behavior of selecting the last unresolved decision.
 Allowed actions must be unique, non-blank canonical strings (no surrounding whitespace), and `recommendedAction` must be `null` or one of those actions; an invalid gate decision settles as `executor_contract_invalid` instead of parking an unresolvable gate.
 The dispatcher mirrors that decision into a round-scoped workflow gate, releases its dispatch lease, and leaves the invocation paused at `waiting_operator`.
 Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the invocation, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.

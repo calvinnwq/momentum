@@ -461,11 +461,12 @@ export class DelegateSupervisorExecutor implements Executor<
       );
     }
 
+    let humanGateDecisionId: string | undefined;
     if (
       identityMismatch === null &&
       decision.recoveryCode !== "external_state_unreadable"
     ) {
-      mirrorEvidence(context, roundId, read.value);
+      humanGateDecisionId = mirrorEvidence(context, roundId, read.value);
     }
     observeDecision(
       context,
@@ -476,7 +477,7 @@ export class DelegateSupervisorExecutor implements Executor<
         ? { state: read.value, progressDigest, progressAt, observedAt }
         : null,
     );
-    return tickResult(roundId, decision);
+    return tickResult(roundId, decision, humanGateDecisionId);
   }
 
   private recordHandoffEvidence(
@@ -622,7 +623,7 @@ function mirrorEvidence(
   >,
   roundId: string,
   state: DelegateSupervisorExternalState,
-): void {
+): string | undefined {
   const selected = new Set(state.selectedFindingIds);
   const mirroredRound = context.envelope
     .snapshot()
@@ -674,6 +675,12 @@ function mirrorEvidence(
         ]
       : state.decisions;
   const existingDecisions = mirroredRound?.decisions ?? [];
+  let syntheticApprovalDecisionId = existingDecisions.find(
+    (decision) =>
+      decision.chosenAction === null &&
+      decision.externalRef ===
+        DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
+  )?.decisionId;
   for (const decision of decisions) {
     const projection = {
       summary: decision.summary,
@@ -684,24 +691,43 @@ function mirrorEvidence(
       externalRef: decision.externalId,
     };
     const projectionKey = decisionProjectionKey(projection);
+    const existingDecision = existingDecisions.find(
+      (existing) => decisionProjectionKey(existing) === projectionKey,
+    );
+    const isSyntheticApproval =
+      decision.externalId ===
+      DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID;
     if (
-      existingDecisions.some(
-        (existing) => decisionProjectionKey(existing) === projectionKey,
-      )
+      existingDecision !== undefined &&
+      (!isSyntheticApproval || existingDecision.chosenAction === null)
     ) {
+      if (isSyntheticApproval && existingDecision.chosenAction === null) {
+        syntheticApprovalDecisionId = existingDecision.decisionId;
+      }
       continue;
     }
     const baseId = `${roundId}-decision-${stableId(decision.externalId)}`;
     const hasPriorVersion = existingDecisions.some(
       (existing) => existing.externalRef === decision.externalId,
     );
-    context.envelope.recordDecision(roundId, {
-      decisionId: hasPriorVersion
-        ? `${baseId}-${stableId(projectionKey)}`
-        : baseId,
+    const versionBaseId = `${baseId}-${stableId(projectionKey)}`;
+    let decisionId = hasPriorVersion ? versionBaseId : baseId;
+    for (
+      let version = 2;
+      existingDecisions.some((existing) => existing.decisionId === decisionId);
+      version += 1
+    ) {
+      decisionId = `${versionBaseId}-${version}`;
+    }
+    const recorded = context.envelope.recordDecision(roundId, {
+      decisionId,
       ...projection,
     });
+    if (isSyntheticApproval) {
+      syntheticApprovalDecisionId = recorded.decisionId;
+    }
   }
+  return syntheticApprovalDecisionId;
 }
 
 function findingProjectionKey(value: {
@@ -741,6 +767,7 @@ function decisionProjectionKey(value: {
 function tickResult(
   roundId: string,
   decision: DelegateSupervisorDecision,
+  humanGateDecisionId?: string,
 ): ExecutorTickResult {
   return {
     roundId,
@@ -752,6 +779,7 @@ function tickResult(
     recommendedInvocationState: decision.invocationState,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
+    ...(humanGateDecisionId !== undefined ? { humanGateDecisionId } : {}),
     reason: decision.reason,
   };
 }

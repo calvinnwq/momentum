@@ -256,8 +256,12 @@ export type ExecutorTickResult = {
   readonly recommendedInvocationState: ExecutorInvocationState;
   readonly recoveryCode: string | null;
   readonly humanGate: ExecutorHumanGateType | null;
+  readonly humanGateDecisionId?: string | null;
   readonly reason: string;
 };
+
+export const EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE =
+  "human_gate_decision_selected";
 
 /**
  * Core executor SDK interface. Registration/discovery decides the durable name;

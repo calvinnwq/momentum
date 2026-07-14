@@ -1607,9 +1607,15 @@ describe("executor registration and SDK dispatch", () => {
       action: "apply",
       roundState: "failed" as const,
     },
+    {
+      classification: "approval_required" as const,
+      action: "acknowledge",
+      roundState: "waiting_operator" as const,
+      legacySelection: true,
+    },
   ])(
     "persists and resumes a registered executor $classification gate after a $roundState round",
-    async ({ classification, action, roundState }) => {
+    async ({ classification, action, roundState, legacySelection = false }) => {
       const dataDir = tempDir();
       const runId = `registered-gate-${classification}`;
       const definition = fixtureDefinition({});
@@ -1715,15 +1721,37 @@ describe("executor registration and SDK dispatch", () => {
               verificationStatus: null,
               commitSha: null,
             });
+            const gateDecision = context.envelope.recordDecision(
+              round.roundId,
+              {
+                decisionId: `${round.roundId}::decision-1`,
+                summary: "Choose how the executor should continue",
+                allowedActions: [action, "cancel"],
+                recommendedAction: action,
+                chosenAction: null,
+                resolution: null,
+                externalRef: null,
+              },
+            );
             context.envelope.recordDecision(round.roundId, {
-              decisionId: `${round.roundId}::decision-1`,
-              summary: "Choose how the executor should continue",
-              allowedActions: [action, "cancel"],
-              recommendedAction: action,
+              decisionId: `${round.roundId}::decision-2`,
+              summary: "Mirrored external decision",
+              allowedActions: ["acknowledge", "cancel"],
+              recommendedAction: "acknowledge",
               chosenAction: null,
               resolution: null,
-              externalRef: null,
+              externalRef: "external-decision",
             });
+            if (legacySelection) {
+              context.envelope.recordCheckpoint(round.roundId, {
+                checkpointId: `${round.roundId}::stale-gate-selector`,
+                sequence: 0,
+                stage: "human_gate_decision_selected",
+                detail: JSON.stringify({
+                  decisionId: gateDecision.decisionId,
+                }),
+              });
+            }
             return {
               roundId: round.roundId,
               recommendation: classification,
@@ -1731,6 +1759,9 @@ describe("executor registration and SDK dispatch", () => {
               recommendedInvocationState: "waiting_operator",
               recoveryCode: null,
               humanGate: classification,
+              humanGateDecisionId: legacySelection
+                ? null
+                : gateDecision.decisionId,
               reason: "The executor needs an operator decision.",
             };
           },
@@ -1756,21 +1787,37 @@ describe("executor registration and SDK dispatch", () => {
 
       const gate = db
         .prepare(
-          "SELECT gate_id, gate_type, reason, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+          "SELECT gate_id, gate_type, reason, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
         )
         .get(runId) as
         | {
             gate_id: string;
             gate_type: string;
             reason: string;
+            evidence: string;
             resolved_at: number | null;
           }
         | undefined;
-      expect(gate?.reason).toBe("Choose how the executor should continue");
+      expect(gate?.reason).toBe(
+        legacySelection
+          ? "Mirrored external decision"
+          : "Choose how the executor should continue",
+      );
       expect(gate).toMatchObject({
         gate_type: classification,
         resolved_at: null,
       });
+      expect(
+        db
+          .prepare(
+            `SELECT json_extract(detail, '$.decisionId') AS decisionId
+              FROM executor_checkpoints
+              WHERE stage = 'human_gate_decision_selected'
+              ORDER BY sequence DESC
+              LIMIT 1`,
+          )
+          .get(),
+      ).toEqual({ decisionId: legacySelection ? null : gate?.evidence });
       expect(
         db
           .prepare(
@@ -1829,7 +1876,7 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
-            "SELECT d.chosen_action FROM executor_decisions AS d JOIN executor_rounds AS r ON r.round_id = d.round_id WHERE r.workflow_run_id = ? ORDER BY r.round_index DESC LIMIT 1",
+            "SELECT d.chosen_action FROM executor_decisions AS d JOIN executor_rounds AS r ON r.round_id = d.round_id WHERE r.workflow_run_id = ? AND d.chosen_action IS NOT NULL ORDER BY r.round_index DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ chosen_action: action });

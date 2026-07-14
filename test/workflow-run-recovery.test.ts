@@ -188,6 +188,8 @@ function seedNoMistakesCheckpoint(
   stepId: string,
   options: {
     executorFamily?: "no-mistakes" | "delegate-supervisor";
+    delegateCheckpoint?: "mirrored" | "handoff" | "handoff-terminal";
+    delegateTool?: string;
     noMistakesRunId?: string;
     branch?: string;
     headSha?: string;
@@ -199,6 +201,52 @@ function seedNoMistakesCheckpoint(
   const executorFamily = options.executorFamily ?? "no-mistakes";
   const invocationId = `${runId}::${stepId}::dispatch`;
   const roundId = `${invocationId}::round-0`;
+  const externalState = {
+    externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
+    branch: options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
+    headSha: options.headSha ?? "1111111111111111111111111111111111111111",
+    activeStep: null,
+    stepStatus: "completed",
+    prUrl:
+      options.prUrl === undefined
+        ? "https://github.com/acme/momentum/pull/193"
+        : options.prUrl,
+    ciState: "passed",
+  };
+  const delegateCheckpoint = options.delegateCheckpoint ?? "mirrored";
+  const checkpointStage =
+    executorFamily === "no-mistakes"
+      ? "external_state_mirrored"
+      : delegateCheckpoint === "mirrored"
+        ? "delegate_external_state_mirrored"
+        : "delegate_handoff_completed";
+  const externalIdentity = {
+    externalRunId: externalState.externalRunId,
+    branch: externalState.branch,
+    headSha: externalState.headSha,
+  };
+  const checkpointDetail =
+    executorFamily === "no-mistakes"
+      ? externalState
+      : delegateCheckpoint === "mirrored"
+        ? {
+            state: externalState,
+            progressDigest: "sha256:delegate-progress",
+            progressAt: at,
+            observedAt: at,
+          }
+        : {
+            externalIdentity,
+            summary: "Delegated handoff completed.",
+            ...(delegateCheckpoint === "handoff-terminal"
+              ? {
+                  terminalState: {
+                    value: externalState,
+                    digest: "sha256:delegate-terminal",
+                  },
+                }
+              : {}),
+          };
   db.prepare(
     `INSERT INTO executor_invocations (
        invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
@@ -243,20 +291,31 @@ function seedNoMistakesCheckpoint(
     `${roundId}::checkpoint-0`,
     roundId,
     0,
-    "external_state_mirrored",
-    JSON.stringify({
-      externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
-      branch:
-        options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
-      headSha: options.headSha ?? "1111111111111111111111111111111111111111",
-      activeStep: null,
-      stepStatus: "completed",
-      prUrl:
-        options.prUrl === undefined
-          ? "https://github.com/acme/momentum/pull/193"
-          : options.prUrl,
-      ciState: "passed",
-    }),
+    executorFamily === "delegate-supervisor"
+      ? "delegate_handoff_intent"
+      : checkpointStage,
+    JSON.stringify(
+      executorFamily === "delegate-supervisor"
+        ? {
+            tool: options.delegateTool ?? "no-mistakes",
+            invocationId,
+            attempt: 1,
+          }
+        : checkpointDetail,
+    ),
+    at,
+  );
+  if (executorFamily !== "delegate-supervisor") return;
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${roundId}::checkpoint-1`,
+    roundId,
+    1,
+    checkpointStage,
+    JSON.stringify(checkpointDetail),
     at,
   );
 }
@@ -1000,9 +1059,30 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     }
   });
 
-  it.each(["no-mistakes", "delegate-supervisor"] as const)(
-    "reconciles %s no-mistakes checkpoint evidence without a new no-mistakes run",
-    (executorFamily) => {
+  it.each([
+    {
+      label: "legacy mirrored",
+      executorFamily: "no-mistakes" as const,
+      delegateCheckpoint: undefined,
+    },
+    {
+      label: "delegate mirrored",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "mirrored" as const,
+    },
+    {
+      label: "delegate handoff identity",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "handoff" as const,
+    },
+    {
+      label: "delegate terminal handoff",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "handoff-terminal" as const,
+    },
+  ])(
+    "reconciles $label no-mistakes checkpoint evidence without a new no-mistakes run",
+    ({ executorFamily, delegateCheckpoint }) => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1028,6 +1108,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         });
         seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
           executorFamily,
+          ...(delegateCheckpoint !== undefined ? { delegateCheckpoint } : {}),
         });
 
         const evidence = JSON.parse(
@@ -1092,6 +1173,146 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       }
     },
   );
+
+  it("refuses delegate checkpoint evidence owned by another tool", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] },
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3,
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
+        executorFamily: "delegate-supervisor",
+        delegateCheckpoint: "mirrored",
+        delegateTool: "other-tool",
+      });
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-clean-success.json",
+          ),
+          "utf8",
+        ),
+      ) as unknown;
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence,
+      });
+
+      expect(out).toMatchObject({
+        ok: false,
+        reason: "recovery_clear_refused",
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get("run-ngx-561", "no-mistakes"),
+      ).toEqual({ state: "failed" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses no-mistakes evidence when only a prior attempt has identity", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = "run-ngx-561";
+      const stepId = "no-mistakes";
+      const invocationId = `${runId}::${stepId}::dispatch`;
+      const roundId = `${invocationId}::round-1`;
+      seedRunWithState(db, runId, "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] },
+      });
+      seedStep(db, runId, stepId, "failed", {
+        kind: "no-mistakes",
+        order: 3,
+      });
+      seedNoMistakesCheckpoint(db, runId, stepId, {
+        executorFamily: "delegate-supervisor",
+        delegateCheckpoint: "mirrored",
+      });
+      db.prepare(
+        `UPDATE executor_invocations
+            SET attempt = 2, updated_at = ?
+          WHERE invocation_id = ?`,
+      ).run(1_730_000_100_000, invocationId);
+      db.prepare(
+        `INSERT INTO executor_rounds (
+           round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt, round_index, state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        roundId,
+        invocationId,
+        runId,
+        stepId,
+        stepId,
+        "delegate-supervisor",
+        2,
+        1,
+        "running",
+        1_730_000_100_000,
+        1_730_000_100_000,
+      );
+      db.prepare(
+        `INSERT INTO executor_checkpoints (
+           checkpoint_id, round_id, sequence, stage, detail, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `${roundId}::checkpoint-0`,
+        roundId,
+        0,
+        "delegate_handoff_intent",
+        JSON.stringify({ tool: "no-mistakes", invocationId, attempt: 2 }),
+        1_730_000_100_000,
+      );
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-clean-success.json",
+          ),
+          "utf8",
+        ),
+      ) as unknown;
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence,
+      });
+
+      expect(out).toMatchObject({
+        ok: false,
+        reason: "recovery_clear_refused",
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "failed" });
+    } finally {
+      db.close();
+    }
+  });
 
   it("keeps no-mistakes blocked when deterministic evidence is stale", () => {
     const dataDir = makeTempDir();

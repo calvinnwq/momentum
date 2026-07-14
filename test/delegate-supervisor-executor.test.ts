@@ -1807,6 +1807,9 @@ describe("delegate-supervisor SDK executor", () => {
     const represented = await driveExecutorTicks(input);
     expect(represented.invocation.state).toBe("waiting_operator");
     resolveCurrentApproval("approve", 13);
+    const representedAgain = await driveExecutorTicks(input);
+    expect(representedAgain.invocation.state).toBe("waiting_operator");
+    resolveCurrentApproval("approve", 15);
     external = state({
       activeStep: null,
       stepStatus: "completed",
@@ -1950,11 +1953,18 @@ describe("delegate-supervisor SDK executor", () => {
       .currentRound?.decisions.filter(
         (decision) => decision.chosenAction === null,
       );
-    expect(unresolved?.at(-1)).toMatchObject({
+    const syntheticApproval = unresolved?.find(
+      (decision) =>
+        decision.externalRef === "delegate-supervisor:synthetic-approval-gate",
+    );
+    expect(syntheticApproval).toMatchObject({
       externalRef: "delegate-supervisor:synthetic-approval-gate",
       allowedActions: ["approve", "reject"],
       recommendedAction: "approve",
     });
+    expect(gated.ticks.at(-1)?.humanGateDecisionId).toBe(
+      syntheticApproval?.decisionId,
+    );
     db.close();
   });
 
