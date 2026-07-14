@@ -1,36 +1,35 @@
 /**
- * no-mistakes executor mirror — external-state reader.
+ * Shared no-mistakes external-state reader.
  *
- * `no-mistakes-executor.ts` owns the *pure* half of the mirror: the
- * {@link NoMistakesExternalState} snapshot shape, the daemon classification
- * (`decideNoMistakesMirror`), and the durable finding / decision projections. It
- * is a pure function of an *already-typed* snapshot. This module is the IO seam
- * that produces that snapshot: it reads the untrusted external no-mistakes state
- * store and turns its raw bytes into a typed {@link NoMistakesExternalState} the
- * brain can classify — exactly the way `goal-loop/mechanism.ts` is the seam
+ * This module is the shared no-mistakes external-state reader used by both the
+ * legacy `no-mistakes` mirror and the current delegated-tool adapter.
+ * `no-mistakes-executor.ts` preserves the legacy snapshot and projection API,
+ * while `delegate-supervisor/classifier.ts` owns the shared semantic
+ * classification authority.
+ * This IO seam reads the untrusted external no-mistakes state store and turns
+ * its raw bytes into a typed {@link NoMistakesExternalState} that authority can
+ * classify, exactly the way `goal-loop/mechanism.ts` is the seam
  * between "the round's agent wrote a result document" and "the daemon classifies
  * and persists", and `single-shot/mechanism.ts` is the seam that runs the bounded
  * command. Here the bounded work is a *read*: no-mistakes owns and runs its own
- * pipeline (ticket "No rewrite of no-mistakes"; contract "Replacement of GNHF or
- * no-mistakes internals" is a non-goal), so Momentum only mirrors enough state to
- * decide workflow progress (contract "External Executor Mirroring").
+ * pipeline, so Momentum mirrors only enough state to decide workflow progress.
  *
- * The defining discipline is the ticket's "Treat external no-mistakes state as
- * evidence to classify, not blindly trusted authority" and the contract's
- * "External state strings are never enough on their own." That splits cleanly
- * across the two modules:
+ * External state is evidence to classify, not trusted authority.
+ * That splits cleanly across the reader and classifier:
  *
  *   - This reader owns *structural* (JSON-type) validation: is the store even the
  *     right shape? It rejects a missing / unreadable file, non-JSON bytes, a
  *     non-object root, and any field whose JSON type does not match the snapshot
  *     (a numeric `headSha`, a string `findings`, a finding that is not an object,
  *     a non-string selected id, a decision with non-array `allowedActions`). It
- *     does *not* re-validate the values the brain owns.
- *   - The brain ({@link decideNoMistakesMirror}) owns *semantic* validation: enum
- *     membership (`stepStatus` / `ciState`), the 40-hex `headSha` format, blank
- *     ids, dangling selected findings, duplicate ids, and the cross-field
- *     completion checks. So a well-typed but semantically bad snapshot — an
- *     unknown `stepStatus`, a dangling selected id — parses *here* and is routed
+ *     does *not* re-validate the values the classifier owns.
+ *   - The shared classifier, exposed to legacy callers through
+ *     {@link decideNoMistakesMirror}, owns *semantic* validation: enum
+ *     membership (`stepStatus` / `ciState`), the 7-to-40-hex `headSha` format,
+ *     blank ids, dangling selected findings, duplicate ids, and the cross-field
+ *     completion checks. Terminal completion additionally requires a full
+ *     40-character SHA. So a well-typed but semantically bad snapshot, such as
+ *     an unknown `stepStatus` or dangling selected id, parses *here* and is routed
  *     to `manual_recovery_required` *there*. Enum-typed string fields are read as
  *     strings and passed through unchecked for exactly this reason.
  *
@@ -40,8 +39,8 @@
  * the raw bytes the snapshot was parsed from (the round-schema `input_digest`
  * reattach fingerprint), so the durable round can fingerprint the exact external
  * evidence it mirrored. The reader is *total*: it never throws on untrusted
- * bytes, returning an `error` reason instead, the same way the brain never throws
- * on an untrusted snapshot.
+ * bytes, returning an `error` reason instead, the same way the shared classifier
+ * never throws on an untrusted snapshot.
  */
 
 import crypto from "node:crypto";

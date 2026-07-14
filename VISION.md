@@ -95,7 +95,8 @@ Every step names an **executor**, the kind of thing that does:
 - `external-apply` performs a policy-gated mutation of another system - create, edit, or delete: preflight, apply once, reconcile from read-back.
 - `subworkflow` runs the step as a nested workflow.
 
-Every executor runs inside the same durable envelope: bounded execution, a structured result document, verification, a commit-or-reset boundary, evidence.
+Every executor runs inside the same durable envelope: bounded turns, structured observations and evidence, explicit classification, recovery, and operator gates.
+Result documents, verification, and commit-or-reset boundaries are narrower mechanism contracts for agent, script, and profile-backed handoff work rather than requirements imposed on every external-state read.
 That envelope is Momentum's identity; executors are interchangeable ways of filling it.
 Which agent an `agent-*` executor runs is the step's **agent config** - harness, model, effort - not a new executor.
 What role a step plays in a recipe - implement, validate, merge - is the step's kind, not its executor.

@@ -289,8 +289,10 @@ Behaviour:
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
   Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
-  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence.
-  A successful wrapper result is finalized through the shared verify -> commit / reset transaction before reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured profile-backed step wrappers after the scaffold is created.
+  An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
+  The delegate invocation and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
   With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
@@ -942,6 +944,9 @@ Behaviour:
 - An `unsupported_platform` refusal is retryable for any dispatched step after the workflow moves to Linux or macOS; clearing recovery on the supported host prepares the same step for one safe scheduler retry.
 - A `runtime_unavailable` refusal is retryable for any dispatched step after its registered executor, wrapper, credentials, or other runtime dependency is repaired. This includes stale wrapper/build paths, missing no-mistakes branch-start state, current no-mistakes cancellation evidence before clean runner evidence exists, and merge-cleanup auth, target, PR readback, expected-head, cleanup-branch, or mergeability refusals reported before clean runner evidence exists.
 - Registered SDK `executor_threw` and `executor_contract_invalid` refusals are also retryable after the executor implementation or result contract is repaired.
+- Delegate-supervisor `tool_adapter_unavailable`, `delegate_handoff_failed`, `delegate_handoff_recovery_required`, `external_state_unreadable`, and `external_state_inconsistent` refusals are retryable after the adapter, handoff evidence, or correlated external state is repaired.
+  An `external_state_blocked` invocation is also retryable after the external blocker clears.
+  Guarded clear increments the existing deterministic invocation's attempt, reconciles any unresolved handoff intent before another launch, reuses a valid correlated handoff and prior decisions when available, and starts a fresh semantic-stall window for the new attempt.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
@@ -2381,10 +2386,12 @@ The current coding definition uses `delegate-supervisor` with portable `tool` co
 The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
 The initial dispatcher pass may perform the durable handoff and first read as two ticks under the same workflow claim, while later passes perform one tick.
-If the claim is lost after `delegate_handoff_completed` but before classification, stale auto-release lease recovery makes that unclassified round resumable under the same invocation instead of parking it or repeating the handoff.
+If the claim is lost after durable handoff evidence exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
+A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
-A retry preserves the correlated handoff and decision history but starts a fresh semantic-progress window for the new attempt.
+A retry preserves a valid non-terminal correlated handoff and decision history but starts a fresh semantic-progress window for the new attempt.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
 Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.

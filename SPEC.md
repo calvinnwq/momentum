@@ -122,10 +122,13 @@ share one driving loop.
 A new delegate-supervisor handoff may use a second bounded tick in its initial
 pass so the first external-state read follows the durable handoff immediately;
 later passes return to one tick.
-If a crash leaves `delegate_handoff_completed` on an unclassified running or
-capturing-result round, stale auto-release dispatch-lease recovery releases the
-abandoned lease and makes that same invocation scheduler-resumable instead of
-parking the run or repeating the handoff.
+If a crash leaves an unclassified running, capturing-result, or
+`mirroring_external_state` round with durable handoff evidence, stale
+auto-release dispatch-lease recovery releases the abandoned lease and makes
+that same invocation scheduler-resumable instead of parking the run or
+repeating the handoff.
+The same recovery applies after a completed `continue` poll when its succeeded
+or failed round has a durable handoff in its history.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
@@ -137,6 +140,9 @@ Retries preserve earlier rounds under the deterministic invocation and increment
 the attempt, while the driver rejects cross-attempt or non-current round results.
 Delegate retries retain correlated handoff and decision evidence but start a new
 semantic-stall window for the new attempt.
+A valid non-terminal handoff is reused.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior
+external run remains evidence but permits one fresh launch on the newer attempt.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
 
@@ -163,7 +169,7 @@ Ignored-path comparison hashes every included entry's path and metadata, includi
 Directory-only mode or timestamp mutations therefore cannot evade the baseline.
 Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
 Agent-loop will repeat bounded runner rounds. `delegate-supervisor` composes one
-tool-adapter handoff with repeated bounded external-state reads across SDK
+tool-adapter handoff for the active correlated external run with repeated bounded external-state reads across SDK
 ticks. The executor, not the adapter, owns durable rounds, semantic progress
 heartbeats, four-minute stall recovery, finding and decision projection,
 identity corroboration, and terminal classification. A tool adapter supplies
@@ -290,10 +296,14 @@ events, recovery, and logs surfaces. Autonomy is allowed only inside the approve
 Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
-For live-wrapper-owned dispatched steps, successful wrapper evidence is not
-terminal by itself: Momentum reads the runner result, verifies, commits or resets
-against the captured base HEAD, and only then records terminal executor evidence
-for reconciliation.
+For ordinary live-wrapper-owned dispatched steps, successful wrapper evidence is
+not terminal by itself: Momentum reads the runner result, verifies, commits or
+resets against the captured base HEAD, and only then records terminal executor
+evidence for reconciliation.
+For profile-backed delegate-supervisor steps, that same finalization produces
+durable handoff and candidate evidence instead; the invocation and workflow step
+remain non-terminal until a later external-state read receives a daemon-accepted
+terminal classification.
 Repo-local run artifact directories must be ignored by git before wrapper work
 starts, and repo-scoped locks prevent concurrent live-wrapper dispatches from
 sharing a whole-worktree commit boundary.

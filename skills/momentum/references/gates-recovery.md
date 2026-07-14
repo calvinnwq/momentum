@@ -64,6 +64,16 @@ For `unsupported_platform`, move the workflow to Linux or macOS, confirm from
 the executor log and worktree that no process ran and no edits were made, then
 clear recovery on that supported host so Momentum can prepare the step's next
 attempt.
+For `tool_adapter_unavailable`, `delegate_handoff_failed`,
+`delegate_handoff_recovery_required`, `external_state_unreadable`, or
+`external_state_inconsistent`, inspect the step-scoped handoff receipt, executor
+log, mirrored state, and external tool before clearing recovery.
+Prove whether a correlated external run already launched, and never relaunch
+from missing or ambiguous evidence.
+Restore the adapter or reconcile the same external run until the supervisor can
+read and classify it safely.
+For `external_state_blocked`, clear recovery only after the external blocker is
+resolved.
 
 ## Manual Step Repair
 

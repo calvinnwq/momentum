@@ -2,7 +2,9 @@
 
 Momentum executors run below workflow steps inside the same durable invocation and round envelope. The SDK contract is deliberately tick-shaped: one call observes durable state, performs at most one bounded turn, records evidence, and recommends an outcome. The daemon decides what happens next.
 
-The source contract is `src/core/executors/sdk/types.ts`. Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`. The current `one-shot` and `script` built-ins prove the contract through `src/core/executors/single-shot/sdk.ts`.
+The source contract is `src/core/executors/sdk/types.ts`.
+Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`.
+The current `one-shot` and `script` built-ins prove the single-turn contract through `src/core/executors/single-shot/sdk.ts`, while `delegate-supervisor` proves repeated bounded supervision through `src/core/executors/delegate-supervisor/`.
 
 Module registration, discovery, declared-schema preflight, and daemon dispatch use this interface for both built-ins and third-party executors.
 
@@ -141,7 +143,7 @@ A delegated-tool adapter owns only three bounded operations: initial handoff, op
 The executor owns durable rounds, evidence projection, semantic liveness, gates, stalls, and terminal classification.
 
 Before invoking a tool, the executor records a `delegate_handoff_intent` checkpoint.
-A successful handoff records the pinned external run id and branch, the launch head, summary, artifact paths, and any terminal-state candidate observed during handoff in `delegate_handoff_completed`.
+A successful handoff records the pinned external run id and branch, the canonical lowercase full 40-character launch-head SHA, summary, artifact paths, and any terminal-state candidate observed during handoff in `delegate_handoff_completed`.
 The profile-backed host releases repository ownership only after that handoff evidence is durable.
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
@@ -154,7 +156,8 @@ Finalized profile-backed state must also carry a full 40-character head SHA that
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
 Checkpoint precedence follows durable round index and checkpoint sequence, so a newer delegate intent or handoff cannot be overridden by an older legacy completion.
-A later attempt reuses the latest valid handoff and prior decision history rather than relaunching the delegated tool, while starting a fresh semantic-stall window for that attempt.
+A later attempt reuses the latest valid non-terminal handoff and prior decision history rather than relaunching the delegated tool, while starting a fresh semantic-stall window for that attempt.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains durable evidence but permits one fresh launch on the newer attempt.
 
 Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
 The external run id and branch remain the stable correlation identity; exact launch head matching is the default, while an adapter may mark a changed head as `verified_descendant` after proving the tool committed forward from the launch commit.
@@ -187,7 +190,8 @@ Profile-backed built-ins use Momentum's internal host-binding resolver for live-
 
 The managed daemon normally drives at most one registered-executor tick per scheduler pass.
 For a new delegate-supervisor handoff, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows the durable handoff immediately; later passes return to one tick.
-If a process dies after `delegate_handoff_completed` is durable but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running or capturing-result round under the same invocation.
+If a process dies after durable handoff evidence exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
+The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
 The tick must return the id of the current non-terminal round for the current invocation attempt.
 A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.

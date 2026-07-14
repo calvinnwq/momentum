@@ -18,7 +18,11 @@ export type NoMistakesToolAdapterOptions = {
   handoff: (
     context: DelegateSupervisorToolContext,
   ) => DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
-  /** Reattach an interrupted launch from correlated durable evidence. */
+  /**
+   * Reconcile an interrupted launch without duplicating unresolved work.
+   * A newer attempt may launch once after the prior run is durably failed or
+   * cancelled.
+   */
   recoverHandoff?: (
     context: DelegateSupervisorToolContext,
   ) => DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;

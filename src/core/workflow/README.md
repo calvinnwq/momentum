@@ -113,7 +113,10 @@ The step-scoped `delegate-handoff.json` receipt records no-mistakes launch inten
 Correlated no-mistakes launch output cannot recover a launch-only receipt without wrapper-finalization proof.
 Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
 Finalized profile-backed delegate state must match the repository's current full `HEAD`.
-After a durable `delegate_handoff_completed` checkpoint, an unclassified running or capturing-result round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
+After durable handoff evidence exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
+A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
+A valid non-terminal handoff is reused across retry attempts.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,

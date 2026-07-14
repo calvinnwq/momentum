@@ -1,13 +1,11 @@
 /**
- * no-mistakes executor mirror — decision brain and identity.
+ * Legacy no-mistakes executor-mirror compatibility facade.
  *
- * The executor-loop contract (SPEC.md) pins the
- * `no-mistakes` family as a *mirror*, not a runner: it "mirrors no-mistakes
- * daemon state and turns review findings into durable Momentum gates, findings,
- * and decisions." Momentum does not own or re-run the no-mistakes pipeline; it
- * mirrors enough external state to decide workflow progress. The contract's
- * "External Executor Mirroring" section lists exactly what Momentum mirrors for
- * no-mistakes:
+ * Recorded workflow definitions may still use the legacy `no-mistakes` family
+ * as an external-state mirror.
+ * Current coding definitions use `delegate-supervisor` with
+ * `tool: "no-mistakes"` instead.
+ * Both paths normalize the same no-mistakes evidence fields:
  *
  *   - External run id.
  *   - Branch and head SHA.
@@ -18,27 +16,28 @@
  *   - Decisions and delegated-policy results.
  *   - PR URL and CI state.
  *
- * This module owns the *pure* half of that mirror: the {@link NoMistakesExternalState}
- * snapshot shape, the daemon classification of a mirrored snapshot, the durable
- * finding / decision projections, and the deterministic, reattachable invocation
- * / round identity. Like `single-shot/executor.ts` and `goal-loop/executor.ts`,
- * it is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation. The mechanism / orchestrator siblings layer the
- * external-state reader and durable persistence on top, exactly as the
- * single-shot twins layer on `single-shot/executor.ts`.
+ * This module preserves the legacy `no-mistakes` family API for recorded
+ * invocations: the {@link NoMistakesExternalState} snapshot aliases, durable
+ * finding / decision projections, and deterministic invocation / round
+ * identity. Classification delegates to the shared
+ * `delegate-supervisor/classifier.ts` authority, so compatibility callers and
+ * current tool adapters cannot drift. Like `single-shot/executor.ts` and
+ * `goal-loop/executor.ts`, these compatibility helpers are pure functions of
+ * their inputs: no SQLite, file system, git, or executor invocation. The legacy
+ * mechanism / orchestrator siblings layer external-state reading and durable
+ * persistence on top; current coding definitions instead use the
+ * `delegate-supervisor` executor with `tool: "no-mistakes"`.
  *
- * The defining discipline is the ticket's "Treat external no-mistakes state as
- * evidence to classify, not blindly trusted authority" and the contract's
- * "External state strings are never enough on their own." So unlike
- * `decideSingleShotInvocation` — which classifies an outcome Momentum's *own*
- * mechanism produced and therefore *throws* on an unknown code (a programming
- * error) — {@link decideNoMistakesMirror} classifies *external* evidence and is
+ * External state is evidence to classify, not trusted authority.
+ * Unlike `decideSingleShotInvocation`, which classifies an outcome Momentum's
+ * own mechanism produced and therefore throws on an unknown code,
+ * {@link decideNoMistakesMirror} classifies external evidence and is
  * total: any malformed, contradictory, or unrecognized snapshot routes to
  * `manual_recovery_required` for operator inspection rather than being trusted or
  * crashing the daemon.
  *
- * Classification, grounded in the contract's "Completion Classification" and the
- * ticket's "Preserve no-mistakes daemon ownership and human-gate semantics":
+ * Compatibility classification preserves no-mistakes ownership and human-gate
+ * semantics:
  *
  *   - `running` is `continue`: the external pipeline is still working, so the
  *     mirror round stays in `mirroring_external_state` and the daemon polls
@@ -117,8 +116,7 @@ export function isNoMistakesExecutorFamily(
 }
 
 /**
- * The external no-mistakes step statuses Momentum can mirror (contract "External
- * Executor Mirroring": "Active external step" / "Step status"). These are the
+ * The external no-mistakes step statuses the compatibility mirror accepts. These are the
  * status strings the no-mistakes daemon exposes for its active step; the mirror
  * reconciles them with the rest of the snapshot rather than trusting them
  * outright.
@@ -136,8 +134,7 @@ export type NoMistakesExternalStepStatus =
   (typeof NO_MISTAKES_EXTERNAL_STEP_STATUSES)[number];
 
 /**
- * The external CI states Momentum can mirror (contract "External Executor
- * Mirroring": "PR URL and CI state"). `none` means CI is not configured for the
+ * The external CI states Momentum can mirror. `none` means CI is not configured for the
  * run (no PR checks); `passed` / `failed` / `pending` mirror the PR's check
  * conclusion. A completed external run is only trusted as `complete` when CI is
  * `passed` or `none`.
@@ -177,8 +174,7 @@ export type NoMistakesRecoveryCode =
   (typeof NO_MISTAKES_RECOVERY_CODES)[number];
 
 /**
- * One review finding surfaced by an external no-mistakes run (contract "External
- * Executor Mirroring": "Review findings"). `externalId` is no-mistakes' own
+ * One review finding surfaced by an external no-mistakes run. `externalId` is no-mistakes' own
  * finding id (e.g. `F-1`); the projection mints the durable Momentum finding id
  * and `externalRef` from it.
  */
@@ -190,8 +186,7 @@ export type NoMistakesExternalFinding = {
 };
 
 /**
- * One decision point surfaced by an external no-mistakes run (contract "External
- * Executor Mirroring": "Decisions and delegated-policy results"). `resolution`
+ * One decision point surfaced by an external no-mistakes run. `resolution`
  * mirrors the delegated-policy or operator outcome once the external daemon has
  * settled the decision; an absent / empty `resolution` means the decision is
  * still open.
@@ -206,8 +201,7 @@ export type NoMistakesExternalDecision = {
 };
 
 /**
- * A mirrored snapshot of external no-mistakes daemon state — exactly the fields
- * the contract's "External Executor Mirroring" section lists for no-mistakes. The
+ * A mirrored snapshot of external no-mistakes daemon state. The
  * mechanism twin reads this from the external state store; this pure module
  * classifies it and projects its findings / decisions into durable Momentum
  * records. It is evidence to reconcile, not authoritative Momentum state.
@@ -246,9 +240,7 @@ export type NoMistakesMirrorDecision = {
  * Classify one mirrored no-mistakes snapshot into a daemon decision. Pure and
  * total: the same snapshot always yields the same decision, and *any* input —
  * including a malformed or self-contradictory one — yields a decision rather than
- * throwing, because the snapshot is untrusted external evidence (contract
- * "External state strings are never enough on their own"; ticket "Treat external
- * no-mistakes state as evidence to classify, not blindly trusted authority").
+ * throwing, because the snapshot is untrusted external evidence.
  *
  * See the module doc for the per-status classification boundaries.
  */
@@ -289,8 +281,7 @@ export function decideNoMistakesUnreadable(
  * Mint the deterministic, reattachable executor-invocation id for a no-mistakes
  * mirror under a step run. The id embeds the `(workflowRunId, stepRunId)`
  * step-run identity, the `no-mistakes` family, and the `attempt`, so it is
- * globally unique yet recomputable from durable state alone (contract "Heartbeat
- * And Reattach"). A re-run of the step is a fresh `attempt`, so it never collides
+ * globally unique yet recomputable from durable state alone. A re-run of the step is a fresh `attempt`, so it never collides
  * with the prior mirror.
  */
 export function noMistakesInvocationId(
@@ -332,8 +323,7 @@ export type PlanNoMistakesInvocationInput = {
 /**
  * Project a `StepRun` identity into the durable no-mistakes
  * {@link ExecutorInvocationRecord} the orchestrator twin inserts before the mirror
- * round runs (contract "State Model": `StepRun -> ExecutorInvocation ->
- * ExecutorRound[]`). One configured mirror session for the step, materialized at
+ * round runs. One configured mirror session for the step, materialized at
  * `running` with the deterministic {@link noMistakesInvocationId} and the start
  * clock copied in. Pure: no ids or clocks are invented beyond the supplied
  * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh invocation.
@@ -361,8 +351,8 @@ export function planNoMistakesInvocation(
 
 /**
  * The per-round runtime inputs the daemon provides for the mirror: the round's
- * input digest, its daemon-provided artifact directory, and its bounded log paths
- * (contract "Round Lifecycle" steps 4-5). These are the filesystem / content
+ * input digest, its daemon-provided artifact directory, and its bounded log paths.
+ * These are the filesystem / content
  * concerns the pure adapter never invents — the orchestrator resolves them and
  * {@link planNoMistakesRoundStart} freezes them into the round-start record.
  */
@@ -389,7 +379,7 @@ export type PlanNoMistakesRoundStartInput = {
 /**
  * Project a materialized invocation + per-round runtime inputs into the durable
  * round-start {@link ExecutorRoundRecord} the orchestrator inserts before it begins
- * mirroring (contract Round Lifecycle step 4). The round inherits the invocation's
+ * mirroring. The round inherits the invocation's
  * `(workflowRunId, stepRunId, stepKey, attempt)` identity and its `no-mistakes`
  * family, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
  * the round's input digest / artifact root / log paths.
@@ -401,13 +391,11 @@ export type PlanNoMistakesRoundStartInput = {
  *     enters the capture/mirror phase directly; from there every decided round
  *     state ({@link decideNoMistakesMirror}) is a legal transition.
  *   - `agentProvider` / `model` / `effort` stay `null`. No-mistakes owns its own
- *     pipeline, so Momentum resolves no agent for the mirror (contract "Preserve
- *     no-mistakes daemon ownership"), exactly as the deterministic `script` family
+ *     pipeline, so Momentum resolves no agent for the mirror, exactly as the deterministic `script` family
  *     resolves no agent.
  *
- * Pure: no ids or clock are invented here — freezing the identity at start is the
- * contract's "a later config edit must not rewrite the historical record for an
- * already-started round."
+ * Pure: no ids or clock are invented here, so later config edits cannot rewrite
+ * the historical record for an already-started round.
  *
  * @throws {Error} if the invocation's family is not `no-mistakes` — the mirror
  * round must inherit the family {@link planNoMistakesInvocation} establishes.
@@ -513,8 +501,7 @@ export function noMistakesRoundUpdate(
  * Build the durable persistence plan for one mirror poll. Composes
  * {@link decideNoMistakesMirror} into the single round patch the orchestrator
  * applies (via {@link noMistakesRoundUpdate}), so the daemon classification,
- * recovery code, and human gate all derive from the same snapshot (contract "Round
- * Lifecycle" steps 9-10 for the mirror). Pure: no SQLite, no file system; the same
+ * recovery code, and human gate all derive from the same snapshot. Pure: no SQLite, no file system; the same
  * snapshot always yields the same plan, and — like {@link decideNoMistakesMirror}
  * — it is total, never throwing on untrusted external evidence.
  */
@@ -539,8 +526,7 @@ export type PlanNoMistakesRoundFindingsInput = {
 /**
  * Project the external review findings into the durable {@link ExecutorFindingRecord}
  * rows the persistence layer (`insertExecutorFinding`) writes — the no-mistakes
- * mirror's "Review findings" / "Selected finding IDs" (contract "External
- * Executor Mirroring"). Each finding takes a deterministic id
+ * mirror's review findings and selected finding IDs. Each finding takes a deterministic id
  * (`<roundId>-finding-<externalId>`) and an `externalRef` of
  * `nomistakes:<externalId>`, is marked `selected` when its external id is in
  * `selectedFindingIds`, and preserves the surfaced order. Pure: no SQLite, no
@@ -573,8 +559,7 @@ export type PlanNoMistakesRoundDecisionsInput = {
 /**
  * Project the external decision points into the durable {@link ExecutorDecisionRecord}
  * rows the persistence layer (`insertExecutorDecision`) writes — the no-mistakes
- * mirror's "Decisions and delegated-policy results" (contract "External Executor
- * Mirroring"). Each decision takes a deterministic id
+ * mirror's decisions and delegated-policy results. Each decision takes a deterministic id
  * (`<roundId>-decision-<externalId>`) and an `externalRef` of
  * `nomistakes:<externalId>`, copies its allowed actions, and mirrors its
  * recommended / chosen action and `resolution` (the delegated-policy or operator

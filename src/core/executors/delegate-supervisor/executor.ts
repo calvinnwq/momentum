@@ -95,7 +95,7 @@ type DurableCheckpointPosition = {
   sequence: number;
 };
 
-/** SDK-native executor that composes one bounded handoff with repeated polls. */
+/** SDK-native executor that composes one active handoff with repeated polls. */
 export class DelegateSupervisorExecutor implements Executor<
   DelegateSupervisorConfig,
   DelegateSupervisorHostBindings

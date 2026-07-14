@@ -20,7 +20,9 @@
  *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
  *     directly; and
  *   - the single-shot executor family - `single-shot/mechanism.ts`, imported
- *     directly.
+ *     directly; and
+ *   - the production live-step SDK finalizer, reused by the profile-backed
+ *     delegate-tool bridge before handoff evidence becomes durable.
  *
  * The ordered contract this transaction enforces:
  *
@@ -51,11 +53,11 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The goal-loop / single-shot mechanisms project the run-level recovery
- * outcomes this seam surfaces (`manual_recovery_required`, `result_missing`,
- * `result_invalid`, unsafe finalization failures such as `reset_failed`,
- * `repo_lock_lost`, `git_failed`, `commit_failed`, or `invalid_input`) into
- * their durable round classification.
+ * The goal-loop, single-shot, and profile-backed delegate paths project the
+ * run-level recovery outcomes this seam surfaces (`manual_recovery_required`,
+ * `result_missing`, `result_invalid`, unsafe finalization failures such as
+ * `reset_failed`, `repo_lock_lost`, `git_failed`, `commit_failed`, or
+ * `invalid_input`) into durable executor evidence.
  */
 
 import { execFileSync } from "node:child_process";

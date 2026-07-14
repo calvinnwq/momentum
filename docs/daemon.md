@@ -116,15 +116,19 @@ after the child reaches a terminal state. Missing child config, unsafe recursion
 unresolved child definitions, unsupported child attachments, invalid child state,
 or ambiguous child terminals park the parent run for manual recovery. When
 `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow step wrapper profile,
-the managed loop also runs genuinely dispatched live-wrapper-owned step wrappers
-in the same tick, records terminal executor evidence on the dispatch scaffold,
-and lets the reconciliation seam finalize the step or park it for manual
-recovery.
-For successful wrapper results, the daemon first captures the current repo HEAD
-as the step base, parses the normalized runner result, runs the configured
-verification commands, commits verified changes, resets failed or unverifiable
-changes when safe, and records `verification.log` as round evidence before the
-dispatch scaffold is terminalized.
+the managed loop also runs genuinely dispatched profile-backed step wrappers in
+the same tick.
+For ordinary live-wrapper executors, it records terminal executor evidence on
+the dispatch scaffold and lets the reconciliation seam finalize the step or park
+it for manual recovery.
+For successful ordinary wrapper results, the daemon first captures the current
+repo HEAD as the step base, parses the normalized runner result, runs the
+configured verification commands, commits verified changes, resets failed or
+unverifiable changes when safe, and records `verification.log` as round evidence
+before the dispatch scaffold is terminalized.
+For a delegate-supervisor handoff, the daemon runs the same safe finalization but
+stores the wrapper result as durable handoff and terminal-candidate evidence.
+The invocation and step do not terminalize or reconcile until a later external-state read receives a daemon-accepted terminal classification.
 The verification commands and timeout resolve per the repo policy precedence:
 the linked goal's stored verification when the run carries a legacy goal, then
 the repo's `MOMENTUM.md` `verification` frontmatter, then no commands, in which
@@ -399,6 +403,9 @@ remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
 runner state.
+Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked invocation is retryable after its blocker clears.
+The retry keeps the deterministic invocation identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 An `unsupported_platform` refusal is separately retryable for every dispatched
 step after the workflow moves to Linux or macOS and recovery is cleared there.
 The coding-workflow wrapper also treats known no-mistakes runner lifecycle

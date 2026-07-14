@@ -91,6 +91,7 @@ export type DelegateSupervisorDecision = {
 };
 
 export type DelegateSupervisorHandoff = {
+  /** `headSha` must be a canonical lowercase full 40-character commit SHA. */
   externalIdentity: DelegateSupervisorExternalIdentity;
   summary: string;
   artifactPaths?: readonly string[];
@@ -120,7 +121,11 @@ export interface DelegateSupervisorToolAdapter {
   handoff(
     context: DelegateSupervisorToolContext,
   ): DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
-  /** Reconcile an interrupted handoff intent without launching again. */
+  /**
+   * Reconcile an interrupted intent without duplicating an unresolved launch.
+   * A newer attempt may launch once after prior evidence is conclusively failed
+   * or cancelled.
+   */
   recoverHandoff?(
     context: DelegateSupervisorToolContext,
   ): DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;

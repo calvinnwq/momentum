@@ -1,5 +1,10 @@
 /**
- * no-mistakes executor mirror — polling orchestrator.
+ * Legacy no-mistakes executor-mirror polling orchestrator.
+ *
+ * This stateful one-round mirror remains for recorded workflow definitions that
+ * use the legacy `no-mistakes` executor family.
+ * Current coding definitions use `delegate-supervisor` with
+ * `tool: "no-mistakes"` and repeated bounded rounds instead.
  *
  * `no-mistakes-executor.ts` owns the *pure* half of the mirror: the
  * {@link NoMistakesExternalState} snapshot shape, the daemon classification
@@ -22,8 +27,7 @@
  *
  * The structural difference from the single-shot / goal-loop drivers is that the
  * mirror does **not** loop internally. No-mistakes owns and runs its own pipeline
- * at its own cadence (ticket "Preserve no-mistakes daemon ownership"; "No rewrite
- * of no-mistakes"), so Momentum never busy-loops on external state: a daemon
+ * at its own cadence, so Momentum never busy-loops on external state: a daemon
  * scheduler *ticks* {@link runNoMistakesMirrorRound} once per poll against the same
  * long-lived round, which lives in `mirroring_external_state` between ticks. Each
  * tick reconciles the durable round with the latest external evidence:
@@ -51,8 +55,8 @@
  * the round can stay non-terminal (`running` / `mirroring_external_state` /
  * `waiting_operator`) across many ticks.
  *
- * The defining discipline is the ticket's "Treat external no-mistakes state as
- * evidence to classify, not blindly trusted authority": the injected reader is
+ * External no-mistakes state is evidence to classify, not trusted authority:
+ * the injected reader is
  * total (a missing / unreadable / malformed store returns an `error`, never a
  * throw) and a reader failure routes through {@link decideNoMistakesUnreadable} to
  * the same `manual_recovery_required` settle as a semantically broken snapshot, so
@@ -712,7 +716,7 @@ export type RunNoMistakesMirrorRoundResult = {
  * `inputDigest` with the exact external bytes it mirrored this poll and
  * `resultDigest` with the semantic progress fingerprint used for heartbeat / stall
  * decisions, so the durable round reflects both the raw evidence and the progress
- * signal behind its current state (contract "Heartbeat And Reattach"). Findings /
+ * signal behind its current state. Findings /
  * decisions are projected only from a readable snapshot — a reader failure invents
  * none and preserves any already mirrored.
  *
@@ -905,8 +909,7 @@ export type RunNoMistakesMirrorStepResult = {
 };
 
 /**
- * The no-mistakes mirror entrypoint "below `StepRun`" (contract "State Model":
- * `StepRun -> ExecutorInvocation -> ExecutorRound[]`, here exactly one long-lived
+ * The legacy no-mistakes mirror entrypoint below `StepRun`, with exactly one long-lived
  * mirror round). It {@link planNoMistakesInvocation | materializes} the durable
  * `executor_invocations` row with a deterministic, reattachable id, inserts the
  * single {@link planNoMistakesRoundStart | round-start} row (born directly in
@@ -915,8 +918,7 @@ export type RunNoMistakesMirrorStepResult = {
  * settles the invocation into that poll's decision.
  *
  * The durable invocation + round rows are inserted *before* the first read, so a
- * lost process leaves a durable `running` mirror to reattach to (contract "Round
- * Lifecycle" step 4). Unlike the single-shot driver, the settle is not always
+ * lost process leaves a durable `running` mirror to reattach to. Unlike the single-shot driver, the settle is not always
  * terminal: a still-running external run leaves the invocation `running` and a gate
  * leaves it in the durable non-terminal `waiting_operator` (no `finished_at`), for
  * a later {@link runNoMistakesMirrorRound} tick to advance — only a settle stamps
@@ -925,7 +927,7 @@ export type RunNoMistakesMirrorStepResult = {
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
  * invocation reattaches from `(workflowRunId, stepRunId, attempt)` and the round
  * from the invocation id alone (the mirror is always round 0), both recomputable
- * from durable state (contract "Heartbeat And Reattach"). A re-run is a fresh
+ * from durable state. A re-run is a fresh
  * `attempt` minting a fresh invocation, never a mutation of the prior one.
  *
  * @throws {ExecutorInvocationConflictError} if the invocation id already exists
