@@ -400,6 +400,89 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("consumes a retryable legacy recovery before the next repaired attempt", async () => {
+    const { db, invocation } = openDelegateDb();
+    const legacyRoundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      JSON.stringify({
+        recommendation: "manual_recovery_required",
+        recommendedRoundState: "manual_recovery_required",
+        recommendedInvocationState: "manual_recovery_required",
+        recoveryCode: "external_state_unreadable",
+        humanGate: "manual_recovery_required",
+        reason: "legacy state could not be read",
+      }),
+    );
+    updateExecutorRound(db, legacyRoundId, { toState: "capturing_result" });
+    updateExecutorRound(db, legacyRoundId, {
+      toState: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      executorRecommendation: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+      humanGate: "manual_recovery_required",
+      finishedAt: 5,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    let repaired = false;
+    let handoffs = 0;
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => {
+        handoffs += 1;
+        if (!repaired) throw new Error("legacy recovery must replay first");
+        return {
+          externalIdentity: {
+            externalRunId: "nm-run-repaired",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "repaired delegated handoff",
+        };
+      },
+      readExternalState: () => {
+        throw new Error("handoff should finish before polling");
+      },
+    };
+
+    const replayed = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    });
+    expect(replayed.invocation.state).toBe("manual_recovery_required");
+    expect(handoffs).toBe(0);
+
+    repaired = true;
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 3, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const retried = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 7,
+    });
+    expect(handoffs).toBe(1);
+    expect(retried.lastRound).toMatchObject({
+      classification: "continue",
+      summary: "repaired delegated handoff",
+    });
+    db.close();
+  });
+
   it("prefers newer delegated handoff evidence over legacy completion", async () => {
     const { db, invocation } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
@@ -816,6 +899,38 @@ describe("delegate-supervisor SDK executor", () => {
       recoveryCode: "tool_adapter_unavailable",
     });
     expect(reads).toBe(1);
+    db.close();
+  });
+
+  it("rejects a host binding whose adapter name does not match the tool key", async () => {
+    const { db, invocation } = openDelegateDb();
+    let handoffs = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "different-tool",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("mismatched adapter must not run");
+            },
+            readExternalState: () => {
+              throw new Error("mismatched adapter must not be polled");
+            },
+          },
+        },
+      },
+      now: () => 7,
+    });
+    expect(handoffs).toBe(0);
+    expect(result.lastRound).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "tool_adapter_unavailable",
+    });
     db.close();
   });
 
@@ -2934,6 +3049,7 @@ describe("no-mistakes tool adapter", () => {
     expect(classifyDelegateSupervisorState(parsed.value).classification).toBe(
       "continue",
     );
+    expect(settleNoMistakesHandoffState(parsed, HEAD)).toBe(parsed);
   });
 
   it("rejects a changed head outside the launch ancestry", () => {
@@ -3145,6 +3261,37 @@ describe("no-mistakes tool adapter", () => {
       classification: "manual_recovery_required",
       recoveryCode: "external_state_inconsistent",
     });
+  });
+
+  it("keeps pending non-CI work active after CI completes", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: running",
+        "  head: aaaaaaaa",
+        '  pr: "https://example.test/pull/1"',
+        "  clean: true",
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    ci,completed,0,1000",
+        "    review,pending,0,0",
+        "outcome: checks-passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        activeStep: "review",
+        stepStatus: "running",
+        ciState: "passed",
+      },
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(classifyDelegateSupervisorState(parsed.value).classification).toBe(
+      "continue",
+    );
   });
 
   it.each([

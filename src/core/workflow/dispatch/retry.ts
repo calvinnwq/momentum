@@ -6,18 +6,23 @@ import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 
-const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
+const GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "unsupported_platform",
   "runtime_unavailable",
   "executor_threw",
   "executor_contract_invalid",
-  "tool_adapter_unavailable",
-  "delegate_handoff_failed",
-  "delegate_handoff_recovery_required",
-  "external_state_unreadable",
-  "external_state_inconsistent",
-  "external_state_blocked",
 ]);
+
+const DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set(
+  [
+    "tool_adapter_unavailable",
+    "delegate_handoff_failed",
+    "delegate_handoff_recovery_required",
+    "external_state_unreadable",
+    "external_state_inconsistent",
+    "external_state_blocked",
+  ],
+);
 
 type RetryableInvocationState = "manual_recovery_required" | "blocked";
 
@@ -277,7 +282,7 @@ function parseRetryableDispatchRow(
     row.round_index === null ||
     row.recovery_code === null ||
     !isRetryableInvocationState(row.invocation_state, row.recovery_code) ||
-    !isRetryableDispatchRecovery(row.kind, row.recovery_code)
+    !isRetryableDispatchRecovery(row.executor_family, row.recovery_code)
   ) {
     return undefined;
   }
@@ -369,10 +374,15 @@ function isWorkflowStepKind(value: string): value is WorkflowStepKind {
 }
 
 function isRetryableDispatchRecovery(
-  _kind: WorkflowStepKind,
+  executorFamily: ExecutorName,
   recoveryCode: string,
 ): boolean {
-  return RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode);
+  if (GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return true;
+  return (
+    (executorFamily === "delegate-supervisor" ||
+      executorFamily === "no-mistakes") &&
+    DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)
+  );
 }
 
 function isRetryableInvocationState(

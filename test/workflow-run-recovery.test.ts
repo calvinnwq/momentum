@@ -15,6 +15,7 @@ import {
   isBlockingWorkflowRecoveryCode,
   markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
+import { findRetryableDispatchedStepRecovery } from "../src/core/workflow/dispatch/retry.js";
 
 const tempRoots: string[] = [];
 
@@ -99,7 +100,13 @@ function seedStep(
   );
 }
 
-function seedRetryableDelegateRecovery(db: MomentumDb): {
+function seedRetryableDelegateRecovery(
+  db: MomentumDb,
+  options: {
+    executorFamily?: string;
+    recoveryCode?: string;
+  } = {},
+): {
   runId: string;
   stepId: string;
   invocationId: string;
@@ -110,6 +117,8 @@ function seedRetryableDelegateRecovery(db: MomentumDb): {
   const stepId = "implementation";
   const invocationId = `${runId}::${stepId}::dispatch`;
   const at = 1_730_000_500_000;
+  const executorFamily = options.executorFamily ?? "delegate-supervisor";
+  const recoveryCode = options.recoveryCode ?? "delegate_handoff_failed";
   seedRun(db, runId);
   seedStep(db, runId, stepId, "running", { at });
   db.prepare(
@@ -122,7 +131,7 @@ function seedRetryableDelegateRecovery(db: MomentumDb): {
     runId,
     stepId,
     stepId,
-    "delegate-supervisor",
+    executorFamily,
     "manual_recovery_required",
     2,
     at,
@@ -141,17 +150,17 @@ function seedRetryableDelegateRecovery(db: MomentumDb): {
     runId,
     stepId,
     stepId,
-    "delegate-supervisor",
+    executorFamily,
     2,
     1,
     "manual_recovery_required",
-    "delegate_handoff_failed",
+    recoveryCode,
     at,
     at,
   );
   markWorkflowRunNeedsManualRecovery(db, {
     runId,
-    reason: "delegate_handoff_failed",
+    reason: recoveryCode,
     now: at,
   });
   const acquired = acquireRepoLock(db, {
@@ -570,6 +579,57 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         manual_recovery_reason: null,
         manual_recovery_at: null,
         updated_at: 1_730_000_900_000,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    "tool_adapter_unavailable",
+    "delegate_handoff_failed",
+    "delegate_handoff_recovery_required",
+    "external_state_unreadable",
+    "external_state_inconsistent",
+    "external_state_blocked",
+  ])(
+    "does not apply delegate recovery code %s to an unrelated executor",
+    (recoveryCode) => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const { runId } = seedRetryableDelegateRecovery(db, {
+          executorFamily: "fixture-executor",
+          recoveryCode,
+        });
+        expect(
+          findRetryableDispatchedStepRecovery(db, {
+            runId,
+            stepState: "running",
+          }),
+        ).toBeUndefined();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("retains delegate recovery semantics for the legacy no-mistakes executor", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = seedRetryableDelegateRecovery(db, {
+        executorFamily: "no-mistakes",
+        recoveryCode: "external_state_unreadable",
+      });
+      expect(
+        findRetryableDispatchedStepRecovery(db, {
+          runId,
+          stepState: "running",
+        }),
+      ).toMatchObject({
+        executorFamily: "no-mistakes",
+        recoveryCode: "external_state_unreadable",
       });
     } finally {
       db.close();

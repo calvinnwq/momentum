@@ -313,9 +313,8 @@ export function parseNoMistakesAxiStatus(
   const stepRows = stepRowsRead.value;
   const activeStep =
     gateStep ??
-    stepRows.find(
-      (row) => !["completed", "skipped", "pending"].includes(row.status),
-    )?.step ??
+    stepRows.find((row) => !["completed", "skipped"].includes(row.status))
+      ?.step ??
     null;
   const runFindings = toonSectionScalar(currentRaw, "run", "findings");
   const hasStepFindings = stepRows.some((row) => row.findings > 0);
@@ -340,13 +339,18 @@ export function parseNoMistakesAxiStatus(
     runStatus === "completed";
   const monitoringSuccessClaim =
     runStatus === "running" &&
+    activeStep === null &&
     hasCleanPullRequest &&
     (ciStatus === "completed" || ciStatus === "skipped");
   const hasPendingCi = ciStatus === "pending" || ciStatus === "running";
+  const hasPendingStep = stepRows.some((row) =>
+    ["pending", "running"].includes(row.status),
+  );
   const currentTerminalClaim =
     (terminalOutcomeClaim || monitoringSuccessClaim) &&
     !blockingOutcome &&
     !hasPendingCi &&
+    activeStep === null &&
     !hasBlockingGate &&
     !hasActiveFindings &&
     !hasContradictoryPullRequest;
@@ -361,7 +365,8 @@ export function parseNoMistakesAxiStatus(
           ? "awaiting_approval"
           : gateStatus === "awaiting_decision"
             ? "awaiting_decision"
-            : runStatus === "completed" && hasActiveFindings
+            : runStatus === "completed" &&
+                (hasActiveFindings || (activeStep !== null && !hasPendingStep))
               ? "completed"
               : runStatus === "blocked" ||
                   hasBlockingGate ||

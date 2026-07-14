@@ -58,7 +58,10 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
-import { DELEGATE_SUPERVISOR_HANDOFF_STAGE } from "../../executors/delegate-supervisor/executor.js";
+import {
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+} from "../../executors/delegate-supervisor/executor.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
   reconcileDispatchedWorkflowStep,
@@ -671,7 +674,7 @@ function tryParkStaleRunningDispatchLease(
     if (
       invocation !== undefined &&
       invocationRounds[0]?.roundIndex === 0 &&
-      isCheckpointedDelegateHandoff(db, invocation, invocationRounds)
+      hasResumableDelegateCheckpoint(db, invocation, invocationRounds)
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1243,7 +1246,7 @@ function isResumableRegisteredSdkTick(
   const round = rounds.at(-1);
   if (invocation.state !== "running" || round === undefined) return false;
   if (round.classification === "continue") return true;
-  if (isCheckpointedDelegateHandoff(db, invocation, rounds)) return true;
+  if (hasResumableDelegateCheckpoint(db, invocation, rounds)) return true;
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1257,7 +1260,7 @@ function isResumableRegisteredSdkTick(
   );
 }
 
-function isCheckpointedDelegateHandoff(
+function hasResumableDelegateCheckpoint(
   db: MomentumDb,
   invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
   rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
@@ -1287,7 +1290,9 @@ function isCheckpointedDelegateHandoff(
       : rounds.slice(0, -1);
   return handoffRounds.some((round) =>
     listExecutorCheckpointsForRound(db, round.roundId).some(
-      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+      (checkpoint) =>
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
     ),
   );
 }

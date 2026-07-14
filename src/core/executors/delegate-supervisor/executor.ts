@@ -40,7 +40,8 @@ export const DELEGATE_SUPERVISOR_EXECUTOR_NAME = "delegate-supervisor";
 export const DELEGATE_SUPERVISOR_STALL_AFTER_MS = 4 * 60 * 1000;
 
 export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
-const HANDOFF_INTENT_STAGE = "delegate_handoff_intent";
+export const DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE =
+  "delegate_handoff_intent";
 const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
 const MIRRORED_STAGE = "delegate_external_state_mirrored";
 
@@ -123,7 +124,7 @@ export class DelegateSupervisorExecutor implements Executor<
     const latestDelegateEvidence = latestCheckpointPosition(
       context.state.rounds,
       new Set([
-        HANDOFF_INTENT_STAGE,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
         DELEGATE_SUPERVISOR_HANDOFF_STAGE,
         LEGACY_COMPLETION_REPLAYED_STAGE,
       ]),
@@ -160,7 +161,8 @@ export class DelegateSupervisorExecutor implements Executor<
         ({ round, checkpoints }) =>
           round.roundIndex > (latestPriorHandoffRoundIndex ?? -1) &&
           checkpoints.some(
-            (checkpoint) => checkpoint.stage === HANDOFF_INTENT_STAGE,
+            (checkpoint) =>
+              checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
           ) &&
           !checkpoints.some(
             (checkpoint) =>
@@ -237,7 +239,8 @@ export class DelegateSupervisorExecutor implements Executor<
       .rounds.find(({ round }) => round.roundId === roundId);
     const hasCurrentHandoffIntent =
       roundBeforeHandoff?.checkpoints.some(
-        (checkpoint) => checkpoint.stage === HANDOFF_INTENT_STAGE,
+        (checkpoint) =>
+          checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
       ) ?? false;
     const recoveringInterruptedHandoff =
       recoveringAttempt !== undefined || hasCurrentHandoffIntent;
@@ -252,9 +255,9 @@ export class DelegateSupervisorExecutor implements Executor<
     if (!hasCurrentHandoffIntent) {
       const sequence = roundBeforeHandoff?.checkpoints.length ?? 0;
       context.envelope.recordCheckpoint(roundId, {
-        checkpointId: `${roundId}-${HANDOFF_INTENT_STAGE}`,
+        checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE}`,
         sequence,
-        stage: HANDOFF_INTENT_STAGE,
+        stage: DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
         detail: JSON.stringify({
           tool: context.config.tool,
           invocationId: context.state.invocation.invocationId,
@@ -773,12 +776,15 @@ function resolveToolAdapter(
   tools: DelegateSupervisorHostBindings["tools"],
   name: string,
 ): DelegateSupervisorToolAdapter | undefined {
+  let adapter: DelegateSupervisorToolAdapter | undefined;
   if ("get" in tools && typeof tools.get === "function") {
-    return tools.get(name);
+    adapter = tools.get(name);
+  } else {
+    adapter = (
+      tools as Readonly<Record<string, DelegateSupervisorToolAdapter>>
+    )[name];
   }
-  return (tools as Readonly<Record<string, DelegateSupervisorToolAdapter>>)[
-    name
-  ];
+  return adapter?.name === name ? adapter : undefined;
 }
 
 function findHandoff(
@@ -985,7 +991,7 @@ function replayLegacyCompletion(
       });
     }
   }
-  if (completion.value.recommendation === "continue") {
+  if (fromPriorAttempt || completion.value.recommendation === "continue") {
     const replayRound = context.envelope
       .snapshot()
       .rounds.find(({ round }) => round.roundId === roundId);

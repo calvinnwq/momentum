@@ -37,7 +37,10 @@ import {
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
-import { DELEGATE_SUPERVISOR_HANDOFF_STAGE } from "../src/core/executors/delegate-supervisor/executor.js";
+import {
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+} from "../src/core/executors/delegate-supervisor/executor.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -1668,6 +1671,7 @@ function seedCheckpointedDelegateHandoff(
   db: MomentumDb,
   runId: string,
   stepId: string,
+  stage: string = DELEGATE_SUPERVISOR_HANDOFF_STAGE,
 ) {
   seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
   seedStep(db, {
@@ -1726,17 +1730,25 @@ function seedCheckpointedDelegateHandoff(
     commitSha: null,
   });
   envelope.facade.recordCheckpoint(roundId, {
-    checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_HANDOFF_STAGE}`,
+    checkpointId: `${roundId}-${stage}`,
     sequence: 0,
-    stage: DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    detail: JSON.stringify({
-      externalIdentity: {
-        externalRunId: "external-run-1",
-        branch: "feature/delegate-supervisor",
-        headSha: "a".repeat(40),
-      },
-      summary: "handoff evidence persisted",
-    }),
+    stage,
+    detail: JSON.stringify(
+      stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE
+        ? {
+            tool: "no-mistakes",
+            invocationId,
+            attempt: 1,
+          }
+        : {
+            externalIdentity: {
+              externalRunId: "external-run-1",
+              branch: "feature/delegate-supervisor",
+              headSha: "a".repeat(40),
+            },
+            summary: "handoff evidence persisted",
+          },
+    ),
   });
   return { envelope, invocationId, roundId };
 }
@@ -1861,6 +1873,54 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
       expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an interrupted delegate handoff after its intent is durable", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "checkpointed-delegate-intent";
+      const stepId = "implementation";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
     } finally {
       db.close();
     }

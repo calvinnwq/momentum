@@ -1968,15 +1968,8 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
-  it.each([
-    "executor_threw",
-    "tool_adapter_unavailable",
-    "delegate_handoff_failed",
-    "delegate_handoff_recovery_required",
-    "external_state_unreadable",
-    "external_state_inconsistent",
-  ])(
-    "retries a %s invocation after the delegated runtime is repaired",
+  it.each(["executor_threw"])(
+    "retries a %s invocation after the registered executor is repaired",
     async (recoveryCode) => {
       const definition = fixtureDefinition({});
       const db = openDb(tempDir());
