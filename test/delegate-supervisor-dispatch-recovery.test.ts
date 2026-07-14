@@ -872,6 +872,191 @@ describe(
       expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
     });
 
+    it.each([
+      { tool: "gnhf", recovery: false },
+      { tool: "gnhf", recovery: true },
+      { tool: "no-mistakes", recovery: false },
+      { tool: "no-mistakes", recovery: true },
+    ] as const)(
+      "rechecks repo ownership after staging for $tool recovery=$recovery",
+      async ({ tool, recovery }) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const label = `${tool}-${recovery ? "recovery" : "handoff"}-ownership`;
+        const root = path.join(repoPath, ".agent-workflows", label);
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const statePath = path.join(root, "delegate-external-state.json");
+        const resultJsonPath = path.join(root, "result.json");
+        const executorLogPath = path.join(root, "executor.log");
+        const verificationLogPath = path.join(root, "verification.log");
+        const statusCommand = path.join(root, "status.sh");
+        const invocationId = `${label}::implementation::dispatch`;
+        const externalRunId = `nm-run-${label}`;
+        const resultContent = JSON.stringify({
+          success: true,
+          summary: `${label} completed`,
+          key_changes_made: ["updated README"],
+          key_learnings: [],
+          remaining_work: [],
+          goal_complete: false,
+          commit: {
+            type: "test",
+            subject: `complete ${label}`,
+            body: "",
+            breaking: false,
+          },
+        });
+        const resultDigest = `sha256:${crypto
+          .createHash("sha256")
+          .update(resultContent)
+          .digest("hex")}`;
+
+        if (recovery) {
+          fs.writeFileSync(resultJsonPath, resultContent);
+          fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+          if (tool === "gnhf") {
+            runGit(repoPath, ["add", "-A"]);
+            const worktreeTree = runGit(repoPath, ["write-tree"]);
+            runGit(repoPath, ["reset", "--quiet", headSha]);
+            fs.writeFileSync(
+              handoffReceiptPath,
+              JSON.stringify({
+                schemaVersion: 1,
+                tool,
+                invocationId,
+                attempt: 1,
+                phase: "completed",
+                baseHead: headSha,
+                branch,
+                statePath,
+                resultJsonPath,
+                executorLogPath,
+                verificationLogPath,
+                preexistingResultDigest: null,
+                resultDigest,
+                worktreeTree,
+                dispatchOutcome: {
+                  ok: true,
+                  state: "succeeded",
+                  summary: `${label} completed`,
+                },
+              }),
+            );
+          } else {
+            fs.writeFileSync(
+              handoffReceiptPath,
+              JSON.stringify({
+                schemaVersion: 1,
+                invocationId,
+                attempt: 1,
+                phase: "failed",
+                branch,
+                headSha,
+                statePath,
+                resultJsonPath,
+                executorLogPath,
+                externalIdentity: {
+                  externalRunId,
+                  branch,
+                  headSha,
+                },
+                resultDigest,
+                failureSummary: "previous local finalization failed",
+              }),
+            );
+            fs.writeFileSync(
+              statusCommand,
+              `#!/bin/sh
+printf 'run:\n  id: "${externalRunId}"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  review,running,0,1\n'
+`,
+            );
+            fs.chmodSync(statusCommand, 0o755);
+          }
+        }
+
+        const mutations: Array<"commit" | "reset"> = [];
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool,
+          invocationId,
+          attempt: recovery ? 2 : 1,
+          branch,
+          headSha,
+          statePath,
+          handoffReceiptPath,
+          resultJsonPath,
+          executorLogPath,
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath,
+            beforeGitMutation: (mutation) => {
+              mutations.push(mutation);
+              return mutations.length === 1
+                ? { ok: true }
+                : { ok: false, error: "repo lock transferred" };
+            },
+          },
+          run: () => {
+            fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+            fs.writeFileSync(resultJsonPath, resultContent);
+            if (tool === "no-mistakes") {
+              fs.writeFileSync(
+                executorLogPath,
+                `run:\n  id: "${externalRunId}"\n`,
+              );
+            }
+            return {
+              ok: true,
+              result: {
+                state: "succeeded",
+                summary: `${label} completed`,
+                checkpoints: [],
+                artifacts: [],
+                resultDigest: null,
+                errorCode: null,
+                errorMessage: null,
+                retryHint: null,
+                recoveryHint: null,
+              },
+              executorLogPath,
+              resultJsonPath,
+            };
+          },
+          statusCommand:
+            recovery && tool === "no-mistakes"
+              ? statusCommand
+              : "/usr/bin/false",
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        });
+        const context = {
+          invocation: {} as never,
+          config: { tool },
+          signal: new AbortController().signal,
+        };
+        const operation = recovery
+          ? () => adapter.recoverHandoff!(context)
+          : () => adapter.handoff(context);
+
+        await expect(Promise.resolve().then(operation)).rejects.toThrow(
+          "repo lock transferred",
+        );
+        expect(mutations).toEqual(["commit", "commit"]);
+        expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+        expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
+          "changed\n",
+        );
+      },
+    );
+
     it("rechecks the generic result after recovery verification", async () => {
       const repoPath = initRepo();
       const branch = runGit(repoPath, ["branch", "--show-current"]);

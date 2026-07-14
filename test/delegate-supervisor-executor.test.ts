@@ -3727,6 +3727,28 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
+  it("refuses to gate a chosen decision without resolution evidence", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          stepStatus: "awaiting_decision",
+          decisions: [
+            {
+              externalId: "review-1",
+              summary: "choose the review disposition",
+              allowedActions: ["approve", "reject"],
+              chosenAction: "approve",
+              resolution: null,
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+    });
+  });
+
   it("routes non-canonical decision actions to unreadable recovery", () => {
     expect(
       classifyDelegateSupervisorState(

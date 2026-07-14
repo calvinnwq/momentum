@@ -408,4 +408,21 @@ describe("selectExecutorDecisionForHumanGate", () => {
       undefined,
     );
   });
+
+  it("skips decisions with a chosen action but no resolution", () => {
+    const decisions = [
+      {
+        decisionId: "partially-resolved",
+        chosenAction: "approve",
+        resolution: null,
+      },
+    ];
+
+    expect(selectExecutorDecisionForHumanGate(decisions, undefined)).toBe(
+      undefined,
+    );
+    expect(
+      selectExecutorDecisionForHumanGate(decisions, "partially-resolved"),
+    ).toBe(undefined);
+  });
 });

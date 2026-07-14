@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { isExecutorDecisionEligibleForHumanGate } from "../loop/reducer.js";
 import {
   DELEGATE_SUPERVISOR_CI_STATES,
   DELEGATE_SUPERVISOR_EXTERNAL_STATUSES,
@@ -220,12 +221,12 @@ export function classifyDelegateSupervisorState(
         );
       }
       const unresolved = state.decisions.filter(
-        (decision) => !isResolved(decision),
+        isExecutorDecisionEligibleForHumanGate,
       );
       if (unresolved.length === 0) {
         return manualRecovery(
           "external_state_inconsistent",
-          `${subject} run is awaiting_decision but surfaced no unresolved decision`,
+          `${subject} run is awaiting_decision but surfaced no gate-eligible unresolved decision`,
         );
       }
       return {

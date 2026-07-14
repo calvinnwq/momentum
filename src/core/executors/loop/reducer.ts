@@ -606,6 +606,18 @@ export type ExecutorDecisionRecord = {
   externalRef?: string | null;
 };
 
+export function isExecutorDecisionEligibleForHumanGate(decision: {
+  chosenAction?: string | null;
+  resolution?: string | null;
+}): boolean {
+  return (
+    (decision.chosenAction === null || decision.chosenAction === undefined) &&
+    (decision.resolution === null ||
+      decision.resolution === undefined ||
+      decision.resolution.trim().length === 0)
+  );
+}
+
 export function selectExecutorDecisionForHumanGate<
   T extends {
     decisionId: string;
@@ -613,12 +625,7 @@ export function selectExecutorDecisionForHumanGate<
     resolution: string | null;
   },
 >(decisions: readonly T[], decisionId: unknown): T | undefined {
-  const unresolved = decisions.filter(
-    (candidate) =>
-      candidate.chosenAction === null &&
-      (candidate.resolution === null ||
-        candidate.resolution.trim().length === 0),
-  );
+  const unresolved = decisions.filter(isExecutorDecisionEligibleForHumanGate);
   if (typeof decisionId === "string") {
     return unresolved.find((candidate) => candidate.decisionId === decisionId);
   }

@@ -63,6 +63,13 @@ export type ProfileBackedDelegateToolInput = {
   };
 };
 
+function verifyDelegateCommitOwnership(
+  input: Pick<ProfileBackedDelegateToolInput, "repoSafety">,
+): { ok: true } | { ok: false; error: string } {
+  const ownership = input.repoSafety.beforeGitMutation?.("commit");
+  return ownership?.ok === false ? ownership : { ok: true };
+}
+
 type LiveWrapperDelegateReceipt = {
   schemaVersion: 1;
   tool: string;
@@ -290,6 +297,8 @@ function createLiveWrapperDelegateToolAdapter(
                 "delegated live-wrapper result no longer matches its completed handoff",
             };
           }
+          const ownership = verifyDelegateCommitOwnership(input);
+          if (!ownership.ok) return ownership;
           preparedReceipt = {
             ...completed,
             phase: "finalizing",
@@ -461,8 +470,8 @@ function recoverLiveWrapperDelegateHandoff(
               "delegated prepared commit result no longer matches its durable finalization receipt",
           };
         }
-        const ownership = input.repoSafety.beforeGitMutation?.("commit");
-        if (ownership?.ok === false) return ownership;
+        const ownership = verifyDelegateCommitOwnership(input);
+        if (!ownership.ok) return ownership;
         return evidence.expectedTree === receipt.expectedTree &&
           evidence.message === receipt.expectedMessage
           ? { ok: true }
@@ -522,6 +531,8 @@ function recoverLiveWrapperDelegateHandoff(
             "delegated recovered result no longer matches its durable completion receipt",
         };
       }
+      const ownership = verifyDelegateCommitOwnership(input);
+      if (!ownership.ok) return ownership;
       preparedReceipt = {
         ...receipt,
         phase: "finalizing",
@@ -1255,6 +1266,8 @@ function createProfileNoMistakesToolAdapter(
                 "delegated no-mistakes result no longer matches its completed handoff",
             };
           }
+          const ownership = verifyDelegateCommitOwnership(input);
+          if (!ownership.ok) return ownership;
           const prepared = input.repoSafety.beforeCommit?.(evidence);
           if (prepared?.ok === false) return prepared;
           preparedReceipt = {
@@ -1562,6 +1575,8 @@ function retryFailedNoMistakesFinalization(
               "stored no-mistakes handoff result no longer matches its durable finalization receipt",
           };
         }
+        const ownership = verifyDelegateCommitOwnership(input);
+        if (!ownership.ok) return ownership;
         const prepared = input.repoSafety.beforeCommit?.(evidence);
         if (prepared?.ok === false) return prepared;
         preparedReceipt = {
@@ -1819,8 +1834,8 @@ function recoverPreparedNoMistakesCommit(
     terminalProofHeadSha = currentHead;
   } else {
     assertNoMistakesResultMatchesReceipt(receipt);
-    const ownership = input.repoSafety.beforeGitMutation?.("commit");
-    if (ownership?.ok === false) throw new Error(ownership.error);
+    const ownership = verifyDelegateCommitOwnership(input);
+    if (!ownership.ok) throw new Error(ownership.error);
     const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
     const commit = commitVerifiedChanges({
       repoPath: input.repoPath,
@@ -1836,8 +1851,8 @@ function recoverPreparedNoMistakesCommit(
               "delegated prepared commit result no longer matches its durable finalization receipt",
           };
         }
-        const ownership = input.repoSafety.beforeGitMutation?.("commit");
-        if (ownership?.ok === false) return ownership;
+        const ownership = verifyDelegateCommitOwnership(input);
+        if (!ownership.ok) return ownership;
         return evidence.expectedTree === receipt.expectedTree &&
           evidence.message === receipt.expectedMessage
           ? { ok: true }
