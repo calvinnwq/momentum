@@ -10,6 +10,7 @@ import { openDb } from "../src/adapters/db.js";
 import {
   createPersistedProfileDelegateToolAdapter,
   createProfileBackedDelegateToolAdapter,
+  resolvePreparedDelegateCommitEvidence,
 } from "../src/adapters/profile-backed-delegate-tool-adapter.js";
 import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
@@ -144,6 +145,7 @@ ${statusOutput}
       ? `printf 'run:\n  id: "nm-run-1"\n'`
       : `printf 'launch completed without identity\n'`;
   const launchScript = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/no-mistakes-launch-count"
+mkdir -p "$(dirname "$count_file")"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
 printf '%s\n' "$((count + 1))" > "$count_file"
@@ -762,6 +764,112 @@ describe(
       expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
         "changed\n",
       );
+    });
+
+    it("rechecks repo ownership immediately before a prepared no-mistakes commit", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(
+        repoPath,
+        ".agent-workflows",
+        "no-mistakes-ownership",
+      );
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const resultContent = JSON.stringify({
+        success: true,
+        summary: "prepared no-mistakes commit",
+        key_changes_made: ["updated README"],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: false,
+        commit: {
+          type: "test",
+          subject: "complete prepared no-mistakes handoff",
+          body: "",
+          breaking: false,
+        },
+      });
+      fs.writeFileSync(resultJsonPath, resultContent);
+      fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+      runGit(repoPath, ["add", "-A"]);
+      const expectedTree = runGit(repoPath, ["write-tree"]);
+      runGit(repoPath, ["reset", "--quiet", headSha]);
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          invocationId: "no-mistakes-ownership::implementation::dispatch",
+          attempt: 1,
+          phase: "finalizing",
+          branch,
+          headSha,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          externalIdentity: {
+            externalRunId: "nm-run-ownership",
+            branch,
+            headSha,
+          },
+          resultDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(resultContent)
+            .digest("hex")}`,
+          expectedTree,
+          expectedMessage: "test: complete prepared no-mistakes handoff",
+        }),
+      );
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "no-mistakes",
+        invocationId: "no-mistakes-ownership::implementation::dispatch",
+        attempt: 2,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return mutations.length === 1
+              ? { ok: true }
+              : { ok: false, error: "repo lock transferred" };
+          },
+        },
+        run: () => {
+          throw new Error("prepared handoff must not relaunch");
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        adapter.recoverHandoff!({
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow("repo lock transferred");
+      expect(mutations).toEqual(["commit", "commit"]);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
     });
 
     it("rechecks the generic result after recovery verification", async () => {
@@ -3357,6 +3465,130 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
           "utf8",
         ),
       ).toBe("1\n");
+      db.close();
+    });
+
+    it("recovers an imported no-mistakes commit from prepared finalization evidence", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const importedRunDir = tempDir();
+      const runId = "imported-no-mistakes-prepared-commit-recovery";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(tempDir(), "lagging");
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      db.prepare(
+        "UPDATE workflow_runs SET source_artifact_path = ? WHERE id = ?",
+      ).run(path.join(importedRunDir, "plan.json"), runId);
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+        },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+
+      const stepRoot = path.join(importedRunDir, "delegate", stepId);
+      const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+      const receipt = JSON.parse(
+        fs.readFileSync(receiptPath, "utf8"),
+      ) as Record<string, unknown>;
+      const committedHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const baseHead = String(receipt["headSha"]);
+      runGit(repoPath, ["reset", "--hard", baseHead]);
+      runGit(repoPath, ["cherry-pick", "--no-commit", committedHead]);
+      expect(runGit(repoPath, ["write-tree"])).toBe(receipt["expectedTree"]);
+      receipt["phase"] = "finalizing";
+      delete receipt["terminalProofHeadSha"];
+      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+      fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+      reopenInterruptedHandoff(db, runId, stepId);
+      expect(
+        resolvePreparedDelegateCommitEvidence({
+          tool: "no-mistakes",
+          invocationId: String(receipt["invocationId"]),
+          attempt: 2,
+          repoPath,
+          handoffReceiptPath: receiptPath,
+          statePath: path.join(stepRoot, "delegate-external-state.json"),
+          resultJsonPath: path.join(stepRoot, "result.json"),
+          executorLogPath: path.join(stepRoot, "executor.log"),
+          legacyPaths: {
+            rootDir: importedRunDir,
+            handoffReceiptPath: path.join(
+              importedRunDir,
+              "delegate-handoff.json",
+            ),
+          },
+        }),
+      ).toEqual({
+        baseHead,
+        expectedTree: receipt["expectedTree"],
+      });
+      const originalResultJsonPath = String(receipt["resultJsonPath"]);
+      const substitutedResultJsonPath = path.join(
+        stepRoot,
+        "substituted-result.json",
+      );
+      fs.copyFileSync(originalResultJsonPath, substitutedResultJsonPath);
+      receipt["resultJsonPath"] = substitutedResultJsonPath;
+      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+      expect(
+        resolvePreparedDelegateCommitEvidence({
+          tool: "no-mistakes",
+          invocationId: String(receipt["invocationId"]),
+          attempt: 2,
+          repoPath,
+          handoffReceiptPath: receiptPath,
+          statePath: path.join(stepRoot, "delegate-external-state.json"),
+          resultJsonPath: path.join(stepRoot, "result.json"),
+          executorLogPath: path.join(stepRoot, "executor.log"),
+          legacyPaths: {
+            rootDir: importedRunDir,
+            handoffReceiptPath: path.join(
+              importedRunDir,
+              "delegate-handoff.json",
+            ),
+          },
+        }),
+      ).toBeNull();
+      receipt["resultJsonPath"] = originalResultJsonPath;
+      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 3,
+      });
+
+      const recoveredHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+      expect(recoveredHead).not.toBe(baseHead);
+      expect(runGit(repoPath, ["rev-parse", "HEAD^{tree}"])).toBe(
+        receipt["expectedTree"],
+      );
+      expect(runGit(repoPath, ["status", "--porcelain"])).toBe("");
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded", attempt: 2 });
       db.close();
     });
 

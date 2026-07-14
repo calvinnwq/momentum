@@ -431,6 +431,11 @@ function createLiveStepHostBindingsResolver(
         ...(settleHandoff !== undefined ? { settleHandoff } : {}),
       };
     }
+    const preparedDelegateArtifactRoot = path.join(
+      resolved.exec.runDir,
+      "delegate",
+      claim.stepId,
+    );
     const preparedCommitEvidence = isDelegate
       ? resolvePreparedDelegateCommitEvidence({
           tool: delegateTool!,
@@ -438,19 +443,21 @@ function createLiveStepHostBindingsResolver(
           attempt: invocation.attempt,
           repoPath: resolved.exec.repoPath,
           handoffReceiptPath: path.join(
-            resolved.exec.runDir,
-            "delegate",
-            claim.stepId,
+            preparedDelegateArtifactRoot,
             "delegate-handoff.json",
           ),
           statePath: path.join(
-            resolved.exec.runDir,
-            "delegate",
-            claim.stepId,
+            preparedDelegateArtifactRoot,
             "delegate-external-state.json",
           ),
-          resultJsonPath: resolved.exec.resultJsonPath,
-          executorLogPath: resolved.exec.executorLogPath,
+          resultJsonPath: path.join(
+            preparedDelegateArtifactRoot,
+            path.basename(resolved.exec.resultJsonPath),
+          ),
+          executorLogPath: path.join(
+            preparedDelegateArtifactRoot,
+            path.basename(resolved.exec.executorLogPath),
+          ),
           legacyPaths: {
             rootDir: resolved.exec.runDir,
             handoffReceiptPath: path.join(

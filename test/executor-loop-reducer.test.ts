@@ -9,13 +9,14 @@ import {
   EXECUTOR_ROUND_TERMINAL_STATES,
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
+  selectExecutorDecisionForHumanGate,
   transitionExecutorInvocation,
   transitionExecutorRound,
   type ExecutorDefinitionRecord,
   type ExecutorInvocationRecord,
   type ExecutorInvocationState,
   type ExecutorRoundRecord,
-  type ExecutorRoundState
+  type ExecutorRoundState,
 } from "../src/core/executors/loop/reducer.js";
 
 describe("executor-loop-reducer vocabulary", () => {
@@ -31,8 +32,8 @@ describe("executor-loop-reducer vocabulary", () => {
         "blocked",
         "failed",
         "succeeded",
-        "cancelled"
-      ].sort()
+        "cancelled",
+      ].sort(),
     );
   });
 
@@ -49,8 +50,8 @@ describe("executor-loop-reducer vocabulary", () => {
         "blocked",
         "failed",
         "succeeded",
-        "cancelled"
-      ].sort()
+        "cancelled",
+      ].sort(),
     );
   });
 
@@ -60,7 +61,7 @@ describe("executor-loop-reducer vocabulary", () => {
       "blocked",
       "failed",
       "succeeded",
-      "cancelled"
+      "cancelled",
     ].sort();
     expect([...EXECUTOR_INVOCATION_TERMINAL_STATES].sort()).toEqual(expected);
     expect([...EXECUTOR_ROUND_TERMINAL_STATES].sort()).toEqual(expected);
@@ -83,8 +84,8 @@ describe("executor-loop-reducer vocabulary", () => {
         "manual_recovery_required",
         "blocked",
         "failed",
-        "cancelled"
-      ].sort()
+        "cancelled",
+      ].sort(),
     );
   });
 
@@ -99,7 +100,7 @@ describe("executor-loop-reducer vocabulary", () => {
       "scope_boundary_exceeded",
       "credential_required",
       "external_state_required",
-      "destructive_action_requested"
+      "destructive_action_requested",
     ]) {
       expect(gates.has(gate as never), `gate ${gate}`).toBe(true);
     }
@@ -119,11 +120,11 @@ describe("transitionExecutorInvocation", () => {
   it("accepts running -> pausing -> waiting_operator then resumes waiting_operator -> running", () => {
     expect(transitionExecutorInvocation("running", "pausing").ok).toBe(true);
     expect(transitionExecutorInvocation("pausing", "waiting_operator").ok).toBe(
-      true
+      true,
     );
     // waiting_operator is a durable pause: it can be resumed, never a terminal.
     expect(transitionExecutorInvocation("waiting_operator", "running").ok).toBe(
-      true
+      true,
     );
   });
 
@@ -133,19 +134,19 @@ describe("transitionExecutorInvocation", () => {
       "preparing",
       "running",
       "pausing",
-      "waiting_operator"
+      "waiting_operator",
     ];
     const aborts: ExecutorInvocationState[] = [
       "blocked",
       "failed",
       "manual_recovery_required",
-      "cancelled"
+      "cancelled",
     ];
     for (const from of active) {
       for (const to of aborts) {
         expect(
           transitionExecutorInvocation(from, to).ok,
-          `${from} -> ${to}`
+          `${from} -> ${to}`,
         ).toBe(true);
       }
     }
@@ -156,7 +157,7 @@ describe("transitionExecutorInvocation", () => {
       "pending",
       "preparing",
       "pausing",
-      "waiting_operator"
+      "waiting_operator",
     ] as const) {
       const result = transitionExecutorInvocation(from, "succeeded");
       expect(result.ok, `${from} -> succeeded`).toBe(false);
@@ -187,7 +188,7 @@ describe("transitionExecutorInvocation", () => {
   it("refuses an unknown state with executor_invocation_unknown_state", () => {
     const result = transitionExecutorInvocation(
       "bogus" as never,
-      "running" as never
+      "running" as never,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -205,9 +206,11 @@ describe("transitionExecutorInvocation", () => {
 describe("transitionExecutorRound", () => {
   it("accepts the local happy path pending -> running -> capturing_result -> finalizing -> succeeded", () => {
     expect(transitionExecutorRound("pending", "running").ok).toBe(true);
-    expect(transitionExecutorRound("running", "capturing_result").ok).toBe(true);
+    expect(transitionExecutorRound("running", "capturing_result").ok).toBe(
+      true,
+    );
     expect(transitionExecutorRound("capturing_result", "finalizing").ok).toBe(
-      true
+      true,
     );
     const succeed = transitionExecutorRound("finalizing", "succeeded");
     expect(succeed.ok).toBe(true);
@@ -215,17 +218,17 @@ describe("transitionExecutorRound", () => {
   });
 
   it("accepts the external-mirror path pending -> mirroring_external_state -> succeeded", () => {
-    expect(transitionExecutorRound("pending", "mirroring_external_state").ok).toBe(
-      true
-    );
     expect(
-      transitionExecutorRound("mirroring_external_state", "succeeded").ok
+      transitionExecutorRound("pending", "mirroring_external_state").ok,
+    ).toBe(true);
+    expect(
+      transitionExecutorRound("mirroring_external_state", "succeeded").ok,
     ).toBe(true);
   });
 
   it("accepts succeeding straight from capturing_result when no finalization is needed", () => {
     expect(transitionExecutorRound("capturing_result", "succeeded").ok).toBe(
-      true
+      true,
     );
   });
 
@@ -234,11 +237,11 @@ describe("transitionExecutorRound", () => {
       "running",
       "capturing_result",
       "finalizing",
-      "mirroring_external_state"
+      "mirroring_external_state",
     ] as const) {
       expect(
         transitionExecutorRound("waiting_operator", to).ok,
-        `waiting_operator -> ${to}`
+        `waiting_operator -> ${to}`,
       ).toBe(true);
     }
   });
@@ -250,18 +253,18 @@ describe("transitionExecutorRound", () => {
       "capturing_result",
       "finalizing",
       "mirroring_external_state",
-      "waiting_operator"
+      "waiting_operator",
     ];
     const aborts: ExecutorRoundState[] = [
       "blocked",
       "failed",
       "manual_recovery_required",
-      "cancelled"
+      "cancelled",
     ];
     for (const from of active) {
       for (const to of aborts) {
         expect(transitionExecutorRound(from, to).ok, `${from} -> ${to}`).toBe(
-          true
+          true,
         );
       }
     }
@@ -304,7 +307,7 @@ describe("transitionExecutorRound", () => {
   it("allows same-state self transitions as a no-op success", () => {
     const result = transitionExecutorRound(
       "capturing_result",
-      "capturing_result"
+      "capturing_result",
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.state).toBe("capturing_result");
@@ -321,7 +324,7 @@ describe("executor-loop record shapes", () => {
       effort: "high",
       timeoutMs: 3_600_000,
       maxRounds: 8,
-      policyEnvelope: "overnight-safe"
+      policyEnvelope: "overnight-safe",
     };
     expect(def.family).toBe("goal-loop");
     expect(def.maxRounds).toBe(8);
@@ -338,7 +341,7 @@ describe("executor-loop record shapes", () => {
       attempt: 1,
       startedAt: 1_000,
       heartbeatAt: 1_500,
-      finishedAt: null
+      finishedAt: null,
     };
     expect(invocation.state).toBe("running");
     expect(invocation.executorFamily).toBe("goal-loop");
@@ -374,11 +377,35 @@ describe("executor-loop record shapes", () => {
       verificationStatus: "passed",
       commitSha: "abc123",
       recoveryCode: null,
-      humanGate: null
+      humanGate: null,
     };
     expect(round.classification).toBe("complete");
     expect(round.state).toBe("succeeded");
     expect(round.logPaths).toHaveLength(1);
     expect(round.remainingWork).toEqual([]);
+  });
+});
+
+describe("selectExecutorDecisionForHumanGate", () => {
+  it("skips decisions resolved without a chosen action", () => {
+    const decisions = [
+      {
+        decisionId: "resolved",
+        chosenAction: null,
+        resolution: "delegated:within-envelope",
+      },
+      {
+        decisionId: "current",
+        chosenAction: null,
+        resolution: null,
+      },
+    ];
+
+    expect(selectExecutorDecisionForHumanGate(decisions, undefined)).toBe(
+      decisions[1],
+    );
+    expect(selectExecutorDecisionForHumanGate(decisions, "resolved")).toBe(
+      undefined,
+    );
   });
 });

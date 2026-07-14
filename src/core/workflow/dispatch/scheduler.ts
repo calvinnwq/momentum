@@ -52,7 +52,10 @@ import {
   releaseWorkflowLease,
 } from "../leases.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
-import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
+import {
+  isTerminalExecutorInvocationState,
+  selectExecutorDecisionForHumanGate,
+} from "../../executors/loop/reducer.js";
 import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
@@ -62,6 +65,7 @@ import {
 import {
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
   DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  DELEGATE_SUPERVISOR_MIRRORED_STAGE,
 } from "../../executors/delegate-supervisor/executor.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
@@ -1366,9 +1370,20 @@ function hasResumableDelegateCheckpoint(
     (activeRound.state === "running" ||
       activeRound.state === "capturing_result" ||
       activeRound.state === "mirroring_external_state");
+  const interruptedGate =
+    activeRound.classification === null &&
+    activeRound.state === "waiting_operator" &&
+    listExecutorCheckpointsForRound(db, activeRound.roundId).some(
+      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+    ) &&
+    selectExecutorDecisionForHumanGate(
+      listExecutorDecisionsForRound(db, activeRound.roundId),
+      undefined,
+    ) !== undefined;
   const completedPoll =
     activeRound.classification === "continue" &&
     (activeRound.state === "succeeded" || activeRound.state === "failed");
+  if (interruptedGate) return true;
   if (!interruptedRound && !completedPoll) return false;
   const handoffRounds = completedPoll
     ? rounds

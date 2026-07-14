@@ -41,6 +41,7 @@ import { EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE } from "../src/core/execu
 import {
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
   DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  DELEGATE_SUPERVISOR_MIRRORED_STAGE,
 } from "../src/core/executors/delegate-supervisor/executor.js";
 import type {
   WorkflowLeaseKind,
@@ -1874,6 +1875,102 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
       expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an unclassified delegate gate observation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "unclassified-delegate-gate";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      envelope.applyDaemonDecision(
+        {
+          roundId,
+          classification: "continue",
+          executorRecommendation: "continue",
+          roundState: "succeeded",
+          invocationState: "running",
+          recoveryCode: null,
+          humanGate: null,
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: "classification: continue",
+          },
+        },
+      );
+      const gateRoundId = `${invocationId}::round-2`;
+      envelope.facade.startRound({
+        roundId: gateRoundId,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 1,
+        roundIndex: 1,
+        state: "mirroring_external_state",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "Mirrored delegated gate evidence",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      envelope.facade.recordDecision(gateRoundId, {
+        decisionId: `${gateRoundId}::decision`,
+        summary: "Approve delegated completion",
+        allowedActions: ["approve", "reject"],
+        recommendedAction: "approve",
+        chosenAction: null,
+        resolution: null,
+        externalRef: null,
+      });
+      envelope.facade.recordCheckpoint(gateRoundId, {
+        checkpointId: `${gateRoundId}::mirrored`,
+        sequence: 0,
+        stage: DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+        detail: "{}",
+      });
+      envelope.facade.observeRound(gateRoundId, {
+        phase: "waiting_operator",
+        summary: "Delegated completion requires approval",
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
     } finally {
       db.close();
     }

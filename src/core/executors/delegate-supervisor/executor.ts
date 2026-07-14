@@ -44,7 +44,8 @@ export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
 export const DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE =
   "delegate_handoff_intent";
 const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
-const MIRRORED_STAGE = "delegate_external_state_mirrored";
+export const DELEGATE_SUPERVISOR_MIRRORED_STAGE =
+  "delegate_external_state_mirrored";
 
 export type DelegateSupervisorConfig = {
   tool: string;
@@ -605,9 +606,9 @@ function observeDecision(
         ? []
         : [
             {
-              checkpointId: `${roundId}-${MIRRORED_STAGE}-${sequence}`,
+              checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_MIRRORED_STAGE}-${sequence}`,
               sequence,
-              stage: MIRRORED_STAGE,
+              stage: DELEGATE_SUPERVISOR_MIRRORED_STAGE,
               detail: JSON.stringify(mirrored),
             },
           ],
@@ -1069,7 +1070,10 @@ function latestMirroredCheckpoint(
 ): MirroredCheckpoint | null {
   for (const { checkpoints } of [...rounds].reverse()) {
     for (const checkpoint of [...checkpoints].reverse()) {
-      if (checkpoint.stage !== MIRRORED_STAGE || checkpoint.detail === null) {
+      if (
+        checkpoint.stage !== DELEGATE_SUPERVISOR_MIRRORED_STAGE ||
+        checkpoint.detail === null
+      ) {
         continue;
       }
       try {

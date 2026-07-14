@@ -607,10 +607,17 @@ export type ExecutorDecisionRecord = {
 };
 
 export function selectExecutorDecisionForHumanGate<
-  T extends { decisionId: string; chosenAction: string | null },
+  T extends {
+    decisionId: string;
+    chosenAction: string | null;
+    resolution: string | null;
+  },
 >(decisions: readonly T[], decisionId: unknown): T | undefined {
   const unresolved = decisions.filter(
-    (candidate) => candidate.chosenAction === null,
+    (candidate) =>
+      candidate.chosenAction === null &&
+      (candidate.resolution === null ||
+        candidate.resolution.trim().length === 0),
   );
   if (typeof decisionId === "string") {
     return unresolved.find((candidate) => candidate.decisionId === decisionId);

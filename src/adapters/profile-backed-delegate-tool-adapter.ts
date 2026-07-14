@@ -122,31 +122,31 @@ export function resolvePreparedDelegateCommitEvidence(
 ): { baseHead: string; expectedTree: string } | null {
   try {
     const canonicalRepoPath = fs.realpathSync(input.repoPath);
-    const requestedRepoPath = path.resolve(input.repoPath);
-    const canonicalizeRepoPath = (candidate: string) => {
-      const relative = path.relative(
-        requestedRepoPath,
-        path.resolve(candidate),
-      );
+    const requestedRunPath = path.resolve(input.legacyPaths.rootDir);
+    const canonicalRunPath = fs.realpathSync(requestedRunPath);
+    const canonicalizeRunPath = (candidate: string) => {
+      const relative = path.relative(requestedRunPath, path.resolve(candidate));
       if (
         relative === ".." ||
         relative.startsWith(`..${path.sep}`) ||
         path.isAbsolute(relative)
       ) {
-        throw new Error("delegate recovery path escapes the repository");
+        throw new Error(
+          "delegate recovery path escapes the configured run directory",
+        );
       }
-      return path.resolve(canonicalRepoPath, relative);
+      return path.resolve(canonicalRunPath, relative);
     };
     const canonicalInput: DelegateReceiptReadInput = {
       ...input,
       repoPath: canonicalRepoPath,
-      handoffReceiptPath: canonicalizeRepoPath(input.handoffReceiptPath),
-      statePath: canonicalizeRepoPath(input.statePath),
-      resultJsonPath: canonicalizeRepoPath(input.resultJsonPath),
-      executorLogPath: canonicalizeRepoPath(input.executorLogPath),
+      handoffReceiptPath: canonicalizeRunPath(input.handoffReceiptPath),
+      statePath: canonicalizeRunPath(input.statePath),
+      resultJsonPath: canonicalizeRunPath(input.resultJsonPath),
+      executorLogPath: canonicalizeRunPath(input.executorLogPath),
       legacyPaths: {
-        rootDir: canonicalizeRepoPath(input.legacyPaths.rootDir),
-        handoffReceiptPath: canonicalizeRepoPath(
+        rootDir: canonicalRunPath,
+        handoffReceiptPath: canonicalizeRunPath(
           input.legacyPaths.handoffReceiptPath,
         ),
       },
@@ -155,6 +155,11 @@ export function resolvePreparedDelegateCommitEvidence(
     if (canonicalInput.tool === "no-mistakes") {
       const receipt = readNoMistakesHandoffReceipt(canonicalInput);
       if (receipt.phase !== "finalizing") return null;
+      if (
+        !delegateReceiptPathsMatchConfiguredArtifacts(canonicalInput, receipt)
+      ) {
+        return null;
+      }
       assertNoMistakesResultMatchesReceipt(receipt);
       return {
         baseHead: receipt.headSha,
@@ -165,6 +170,7 @@ export function resolvePreparedDelegateCommitEvidence(
     const receipt = readLiveWrapperDelegateReceipt(canonicalInput);
     if (
       receipt.phase !== "finalizing" ||
+      !delegateReceiptPathsMatchConfiguredArtifacts(canonicalInput, receipt) ||
       typeof receipt.resultDigest !== "string" ||
       !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
     ) {
@@ -948,10 +954,53 @@ function persistRecoveredLiveWrapperHandoff(
 }
 
 function isPathWithin(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate);
+  const relative = path.relative(
+    canonicalizePathThroughExistingAncestor(parent),
+    canonicalizePathThroughExistingAncestor(candidate),
+  );
   return (
     relative.length === 0 ||
     (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function canonicalizePathThroughExistingAncestor(candidate: string): string {
+  let existing = path.resolve(candidate);
+  const suffix: string[] = [];
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    suffix.unshift(path.basename(existing));
+    existing = parent;
+  }
+  return path.join(fs.realpathSync(existing), ...suffix);
+}
+
+function delegateReceiptPathsMatchConfiguredArtifacts(
+  input: DelegateReceiptReadInput,
+  receipt: Pick<
+    LiveWrapperDelegateReceipt | NoMistakesDelegateReceipt,
+    "attempt" | "statePath" | "resultJsonPath" | "executorLogPath"
+  >,
+): boolean {
+  const expectedForAttempt = (configured: string) =>
+    receipt.attempt === 1
+      ? configured
+      : path.join(
+          path.dirname(configured),
+          `attempt-${receipt.attempt}`,
+          path.basename(configured),
+        );
+  return (
+    [
+      [receipt.statePath, input.statePath],
+      [receipt.resultJsonPath, input.resultJsonPath],
+      [receipt.executorLogPath, input.executorLogPath],
+    ] as const
+  ).every(
+    ([actual, configured]) =>
+      canonicalizePathThroughExistingAncestor(actual) ===
+      canonicalizePathThroughExistingAncestor(expectedForAttempt(configured)),
   );
 }
 
@@ -1777,15 +1826,27 @@ function recoverPreparedNoMistakesCommit(
       repoPath: input.repoPath,
       baseHead: receipt.headSha,
       commit: runnerResult.commit,
-      beforeCommit: (evidence) =>
-        evidence.expectedTree === receipt.expectedTree &&
-        evidence.message === receipt.expectedMessage
+      beforeCommit: (evidence) => {
+        if (
+          !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
+        ) {
+          return {
+            ok: false,
+            error:
+              "delegated prepared commit result no longer matches its durable finalization receipt",
+          };
+        }
+        const ownership = input.repoSafety.beforeGitMutation?.("commit");
+        if (ownership?.ok === false) return ownership;
+        return evidence.expectedTree === receipt.expectedTree &&
+          evidence.message === receipt.expectedMessage
           ? { ok: true }
           : {
               ok: false,
               error:
                 "delegated prepared commit no longer matches its durable finalization receipt",
-            },
+            };
+      },
     });
     if (!commit.ok) throw new Error(commit.error);
     terminalProofHeadSha = commit.commitSha;
