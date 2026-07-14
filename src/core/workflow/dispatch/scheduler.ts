@@ -671,7 +671,7 @@ function tryParkStaleRunningDispatchLease(
     if (
       invocation !== undefined &&
       invocationRounds[0]?.roundIndex === 0 &&
-      isCheckpointedDelegateHandoff(db, invocation, invocationRounds.at(-1))
+      isCheckpointedDelegateHandoff(db, invocation, invocationRounds)
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1231,18 +1231,19 @@ function isRegisteredSdkContinuation(
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
     rounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(db, invocation, rounds.at(-1))
+    isResumableRegisteredSdkTick(db, invocation, rounds)
   );
 }
 
 function isResumableRegisteredSdkTick(
   db: MomentumDb,
   invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
-  round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
 ): boolean {
+  const round = rounds.at(-1);
   if (invocation.state !== "running" || round === undefined) return false;
   if (round.classification === "continue") return true;
-  if (isCheckpointedDelegateHandoff(db, invocation, round)) return true;
+  if (isCheckpointedDelegateHandoff(db, invocation, rounds)) return true;
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1259,17 +1260,27 @@ function isResumableRegisteredSdkTick(
 function isCheckpointedDelegateHandoff(
   db: MomentumDb,
   invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
-  round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
 ): boolean {
-  return (
-    invocation.state === "running" &&
-    invocation.executorFamily === "delegate-supervisor" &&
-    round !== undefined &&
-    (round.state === "running" || round.state === "capturing_result") &&
-    round.classification === null &&
+  const activeRound = rounds.at(-1);
+  if (
+    invocation.state !== "running" ||
+    invocation.executorFamily !== "delegate-supervisor" ||
+    activeRound === undefined ||
+    activeRound.classification !== null
+  ) {
+    return false;
+  }
+  const handoffRounds =
+    activeRound.state === "running" || activeRound.state === "capturing_result"
+      ? [activeRound]
+      : activeRound.state === "mirroring_external_state"
+        ? rounds.slice(0, -1)
+        : [];
+  return handoffRounds.some((round) =>
     listExecutorCheckpointsForRound(db, round.roundId).some(
       (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    )
+    ),
   );
 }
 
@@ -1303,8 +1314,9 @@ function buildActiveSubworkflowClaim(
       ? []
       : listExecutorRoundsForInvocation(db, invocation.invocationId);
   const resumableSdkTick =
+    invocation !== undefined &&
     invocationRounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(db, invocation!, invocationRounds.at(-1));
+    isResumableRegisteredSdkTick(db, invocation, invocationRounds);
   if (
     invocation === undefined ||
     (invocation.executorFamily !== "subworkflow" && !resumableSdkTick) ||
