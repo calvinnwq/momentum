@@ -7,7 +7,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
-import { createProfileBackedDelegateToolAdapter } from "../src/adapters/profile-backed-delegate-tool-adapter.js";
+import {
+  createPersistedProfileDelegateToolAdapter,
+  createProfileBackedDelegateToolAdapter,
+} from "../src/adapters/profile-backed-delegate-tool-adapter.js";
 import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
@@ -654,6 +657,291 @@ describe(
       );
     });
 
+    it("refuses a prepared generic commit after repo ownership is lost", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "commit-ownership");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const resultContent = JSON.stringify({
+        success: true,
+        summary: "prepared generic commit",
+        key_changes_made: ["updated README"],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: false,
+        commit: {
+          type: "test",
+          subject: "complete prepared handoff",
+          body: "",
+          breaking: false,
+        },
+      });
+      fs.writeFileSync(resultJsonPath, resultContent);
+      fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+      runGit(repoPath, ["add", "-A"]);
+      const expectedTree = runGit(repoPath, ["write-tree"]);
+      runGit(repoPath, ["reset", "--quiet", headSha]);
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          tool: "gnhf",
+          invocationId: "commit-ownership::implementation::dispatch",
+          attempt: 1,
+          phase: "finalizing",
+          baseHead: headSha,
+          branch,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          verificationLogPath,
+          preexistingResultDigest: null,
+          resultDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(resultContent)
+            .digest("hex")}`,
+          worktreeTree: expectedTree,
+          dispatchOutcome: {
+            ok: true,
+            state: "succeeded",
+            summary: "prepared generic commit",
+          },
+          expectedTree,
+          expectedMessage: "test: complete prepared handoff",
+        }),
+      );
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "gnhf",
+        invocationId: "commit-ownership::implementation::dispatch",
+        attempt: 2,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: false, error: "repo lock transferred" };
+          },
+        },
+        run: () => {
+          throw new Error("prepared handoff must not relaunch");
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      expect(() =>
+        adapter.recoverHandoff!({
+          invocation: {} as never,
+          config: { tool: "gnhf" },
+          signal: new AbortController().signal,
+        }),
+      ).toThrow("repo lock transferred");
+      expect(mutations).toEqual(["commit"]);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+      expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
+        "changed\n",
+      );
+    });
+
+    it("rechecks the generic result after recovery verification", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "recovery-digest");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const verificationCommand = path.join(root, "change-result.sh");
+      const resultContent = JSON.stringify({
+        success: true,
+        summary: "recover generic result",
+        key_changes_made: ["updated README"],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: false,
+        commit: {
+          type: "test",
+          subject: "recover generic result",
+          body: "",
+          breaking: false,
+        },
+      });
+      fs.writeFileSync(resultJsonPath, resultContent);
+      fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+      runGit(repoPath, ["add", "-A"]);
+      const worktreeTree = runGit(repoPath, ["write-tree"]);
+      runGit(repoPath, ["reset", "--quiet", headSha]);
+      fs.writeFileSync(
+        verificationCommand,
+        `#!/bin/sh
+printf '%s' '{"success":false}' > '${resultJsonPath}'
+`,
+      );
+      fs.chmodSync(verificationCommand, 0o755);
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          tool: "gnhf",
+          invocationId: "recovery-digest::implementation::dispatch",
+          attempt: 1,
+          phase: "completed",
+          baseHead: headSha,
+          branch,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          verificationLogPath,
+          preexistingResultDigest: null,
+          resultDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(resultContent)
+            .digest("hex")}`,
+          worktreeTree,
+          dispatchOutcome: {
+            ok: true,
+            state: "succeeded",
+            summary: "recover generic result",
+          },
+        }),
+      );
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "gnhf",
+        invocationId: "recovery-digest::implementation::dispatch",
+        attempt: 2,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [verificationCommand],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: true };
+          },
+        },
+        run: () => {
+          throw new Error("interrupted handoff must not relaunch");
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      expect(() =>
+        adapter.recoverHandoff!({
+          invocation: {} as never,
+          config: { tool: "gnhf" },
+          signal: new AbortController().signal,
+        }),
+      ).toThrow(
+        "delegated recovered result no longer matches its durable completion receipt",
+      );
+      expect(mutations).toEqual([]);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+      expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
+        "changed\n",
+      );
+    });
+
+    it.each([false, undefined])(
+      "keeps a legacy no-mistakes handoff with outcome %s in manual recovery",
+      async (handoffSucceeded) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const root = path.join(repoPath, ".agent-workflows", "legacy-outcome");
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const legacyReceiptPath = path.join(root, "legacy-handoff.json");
+        const invocationId = "legacy-outcome::no-mistakes::dispatch";
+        fs.writeFileSync(
+          legacyReceiptPath,
+          JSON.stringify({
+            invocationId,
+            attempt: 1,
+            externalIdentity: {
+              externalRunId: "nm-run-legacy",
+              branch,
+              headSha,
+            },
+            ...(handoffSucceeded !== undefined ? { handoffSucceeded } : {}),
+          }),
+        );
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool: "no-mistakes",
+          invocationId,
+          attempt: 2,
+          branch,
+          headSha,
+          statePath: path.join(root, "delegate-external-state.json"),
+          handoffReceiptPath,
+          resultJsonPath: path.join(root, "result.json"),
+          executorLogPath: path.join(root, "executor.log"),
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath: path.join(root, "verification.log"),
+          },
+          run: () => {
+            throw new Error("legacy handoff must not relaunch");
+          },
+          statusCommand: "/usr/bin/false",
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: { rootDir: root, handoffReceiptPath: legacyReceiptPath },
+        });
+
+        await expect(
+          adapter.recoverHandoff!({
+            invocation: {} as never,
+            config: { tool: "no-mistakes" },
+            signal: new AbortController().signal,
+          }),
+        ).rejects.toThrow(
+          "no durable receipt or launch identity; refusing to launch again",
+        );
+        expect(fs.existsSync(handoffReceiptPath)).toBe(false);
+      },
+    );
+
     it.each([
       {
         expectedOutcome: "accepts",
@@ -785,6 +1073,302 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
         ).toMatchObject({ attempt: 1, phase: "launched" });
       },
     );
+
+    it("rejects a no-change handoff when verification changes its result", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(
+        repoPath,
+        ".agent-workflows",
+        "changed-verification",
+      );
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const verificationCommand = path.join(root, "change-result.sh");
+      const statusCommand = path.join(root, "status.sh");
+      fs.writeFileSync(
+        verificationCommand,
+        `#!/bin/sh
+printf '%s' '{"success":false}' > '${resultJsonPath}'
+`,
+      );
+      fs.chmodSync(verificationCommand, 0o755);
+      fs.writeFileSync(
+        statusCommand,
+        `#!/bin/sh
+printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status: completed\n  head: ${headSha}\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n'
+`,
+      );
+      fs.chmodSync(statusCommand, 0o755);
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "no-mistakes",
+        invocationId: "changed-verification::no-mistakes::dispatch",
+        attempt: 1,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [verificationCommand],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: true };
+          },
+        },
+        run: () => {
+          fs.writeFileSync(
+            executorLogPath,
+            'run:\n  id: "nm-run-changed-verification"\n',
+          );
+          fs.writeFileSync(
+            resultJsonPath,
+            JSON.stringify({
+              success: true,
+              summary: "no-change handoff completed",
+              key_changes_made: [],
+              key_learnings: [],
+              remaining_work: [],
+              goal_complete: false,
+              commit: {
+                type: "test",
+                subject: "complete no-change handoff",
+                body: "",
+                breaking: false,
+              },
+            }),
+          );
+          return {
+            ok: true,
+            result: {
+              state: "succeeded",
+              summary: "no-change handoff completed",
+              checkpoints: [],
+              artifacts: [],
+              resultDigest: null,
+              errorCode: null,
+              errorMessage: null,
+              retryHint: null,
+              recoveryHint: null,
+            },
+            executorLogPath,
+            resultJsonPath,
+          };
+        },
+        statusCommand,
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        adapter.handoff({
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(
+        "delegated no-mistakes result no longer matches its completed handoff",
+      );
+      expect(mutations).toEqual([]);
+      expect(
+        JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+      ).toMatchObject({ phase: "failed" });
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+    });
+
+    it("reloads durable terminal proof for persisted no-mistakes polling", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "persisted-proof");
+      fs.mkdirSync(root, { recursive: true });
+      const statePath = path.join(root, "delegate-external-state.json");
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statusCommand = path.join(root, "status.sh");
+      const identity = {
+        externalRunId: "nm-run-persisted-proof",
+        branch,
+        headSha,
+      };
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          invocationId: "persisted-proof::no-mistakes::dispatch",
+          attempt: 1,
+          phase: "launched",
+          branch,
+          headSha,
+          statePath,
+          resultJsonPath: path.join(root, "result.json"),
+          executorLogPath: path.join(root, "executor.log"),
+          externalIdentity: identity,
+          terminalProofHeadSha: headSha,
+        }),
+      );
+      fs.writeFileSync(
+        statusCommand,
+        `#!/bin/sh
+printf 'run:\n  id: "${identity.externalRunId}"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n'
+`,
+      );
+      fs.chmodSync(statusCommand, 0o755);
+      const adapter = createPersistedProfileDelegateToolAdapter({
+        tool: "no-mistakes",
+        repoPath,
+        command: statusCommand,
+        argsPrefix: [],
+        env: {},
+      });
+
+      const observed = await adapter.readExternalState({
+        invocation: {} as never,
+        config: { tool: "no-mistakes" },
+        signal: new AbortController().signal,
+        handoff: {
+          externalIdentity: identity,
+          summary: "persisted no-mistakes handoff",
+          artifactPaths: [statePath, handoffReceiptPath],
+        },
+      });
+
+      expect(observed).toMatchObject({
+        ok: true,
+        value: {
+          externalRunId: identity.externalRunId,
+          stepStatus: "completed",
+          ciState: "passed",
+        },
+      });
+    });
+
+    it("rechecks a failed no-mistakes result after retry verification", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "retry-digest");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const verificationCommand = path.join(root, "change-result.sh");
+      const statusCommand = path.join(root, "status.sh");
+      const resultContent = JSON.stringify({
+        success: true,
+        summary: "retry local finalization",
+        key_changes_made: [],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: false,
+        commit: {
+          type: "test",
+          subject: "retry local finalization",
+          body: "",
+          breaking: false,
+        },
+      });
+      fs.writeFileSync(resultJsonPath, resultContent);
+      fs.writeFileSync(
+        verificationCommand,
+        `#!/bin/sh
+printf '%s' '{"success":false}' > '${resultJsonPath}'
+`,
+      );
+      fs.chmodSync(verificationCommand, 0o755);
+      fs.writeFileSync(
+        statusCommand,
+        `#!/bin/sh
+printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  review,running,0,1\n'
+`,
+      );
+      fs.chmodSync(statusCommand, 0o755);
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          invocationId: "retry-digest::no-mistakes::dispatch",
+          attempt: 1,
+          phase: "failed",
+          branch,
+          headSha,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          externalIdentity: {
+            externalRunId: "nm-run-retry-digest",
+            branch,
+            headSha,
+          },
+          resultDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(resultContent)
+            .digest("hex")}`,
+          failureSummary: "previous local finalization failed",
+        }),
+      );
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "no-mistakes",
+        invocationId: "retry-digest::no-mistakes::dispatch",
+        attempt: 2,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [verificationCommand],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: true };
+          },
+        },
+        run: () => {
+          throw new Error("failed handoff must not relaunch");
+        },
+        statusCommand,
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        adapter.recoverHandoff!({
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(
+        "stored no-mistakes handoff result no longer matches its durable finalization receipt",
+      );
+      expect(mutations).toEqual([]);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+    });
 
     it.each(["failed", "cancelled"] as const)(
       "launches a fresh run after external status proves a locally failed prior handoff is %s",

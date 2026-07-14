@@ -165,6 +165,13 @@ function createLiveWrapperDelegateToolAdapter(
       const finalized = finalizeLiveStepResult(raw, input.repoPath, {
         ...input.repoSafety,
         beforeGitMutation: (mutation) => {
+          if (!resultDigestMatches(resultDigest, input.resultJsonPath)) {
+            return {
+              ok: false,
+              error:
+                "delegated live-wrapper result no longer matches its completed handoff",
+            };
+          }
           const ownership = input.repoSafety.beforeGitMutation?.(mutation);
           if (ownership?.ok === false) return ownership;
           if (mutation !== "reset") return { ok: true };
@@ -184,10 +191,11 @@ function createLiveWrapperDelegateToolAdapter(
           }
         },
         beforeCommit: ({ expectedTree, message }) => {
-          if (resultDigest === null) {
+          if (!resultDigestMatches(resultDigest, input.resultJsonPath)) {
             return {
               ok: false,
-              error: "delegated live-wrapper result disappeared before commit",
+              error:
+                "delegated live-wrapper result no longer matches its completed handoff",
             };
           }
           preparedReceipt = {
@@ -351,15 +359,27 @@ function recoverLiveWrapperDelegateHandoff(
       repoPath: input.repoPath,
       baseHead: receipt.baseHead,
       commit: runnerResult.commit,
-      beforeCommit: (evidence) =>
-        evidence.expectedTree === receipt.expectedTree &&
-        evidence.message === receipt.expectedMessage
+      beforeCommit: (evidence) => {
+        if (
+          !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
+        ) {
+          return {
+            ok: false,
+            error:
+              "delegated prepared commit result no longer matches its durable finalization receipt",
+          };
+        }
+        const ownership = input.repoSafety.beforeGitMutation?.("commit");
+        if (ownership?.ok === false) return ownership;
+        return evidence.expectedTree === receipt.expectedTree &&
+          evidence.message === receipt.expectedMessage
           ? { ok: true }
           : {
               ok: false,
               error:
                 "delegated prepared commit no longer matches its durable finalization receipt",
-            },
+            };
+      },
     });
     if (!commit.ok) throw new Error(commit.error);
     const externalState = liveWrapperDelegateExternalState(
@@ -376,6 +396,13 @@ function recoverLiveWrapperDelegateHandoff(
     baseHead: receipt.baseHead,
     verificationLogPath: receipt.verificationLogPath,
     beforeGitMutation: (mutation) => {
+      if (!resultDigestMatches(digest, receipt.resultJsonPath)) {
+        return {
+          ok: false,
+          error:
+            "delegated recovered result no longer matches its durable completion receipt",
+        };
+      }
       const ownership = input.repoSafety.beforeGitMutation?.(mutation);
       if (ownership?.ok === false) return ownership;
       if (mutation !== "reset") return { ok: true };
@@ -396,6 +423,13 @@ function recoverLiveWrapperDelegateHandoff(
       }
     },
     beforeCommit: ({ expectedTree, message }) => {
+      if (!resultDigestMatches(digest, receipt.resultJsonPath)) {
+        return {
+          ok: false,
+          error:
+            "delegated recovered result no longer matches its durable completion receipt",
+        };
+      }
       preparedReceipt = {
         ...receipt,
         phase: "finalizing",
@@ -864,6 +898,61 @@ function assertNoMistakesResultMatchesReceipt(
   }
 }
 
+function noMistakesTerminalProofOptions(
+  repoPath: string,
+  handoff: DelegateSupervisorHandoff,
+): { terminalProofHeadSha?: string } {
+  if (handoff.terminalState !== undefined) {
+    return { terminalProofHeadSha: handoff.terminalState.value.headSha };
+  }
+  const receiptPath = handoff.artifactPaths?.find(
+    (artifactPath) => path.basename(artifactPath) === "delegate-handoff.json",
+  );
+  if (receiptPath === undefined) return {};
+  try {
+    const stored = JSON.parse(
+      readBoundedRegularFile(
+        receiptPath,
+        "no-mistakes handoff receipt",
+      ).toString("utf8"),
+    ) as {
+      schemaVersion?: unknown;
+      phase?: unknown;
+      branch?: unknown;
+      headSha?: unknown;
+      terminalProofHeadSha?: unknown;
+      externalIdentity?: {
+        externalRunId?: unknown;
+        branch?: unknown;
+        headSha?: unknown;
+      };
+    };
+    const expected = handoff.externalIdentity;
+    const identity = stored.externalIdentity;
+    if (
+      stored.schemaVersion !== 1 ||
+      stored.phase !== "launched" ||
+      stored.branch !== expected.branch ||
+      typeof stored.headSha !== "string" ||
+      !/^[0-9a-f]{40}$/.test(stored.headSha) ||
+      stored.headSha !== expected.headSha ||
+      typeof stored.terminalProofHeadSha !== "string" ||
+      !/^[0-9a-f]{40}$/.test(stored.terminalProofHeadSha) ||
+      identity === undefined ||
+      identity.externalRunId !== expected.externalRunId ||
+      identity.branch !== expected.branch ||
+      typeof identity.headSha !== "string" ||
+      identity.headSha !== expected.headSha ||
+      !isGitDescendant(repoPath, expected.headSha, stored.terminalProofHeadSha)
+    ) {
+      return {};
+    }
+    return { terminalProofHeadSha: stored.terminalProofHeadSha };
+  } catch {
+    return {};
+  }
+}
+
 function readBoundedResultFile(filePath: string): Buffer {
   return readBoundedRegularFile(filePath, "result");
 }
@@ -946,9 +1035,7 @@ export function createPersistedProfileDelegateToolAdapter(input: {
           env: input.env,
           statePath: delegateStatePath(handoff.artifactPaths),
           expected: handoff.externalIdentity,
-          ...(handoff.terminalState !== undefined
-            ? { terminalProofHeadSha: handoff.terminalState.value.headSha }
-            : {}),
+          ...noMistakesTerminalProofOptions(input.repoPath, handoff),
         }),
     });
   }
@@ -1000,9 +1087,6 @@ function createProfileNoMistakesToolAdapter(
       {
         ...input.repoSafety,
         beforeGitMutation: (mutation) => {
-          const ownership = input.repoSafety.beforeGitMutation?.(mutation);
-          if (ownership?.ok === false) return ownership;
-          if (mutation !== "reset") return { ok: true };
           if (!resultDigestMatches(resultDigest, input.resultJsonPath)) {
             return {
               ok: false,
@@ -1010,6 +1094,9 @@ function createProfileNoMistakesToolAdapter(
                 "delegated no-mistakes result no longer matches its completed handoff",
             };
           }
+          const ownership = input.repoSafety.beforeGitMutation?.(mutation);
+          if (ownership?.ok === false) return ownership;
+          if (mutation !== "reset") return { ok: true };
           preparedReceipt = {
             ...preparedReceipt,
             phase: "resetting",
@@ -1163,9 +1250,7 @@ function createProfileNoMistakesToolAdapter(
         env: input.statusEnv,
         statePath: delegateStatePath(handoff.artifactPaths),
         expected: handoff.externalIdentity,
-        ...(handoff.terminalState !== undefined
-          ? { terminalProofHeadSha: handoff.terminalState.value.headSha }
-          : {}),
+        ...noMistakesTerminalProofOptions(input.repoPath, handoff),
       }),
   });
 }
@@ -1306,6 +1391,15 @@ function retryFailedNoMistakesFinalization(
     {
       ...input.repoSafety,
       beforeGitMutation: (mutation) => {
+        if (
+          !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
+        ) {
+          return {
+            ok: false,
+            error:
+              "stored no-mistakes handoff result no longer matches its durable finalization receipt",
+          };
+        }
         const ownership = input.repoSafety.beforeGitMutation?.(mutation);
         if (ownership?.ok === false) return ownership;
         if (mutation !== "reset") return { ok: true };
@@ -1324,6 +1418,15 @@ function retryFailedNoMistakesFinalization(
         }
       },
       beforeCommit: (evidence) => {
+        if (
+          !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
+        ) {
+          return {
+            ok: false,
+            error:
+              "stored no-mistakes handoff result no longer matches its durable finalization receipt",
+          };
+        }
         const prepared = input.repoSafety.beforeCommit?.(evidence);
         if (prepared?.ok === false) return prepared;
         preparedReceipt = {
@@ -1580,6 +1683,7 @@ function recoverPreparedNoMistakesCommit(
     }
     terminalProofHeadSha = currentHead;
   } else {
+    assertNoMistakesResultMatchesReceipt(receipt);
     const ownership = input.repoSafety.beforeGitMutation?.("commit");
     if (ownership?.ok === false) throw new Error(ownership.error);
     const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);
@@ -1708,6 +1812,7 @@ function migrateLegacyNoMistakesReceipt(
   ) {
     return;
   }
+  if (receipt.handoffSucceeded !== true) return;
   const legacyRunDir =
     receipt.attempt === 1
       ? input.legacyPaths.rootDir
