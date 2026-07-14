@@ -88,7 +88,7 @@ type NoMistakesDelegateReceipt = {
   schemaVersion: 1;
   invocationId: string;
   attempt: number;
-  phase: "launching" | "finalizing" | "launched";
+  phase: "launching" | "resetting" | "finalizing" | "launched" | "failed";
   branch: string;
   headSha: string;
   statePath: string;
@@ -101,6 +101,7 @@ type NoMistakesDelegateReceipt = {
   };
   expectedTree?: string;
   expectedMessage?: string;
+  failureSummary?: string;
   terminalProofHeadSha?: string;
 };
 
@@ -981,6 +982,25 @@ function createProfileNoMistakesToolAdapter(
     };
     const finalized = finalizeLiveStepResult(raw, input.repoPath, {
       ...input.repoSafety,
+      beforeGitMutation: (mutation) => {
+        const ownership = input.repoSafety.beforeGitMutation?.(mutation);
+        if (ownership?.ok === false) return ownership;
+        if (mutation !== "reset") return { ok: true };
+        preparedReceipt = {
+          ...preparedReceipt,
+          phase: "resetting",
+          externalIdentity: launchIdentity.value,
+        };
+        try {
+          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `delegated handoff receipt could not be persisted before reset: ${errorMessage(error)}`,
+          };
+        }
+      },
       beforeCommit: (evidence) => {
         const prepared = input.repoSafety.beforeCommit?.(evidence);
         if (prepared?.ok === false) return prepared;
@@ -1001,20 +1021,42 @@ function createProfileNoMistakesToolAdapter(
         }
       },
     });
-    if (!isProvenClean(finalized)) {
-      throw new Error(
-        finalized.ok ? finalized.result.summary : finalized.error,
-      );
+    if (
+      !isProvenClean(finalized) ||
+      !finalized.ok ||
+      finalized.result.state !== "succeeded"
+    ) {
+      const failureSummary = finalized.ok
+        ? (finalized.result.errorMessage ?? finalized.result.summary)
+        : finalized.error;
+      const failedReceipt: NoMistakesDelegateReceipt = {
+        ...preparedReceipt,
+        phase: "failed",
+        externalIdentity: launchIdentity.value,
+        failureSummary,
+      };
+      writeJsonAtomically(input.handoffReceiptPath, failedReceipt);
+      writeJsonAtomically(launchingReceipt.statePath, {
+        ...launchIdentity.value,
+        activeStep: null,
+        stepStatus: "failed",
+        findings: [],
+        selectedFindingIds: [],
+        decisions: [],
+        prUrl: null,
+        ciState: "failed",
+      } satisfies DelegateSupervisorExternalState);
+      throw new Error(failureSummary);
     }
-    const terminalProofHeadSha =
-      finalized.ok && finalized.result.state === "succeeded"
-        ? resolveTerminalProofHead(input.repoPath, launchIdentity.value.headSha)
-        : undefined;
+    const terminalProofHeadSha = resolveTerminalProofHead(
+      input.repoPath,
+      launchIdentity.value.headSha,
+    );
     const launchedReceipt: NoMistakesDelegateReceipt = {
       ...preparedReceipt,
       phase: "launched",
       externalIdentity: launchIdentity.value,
-      ...(terminalProofHeadSha !== undefined ? { terminalProofHeadSha } : {}),
+      terminalProofHeadSha,
     };
     writeJsonAtomically(input.handoffReceiptPath, launchedReceipt);
     writeProvisionalNoMistakesState(
@@ -1039,19 +1081,13 @@ function createProfileNoMistakesToolAdapter(
       input.handoffReceiptPath,
       launchingReceipt.resultJsonPath,
       launchingReceipt.executorLogPath,
-      ...(finalized.ok
-        ? finalized.result.artifacts.map((artifact) => artifact.path)
-        : []),
+      ...finalized.result.artifacts.map((artifact) => artifact.path),
     ].filter((value, index, values) => values.indexOf(value) === index);
     return {
       externalIdentity: launchIdentity.value,
-      summary: finalized.ok
-        ? finalized.result.summary
-        : "no-mistakes accepted the delegated run",
+      summary: finalized.result.summary,
       artifactPaths,
-      ...(finalized.ok &&
-      finalized.result.state === "succeeded" &&
-      classifyDelegateSupervisorState(observed.value).classification ===
+      ...(classifyDelegateSupervisorState(observed.value).classification ===
         "complete" &&
       delegateStateHeadMatchesRepo(input.repoPath, observed.value.headSha)
         ? {
@@ -1120,6 +1156,16 @@ function recoverNoMistakesHandoff(
   }
   if (receipt.phase === "finalizing") {
     receipt = recoverPreparedNoMistakesCommit(input, receipt);
+  }
+  if (receipt.phase === "resetting") {
+    throw new Error(
+      "stored no-mistakes handoff was interrupted during failure reset; inspect the repository before clearing recovery",
+    );
+  }
+  if (receipt.phase === "failed") {
+    throw new Error(
+      `stored no-mistakes handoff failed finalization: ${receipt.failureSummary}`,
+    );
   }
   const expected = receipt.externalIdentity!;
   const currentBranch = resolveDelegateBranch(input.repoPath);
@@ -1259,12 +1305,17 @@ function readNoMistakesHandoffReceipt(
       ...(stored.expectedMessage !== undefined
         ? { expectedMessage: stored.expectedMessage }
         : {}),
+      ...(stored.failureSummary !== undefined
+        ? { failureSummary: stored.failureSummary }
+        : {}),
       ...(stored.terminalProofHeadSha !== undefined
         ? { terminalProofHeadSha: stored.terminalProofHeadSha }
         : {}),
     };
     if (
-      !["launching", "finalizing", "launched"].includes(receipt.phase) ||
+      !["launching", "resetting", "finalizing", "launched", "failed"].includes(
+        receipt.phase,
+      ) ||
       receipt.branch.length === 0 ||
       !/^[0-9a-f]{40}$/.test(receipt.headSha) ||
       [receipt.statePath, receipt.resultJsonPath, receipt.executorLogPath].some(
@@ -1286,7 +1337,19 @@ function readNoMistakesHandoffReceipt(
         throw new Error("stored handoff finalization receipt is incomplete");
       }
     }
-    if (receipt.phase === "finalizing" || receipt.phase === "launched") {
+    if (
+      receipt.phase === "failed" &&
+      (typeof receipt.failureSummary !== "string" ||
+        receipt.failureSummary.trim().length === 0)
+    ) {
+      throw new Error("stored handoff failure evidence is incomplete");
+    }
+    if (
+      receipt.phase === "finalizing" ||
+      receipt.phase === "launched" ||
+      receipt.phase === "resetting" ||
+      receipt.phase === "failed"
+    ) {
       const identity = receipt.externalIdentity;
       if (
         identity === undefined ||
@@ -1294,15 +1357,11 @@ function readNoMistakesHandoffReceipt(
         identity.branch !== receipt.branch ||
         !commitIdentitiesMatch(identity.headSha, receipt.headSha) ||
         (receipt.terminalProofHeadSha !== undefined &&
-          (!delegateStateHeadMatchesRepo(
+          !isGitDescendant(
             input.repoPath,
+            identity.headSha,
             receipt.terminalProofHeadSha,
-          ) ||
-            !isGitDescendant(
-              input.repoPath,
-              identity.headSha,
-              receipt.terminalProofHeadSha,
-            )))
+          ))
       ) {
         throw new Error("stored handoff identity is incomplete");
       }
@@ -1496,7 +1555,10 @@ function readNoMistakesLaunchIdentity(input: {
   headSha: string;
 }): ReturnType<typeof parseNoMistakesLaunchIdentity> {
   try {
-    const raw = fs.readFileSync(input.executorLogPath, "utf8");
+    const raw = readBoundedRegularFile(
+      input.executorLogPath,
+      "no-mistakes launch evidence",
+    ).toString("utf8");
     return parseNoMistakesLaunchIdentity(raw, {
       branch: input.branch,
       headSha: input.headSha,
@@ -1565,17 +1627,18 @@ function refreshNoMistakesState(input: {
   if (!status.ok) throw new Error(status.error);
   if (
     input.terminalProofHeadSha !== undefined &&
-    (!/^[0-9a-f]{40}$/.test(input.terminalProofHeadSha) ||
-      !delegateStateHeadMatchesRepo(input.repoPath, input.terminalProofHeadSha))
+    !/^[0-9a-f]{40}$/.test(input.terminalProofHeadSha)
   ) {
     throw new Error(
-      `no-mistakes terminal proof head ${input.terminalProofHeadSha} does not match the current repository head`,
+      `no-mistakes terminal proof head ${input.terminalProofHeadSha} is not a canonical full commit SHA`,
     );
   }
-  const observed = settleNoMistakesHandoffState(
-    status,
-    input.terminalProofHeadSha ?? null,
-  );
+  const currentTerminalProof =
+    input.terminalProofHeadSha !== undefined &&
+    delegateStateHeadMatchesRepo(input.repoPath, input.terminalProofHeadSha)
+      ? input.terminalProofHeadSha
+      : null;
+  const observed = settleNoMistakesHandoffState(status, currentTerminalProof);
   writeJsonAtomically(input.statePath, observed.value);
   return observed;
 }

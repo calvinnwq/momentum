@@ -28,6 +28,7 @@ import type {
   DelegateSupervisorDecision,
   DelegateSupervisorExternalIdentity,
   DelegateSupervisorExternalState,
+  DelegateSupervisorExternalStateRead,
   DelegateSupervisorHandoff,
   DelegateSupervisorHostBindings,
   DelegateSupervisorToolAdapter,
@@ -351,9 +352,9 @@ export class DelegateSupervisorExecutor implements Executor<
 
     context.signal.throwIfAborted();
     const observedAt = context.hostBindings.now?.() ?? Date.now();
-    let read;
+    let rawRead: unknown;
     try {
-      read = await adapter.readExternalState({
+      rawRead = await adapter.readExternalState({
         invocation: context.state.invocation,
         config: context.config,
         signal: context.signal,
@@ -362,11 +363,20 @@ export class DelegateSupervisorExecutor implements Executor<
     } catch (error) {
       if (context.signal.aborted && error === context.signal.reason)
         throw error;
-      read = {
+      rawRead = {
         ok: false as const,
         error: `Delegated external-state read failed: ${errorMessage(error)}`,
       };
     }
+    const validatedRead = validateExternalStateRead(rawRead);
+    if (!validatedRead.ok) {
+      const decision = classifyDelegateSupervisorUnreadable(
+        `Delegated external-state read response is unreadable: ${validatedRead.error}`,
+      );
+      observeDecision(context, roundId, decision, null, null, observedAt);
+      return tickResult(roundId, decision);
+    }
+    let read = validatedRead.value;
     if (read.ok) {
       const validation = classifyDelegateSupervisorState(read.value);
       if (validation.recoveryCode === "external_state_unreadable") {
@@ -649,15 +659,13 @@ function mirrorEvidence(
       ...projection,
     });
   }
-  const hasUnresolvedDecision = state.decisions.some(
-    (decision) =>
-      typeof decision.resolution !== "string" ||
-      decision.resolution.trim().length === 0,
-  );
   const decisions =
-    state.stepStatus === "awaiting_approval" && !hasUnresolvedDecision
+    state.stepStatus === "awaiting_approval"
       ? [
-          ...state.decisions,
+          ...state.decisions.filter(
+            (decision) =>
+              decision.externalId !== SYNTHETIC_APPROVAL_EXTERNAL_ID,
+          ),
           {
             externalId: SYNTHETIC_APPROVAL_EXTERNAL_ID,
             summary: "Approve the delegated tool boundary.",
@@ -1119,6 +1127,55 @@ function isLaggingTerminalCorroboration(
         decision.resolution.trim().length > 0,
     )
   );
+}
+
+function validateExternalStateRead(
+  value: unknown,
+):
+  | { ok: true; value: DelegateSupervisorExternalStateRead }
+  | { ok: false; error: string } {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "response is not an object" };
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record["ok"] !== "boolean") {
+    return { ok: false, error: "response ok discriminator is not a boolean" };
+  }
+  if (record["ok"] === false) {
+    if (
+      typeof record["error"] !== "string" ||
+      record["error"].trim().length === 0
+    ) {
+      return { ok: false, error: "failed response error is missing" };
+    }
+    return {
+      ok: true,
+      value: { ok: false, error: record["error"] },
+    };
+  }
+  if (
+    typeof record["digest"] !== "string" ||
+    record["digest"].trim().length === 0
+  ) {
+    return { ok: false, error: "successful response digest is missing" };
+  }
+  if (
+    record["headRelation"] !== undefined &&
+    record["headRelation"] !== "verified_descendant"
+  ) {
+    return { ok: false, error: "successful response head relation is unknown" };
+  }
+  return {
+    ok: true,
+    value: {
+      ok: true,
+      value: record["value"] as DelegateSupervisorExternalState,
+      digest: record["digest"],
+      ...(record["headRelation"] === "verified_descendant"
+        ? { headRelation: record["headRelation"] }
+        : {}),
+    },
+  };
 }
 
 function assertHandoff(value: DelegateSupervisorHandoff): void {

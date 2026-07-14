@@ -1482,6 +1482,66 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("keeps the synthetic approval current alongside unresolved history", async () => {
+    const { db, invocation } = openDelegateDb();
+    const external = state({
+      activeStep: "publish",
+      stepStatus: "awaiting_approval",
+      decisions: [
+        {
+          externalId: "historical-review",
+          summary: "Choose how to resolve the historical review",
+          allowedActions: ["retry", "abort"],
+          recommendedAction: "retry",
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "handoff complete",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: "sha256:approval-with-unresolved-history",
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 10,
+    };
+    await driveExecutorTicks(input);
+    const gated = await driveExecutorTicks(input);
+
+    expect(gated.invocation.state).toBe("waiting_operator");
+    const unresolved = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+    })
+      .snapshot()
+      .currentRound?.decisions.filter(
+        (decision) => decision.chosenAction === null,
+      );
+    expect(unresolved?.at(-1)).toMatchObject({
+      externalRef: "delegate-supervisor:synthetic-approval-gate",
+      allowedActions: ["approve", "reject"],
+      recommendedAction: "approve",
+    });
+    db.close();
+  });
+
   it("versions resolved decision evidence when a gated round resumes", async () => {
     const { db, invocation } = openDelegateDb();
     let external = state({
@@ -1779,6 +1839,71 @@ describe("delegate-supervisor SDK executor", () => {
     });
     db.close();
   });
+
+  it.each([
+    ["failure without an error string", { ok: false, error: null }],
+    [
+      "success without an exact-source digest",
+      {
+        ok: true,
+        value: state({
+          activeStep: null,
+          stepStatus: "completed",
+          ciState: "passed",
+        }),
+      },
+    ],
+    [
+      "success with an unknown head relation",
+      {
+        ok: true,
+        value: state(),
+        digest: "sha256:invalid-head-relation",
+        headRelation: "same-branch",
+      },
+    ],
+  ] as const)(
+    "routes malformed adapter envelope %s to unreadable recovery",
+    async (_label, malformedRead) => {
+      const { db, invocation } = openDelegateDb();
+      const adapter: DelegateSupervisorToolAdapter = {
+        name: "no-mistakes",
+        handoff: () => ({
+          externalIdentity: {
+            externalRunId: "nm-run-1",
+            branch: "feature/delegate-supervisor",
+            headSha: HEAD,
+          },
+          summary: "handoff complete",
+        }),
+        readExternalState: () => malformedRead as never,
+      };
+      const executor = new DelegateSupervisorExecutor();
+      const bindings = { tools: new Map([[adapter.name, adapter]]) };
+      await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor,
+        config: { tool: "no-mistakes" },
+        hostBindings: bindings,
+        now: () => 10,
+      });
+      const result = await driveExecutorTicks({
+        db,
+        invocationId: invocation.invocationId,
+        executor,
+        config: { tool: "no-mistakes" },
+        hostBindings: bindings,
+        now: () => 20,
+      });
+
+      expect(result.lastRound).toMatchObject({
+        classification: "manual_recovery_required",
+        recoveryCode: "external_state_unreadable",
+      });
+      db.close();
+    },
+  );
 
   it("propagates cancellation raised while reading delegated state", async () => {
     const { db, invocation } = openDelegateDb();

@@ -370,6 +370,73 @@ describe("profile-backed delegate handoff artifacts", () => {
     },
   );
 
+  it("rejects symbolic-link no-mistakes launch evidence", async () => {
+    const repoPath = initRepo();
+    const branch = runGit(repoPath, ["branch", "--show-current"]);
+    const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+    const root = path.join(repoPath, ".agent-workflows", "symlink-launch-log");
+    fs.mkdirSync(root, { recursive: true });
+    const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+    const statePath = path.join(root, "delegate-external-state.json");
+    const resultJsonPath = path.join(root, "result.json");
+    const executorLogPath = path.join(root, "executor.log");
+    const realExecutorLogPath = path.join(root, "real-executor.log");
+    const verificationLogPath = path.join(root, "verification.log");
+    const invocationId = "symlink-launch-log::step::dispatch";
+    fs.writeFileSync(realExecutorLogPath, 'run:\n  id: "nm-run-1"\n');
+    fs.symlinkSync(realExecutorLogPath, executorLogPath);
+    fs.writeFileSync(
+      handoffReceiptPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        invocationId,
+        attempt: 1,
+        phase: "launching",
+        branch,
+        headSha,
+        statePath,
+        resultJsonPath,
+        executorLogPath,
+      }),
+    );
+    const adapter = createProfileBackedDelegateToolAdapter({
+      tool: "no-mistakes",
+      invocationId,
+      attempt: 1,
+      branch,
+      headSha,
+      statePath,
+      handoffReceiptPath,
+      resultJsonPath,
+      executorLogPath,
+      repoPath,
+      repoSafety: {
+        baseHead: headSha,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath,
+      },
+      run: () => {
+        throw new Error("unexpected launch");
+      },
+      statusCommand: "/usr/bin/false",
+      statusArgsPrefix: [],
+      statusEnv: {},
+      legacyPaths: {
+        rootDir: root,
+        handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+      },
+    });
+
+    await expect(
+      adapter.recoverHandoff!({
+        invocation: {} as never,
+        config: { tool: "no-mistakes" },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/launch evidence.*bounded regular file/);
+  });
+
   it("namespaces attempt-one artifacts by step", async () => {
     const dataDir = tempDir();
     const repoPath = initRepo();
@@ -809,6 +876,203 @@ describe("profile-backed delegate handoff artifacts", () => {
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoPath,
+          ".agent-workflows",
+          runId,
+          "no-mistakes-launch-count",
+        ),
+        "utf8",
+      ),
+    ).toBe("1\n");
+    db.close();
+  });
+
+  it("uses fresh descendant status when cached terminal proof is stale", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    const runId = "no-mistakes-stale-terminal-proof";
+    const stepId = "no-mistakes";
+    const profile = writeNoMistakesProfile(tempDir());
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+      tool: "no-mistakes",
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+
+    const stepRoot = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as {
+      terminalProofHeadSha: string;
+    };
+    fs.writeFileSync(path.join(repoPath, "descendant.txt"), "new head\n");
+    runGit(repoPath, ["add", "descendant.txt"]);
+    runGit(repoPath, ["commit", "--quiet", "-m", "test: advance head"]);
+    const descendantHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+    expect(receipt.terminalProofHeadSha).not.toBe(descendantHead);
+    fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+    reopenInterruptedHandoff(db, runId, stepId);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 3,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT commit_sha FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+        )
+        .get(runId),
+    ).toEqual({ commit_sha: descendantHead });
+    db.close();
+  });
+
+  it("does not settle success after no-mistakes verification failure", async () => {
+    const dataDir = tempDir();
+    const repoPath = initRepo();
+    fs.writeFileSync(
+      path.join(repoPath, "MOMENTUM.md"),
+      "---\nverification:\n  - /usr/bin/false\nverification_timeout_sec: 5\n---\n",
+    );
+    runGit(repoPath, ["add", "MOMENTUM.md"]);
+    runGit(repoPath, ["commit", "--quiet", "-m", "test: fail verification"]);
+    const runId = "no-mistakes-verification-failure";
+    const stepId = "no-mistakes";
+    const profile = writeNoMistakesProfile(tempDir());
+    const db = prepareRun({
+      dataDir,
+      repoPath,
+      runId,
+      stepKeys: [stepId],
+      tool: "no-mistakes",
+    });
+    const resolved = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!resolved.ok) throw new Error(resolved.message);
+
+    await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+      db,
+      workerId: "delegate-test-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "manual_recovery_required" });
+    const stepRoot = path.join(
+      repoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(receipt).toMatchObject({ phase: "failed" });
+    expect(fs.existsSync(path.join(repoPath, "no-mistakes.txt"))).toBe(false);
+    receipt["phase"] = "resetting";
+    delete receipt["failureSummary"];
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+    const recoveryRepoPath = fs.realpathSync(repoPath);
+    const recoveryStepRoot = path.join(
+      recoveryRepoPath,
+      ".agent-workflows",
+      runId,
+      "delegate",
+      stepId,
+    );
+    const recoveryAdapter = createProfileBackedDelegateToolAdapter({
+      tool: "no-mistakes",
+      invocationId: `${runId}::${stepId}::dispatch`,
+      attempt: 2,
+      branch: runGit(repoPath, ["branch", "--show-current"]),
+      headSha: runGit(repoPath, ["rev-parse", "HEAD"]),
+      statePath: path.join(recoveryStepRoot, "delegate-external-state.json"),
+      handoffReceiptPath: path.join(recoveryStepRoot, "delegate-handoff.json"),
+      resultJsonPath: path.join(recoveryStepRoot, "result.json"),
+      executorLogPath: path.join(recoveryStepRoot, "executor.log"),
+      repoPath: recoveryRepoPath,
+      repoSafety: {
+        baseHead: runGit(repoPath, ["rev-parse", "HEAD"]),
+        verificationCommands: ["/usr/bin/false"],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(recoveryStepRoot, "verification.log"),
+      },
+      run: () => {
+        throw new Error("interrupted reset must not relaunch");
+      },
+      statusCommand: "/usr/bin/false",
+      statusArgsPrefix: [],
+      statusEnv: {},
+      legacyPaths: {
+        rootDir: path.join(recoveryRepoPath, ".agent-workflows", runId),
+        handoffReceiptPath: path.join(
+          recoveryRepoPath,
+          ".agent-workflows",
+          runId,
+          "delegate-handoff.json",
+        ),
+      },
+    });
+
+    await expect(
+      recoveryAdapter.recoverHandoff!({
+        invocation: {} as never,
+        config: { tool: "no-mistakes" },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("interrupted during failure reset");
     expect(
       fs.readFileSync(
         path.join(
