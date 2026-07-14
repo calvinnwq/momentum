@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -756,6 +757,20 @@ fi
         const statusCommand = path.join(root, "status.sh");
         const invocationId =
           "failed-finalization-active-run::no-mistakes::dispatch";
+        const resultContent = JSON.stringify({
+          success: true,
+          summary: "prior no-mistakes run completed",
+          key_changes_made: [],
+          key_learnings: [],
+          remaining_work: [],
+          goal_complete: false,
+          commit: {
+            type: "test",
+            subject: "complete no-mistakes",
+            body: "",
+            breaking: false,
+          },
+        });
         fs.writeFileSync(
           handoffReceiptPath,
           JSON.stringify({
@@ -773,26 +788,14 @@ fi
               branch,
               headSha,
             },
+            resultDigest: `sha256:${crypto
+              .createHash("sha256")
+              .update(resultContent)
+              .digest("hex")}`,
             failureSummary: "local verification failed",
           }),
         );
-        fs.writeFileSync(
-          resultJsonPath,
-          JSON.stringify({
-            success: true,
-            summary: "prior no-mistakes run completed",
-            key_changes_made: [],
-            key_learnings: [],
-            remaining_work: [],
-            goal_complete: false,
-            commit: {
-              type: "test",
-              subject: "complete no-mistakes",
-              body: "",
-              breaking: false,
-            },
-          }),
-        );
+        fs.writeFileSync(resultJsonPath, resultContent);
         fs.writeFileSync(
           statusCommand,
           `#!/bin/sh
@@ -861,6 +864,135 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           externalRunId: "nm-run-active",
           stepStatus: "running",
         });
+      },
+    );
+
+    it.each(["finalizing", "failed"] as const)(
+      "rejects a changed no-mistakes result before %s recovery",
+      async (phase) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const root = path.join(
+          repoPath,
+          ".agent-workflows",
+          `changed-result-${phase}`,
+        );
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const statePath = path.join(root, "delegate-external-state.json");
+        const resultJsonPath = path.join(root, "result.json");
+        const executorLogPath = path.join(root, "executor.log");
+        const verificationLogPath = path.join(root, "verification.log");
+        const statusCommand = path.join(root, "status.sh");
+        const invocationId = `changed-result-${phase}::no-mistakes::dispatch`;
+        const originalResult = JSON.stringify({
+          success: true,
+          summary: "no-mistakes completed",
+          key_changes_made: ["changed tracked.txt"],
+          key_learnings: [],
+          remaining_work: [],
+          goal_complete: false,
+          commit: {
+            type: "test",
+            subject: "complete no-mistakes",
+            body: "",
+            breaking: false,
+          },
+        });
+        fs.writeFileSync(resultJsonPath, originalResult);
+        fs.writeFileSync(path.join(repoPath, "tracked.txt"), "changed\n");
+        runGit(repoPath, ["add", "-A"]);
+        const expectedTree = runGit(repoPath, ["write-tree"]);
+        runGit(repoPath, ["reset", "--quiet", headSha]);
+        fs.writeFileSync(
+          handoffReceiptPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            invocationId,
+            attempt: 1,
+            phase,
+            branch,
+            headSha,
+            statePath,
+            resultJsonPath,
+            executorLogPath,
+            externalIdentity: {
+              externalRunId: "nm-run-changed-result",
+              branch,
+              headSha,
+            },
+            resultDigest: `sha256:${crypto
+              .createHash("sha256")
+              .update(originalResult)
+              .digest("hex")}`,
+            ...(phase === "finalizing"
+              ? {
+                  expectedTree,
+                  expectedMessage: "test: complete no-mistakes",
+                }
+              : { failureSummary: "local finalization failed" }),
+          }),
+        );
+        fs.writeFileSync(
+          resultJsonPath,
+          JSON.stringify({ ...JSON.parse(originalResult), success: false }),
+        );
+        fs.writeFileSync(
+          statusCommand,
+          `#!/bin/sh
+printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  ci,running,0,1\n'
+`,
+        );
+        fs.chmodSync(statusCommand, 0o755);
+        const mutations: Array<"commit" | "reset"> = [];
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool: "no-mistakes",
+          invocationId,
+          attempt: 2,
+          branch,
+          headSha,
+          statePath,
+          handoffReceiptPath,
+          resultJsonPath,
+          executorLogPath,
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath,
+            beforeGitMutation: (mutation) => {
+              mutations.push(mutation);
+              return { ok: true };
+            },
+          },
+          run: () => {
+            throw new Error("changed recovery result must not relaunch");
+          },
+          statusCommand,
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        });
+
+        await expect(
+          adapter.recoverHandoff!({
+            invocation: {} as never,
+            config: { tool: "no-mistakes" },
+            signal: new AbortController().signal,
+          }),
+        ).rejects.toThrow(
+          "stored no-mistakes handoff result does not match its durable finalization receipt",
+        );
+        expect(mutations).toEqual([]);
+        expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+        expect(
+          fs.readFileSync(path.join(repoPath, "tracked.txt"), "utf8"),
+        ).toBe("changed\n");
       },
     );
 

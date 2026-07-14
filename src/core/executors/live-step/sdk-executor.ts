@@ -263,24 +263,21 @@ export function finalizeLiveStepResult(
   if (!result.ok || safety === undefined || result.result.state === "skipped") {
     return result;
   }
-  const ownership = safety.beforeGitMutation?.("commit");
   const finalize: FinalizeWorkflowStepFromResultFileResult =
-    ownership?.ok === false
-      ? { outcome: "repo_lock_lost", error: ownership.error }
-      : finalizeWorkflowStepFromResultFile({
-          repoPath,
-          baseHead: safety.baseHead,
-          resultFilePath: result.resultJsonPath,
-          verificationCommands: [...safety.verificationCommands],
-          verificationTimeoutSec: safety.verificationTimeoutSec,
-          verificationLogPath: safety.verificationLogPath,
-          ...(safety.beforeGitMutation !== undefined
-            ? { beforeGitMutation: safety.beforeGitMutation }
-            : {}),
-          ...(safety.beforeCommit !== undefined
-            ? { beforeCommit: safety.beforeCommit }
-            : {}),
-        });
+    finalizeWorkflowStepFromResultFile({
+      repoPath,
+      baseHead: safety.baseHead,
+      resultFilePath: result.resultJsonPath,
+      verificationCommands: [...safety.verificationCommands],
+      verificationTimeoutSec: safety.verificationTimeoutSec,
+      verificationLogPath: safety.verificationLogPath,
+      ...(safety.beforeGitMutation !== undefined
+        ? { beforeGitMutation: safety.beforeGitMutation }
+        : {}),
+      ...(safety.beforeCommit !== undefined
+        ? { beforeCommit: safety.beforeCommit }
+        : {}),
+    });
   switch (finalize.outcome) {
     case "committed":
       return withVerificationArtifact(result, safety.verificationLogPath);

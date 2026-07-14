@@ -97,6 +97,7 @@ type NoMistakesDelegateReceipt = {
   resultJsonPath: string;
   executorLogPath: string;
   externalIdentity?: DelegateSupervisorExternalIdentity;
+  resultDigest?: string | null;
   expectedTree?: string;
   expectedMessage?: string;
   failureSummary?: string;
@@ -847,6 +848,26 @@ function fileDigest(filePath: string): string | null {
   }
 }
 
+function resultDigestMatches(
+  expectedDigest: string | null | undefined,
+  resultJsonPath: string,
+): expectedDigest is string {
+  return (
+    typeof expectedDigest === "string" &&
+    fileDigest(resultJsonPath) === expectedDigest
+  );
+}
+
+function assertNoMistakesResultMatchesReceipt(
+  receipt: NoMistakesDelegateReceipt,
+): void {
+  if (!resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)) {
+    throw new Error(
+      "stored no-mistakes handoff result does not match its durable finalization receipt",
+    );
+  }
+}
+
 function readBoundedResultFile(filePath: string): Buffer {
   return readBoundedRegularFile(filePath, "result");
 }
@@ -971,9 +992,11 @@ function createProfileNoMistakesToolAdapter(
       headSha: launchingReceipt.headSha,
     });
     if (!launchIdentity.ok) throw new Error(launchIdentity.error);
+    const resultDigest = fileDigest(input.resultJsonPath);
     let preparedReceipt: NoMistakesDelegateReceipt = {
       ...launchingReceipt,
       externalIdentity: launchIdentity.value,
+      resultDigest,
     };
     const finalized = finalizeLiveStepResult(
       raw,
@@ -984,6 +1007,13 @@ function createProfileNoMistakesToolAdapter(
           const ownership = input.repoSafety.beforeGitMutation?.(mutation);
           if (ownership?.ok === false) return ownership;
           if (mutation !== "reset") return { ok: true };
+          if (!resultDigestMatches(resultDigest, input.resultJsonPath)) {
+            return {
+              ok: false,
+              error:
+                "delegated no-mistakes result no longer matches its completed handoff",
+            };
+          }
           preparedReceipt = {
             ...preparedReceipt,
             phase: "resetting",
@@ -1000,6 +1030,13 @@ function createProfileNoMistakesToolAdapter(
           }
         },
         beforeCommit: (evidence) => {
+          if (!resultDigestMatches(resultDigest, input.resultJsonPath)) {
+            return {
+              ok: false,
+              error:
+                "delegated no-mistakes result no longer matches its completed handoff",
+            };
+          }
           const prepared = input.repoSafety.beforeCommit?.(evidence);
           if (prepared?.ok === false) return prepared;
           preparedReceipt = {
@@ -1265,6 +1302,7 @@ function retryFailedNoMistakesFinalization(
   receipt: NoMistakesDelegateReceipt,
 ): NoMistakesDelegateReceipt {
   let preparedReceipt = receipt;
+  assertNoMistakesResultMatchesReceipt(receipt);
   const raw = readRecoveredLiveWrapperResult(receipt);
   const finalized = finalizeLiveStepResult(
     raw,
@@ -1449,6 +1487,9 @@ function readNoMistakesHandoffReceipt(
       ...(stored.externalIdentity !== undefined
         ? { externalIdentity: stored.externalIdentity }
         : {}),
+      ...(stored.resultDigest !== undefined
+        ? { resultDigest: stored.resultDigest }
+        : {}),
       ...(stored.expectedTree !== undefined
         ? { expectedTree: stored.expectedTree }
         : {}),
@@ -1474,7 +1515,10 @@ function readNoMistakesHandoffReceipt(
           !isPathWithin(input.legacyPaths.rootDir, candidate),
       ) ||
       (receipt.terminalProofHeadSha !== undefined &&
-        !/^[0-9a-f]{40}$/.test(receipt.terminalProofHeadSha))
+        !/^[0-9a-f]{40}$/.test(receipt.terminalProofHeadSha)) ||
+      (receipt.resultDigest !== undefined &&
+        receipt.resultDigest !== null &&
+        !/^sha256:[0-9a-f]{64}$/.test(receipt.resultDigest))
     ) {
       throw new Error("stored handoff receipt is incomplete");
     }
@@ -1482,7 +1526,8 @@ function readNoMistakesHandoffReceipt(
       if (
         typeof receipt.expectedTree !== "string" ||
         !/^[0-9a-f]{40}$/.test(receipt.expectedTree) ||
-        typeof receipt.expectedMessage !== "string"
+        typeof receipt.expectedMessage !== "string" ||
+        typeof receipt.resultDigest !== "string"
       ) {
         throw new Error("stored handoff finalization receipt is incomplete");
       }
@@ -1528,6 +1573,7 @@ function recoverPreparedNoMistakesCommit(
   input: ProfileBackedDelegateToolInput,
   receipt: NoMistakesDelegateReceipt,
 ): NoMistakesDelegateReceipt {
+  assertNoMistakesResultMatchesReceipt(receipt);
   const currentHead = resolveCurrentHead(input.repoPath, "");
   let terminalProofHeadSha: string;
   if (currentHead !== receipt.headSha) {
