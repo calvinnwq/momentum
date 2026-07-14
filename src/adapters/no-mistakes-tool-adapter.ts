@@ -111,7 +111,6 @@ export function settleNoMistakesHandoffState(
     findings: [],
     selectedFindingIds: [],
     decisions: [],
-    ciState: read.value.ciState,
   };
   return {
     ok: true,

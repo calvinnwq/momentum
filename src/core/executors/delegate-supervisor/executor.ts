@@ -372,21 +372,14 @@ export class DelegateSupervisorExecutor implements Executor<
       const decision = classifyDelegateSupervisorUnreadable(
         `Delegated external-state read response is unreadable: ${validatedRead.error}`,
       );
-      observeDecision(context, roundId, decision, null, null, observedAt);
+      observeDecision(context, roundId, decision, null, null);
       return tickResult(roundId, decision);
     }
     let read = validatedRead.value;
     if (read.ok) {
       const validation = classifyDelegateSupervisorState(read.value);
       if (validation.recoveryCode === "external_state_unreadable") {
-        observeDecision(
-          context,
-          roundId,
-          validation,
-          read.digest,
-          null,
-          observedAt,
-        );
+        observeDecision(context, roundId, validation, read.digest, null);
         return tickResult(roundId, validation);
       }
       if (
@@ -412,20 +405,13 @@ export class DelegateSupervisorExecutor implements Executor<
 
     if (!read.ok) {
       const decision = classifyDelegateSupervisorUnreadable(read.error);
-      observeDecision(context, roundId, decision, null, null, observedAt);
+      observeDecision(context, roundId, decision, null, null);
       return tickResult(roundId, decision);
     }
 
     let decision = classifyDelegateSupervisorState(read.value);
     if (decision.recoveryCode === "external_state_unreadable") {
-      observeDecision(
-        context,
-        roundId,
-        decision,
-        read.digest,
-        null,
-        observedAt,
-      );
+      observeDecision(context, roundId, decision, read.digest, null);
       return tickResult(roundId, decision);
     }
     const progressDigest = delegateSupervisorProgressDigest(read.value);
@@ -475,7 +461,6 @@ export class DelegateSupervisorExecutor implements Executor<
       identityMismatch === null
         ? { state: read.value, progressDigest, progressAt, observedAt }
         : null,
-      observedAt,
     );
     return tickResult(roundId, decision);
   }
@@ -581,7 +566,6 @@ function observeDecision(
   decision: DelegateSupervisorDecision,
   inputDigest: string | null,
   mirrored: MirroredCheckpoint | null,
-  observedAt: number,
 ): void {
   const snapshot = context.envelope.snapshot();
   const current = snapshot.rounds.find(
@@ -615,7 +599,6 @@ function observeDecision(
   // A facade write is the durable liveness signal; keep this explicit for a
   // read failure where there may be no checkpoint batch.
   if (mirrored === null) context.envelope.heartbeat();
-  void observedAt;
 }
 
 function mirrorEvidence(
