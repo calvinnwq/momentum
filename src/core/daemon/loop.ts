@@ -7,19 +7,20 @@ import {
   recordDaemonRunReconciliation,
   setDaemonRunActiveJob,
   type DaemonCancelOutcome,
-  type DaemonRunState
+  type DaemonRunState,
 } from "./runs.js";
 import {
   runStartupRecovery,
-  type StartupRecoveryResult
+  type StartupRecoveryResult,
 } from "./stale-recovery.js";
 import {
   runWorkflowSchedulerOnceAsync,
   type RunWorkflowSchedulerOnceAsyncInput,
   type RunWorkflowSchedulerOnceResult,
-  type AsyncWorkflowStepDispatch
+  type AsyncWorkflowStepDispatch,
 } from "../workflow/dispatch/scheduler.js";
 import type { WorkflowLeaseStalePolicy } from "../workflow/run/reducer.js";
+import { WORKFLOW_DISPATCH_RESULT_STATUS } from "../workflow/dispatch/execute.js";
 
 export const DEFAULT_DAEMON_POLL_INTERVAL_MS = 500;
 export const DEFAULT_DAEMON_WORKER_LEASE_MS = 30_000;
@@ -143,17 +144,17 @@ export type DaemonLoopResult = {
 };
 
 export async function runDaemonLoop(
-  input: DaemonLoopInput
+  input: DaemonLoopInput,
 ): Promise<DaemonLoopResult> {
   const now = input.now ?? (() => Date.now());
   const sleep = input.sleep ?? defaultSleep;
   const pollIntervalMs = normalizePositive(
     input.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
-    "pollIntervalMs"
+    "pollIntervalMs",
   );
   normalizePositive(
     input.leaseDurationMs ?? DEFAULT_DAEMON_WORKER_LEASE_MS,
-    "leaseDurationMs"
+    "leaseDurationMs",
   );
   const maxLoopIterations = input.maxLoopIterations ?? Infinity;
   const maxIdleCycles = input.maxIdleCycles ?? Infinity;
@@ -181,11 +182,11 @@ export async function runDaemonLoop(
             runId: input.runId,
             jobId: `workflow:${claim.runId}:${claim.stepId}`,
             lockId: null,
-            now: context.now
+            now: context.now,
           });
           heartbeatDaemonRun(input.db, {
             runId: input.runId,
-            now: context.now
+            now: context.now,
           });
           try {
             return await workflowLane.dispatch(claim, context);
@@ -194,32 +195,34 @@ export async function runDaemonLoop(
               runId: input.runId,
               jobId: null,
               lockId: null,
-              now: context.now
+              now: context.now,
             });
             heartbeatDaemonRun(input.db, {
               runId: input.runId,
-              now: context.now
+              now: context.now,
             });
           }
         };
 
   const markInternalError = (error: unknown): void => {
-    internalErrorMessage = error instanceof Error ? error.message : String(error);
+    internalErrorMessage =
+      error instanceof Error ? error.message : String(error);
     exitReason = "internal_error";
   };
 
   if (input.skipStartupRecovery !== true) {
     try {
       const recoveryGraceMs =
-        input.startupRecoveryGraceMs ?? DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
+        input.startupRecoveryGraceMs ??
+        DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
       startupRecovery = mergeStartupRecoveryResults(
         input.preLoopStartupRecovery ?? null,
         runStartupRecovery(input.db, {
           now: now(),
           graceMs: recoveryGraceMs,
           dataDir: input.dataDir,
-          daemonRuns: { excludeRunId: input.runId }
-        })
+          daemonRuns: { excludeRunId: input.runId },
+        }),
       );
     } catch (error) {
       markInternalError(error);
@@ -232,14 +235,14 @@ export async function runDaemonLoop(
     cycleIndex: number,
     observedState: DaemonRunState,
     startedAt: number,
-    workflowResult?: RunWorkflowSchedulerOnceResult
+    workflowResult?: RunWorkflowSchedulerOnceResult,
   ): boolean => {
     try {
       input.onCycleComplete?.({
         cycleIndex,
         observedState,
         startedAt,
-        ...(workflowResult !== undefined ? { workflowResult } : {})
+        ...(workflowResult !== undefined ? { workflowResult } : {}),
       });
       return true;
     } catch (error) {
@@ -282,7 +285,7 @@ export async function runDaemonLoop(
       heartbeatDaemonRun(input.db, { runId: input.runId, now: cycleStart });
       recordDaemonRunReconciliation(input.db, {
         runId: input.runId,
-        now: cycleStart
+        now: cycleStart,
       });
 
       // The retired goal-iteration drain used to claim a queued job here.
@@ -299,7 +302,7 @@ export async function runDaemonLoop(
           db: input.db,
           workerId: input.workerId,
           dispatch: dispatchWithHeartbeat,
-          now
+          now,
         };
         if (workflowLane.leaseDurationMs !== undefined) {
           schedulerInput.leaseDurationMs = workflowLane.leaseDurationMs;
@@ -315,18 +318,26 @@ export async function runDaemonLoop(
       }
 
       // A cycle is active (no idle increment, no poll sleep) only when the
-      // workflow lane dispatched work; otherwise it idles and waits a poll
-      // interval.
-      const cycleDidWork = workflowResult?.code === "dispatched";
+      // workflow lane starts or retries an invocation. A continuation-only SDK
+      // tick has already done its bounded poll, so it observes the configured
+      // interval before the next external-state read.
+      const cycleDidWork =
+        workflowResult?.code === "dispatched" &&
+        workflowResult.dispatch.status !==
+          WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched;
       if (cycleDidWork) {
-        if (!completeCycle(iterations - 1, run.state, cycleStart, workflowResult)) {
+        if (
+          !completeCycle(iterations - 1, run.state, cycleStart, workflowResult)
+        ) {
           break;
         }
         continue;
       }
 
       idleCycles += 1;
-      if (!completeCycle(iterations - 1, run.state, cycleStart, workflowResult)) {
+      if (
+        !completeCycle(iterations - 1, run.state, cycleStart, workflowResult)
+      ) {
         break;
       }
       await sleep(pollIntervalMs);
@@ -353,7 +364,7 @@ export async function runDaemonLoop(
         runId: input.runId,
         terminalState,
         now: finishNow,
-        error: internalErrorMessage
+        error: internalErrorMessage,
       });
     } catch {
       // Best effort: callers still receive an error result even if persistence
@@ -361,7 +372,10 @@ export async function runDaemonLoop(
     }
   } else if (exitReason === "run_missing") {
     terminalState = "error";
-  } else if (exitReason === "run_terminated" && lastObservedState === "canceled") {
+  } else if (
+    exitReason === "run_terminated" &&
+    lastObservedState === "canceled"
+  ) {
     terminalState = "canceled";
     cancelOutcome = getDaemonRun(input.db, input.runId)?.cancel_outcome ?? null;
   } else if (exitReason === "run_terminated" && lastObservedState === "error") {
@@ -376,7 +390,7 @@ export async function runDaemonLoop(
         runId: input.runId,
         terminalState,
         cancelOutcome,
-        now: finishNow
+        now: finishNow,
       });
     } catch (error) {
       markInternalError(error);
@@ -390,7 +404,7 @@ export async function runDaemonLoop(
         finishDaemonRun(input.db, {
           runId: input.runId,
           terminalState,
-          now: finishNow
+          now: finishNow,
         });
       } catch (error) {
         markInternalError(error);
@@ -416,7 +430,7 @@ export async function runDaemonLoop(
     lastWorkerCode,
     lastWorkflowCode,
     cancelOutcome,
-    startupRecovery
+    startupRecovery,
   };
   if (internalErrorMessage !== null) {
     result.error = internalErrorMessage;
@@ -433,7 +447,7 @@ function defaultSleep(ms: number): Promise<void> {
 
 function mergeStartupRecoveryResults(
   first: StartupRecoveryResult | null,
-  second: StartupRecoveryResult | null
+  second: StartupRecoveryResult | null,
 ): StartupRecoveryResult | null {
   if (first === null) return second;
   if (second === null) return first;
@@ -441,38 +455,31 @@ function mergeStartupRecoveryResults(
     observedAt: second.observedAt,
     graceMs: second.graceMs,
     repoLocks: {
-      recovered: [
-        ...first.repoLocks.recovered,
-        ...second.repoLocks.recovered
-      ],
-      skipped: [...first.repoLocks.skipped, ...second.repoLocks.skipped]
+      recovered: [...first.repoLocks.recovered, ...second.repoLocks.recovered],
+      skipped: [...first.repoLocks.skipped, ...second.repoLocks.skipped],
     },
     claimedJobs: {
       recovered: [
         ...first.claimedJobs.recovered,
-        ...second.claimedJobs.recovered
+        ...second.claimedJobs.recovered,
       ],
-      skipped: [
-        ...first.claimedJobs.skipped,
-        ...second.claimedJobs.skipped
-      ]
+      skipped: [...first.claimedJobs.skipped, ...second.claimedJobs.skipped],
     },
     daemonRuns: {
       recovered: [
         ...first.daemonRuns.recovered,
-        ...second.daemonRuns.recovered
+        ...second.daemonRuns.recovered,
       ],
-      skipped: [
-        ...first.daemonRuns.skipped,
-        ...second.daemonRuns.skipped
-      ]
-    }
+      skipped: [...first.daemonRuns.skipped, ...second.daemonRuns.skipped],
+    },
   };
 }
 
 function normalizePositive(value: number, name: string): number {
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`runDaemonLoop: ${name} must be a non-negative finite number`);
+    throw new Error(
+      `runDaemonLoop: ${name} must be a non-negative finite number`,
+    );
   }
   return value;
 }

@@ -98,6 +98,7 @@ export function settleNoMistakesHandoffState(
     return read;
   }
   const laggingMonitoringState =
+    read.value.activeStep === null &&
     read.value.stepStatus === "running" &&
     (read.value.ciState === "passed" || read.value.ciState === "none") &&
     (read.value.findings.length === 0 ||

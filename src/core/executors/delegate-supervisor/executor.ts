@@ -1129,6 +1129,7 @@ function isLaggingTerminalCorroboration(
     observed.externalRunId === terminal.externalRunId &&
     observed.branch === terminal.branch &&
     observed.headSha === terminal.headSha &&
+    observed.activeStep === null &&
     observed.stepStatus === "running" &&
     (observed.ciState === "passed" || observed.ciState === "none") &&
     observed.findings.length === 0 &&

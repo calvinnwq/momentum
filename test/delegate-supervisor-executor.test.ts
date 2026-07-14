@@ -776,7 +776,7 @@ describe("delegate-supervisor SDK executor", () => {
         reads += 1;
         return {
           ok: true,
-          value: state({ ciState: "passed" }),
+          value: state({ activeStep: null, ciState: "passed" }),
           digest: "sha256:fresh-head-corroboration",
         };
       },
@@ -816,6 +816,56 @@ describe("delegate-supervisor SDK executor", () => {
       recoveryCode: "tool_adapter_unavailable",
     });
     expect(reads).toBe(1);
+    db.close();
+  });
+
+  it("does not settle cached terminal state while fresh work remains active", async () => {
+    const { db, invocation } = openDelegateDb();
+    const completed = state({
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: completed.externalRunId,
+          branch: completed.branch,
+          headSha: completed.headSha,
+        },
+        summary: "checks passed during handoff",
+        terminalState: {
+          value: completed,
+          digest: "sha256:cached-terminal",
+        },
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: state({
+          activeStep: "review",
+          stepStatus: "running",
+          ciState: "passed",
+        }),
+        digest: "sha256:fresh-active-work",
+      }),
+    };
+
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      maxTicks: 2,
+      now: () => 6,
+    });
+
+    expect(result.invocation.state).toBe("running");
+    expect(result.lastRound).toMatchObject({
+      classification: "continue",
+      state: "succeeded",
+    });
     db.close();
   });
 
@@ -2949,6 +2999,7 @@ describe("no-mistakes tool adapter", () => {
   it.each([
     state({ activeStep: null, stepStatus: "failed", ciState: "failed" }),
     state({ activeStep: null, stepStatus: "cancelled" }),
+    state({ activeStep: "review", stepStatus: "running", ciState: "passed" }),
     state({
       activeStep: "review",
       stepStatus: "awaiting_decision",
@@ -2984,7 +3035,7 @@ describe("no-mistakes tool adapter", () => {
     (ciState) => {
       const read = {
         ok: true as const,
-        value: state({ ciState }),
+        value: state({ activeStep: null, ciState }),
         digest: `sha256:monitoring-${ciState}`,
       };
       const settled = settleNoMistakesHandoffState(read, HEAD);
