@@ -456,8 +456,140 @@ describe(
       ).rejects.toThrow(/launch evidence.*bounded regular file/);
     });
 
+    it.each([
+      {
+        expectedOutcome: "accepts",
+        verificationCommand: "/usr/bin/true",
+      },
+      {
+        expectedOutcome: "rejects",
+        verificationCommand: "/usr/bin/false",
+      },
+    ] as const)(
+      "$expectedOutcome a no-change no-mistakes handoff according to verification",
+      async ({ expectedOutcome, verificationCommand }) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const root = path.join(
+          repoPath,
+          ".agent-workflows",
+          `clean-handoff-${expectedOutcome}`,
+        );
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const statePath = path.join(root, "delegate-external-state.json");
+        const resultJsonPath = path.join(root, "result.json");
+        const executorLogPath = path.join(root, "executor.log");
+        const verificationLogPath = path.join(root, "verification.log");
+        const statusCommand = path.join(root, "status.sh");
+        const invocationId = `clean-handoff-${expectedOutcome}::no-mistakes::dispatch`;
+        fs.writeFileSync(
+          statusCommand,
+          `#!/bin/sh
+printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  head: ${headSha}\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n'
+`,
+        );
+        fs.chmodSync(statusCommand, 0o755);
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool: "no-mistakes",
+          invocationId,
+          attempt: 1,
+          branch,
+          headSha,
+          statePath,
+          handoffReceiptPath,
+          resultJsonPath,
+          executorLogPath,
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [verificationCommand],
+            verificationTimeoutSec: 5,
+            verificationLogPath,
+          },
+          run: () => {
+            fs.writeFileSync(executorLogPath, 'run:\n  id: "nm-run-clean"\n');
+            fs.writeFileSync(
+              resultJsonPath,
+              JSON.stringify({
+                success: true,
+                summary: "clean no-mistakes handoff launched",
+                key_changes_made: [],
+                key_learnings: [],
+                remaining_work: [],
+                goal_complete: false,
+                commit: {
+                  type: "test",
+                  subject: "launch no-mistakes",
+                  body: "",
+                  breaking: false,
+                },
+              }),
+            );
+            return {
+              ok: true,
+              result: {
+                state: "succeeded",
+                summary: "clean no-mistakes handoff launched",
+                checkpoints: [],
+                artifacts: [],
+                resultDigest: null,
+                errorCode: null,
+                errorMessage: null,
+                retryHint: null,
+                recoveryHint: null,
+              },
+              executorLogPath,
+              resultJsonPath,
+            };
+          },
+          statusCommand,
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        });
+
+        const context = {
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        };
+
+        if (expectedOutcome === "rejects") {
+          await expect(adapter.handoff(context)).rejects.toThrow(
+            /verification command 1 failed/,
+          );
+          expect(
+            JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+          ).toMatchObject({ attempt: 1, phase: "failed" });
+          expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+          expect(fs.readFileSync(verificationLogPath, "utf8")).toContain(
+            `[verify] running: ${verificationCommand}`,
+          );
+          return;
+        }
+
+        const handoff = await adapter.handoff(context);
+
+        expect(handoff.externalIdentity.externalRunId).toBe("nm-run-clean");
+        expect(handoff.terminalState?.value.stepStatus).toBe("completed");
+        expect(handoff.artifactPaths).toContain(verificationLogPath);
+        expect(fs.readFileSync(verificationLogPath, "utf8")).toContain(
+          `[verify] running: ${verificationCommand}`,
+        );
+        expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+        expect(
+          JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+        ).toMatchObject({ attempt: 1, phase: "launched" });
+      },
+    );
+
     it.each(["failed", "cancelled"] as const)(
-      "launches a fresh run after a prior-attempt no-mistakes run is %s",
+      "launches a fresh run after external status proves a locally failed prior handoff is %s",
       async (terminalStatus) => {
         const repoPath = initRepo();
         const branch = runGit(repoPath, ["branch", "--show-current"]);
@@ -482,7 +614,7 @@ describe(
             schemaVersion: 1,
             invocationId,
             attempt: 1,
-            phase: "launched",
+            phase: "failed",
             branch,
             headSha,
             statePath,
@@ -493,6 +625,7 @@ describe(
               branch,
               headSha,
             },
+            failureSummary: "local handoff finalization failed",
           }),
         );
         fs.writeFileSync(
@@ -592,6 +725,120 @@ fi
           attempt: 2,
           phase: "launched",
           externalIdentity: { externalRunId: "nm-run-new" },
+        });
+      },
+    );
+
+    it.each([
+      { reportedRunId: "nm-run-active", shouldReattach: true },
+      { reportedRunId: "nm-run-mismatched", shouldReattach: false },
+    ] as const)(
+      "reconciles a locally failed prior handoff against reported run $reportedRunId",
+      async ({ reportedRunId, shouldReattach }) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const root = path.join(
+          repoPath,
+          ".agent-workflows",
+          "failed-finalization-active-run",
+        );
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const statePath = path.join(root, "delegate-external-state.json");
+        const resultJsonPath = path.join(root, "result.json");
+        const executorLogPath = path.join(root, "executor.log");
+        const verificationLogPath = path.join(root, "verification.log");
+        const statusCommand = path.join(root, "status.sh");
+        const invocationId =
+          "failed-finalization-active-run::no-mistakes::dispatch";
+        fs.writeFileSync(
+          handoffReceiptPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            invocationId,
+            attempt: 1,
+            phase: "failed",
+            branch,
+            headSha,
+            statePath,
+            resultJsonPath,
+            executorLogPath,
+            externalIdentity: {
+              externalRunId: "nm-run-active",
+              branch,
+              headSha,
+            },
+            failureSummary: "local verification failed",
+          }),
+        );
+        fs.writeFileSync(
+          statusCommand,
+          `#!/bin/sh
+printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  ci,running,0,1\n'
+`,
+        );
+        fs.chmodSync(statusCommand, 0o755);
+        let launches = 0;
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool: "no-mistakes",
+          invocationId,
+          attempt: 2,
+          branch,
+          headSha,
+          statePath,
+          handoffReceiptPath,
+          resultJsonPath,
+          executorLogPath,
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath,
+          },
+          run: () => {
+            launches += 1;
+            throw new Error("duplicate launch");
+          },
+          statusCommand,
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        });
+
+        const context = {
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        };
+
+        if (!shouldReattach) {
+          await expect(adapter.recoverHandoff!(context)).rejects.toThrow(
+            /identity mismatch: expected nm-run-active/,
+          );
+          expect(launches).toBe(0);
+          expect(
+            JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+          ).toMatchObject({
+            attempt: 1,
+            phase: "failed",
+            externalIdentity: { externalRunId: "nm-run-active" },
+          });
+          return;
+        }
+
+        const handoff = await adapter.recoverHandoff!(context);
+
+        expect(launches).toBe(0);
+        expect(handoff.externalIdentity.externalRunId).toBe("nm-run-active");
+        expect(handoff.terminalState).toBeUndefined();
+        expect(JSON.parse(fs.readFileSync(statePath, "utf8"))).toMatchObject({
+          externalRunId: "nm-run-active",
+          stepStatus: "running",
         });
       },
     );
@@ -1650,7 +1897,7 @@ fi
       db.close();
     });
 
-    it("launches a fresh no-mistakes run after a failed prior attempt is cleared", async () => {
+    it("reattaches a completed no-mistakes run after local finalization failure is cleared", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();
       fs.writeFileSync(
@@ -1735,7 +1982,7 @@ fi
           ),
           "utf8",
         ),
-      ).toBe("2\n");
+      ).toBe("1\n");
       expect(
         JSON.parse(
           fs.readFileSync(
@@ -1750,7 +1997,22 @@ fi
             "utf8",
           ),
         ),
-      ).toMatchObject({ attempt: 2, phase: "launched" });
+      ).toMatchObject({ attempt: 1, phase: "failed" });
+      expect(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(
+              repoPath,
+              ".agent-workflows",
+              runId,
+              "delegate",
+              stepId,
+              "delegate-external-state.json",
+            ),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ externalRunId: "nm-run-1", stepStatus: "completed" });
       db.close();
     });
 

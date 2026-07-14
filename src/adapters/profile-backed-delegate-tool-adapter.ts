@@ -14,7 +14,9 @@ import {
 } from "./no-mistakes-tool-adapter.js";
 import { classifyDelegateSupervisorState } from "../core/executors/delegate-supervisor/classifier.js";
 import type {
+  DelegateSupervisorExternalIdentity,
   DelegateSupervisorExternalState,
+  DelegateSupervisorExternalStateRead,
   DelegateSupervisorHandoff,
   DelegateSupervisorToolAdapter,
 } from "../core/executors/delegate-supervisor/types.js";
@@ -94,11 +96,7 @@ type NoMistakesDelegateReceipt = {
   statePath: string;
   resultJsonPath: string;
   executorLogPath: string;
-  externalIdentity?: {
-    externalRunId: string;
-    branch: string;
-    headSha: string;
-  };
+  externalIdentity?: DelegateSupervisorExternalIdentity;
   expectedTree?: string;
   expectedMessage?: string;
   failureSummary?: string;
@@ -974,47 +972,54 @@ function createProfileNoMistakesToolAdapter(
       ...launchingReceipt,
       externalIdentity: launchIdentity.value,
     };
-    const finalized = finalizeLiveStepResult(raw, input.repoPath, {
-      ...input.repoSafety,
-      beforeGitMutation: (mutation) => {
-        const ownership = input.repoSafety.beforeGitMutation?.(mutation);
-        if (ownership?.ok === false) return ownership;
-        if (mutation !== "reset") return { ok: true };
-        preparedReceipt = {
-          ...preparedReceipt,
-          phase: "resetting",
-          externalIdentity: launchIdentity.value,
-        };
-        try {
-          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
-          return { ok: true };
-        } catch (error) {
-          return {
-            ok: false,
-            error: `delegated handoff receipt could not be persisted before reset: ${errorMessage(error)}`,
+    const finalized = finalizeLiveStepResult(
+      raw,
+      input.repoPath,
+      {
+        ...input.repoSafety,
+        beforeGitMutation: (mutation) => {
+          const ownership = input.repoSafety.beforeGitMutation?.(mutation);
+          if (ownership?.ok === false) return ownership;
+          if (mutation !== "reset") return { ok: true };
+          preparedReceipt = {
+            ...preparedReceipt,
+            phase: "resetting",
+            externalIdentity: launchIdentity.value,
           };
-        }
-      },
-      beforeCommit: (evidence) => {
-        const prepared = input.repoSafety.beforeCommit?.(evidence);
-        if (prepared?.ok === false) return prepared;
-        preparedReceipt = {
-          ...preparedReceipt,
-          phase: "finalizing",
-          expectedTree: evidence.expectedTree,
-          expectedMessage: evidence.message,
-        };
-        try {
-          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
-          return { ok: true };
-        } catch (error) {
-          return {
-            ok: false,
-            error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+          try {
+            writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+            return { ok: true };
+          } catch (error) {
+            return {
+              ok: false,
+              error: `delegated handoff receipt could not be persisted before reset: ${errorMessage(error)}`,
+            };
+          }
+        },
+        beforeCommit: (evidence) => {
+          const prepared = input.repoSafety.beforeCommit?.(evidence);
+          if (prepared?.ok === false) return prepared;
+          preparedReceipt = {
+            ...preparedReceipt,
+            phase: "finalizing",
+            expectedTree: evidence.expectedTree,
+            expectedMessage: evidence.message,
           };
-        }
+          try {
+            writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+            return { ok: true };
+          } catch (error) {
+            return {
+              ok: false,
+              error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+            };
+          }
+        },
       },
-    });
+      {
+        acceptVerifiedNoChanges: true,
+      },
+    );
     if (
       !isProvenClean(finalized) ||
       !finalized.ok ||
@@ -1163,10 +1168,11 @@ function recoverNoMistakesHandoff(
     );
   }
   if (receipt.phase === "failed") {
-    if (receipt.attempt < input.attempt) return null;
-    throw new Error(
-      `stored no-mistakes handoff failed finalization: ${receipt.failureSummary}`,
-    );
+    if (receipt.attempt >= input.attempt) {
+      throw new Error(
+        `stored no-mistakes handoff failed finalization: ${receipt.failureSummary}`,
+      );
+    }
   }
   const expected = receipt.externalIdentity!;
   const currentBranch = resolveDelegateBranch(input.repoPath);
@@ -1181,9 +1187,12 @@ function recoverNoMistakesHandoff(
     receipt.resultJsonPath,
     receipt.executorLogPath,
   ];
-  const persisted = readPersistedDelegateState(artifactPaths);
+  const locallyFailed = receipt.phase === "failed";
+  const persisted = locallyFailed
+    ? null
+    : readPersistedDelegateState(artifactPaths);
   if (
-    persisted.ok &&
+    persisted?.ok &&
     persisted.value.externalRunId === expected.externalRunId &&
     persisted.value.branch === expected.branch &&
     classifyDelegateSupervisorState(persisted.value).classification ===
@@ -1209,7 +1218,9 @@ function recoverNoMistakesHandoff(
       },
     };
   }
-  const previousState = readPreviousDelegateState(receipt.statePath);
+  const previousState = locallyFailed
+    ? undefined
+    : readPreviousDelegateState(receipt.statePath);
   const status = readNoMistakesStatus({
     repoPath: input.repoPath,
     command: input.statusCommand,
@@ -1221,8 +1232,9 @@ function recoverNoMistakesHandoff(
   if (!status.ok) throw new Error(status.error);
   const observed = settleNoMistakesHandoffState(
     status,
-    receipt.terminalProofHeadSha ?? null,
+    locallyFailed ? null : (receipt.terminalProofHeadSha ?? null),
   );
+  writeJsonAtomically(receipt.statePath, observed.value);
   if (
     receipt.attempt < input.attempt &&
     (observed.value.stepStatus === "failed" ||
@@ -1230,11 +1242,24 @@ function recoverNoMistakesHandoff(
   ) {
     return null;
   }
-  writeJsonAtomically(receipt.statePath, observed.value);
+  return recoveredNoMistakesHandoff(
+    input.repoPath,
+    expected,
+    artifactPaths,
+    observed,
+  );
+}
+
+function recoveredNoMistakesHandoff(
+  repoPath: string,
+  expected: DelegateSupervisorExternalIdentity,
+  artifactPaths: readonly string[],
+  observed: Extract<DelegateSupervisorExternalStateRead, { ok: true }>,
+): DelegateSupervisorHandoff {
   const terminal =
     classifyDelegateSupervisorState(observed.value).classification ===
       "complete" &&
-    delegateStateHeadMatchesRepo(input.repoPath, observed.value.headSha);
+    delegateStateHeadMatchesRepo(repoPath, observed.value.headSha);
   return {
     externalIdentity: expected,
     summary: "reattached the correlated no-mistakes run",

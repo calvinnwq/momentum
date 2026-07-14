@@ -254,6 +254,7 @@ export function finalizeLiveStepResult(
   result: WorkflowStepExecutorDispatchResult,
   repoPath: string,
   safety: LiveStepRepoSafetyHostBinding | undefined,
+  options: { acceptVerifiedNoChanges?: boolean } = {},
 ): WorkflowStepExecutorDispatchResult {
   if (!result.ok || safety === undefined || result.result.state === "skipped") {
     return result;
@@ -295,6 +296,12 @@ export function finalizeLiveStepResult(
         safety.verificationLogPath,
       );
     case "commit_failed":
+      if (
+        finalize.commit.code === "nothing_to_commit" &&
+        options.acceptVerifiedNoChanges === true
+      ) {
+        return withVerificationArtifact(result, safety.verificationLogPath);
+      }
       if (
         finalize.commit.code === "nothing_to_commit" ||
         (finalize.reset !== undefined && finalize.reset.ok)
