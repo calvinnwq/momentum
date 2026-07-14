@@ -7,6 +7,7 @@ import {
   createPersistedProfileDelegateToolAdapter,
   createProfileBackedDelegateToolAdapter,
   resolveDelegateBranch,
+  resolvePreparedDelegateCommitEvidence,
 } from "../../adapters/profile-backed-delegate-tool-adapter.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
@@ -430,11 +431,41 @@ function createLiveStepHostBindingsResolver(
         ...(settleHandoff !== undefined ? { settleHandoff } : {}),
       };
     }
+    const preparedCommitEvidence = isDelegate
+      ? resolvePreparedDelegateCommitEvidence({
+          tool: delegateTool!,
+          invocationId: invocation.invocationId,
+          attempt: invocation.attempt,
+          repoPath: resolved.exec.repoPath,
+          handoffReceiptPath: path.join(
+            resolved.exec.runDir,
+            "delegate",
+            claim.stepId,
+            "delegate-handoff.json",
+          ),
+          statePath: path.join(
+            resolved.exec.runDir,
+            "delegate",
+            claim.stepId,
+            "delegate-external-state.json",
+          ),
+          resultJsonPath: resolved.exec.resultJsonPath,
+          executorLogPath: resolved.exec.executorLogPath,
+          legacyPaths: {
+            rootDir: resolved.exec.runDir,
+            handoffReceiptPath: path.join(
+              resolved.exec.runDir,
+              "delegate-handoff.json",
+            ),
+          },
+        })
+      : null;
     const safety = resolveDaemonDispatchedRepoSafety(
       context.db,
       claim.runId,
       resolved.exec.repoPath,
       resolved.exec.runDir,
+      preparedCommitEvidence ?? undefined,
     );
     if (!safety.ok) {
       if (safety.recoveryArtifact !== null) {
@@ -991,6 +1022,10 @@ function resolveDaemonDispatchedRepoSafety(
   runId: string,
   repoPath: string,
   runDir: string,
+  preparedCommitEvidence?: {
+    baseHead: string;
+    expectedTree: string;
+  },
 ):
   | {
       ok: true;
@@ -1004,7 +1039,7 @@ function resolveDaemonDispatchedRepoSafety(
       recoveryCode: string;
       recoveryArtifact?: { runDir: string; repoPath?: string | null } | null;
     } {
-  const repo = inspectRepo(repoPath);
+  const repo = inspectRepo(repoPath, preparedCommitEvidence);
   if (!repo.ok) {
     const recoveryCode =
       repo.code === "dirty_worktree" || repo.code === "git_failed"

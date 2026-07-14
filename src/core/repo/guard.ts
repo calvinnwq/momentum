@@ -22,12 +22,20 @@ export type RepoGuardSuccess = {
 };
 export type RepoGuardResult = RepoGuardError | RepoGuardSuccess;
 
-export function inspectRepo(repoPath: string): RepoGuardResult {
+export type PreparedCommitEvidence = {
+  baseHead: string;
+  expectedTree: string;
+};
+
+export function inspectRepo(
+  repoPath: string,
+  preparedCommit?: PreparedCommitEvidence,
+): RepoGuardResult {
   if (typeof repoPath !== "string" || repoPath.trim().length === 0) {
     return {
       ok: false,
       code: "missing",
-      error: "Repo path is required."
+      error: "Repo path is required.",
     };
   }
 
@@ -40,7 +48,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "missing",
-      error: `Repo path does not exist: ${absPath}`
+      error: `Repo path does not exist: ${absPath}`,
     };
   }
 
@@ -48,7 +56,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_directory",
-      error: `Repo path is not a directory: ${absPath}`
+      error: `Repo path is not a directory: ${absPath}`,
     };
   }
 
@@ -59,7 +67,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_git_repo",
-      error: `Path is not inside a git repo: ${absPath}`
+      error: `Path is not inside a git repo: ${absPath}`,
     };
   }
 
@@ -69,7 +77,25 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_git_repo",
-      error: `Repo path is not the git toplevel: ${absPath} (toplevel: ${topLevel})`
+      error: `Repo path is not the git toplevel: ${absPath} (toplevel: ${topLevel})`,
+    };
+  }
+
+  let head: string;
+  try {
+    head = runGit(topLevel, ["rev-parse", "HEAD"]).trim();
+  } catch {
+    return {
+      ok: false,
+      code: "no_head",
+      error: `Repo has no HEAD commit: ${topLevel}`,
+    };
+  }
+  if (!/^[0-9a-f]{40}$/.test(head)) {
+    return {
+      ok: false,
+      code: "no_head",
+      error: `Unexpected HEAD format: ${head}`,
     };
   }
 
@@ -81,41 +107,53 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "git_failed",
-      error: `git status failed: ${detail}`
+      error: `git status failed: ${detail}`,
     };
   }
-  if (statusOutput.trim().length > 0) {
+  if (
+    statusOutput.trim().length > 0 &&
+    !matchesPreparedCommit(topLevel, head, preparedCommit)
+  ) {
     return {
       ok: false,
       code: "dirty_worktree",
-      error: `Repo has uncommitted changes: ${topLevel}`
-    };
-  }
-
-  let head: string;
-  try {
-    head = runGit(topLevel, ["rev-parse", "HEAD"]).trim();
-  } catch {
-    return {
-      ok: false,
-      code: "no_head",
-      error: `Repo has no HEAD commit: ${topLevel}`
-    };
-  }
-  if (!/^[0-9a-f]{40}$/.test(head)) {
-    return {
-      ok: false,
-      code: "no_head",
-      error: `Unexpected HEAD format: ${head}`
+      error: `Repo has uncommitted changes: ${topLevel}`,
     };
   }
 
   return { ok: true, repoPath: realTop, head };
 }
 
+function matchesPreparedCommit(
+  repoPath: string,
+  head: string,
+  evidence: PreparedCommitEvidence | undefined,
+): boolean {
+  if (
+    evidence === undefined ||
+    !/^[0-9a-f]{40}$/.test(evidence.baseHead) ||
+    !/^[0-9a-f]{40}$/.test(evidence.expectedTree) ||
+    head !== evidence.baseHead
+  ) {
+    return false;
+  }
+  try {
+    runGit(repoPath, ["diff", "--quiet"]);
+    if (
+      runGit(repoPath, ["ls-files", "--others", "--exclude-standard"]).trim()
+        .length > 0
+    ) {
+      return false;
+    }
+    return runGit(repoPath, ["write-tree"]).trim() === evidence.expectedTree;
+  } catch {
+    return false;
+  }
+}
+
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }

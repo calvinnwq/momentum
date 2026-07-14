@@ -104,6 +104,92 @@ type NoMistakesDelegateReceipt = {
   terminalProofHeadSha?: string;
 };
 
+type DelegateReceiptReadInput = Pick<
+  ProfileBackedDelegateToolInput,
+  | "tool"
+  | "invocationId"
+  | "attempt"
+  | "repoPath"
+  | "handoffReceiptPath"
+  | "statePath"
+  | "resultJsonPath"
+  | "executorLogPath"
+  | "legacyPaths"
+>;
+
+export function resolvePreparedDelegateCommitEvidence(
+  input: DelegateReceiptReadInput,
+): { baseHead: string; expectedTree: string } | null {
+  try {
+    const canonicalRepoPath = fs.realpathSync(input.repoPath);
+    const requestedRepoPath = path.resolve(input.repoPath);
+    const canonicalizeRepoPath = (candidate: string) => {
+      const relative = path.relative(
+        requestedRepoPath,
+        path.resolve(candidate),
+      );
+      if (
+        relative === ".." ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative)
+      ) {
+        throw new Error("delegate recovery path escapes the repository");
+      }
+      return path.resolve(canonicalRepoPath, relative);
+    };
+    const canonicalInput: DelegateReceiptReadInput = {
+      ...input,
+      repoPath: canonicalRepoPath,
+      handoffReceiptPath: canonicalizeRepoPath(input.handoffReceiptPath),
+      statePath: canonicalizeRepoPath(input.statePath),
+      resultJsonPath: canonicalizeRepoPath(input.resultJsonPath),
+      executorLogPath: canonicalizeRepoPath(input.executorLogPath),
+      legacyPaths: {
+        rootDir: canonicalizeRepoPath(input.legacyPaths.rootDir),
+        handoffReceiptPath: canonicalizeRepoPath(
+          input.legacyPaths.handoffReceiptPath,
+        ),
+      },
+    };
+    if (!fs.existsSync(canonicalInput.handoffReceiptPath)) return null;
+    if (canonicalInput.tool === "no-mistakes") {
+      const receipt = readNoMistakesHandoffReceipt(canonicalInput);
+      if (receipt.phase !== "finalizing") return null;
+      assertNoMistakesResultMatchesReceipt(receipt);
+      return {
+        baseHead: receipt.headSha,
+        expectedTree: receipt.expectedTree!,
+      };
+    }
+
+    const receipt = readLiveWrapperDelegateReceipt(canonicalInput);
+    if (
+      receipt.phase !== "finalizing" ||
+      typeof receipt.resultDigest !== "string" ||
+      !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
+    ) {
+      return null;
+    }
+    const recovered = readRecoveredLiveWrapperResult(receipt);
+    if (
+      receipt.dispatchOutcome === undefined ||
+      !receipt.dispatchOutcome.ok ||
+      !recovered.ok ||
+      recovered.result.state !== "succeeded" ||
+      recovered.result.state !== receipt.dispatchOutcome.state ||
+      recovered.result.summary !== receipt.dispatchOutcome.summary
+    ) {
+      return null;
+    }
+    return {
+      baseHead: receipt.baseHead,
+      expectedTree: receipt.expectedTree!,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function createProfileBackedDelegateToolAdapter(
   input: ProfileBackedDelegateToolInput,
 ): DelegateSupervisorToolAdapter {
@@ -558,7 +644,7 @@ function legacyDelegateAttemptPaths(
 }
 
 function readLiveWrapperDelegateReceipt(
-  input: ProfileBackedDelegateToolInput,
+  input: DelegateReceiptReadInput,
 ): LiveWrapperDelegateReceipt {
   let parsed: unknown;
   try {
@@ -1540,7 +1626,7 @@ function assertNoMistakesLaunchingRecoveryHasUnchangedRepo(
 }
 
 function readNoMistakesHandoffReceipt(
-  input: ProfileBackedDelegateToolInput,
+  input: DelegateReceiptReadInput,
 ): NoMistakesDelegateReceipt {
   try {
     const stored = JSON.parse(

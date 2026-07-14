@@ -25,7 +25,7 @@ function makeTempDir(prefix = "momentum-repo-guard-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -150,6 +150,37 @@ describe("inspectRepo", () => {
     if (!result.ok) {
       expect(result.code).toBe("dirty_worktree");
     }
+  });
+
+  it("accepts an exact prepared commit tree", () => {
+    const dir = initRepo();
+    const head = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "staged.txt"), "staged\n", "utf-8");
+    runGit(dir, ["add", "staged.txt"]);
+    const expectedTree = runGit(dir, ["write-tree"]).trim();
+
+    const result = inspectRepo(dir, { baseHead: head, expectedTree });
+
+    expect(result).toEqual({
+      ok: true,
+      repoPath: fs.realpathSync(dir),
+      head,
+    });
+  });
+
+  it("rejects unstaged changes beside an exact prepared commit tree", () => {
+    const dir = initRepo();
+    const head = commitInitial(dir);
+    const stagedPath = path.join(dir, "staged.txt");
+    fs.writeFileSync(stagedPath, "staged\n", "utf-8");
+    runGit(dir, ["add", "staged.txt"]);
+    const expectedTree = runGit(dir, ["write-tree"]).trim();
+    fs.writeFileSync(stagedPath, "changed after staging\n", "utf-8");
+
+    const result = inspectRepo(dir, { baseHead: head, expectedTree });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("dirty_worktree");
   });
 
   it("rejects a freshly initialized repo with no commits as no_head", () => {

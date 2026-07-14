@@ -2006,6 +2006,80 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       db.close();
     });
 
+    it("recovers a staged handoff from its finalization receipt", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = "delegate-staged-commit-recovery";
+      const stepId = "implementation";
+      const profilePath = writeProfile(tempDir());
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+      const receiptPath = path.join(
+        repoPath,
+        ".agent-workflows",
+        runId,
+        "delegate",
+        stepId,
+        "delegate-handoff.json",
+      );
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+
+      const receipt = JSON.parse(
+        fs.readFileSync(receiptPath, "utf8"),
+      ) as Record<string, unknown>;
+      const committedHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const baseHead = String(receipt["baseHead"]);
+      runGit(repoPath, ["reset", "--hard", baseHead]);
+      runGit(repoPath, ["cherry-pick", "--no-commit", committedHead]);
+      expect(runGit(repoPath, ["write-tree"])).toBe(receipt["expectedTree"]);
+      delete receipt["externalState"];
+      receipt["phase"] = "finalizing";
+      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+      fs.rmSync(
+        path.join(path.dirname(receiptPath), "delegate-external-state.json"),
+      );
+      reopenInterruptedHandoff(db, runId, stepId);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 3,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded", attempt: 2 });
+      expect(runGit(repoPath, ["rev-parse", "HEAD^{tree}"])).toBe(
+        receipt["expectedTree"],
+      );
+      expect(runGit(repoPath, ["status", "--porcelain"])).toBe("");
+      expect(
+        fs.readFileSync(
+          path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
+          "utf8",
+        ),
+      ).toBe("1\n");
+      db.close();
+    });
+
     it("transfers the matching repo lock after stale dispatch takeover", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();
@@ -3239,6 +3313,10 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(receipt["expectedMessage"]).toBe(
         runGit(repoPath, ["show", "-s", "--format=%B", committedHead]),
       );
+      const baseHead = String(receipt["headSha"]);
+      runGit(repoPath, ["reset", "--hard", baseHead]);
+      runGit(repoPath, ["cherry-pick", "--no-commit", committedHead]);
+      expect(runGit(repoPath, ["write-tree"])).toBe(receipt["expectedTree"]);
       receipt["phase"] = "finalizing";
       delete receipt["terminalProofHeadSha"];
       fs.writeFileSync(receiptPath, JSON.stringify(receipt));
@@ -3251,7 +3329,12 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
         now: NOW + 3,
       });
 
-      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(committedHead);
+      const recoveredHead = runGit(repoPath, ["rev-parse", "HEAD"]);
+      expect(recoveredHead).not.toBe(baseHead);
+      expect(runGit(repoPath, ["rev-parse", "HEAD^{tree}"])).toBe(
+        receipt["expectedTree"],
+      );
+      expect(runGit(repoPath, ["status", "--porcelain"])).toBe("");
       expect(
         db
           .prepare(
@@ -3261,7 +3344,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       ).toEqual({ state: "succeeded", attempt: 2 });
       expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
         phase: "launched",
-        terminalProofHeadSha: committedHead,
+        terminalProofHeadSha: recoveredHead,
       });
       expect(
         fs.readFileSync(
