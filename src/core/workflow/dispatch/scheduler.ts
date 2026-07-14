@@ -1266,17 +1266,25 @@ function isCheckpointedDelegateHandoff(
   if (
     invocation.state !== "running" ||
     invocation.executorFamily !== "delegate-supervisor" ||
-    activeRound === undefined ||
-    activeRound.classification !== null
+    activeRound === undefined
   ) {
     return false;
   }
-  const handoffRounds =
-    activeRound.state === "running" || activeRound.state === "capturing_result"
+  const interruptedRound =
+    activeRound.classification === null &&
+    (activeRound.state === "running" ||
+      activeRound.state === "capturing_result" ||
+      activeRound.state === "mirroring_external_state");
+  const completedPoll =
+    activeRound.classification === "continue" &&
+    (activeRound.state === "succeeded" || activeRound.state === "failed");
+  if (!interruptedRound && !completedPoll) return false;
+  const handoffRounds = completedPoll
+    ? rounds
+    : activeRound.state === "running" ||
+        activeRound.state === "capturing_result"
       ? [activeRound]
-      : activeRound.state === "mirroring_external_state"
-        ? rounds.slice(0, -1)
-        : [];
+      : rounds.slice(0, -1);
   return handoffRounds.some((round) =>
     listExecutorCheckpointsForRound(db, round.roundId).some(
       (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,

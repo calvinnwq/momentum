@@ -16,7 +16,10 @@ const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "delegate_handoff_recovery_required",
   "external_state_unreadable",
   "external_state_inconsistent",
+  "external_state_blocked",
 ]);
+
+type RetryableInvocationState = "manual_recovery_required" | "blocked";
 
 type RetryableStepState = "approved" | "running";
 
@@ -38,7 +41,7 @@ export type RetryableDispatchedStepRecovery = {
   kind: WorkflowStepKind;
   invocationId: string;
   executorFamily: ExecutorName;
-  invocationState: "manual_recovery_required";
+  invocationState: RetryableInvocationState;
   attempt: number;
   latestRoundIndex: number;
   recoveryCode: string;
@@ -217,7 +220,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
               finished_at = NULL,
               updated_at = ?
         WHERE invocation_id = ?
-          AND state = 'manual_recovery_required'
+          AND state = ?
           AND attempt = ?`,
     )
     .run(
@@ -225,6 +228,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
       input.now,
       input.now,
       retryable.invocationId,
+      retryable.invocationState,
       retryable.attempt,
     );
   if (Number(updated.changes) === 0) return { reopened: false };
@@ -262,7 +266,6 @@ function parseRetryableDispatchRow(
 ): RetryableDispatchedStepRecovery | undefined {
   if (row === undefined) return undefined;
   if (!isWorkflowStepKind(row.kind)) return undefined;
-  if (row.invocation_state !== "manual_recovery_required") return undefined;
   if (!isExecutorName(row.executor_family)) return undefined;
   if (
     row.executor_family === "external-apply" ||
@@ -273,6 +276,7 @@ function parseRetryableDispatchRow(
   if (
     row.round_index === null ||
     row.recovery_code === null ||
+    !isRetryableInvocationState(row.invocation_state, row.recovery_code) ||
     !isRetryableDispatchRecovery(row.kind, row.recovery_code)
   ) {
     return undefined;
@@ -284,7 +288,7 @@ function parseRetryableDispatchRow(
     kind: row.kind,
     invocationId: row.invocation_id,
     executorFamily: row.executor_family,
-    invocationState: "manual_recovery_required",
+    invocationState: row.invocation_state,
     attempt: row.attempt,
     latestRoundIndex: row.round_index,
     recoveryCode: row.recovery_code,
@@ -369,4 +373,14 @@ function isRetryableDispatchRecovery(
   recoveryCode: string,
 ): boolean {
   return RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode);
+}
+
+function isRetryableInvocationState(
+  invocationState: string,
+  recoveryCode: string,
+): invocationState is RetryableInvocationState {
+  return (
+    invocationState === "manual_recovery_required" ||
+    (invocationState === "blocked" && recoveryCode === "external_state_blocked")
+  );
 }

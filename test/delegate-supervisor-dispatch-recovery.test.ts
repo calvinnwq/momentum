@@ -84,7 +84,7 @@ JSON`;
 
 function writeNoMistakesProfile(
   profileDir: string,
-  statusMode: "completed" | "lagging" = "completed",
+  statusMode: "completed" | "lagging" | "blocked" = "completed",
   launchIdentityMode: "valid" | "missing" = "valid",
 ): {
   profilePath: string;
@@ -94,7 +94,9 @@ function writeNoMistakesProfile(
   const statusOutput =
     statusMode === "lagging"
       ? `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: running\n  head: %s\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`
-      : `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`;
+      : statusMode === "blocked"
+        ? `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`
+        : `printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$branch" "$head"`;
   fs.writeFileSync(
     executablePath,
     `#!/bin/sh
@@ -1564,6 +1566,87 @@ fi
           "utf8",
         ),
       ).toBe("1\n");
+      db.close();
+    });
+
+    it("prepares a fresh attempt after a blocked external run is cleared", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = "no-mistakes-blocked-attempt-retry";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(tempDir(), "blocked");
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+        },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "blocked", attempt: 1 });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "running" });
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "external_state_blocked",
+        },
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "approved" });
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 3), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 4,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "blocked", attempt: 2 });
       db.close();
     });
 

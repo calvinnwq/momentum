@@ -1939,6 +1939,122 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("resumes a completed delegate handoff", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "completed-delegate-handoff";
+      const stepId = "implementation";
+      const { roundId } = seedCheckpointedDelegateHandoff(db, runId, stepId);
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a completed delegate poll from a prior durable handoff", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "completed-delegate-poll";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      const pollRoundId = `${invocationId}::round-2`;
+      envelope.facade.startRound({
+        roundId: pollRoundId,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 1,
+        roundIndex: 1,
+        state: "mirroring_external_state",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "Reading delegated external state.",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      updateExecutorRound(db, pollRoundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
   it("recovers a stale auto-release lease and then dispatches the freed step in the same tick", () => {
     const db = openDb(makeTempDir());
     try {
