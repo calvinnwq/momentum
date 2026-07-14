@@ -44,6 +44,7 @@ export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
 export const DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE =
   "delegate_handoff_intent";
 const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
+/** Durable canonical external state, including pre-classification gate evidence. */
 export const DELEGATE_SUPERVISOR_MIRRORED_STAGE =
   "delegate_external_state_mirrored";
 

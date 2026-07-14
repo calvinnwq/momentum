@@ -606,6 +606,7 @@ export type ExecutorDecisionRecord = {
   externalRef?: string | null;
 };
 
+/** True only when neither durable resolution field has settled the decision. */
 export function isExecutorDecisionEligibleForHumanGate(decision: {
   chosenAction?: string | null;
   resolution?: string | null;

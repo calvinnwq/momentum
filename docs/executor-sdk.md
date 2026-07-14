@@ -41,6 +41,7 @@ Status, recovery, and historical-run reads use recorded rows and never import th
 At dispatch, a missing registration settles the attempt as `manual_recovery_required` with `runtime_unavailable`.
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
 After the executor is installed or repaired, `workflow run clear-recovery` prepares the same deterministic invocation for a new attempt; the next scheduler pass dispatches it without discarding the refused round.
+The successful clear also resolves open `manual_recovery_required` gates for the run when their allowed actions include `clear_recovery`, so the retried invocation is not left behind a stale gate.
 If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
 Failed daemon discovery is retried on a later scheduler pass, so repairing the executor entry module and clearing recovery does not require a daemon restart.
 Node does not provide a safe in-process unload for an already-evaluated ESM dependency graph; if the repair changes only a transitive dependency that Node already attempted to load or evaluate, restart the daemon before clearing recovery.
@@ -151,12 +152,14 @@ If an attempt or process is interrupted after intent but before completion, the 
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
 The profile-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
 After the no-mistakes wrapper returns, that receipt binds the exact digest of the bounded regular result document.
-The host rechecks the digest before the finalizer's selected reset or commit and before any failed-finalization retry or prepared-commit recovery; changed or missing result bytes fail closed before mutation.
+The host rechecks the digest before the finalizer's selected reset or commit, before accepting a verified no-change result, and before any failed-finalization retry or prepared-commit recovery; changed or missing result bytes fail closed before mutation or handoff completion.
 No-mistakes handoff finalization accepts a successful result with a verified clean worktree and no changes to commit; a failed verification still rejects the handoff.
 An interrupted no-mistakes `launching` receipt reads the original executor log only to corroborate exactly one canonical current run id; historical sections are ignored, duplicate identities fail closed, and without durable wrapper-finalization proof the receipt never becomes authority to reattach or relaunch.
 Generic profile-backed recovery accepts a completed reset or commit only when the current result file is a bounded regular file whose exact digest matches the receipt and the recorded base, tree, commit message, and clean-worktree proof also match.
+If interruption leaves a verified commit staged but not created, host preflight accepts the otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
+Prepared-commit recovery then rechecks repository ownership, result bytes, expected tree, and commit message immediately before committing.
 Delegate receipts, result documents, persisted external-state documents, and no-mistakes launch logs must be bounded regular files; symbolic links, oversized files, named pipes, and path substitution fail closed before evidence is read or refreshed.
-Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; invocation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
+Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; a legacy no-mistakes receipt must explicitly record successful handoff finalization, and invocation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
 Finalized profile-backed state must also carry a full 40-character head SHA that matches the repository's current `HEAD`.
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
@@ -186,6 +189,7 @@ After four minutes without semantic progress or terminal evidence, the invocatio
 Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Profile-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
 Terminal evidence captured by the handoff is persisted in the same envelope as a settlement candidate, but a fresh adapter read must corroborate the same run, branch, and exact full head SHA before the executor can settle it.
+On reattachment, the no-mistakes adapter may reload a missing in-envelope candidate from the step-scoped `launched` receipt only when the receipt's schema, run id, branch, full launch head, full terminal head, and external identity all match and Git proves the terminal head descends from the launch head.
 A lagging `running` response can corroborate the candidate only when it reports no active step, passed or absent CI, no findings or selected findings, and no unresolved decisions.
 Cached proof does not override pending CI or settle another head, including a verified descendant.
 Unreadable state, cancelled state, contradictory completion, and identity drift require manual recovery rather than optimistic retry or success.
@@ -206,6 +210,7 @@ The same recovery applies to a completed `continue` poll whose succeeded or fail
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
 If the process instead dies after gate classification but before gate parking finishes, stale dispatch recovery reuses or reconstructs the round-scoped gate from the durable decision selector and unresolved decision.
 That recovery verifies and releases the exact stale lease in the same transaction, preserving the executor's selected operator target without opening manual recovery.
+If a delegate dies earlier after persisting a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation but before classification, stale recovery makes that unclassified round resumable under the same invocation so classification and gate parking can finish.
 The tick must return the id of the current non-terminal round for the current invocation attempt.
 A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.
 The executor starts the next sequential round when its next tick observes no current non-terminal round.
@@ -241,6 +246,8 @@ The daemon controller rejects a decision atomically unless its classification, i
 
 An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
 An `approval_required` or `operator_decision_required` recommendation must also name a current round with an unresolved durable executor decision and a non-empty allowed-action set.
+For gate selection, a decision is unresolved only when `chosenAction` is absent and `resolution` is null, omitted, or blank.
+A decision with only one of those resolution fields populated is not eligible for another gate.
 Set `humanGateDecisionId` to that decision's durable id when the executor must target a specific unresolved decision, such as a supervisor-owned approval among mirrored external decisions.
 The daemon persists the selector as round evidence before applying the gate classification so parking can resume safely after a crash.
 When the field is omitted or `null`, the dispatcher preserves the legacy behavior of selecting the last unresolved decision.

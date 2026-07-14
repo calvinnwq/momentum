@@ -193,6 +193,7 @@ For an unresolved handoff intent, the next dispatcher may take over the matching
 Repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks prevent a concurrent or newer owner from being displaced.
 Heartbeat and settlement then require the replacement holder and attempt, preventing the former owner from mutating the lock.
 If a crash instead leaves an invocation at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
+If the crash happens before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, stale recovery makes the unclassified round resumable so the same invocation can finish classification and gate parking.
 
 ### Workflow live-wrapper profile
 
@@ -355,15 +356,18 @@ Unreadable status, identity drift, pending CI behind a terminal claim, an active
 The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
 For no-mistakes, the receipt records `launching` before the wrapper starts, `resetting` or `finalizing` before repository mutation, `failed` after an unsuccessful finalization, and `launched` only after successful wrapper finalization and external identity capture.
 After the wrapper returns, the receipt also records the exact bounded result digest.
-The selected reset or commit and every later local-finalization retry or prepared-commit recovery revalidate that digest, so missing or changed result bytes fail closed before the selected reset or commit.
+The selected reset or commit, verified no-change acceptance, and every later local-finalization retry or prepared-commit recovery revalidate that digest, so missing or changed result bytes fail closed before mutation or handoff completion.
 An interrupted `launching` receipt reads its original executor log only to corroborate exactly one canonical current run id; historical or duplicate identities provide no authority, and even with a clean unchanged repository the missing wrapper-finalization proof fails closed without reattaching or launching no-mistakes again.
 Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
 A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again only when the current bounded regular result file has the receipt's exact digest; symbolic links and branch, result, worktree, receipt, or current repository `HEAD` drift fail closed and preserve the worktree for inspection.
+If interruption leaves the verified commit staged, daemon preflight accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
+The adapter rechecks repository ownership and all commit evidence immediately before completing the commit.
 When the initial no-mistakes handoff already proves checks passed, that terminal candidate is stored with a full 40-character SHA for the post-finalization repository `HEAD`.
 It settles only after a fresh status read corroborates the same run, branch, and exact head with passed or absent CI, no active findings, and no unresolved decisions; pending CI or another head fails closed.
+After reattachment, the adapter may reload that terminal candidate from the step-scoped `launched` receipt only when its schema and exact run, branch, launch-head, terminal-head, and external identity match and Git proves the terminal head descends from the launch head.
 Approval boundaries use a supervisor-owned `approve` / `reject` decision that external state cannot forge; only the latest resolved `approve` permits later completion.
 The daemon checkpoints that supervisor decision id before gate classification so recovery cannot accidentally park a different mirrored external decision.
-On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state.
+On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state; a legacy no-mistakes receipt must also explicitly record successful handoff finalization.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 

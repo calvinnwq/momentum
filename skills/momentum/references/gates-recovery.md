@@ -60,6 +60,9 @@ For the older goal compatibility surface:
 
 If evidence is missing or ambiguous, report the recovery reason and the
 inspection command instead of clearing recovery.
+On success, this command also resolves open `manual_recovery_required` gates
+for the run when they explicitly allow `clear_recovery`.
+Do not use it to close other gate types.
 For `unsupported_platform`, move the workflow to Linux or macOS, confirm from
 the executor log and worktree that no process ran and no edits were made, then
 clear recovery on that supported host so Momentum can prepare the step's next

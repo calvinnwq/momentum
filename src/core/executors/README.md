@@ -131,16 +131,21 @@ durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
 recorded `no-mistakes` invocations remain readable.
 The profile-backed host writes its step-scoped receipt before no-mistakes launch and before delegated reset or commit mutation.
-After the wrapper returns, the no-mistakes receipt binds the exact bounded result digest, and the selected mutation plus failed-finalization retry or prepared-commit recovery revalidates it before touching git.
+After the wrapper returns, the no-mistakes receipt binds the exact bounded result digest, and the selected mutation, verified no-change acceptance, failed-finalization retry, or prepared-commit recovery revalidates it before mutation or handoff completion.
 Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit; failed verification still rejects it.
 Correlated no-mistakes launch output identifies a possible external run but cannot recover a launch-only receipt without wrapper-finalization proof.
 Generic interrupted recovery requires a bounded regular result whose exact digest matches the receipt plus exact repository proof, so symbolic links and missing or mismatched evidence preserve the worktree and cannot create a duplicate external run.
+An interrupted `finalizing` receipt may recover an exactly staged commit only when daemon preflight proves the current base `HEAD`, staged tree, configured artifact paths, successful result, and result digest match with no unstaged or untracked changes.
+Commit recovery rechecks repository ownership, result bytes, expected tree, and message immediately before mutation.
 Finalized profile-backed state is bound to the repository's current full `HEAD`, and cached terminal handoff proof still requires a fresh clean read for the same run, branch, and exact head before settlement.
+After reattachment, a missing in-envelope no-mistakes terminal candidate may be reloaded from an exact matching step-scoped `launched` receipt whose terminal head is a verified descendant of its launch head.
 That lagging clean read must report no active step.
 After local wrapper-finalization failure, a later attempt reads the correlated external run first.
 A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 Canonical no-mistakes normalization rejects ambiguous AXI fields and malformed steps tables, while the supervisor's reserved approval decision permits terminal completion only after its latest action is `approve`.
+Only decisions with neither a chosen action nor a non-blank resolution are eligible for a new human gate; partial resolution evidence is skipped rather than gated again.
 The selected supervisor decision id is persisted before gate classification, allowing stale dispatch recovery to reuse or recreate the workflow gate without selecting a different unresolved decision.
+An unclassified delegate round with a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation is also resumable after stale dispatch recovery so it can finish classification and parking.
 Profile-backed recovery may take over an active lock for the same interrupted deterministic invocation after lock expiry or after the scheduler proves and releases the matching stale dispatch owner, with compare-and-swap fencing against concurrent or newer ownership.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:

@@ -22,11 +22,16 @@ export type RepoGuardSuccess = {
 };
 export type RepoGuardResult = RepoGuardError | RepoGuardSuccess;
 
+/** Exact staged-tree evidence that may safely pass dirty-worktree preflight. */
 export type PreparedCommitEvidence = {
   baseHead: string;
   expectedTree: string;
 };
 
+/**
+ * Inspect the repository root and HEAD, requiring a clean worktree unless an
+ * exact prepared commit has no unstaged or untracked changes.
+ */
 export function inspectRepo(
   repoPath: string,
   preparedCommit?: PreparedCommitEvidence,

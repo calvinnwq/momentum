@@ -110,13 +110,16 @@ the same deterministic invocation with the next attempt. Ordinary live-wrapper
 evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
 evidence is first isolated beneath `delegate/<step-id>/`.
 The step-scoped `delegate-handoff.json` receipt records no-mistakes launch intent before process start and generic delegate reset or commit intent before repository mutation.
-After no-mistakes returns, its receipt also binds the exact bounded result digest used to authorize the selected reset or commit and any later failed-finalization retry or prepared-commit recovery.
+After no-mistakes returns, its receipt also binds the exact bounded result digest used to authorize the selected reset or commit, verified no-change acceptance, and any later failed-finalization retry or prepared-commit recovery.
 Correlated no-mistakes launch output cannot recover a launch-only receipt without wrapper-finalization proof.
 Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
+If a verified commit is staged when the process stops, recovery accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
+Repository ownership and commit evidence are checked again immediately before the recovered commit.
 Finalized profile-backed delegate state must match the repository's current full `HEAD`.
 After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 An invocation classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
+An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same invocation can finish classification and gate parking.
 A scheduler pass that releases a stale dispatch owner can transfer the same invocation's matching active repo lock to the replacement holder before the longer repo lock expires, with full identity compare-and-swap fencing.
 A valid non-terminal handoff is reconciled through adapter recovery before reuse across retry attempts.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.

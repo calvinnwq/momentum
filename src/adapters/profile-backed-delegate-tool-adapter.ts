@@ -124,6 +124,10 @@ type DelegateReceiptReadInput = Pick<
   | "legacyPaths"
 >;
 
+/**
+ * Read a step-scoped finalization receipt into the narrow evidence accepted by
+ * repo preflight for recovery of an exactly staged delegate commit.
+ */
 export function resolvePreparedDelegateCommitEvidence(
   input: DelegateReceiptReadInput,
 ): { baseHead: string; expectedTree: string } | null {

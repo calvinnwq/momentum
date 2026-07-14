@@ -116,6 +116,9 @@ registered declaration before workflow-run rows are written.
 An unregistered executor records the honest `runtime_unavailable` class in
 `manual_recovery_required`; after registration repair and guarded recovery clear,
 the same deterministic invocation reopens with an incremented attempt.
+The successful clear also resolves every open `manual_recovery_required` gate
+for the run that permits `clear_recovery`, in the same transaction as the flag
+clear and retry preparation.
 The daemon SDK driver normally applies one bounded tick per scheduler pass and
 rechecks non-terminal invocations, so single-round and multi-round executors
 share one driving loop.
@@ -133,8 +136,14 @@ If a crash occurs after an executor is classified `waiting_operator` but before
 gate parking finishes, stale dispatch recovery reuses or recreates the gate from
 the durable selected-decision checkpoint and unresolved decision, then releases
 only the same stale lease.
+If the crash happens earlier, after a delegate mirrored a gate-eligible decision
+and observed `waiting_operator` but before classification, the mirrored
+checkpoint and decision make the unclassified round resumable so the executor
+can finish classification and gate parking under the same invocation.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
+Gate eligibility requires both `chosenAction` and non-blank `resolution` to be
+absent; partially resolved decision evidence is never selected for a new gate.
 An executor may select that decision with `humanGateDecisionId`; the daemon persists the selector before classification, and an omitted or null selector retains last-unresolved-decision compatibility.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
 gate resolution records the chosen action and makes the invocation
@@ -190,10 +199,16 @@ intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
 After the no-mistakes wrapper returns, the receipt binds the exact digest of its bounded regular result file.
-The host revalidates that digest before a selected reset or commit and before retrying failed local finalization or recovering a prepared commit, so changed result bytes authorize no repository mutation.
+The host revalidates that digest before a selected reset or commit, before accepting a verified no-change result, and before retrying failed local finalization or recovering a prepared commit, so changed result bytes authorize no repository mutation or handoff completion.
 Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit, while failed verification still rejects the handoff.
 Correlated no-mistakes launch output identifies an interrupted external run but does not make a launch-only receipt recoverable without durable wrapper-finalization proof.
 Generic reset or commit recovery additionally requires a bounded regular result whose exact digest matches the receipt plus matching base, tree, commit-message, and clean-worktree proof; symbolic links and missing or mismatched evidence preserve the worktree and forbid a duplicate launch.
+If a crash leaves the verified commit staged but not created, daemon preflight
+accepts that dirty index only when the durable finalization receipt matches the
+current base `HEAD`, exact index tree, configured artifact paths, result digest,
+and successful result, with no unstaged or untracked changes.
+Recovery then rechecks repository ownership, result digest, expected tree, and
+commit message immediately before creating the prepared commit.
 Completed profile-backed state is accepted only while its full 40-character head
 SHA matches the repository's current `HEAD`.
 The external run id and branch are stable correlation identity; an
@@ -203,6 +218,9 @@ Terminal state captured during handoff is a durable settlement candidate, not
 authority by itself: a fresh adapter read must corroborate the same run, branch,
 and exact full head SHA with passed or absent CI, no active findings, and no
 unresolved decisions.
+On reattachment, no-mistakes may reload that candidate from the step-scoped
+`launched` receipt only when its full run, branch, launch-head, and terminal-head
+identity remains valid and the terminal head descends from the launch head.
 A lagging `running` read can provide that corroboration only when it also reports no active step.
 Pending CI, another head, or unreadable corroboration fails closed rather than
 settling cached success.

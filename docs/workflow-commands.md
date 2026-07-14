@@ -14,7 +14,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
-- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
+- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag and matching clearable recovery gates after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
@@ -936,6 +936,8 @@ Behaviour:
 
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
   The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
+- After a successful flagged clear, resolves every open `manual_recovery_required` gate for the run whose `allowedActions` includes `clear_recovery` in that same transaction.
+  The gate records `workflow run clear-recovery` as its operator actor and `clear_recovery` as its chosen action; other gate types and manual-recovery gates without that action remain open.
 - Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
   The only `failed_required_step` exception is a failed required `no-mistakes` step with explicit legacy `no-mistakes:<run-id>#checks-passed` proof or a structured deterministic evidence JSON file, used when the wrapper was interrupted after the external no-mistakes run had already proved current success.
 - For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state and `finished_at` from the re-derived terminal or non-terminal state, and clearing the flag.
