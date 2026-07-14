@@ -129,6 +129,10 @@ that same invocation scheduler-resumable instead of parking the run or
 repeating the handoff.
 The same recovery applies after a completed `continue` poll when its succeeded
 or failed round has a durable handoff in its history.
+If a crash occurs after an executor is classified `waiting_operator` but before
+gate parking finishes, stale dispatch recovery reuses or recreates the gate from
+the durable selected-decision checkpoint and unresolved decision, then releases
+only the same stale lease.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
 An executor may select that decision with `humanGateDecisionId`; the daemon persists the selector before classification, and an omitted or null selector retains last-unresolved-decision compatibility.
@@ -149,7 +153,8 @@ A conclusively failed or cancelled run permits one fresh launch; every other sta
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
 The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
-An unresolved delegate intent can reclaim an expired active lock only for the same deterministic invocation through repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing; later lock writes are fenced by the new holder and attempt.
+An unresolved delegate intent can take over an active lock only for the same deterministic invocation: either after that lock expires or after the scheduler proves and releases the matching stale dispatch owner.
+Repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing prevents displacement of a concurrent or newer owner, and later lock writes require the new holder and attempt.
 
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
@@ -184,6 +189,8 @@ executor family or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
+After the no-mistakes wrapper returns, the receipt binds the exact digest of its bounded regular result file.
+The host revalidates that digest before a selected reset or commit and before retrying failed local finalization or recovering a prepared commit, so changed result bytes authorize no repository mutation.
 Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit, while failed verification still rejects the handoff.
 Correlated no-mistakes launch output identifies an interrupted external run but does not make a launch-only receipt recoverable without durable wrapper-finalization proof.
 Generic reset or commit recovery additionally requires a bounded regular result whose exact digest matches the receipt plus matching base, tree, commit-message, and clean-worktree proof; symbolic links and missing or mismatched evidence preserve the worktree and forbid a duplicate launch.

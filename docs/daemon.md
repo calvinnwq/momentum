@@ -189,8 +189,10 @@ Later passes and retry attempts use one tick, including a retry that launches a 
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
 The profile-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
-For an unresolved handoff intent, the next dispatcher may reclaim an expired active lock only for the same deterministic invocation through repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks.
-Heartbeat and settlement then require the reclaimed holder and attempt, preventing the former owner from mutating the lock.
+For an unresolved handoff intent, the next dispatcher may take over the matching active lock after it expires or immediately after the scheduler proves and releases the same stale dispatch owner.
+Repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks prevent a concurrent or newer owner from being displaced.
+Heartbeat and settlement then require the replacement holder and attempt, preventing the former owner from mutating the lock.
+If a crash instead leaves an invocation at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
 
 ### Workflow live-wrapper profile
 
@@ -352,6 +354,8 @@ Pending or running table rows count as an active step and block terminal monitor
 Unreadable status, identity drift, pending CI behind a terminal claim, an active step, active findings, or unresolved decisions fail closed instead of settling success.
 The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
 For no-mistakes, the receipt records `launching` before the wrapper starts, `resetting` or `finalizing` before repository mutation, `failed` after an unsuccessful finalization, and `launched` only after successful wrapper finalization and external identity capture.
+After the wrapper returns, the receipt also records the exact bounded result digest.
+The selected reset or commit and every later local-finalization retry or prepared-commit recovery revalidate that digest, so missing or changed result bytes fail closed before the selected reset or commit.
 An interrupted `launching` receipt reads its original executor log only to corroborate exactly one canonical current run id; historical or duplicate identities provide no authority, and even with a clean unchanged repository the missing wrapper-finalization proof fails closed without reattaching or launching no-mistakes again.
 Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
 A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again only when the current bounded regular result file has the receipt's exact digest; symbolic links and branch, result, worktree, receipt, or current repository `HEAD` drift fail closed and preserve the worktree for inspection.

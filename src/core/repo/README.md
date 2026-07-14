@@ -24,7 +24,8 @@ the folder now carries the domain (`repo-guard.ts` → `guard.ts`, `repo-locks.t
 | Project rollup         | `project-rollup.ts`     |
 
 `locks.ts` keeps active repository ownership lease-based and fences heartbeat, release, and recovery transitions by the current holder and attempt when the caller supplies them.
-Interrupted delegate recovery may reclaim an expired active lock only for the same repository, run, and deterministic dispatch job through compare-and-swap checks over the previous holder, attempt, and deadline.
+Interrupted delegate recovery may take over an active lock only for the same repository, run, and deterministic dispatch job, either after lock expiry or after scheduler recovery proves the matching dispatch holder stale.
+Compare-and-swap checks over the previous holder, attempt, and deadline prevent a concurrent or newer owner from being displaced.
 
 The step-finalization reconciliation seam is not
 part of this mechanical regrouping; `iteration-finalize.ts` keeps its existing

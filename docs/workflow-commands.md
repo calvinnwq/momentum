@@ -2411,6 +2411,7 @@ The supervisor reserves its synthetic approval identity and offers `approve` / `
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
 The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.
 For no-mistakes, correlated launch output identifies a launch-only external run but cannot authorize reattachment without wrapper-finalization proof.
+After its wrapper returns, the no-mistakes receipt binds the exact bounded result digest; the selected reset or commit and any later failed-finalization retry or prepared-commit recovery reject changed or missing result bytes before mutation.
 For other profile-backed tools, recovery requires the bounded regular result's exact receipt digest plus completed-reset or parent/tree/message/clean-worktree commit proof; symbolic links or any mismatch refuse a duplicate launch while preserving the worktree.
 No-mistakes status normalization accepts only canonical current AXI fields and a validated steps table, so ambiguous fields, malformed or duplicate rows, unknown statuses, and out-of-table CI evidence fail closed.
 GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.

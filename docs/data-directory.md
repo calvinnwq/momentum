@@ -54,7 +54,8 @@ A single `momentum.db` per data directory backs durable state across all goals:
   Workflow dispatch locks are released after a proven-clean commit / reset / reconciliation outcome or, when already parked in `needs_manual_recovery`, by an operator-guarded recovery clear that atomically prepares the matching attempt for retry; stored goal-iteration manual-recovery locks are also released by `recovery clear`.
   A profile-backed dispatch lock covers at least the longest configured wrapper/probe execution window plus the full verification-command budget, so a bounded delegate handoff cannot outlive its repository ownership.
   Workflow dispatch locks reuse the legacy identity columns (`goal_id` = run id, `job_id` = dispatch invocation id, `iteration` = attempt) so the active-per-repo-root index remains the exclusion primitive.
-  An unresolved delegate intent may reclaim its own expired active lock through a compare-and-swap over the repository, run, job, previous holder, attempt, and deadline, then fences later lock writes by the new holder and attempt.
+  An unresolved delegate intent may take over its matching active lock after lock expiry or after the scheduler proves and releases the same stale dispatch owner.
+  A compare-and-swap over the repository, run, job, previous holder, attempt, and deadline prevents displacement of a concurrent or newer owner, then fences later lock writes by the new holder and attempt.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
 - `source_items` — durable rows for external tracker items (linked or unlinked) seen by source adapters.
 - `source_snapshots` — point-in-time JSON snapshots captured during reconciliation.
@@ -118,6 +119,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   A registered executor's `continue` recommendation terminalizes its current round while leaving the invocation running; the next daemon scheduler pass may append the next sequential round for the same attempt.
   A registered executor's approval or operator-decision recommendation pauses its current round at `waiting_operator`, mirrors an unresolved executor decision into a round-scoped workflow gate, and releases the dispatch lease. Resolving that gate records the chosen action, reopens the same round, and makes it eligible for scheduler reattachment.
   When an executor selects a specific decision for that gate, `human_gate_decision_selected` checkpoint evidence preserves the decision id before classification; a null selection retains last-unresolved-decision behavior.
+  If a crash occurs after `waiting_operator` classification but before gate parking finishes, stale dispatch recovery reuses or recreates the gate from that selector and unresolved decision, then releases the exact stale lease without changing the selected operator target.
   Delegate-supervisor approval uses a reserved synthetic decision identity; only the latest resolved `approve` allows a later completed external state to settle.
   `workflow run logs` reads invocations run-wide in deterministic step / attempt / invocation order and rounds in deterministic step / attempt / invocation / round order.
   For native goal-loop, `executor_invocations` own the autonomous attempt and `executor_rounds` own each durable iteration; `.gnhf/runs`, terminal scrollback, and runner-local directories may be mirrored as artifacts but are not authoritative state.
@@ -145,6 +147,7 @@ Each delegated step writes its atomic schema-version-1 `delegate-handoff.json` r
 Recovery routes a prior valid handoff through the adapter before reuse, allowing host-local receipt finalization to be reconciled first.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior run remains evidence but permits one fresh launch on the newer attempt.
 No-mistakes receipts progress through `launching`, `resetting` or `finalizing`, and `launched` or `failed`; a correlated launch log alone cannot promote a `launching` receipt without wrapper-finalization proof.
+After the wrapper returns, a no-mistakes receipt binds the exact bounded result digest used to authorize the selected reset or commit and any later failed-finalization retry or prepared-commit recovery.
 A retry of a locally failed no-mistakes receipt reads the correlated external state first.
 A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 Other profile-backed delegate receipts progress through launch, wrapper completion, reset or commit preparation, and finalization phases, carrying the exact result digest plus repository base/tree/message proof required to recognize an already-completed mutation safely.

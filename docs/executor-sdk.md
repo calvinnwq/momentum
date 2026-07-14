@@ -150,6 +150,8 @@ The profile-backed host releases repository ownership only after that handoff ev
 If an attempt or process is interrupted after intent but before completion, the adapter must recover the same external handoff from durable evidence.
 An adapter without safe recovery support fails closed, and a later attempt cannot launch another external run while an earlier handoff intent remains unresolved.
 The profile-backed host writes its tool receipt before the no-mistakes launch and before any delegated reset or commit mutation.
+After the no-mistakes wrapper returns, that receipt binds the exact digest of the bounded regular result document.
+The host rechecks the digest before the finalizer's selected reset or commit and before any failed-finalization retry or prepared-commit recovery; changed or missing result bytes fail closed before mutation.
 No-mistakes handoff finalization accepts a successful result with a verified clean worktree and no changes to commit; a failed verification still rejects the handoff.
 An interrupted no-mistakes `launching` receipt reads the original executor log only to corroborate exactly one canonical current run id; historical sections are ignored, duplicate identities fail closed, and without durable wrapper-finalization proof the receipt never becomes authority to reattach or relaunch.
 Generic profile-backed recovery accepts a completed reset or commit only when the current result file is a bounded regular file whose exact digest matches the receipt and the recorded base, tree, commit message, and clean-worktree proof also match.
@@ -202,6 +204,8 @@ A continuation-only pass waits the configured daemon poll interval before the ne
 If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
+If the process instead dies after gate classification but before gate parking finishes, stale dispatch recovery reuses or reconstructs the round-scoped gate from the durable decision selector and unresolved decision.
+That recovery verifies and releases the exact stale lease in the same transaction, preserving the executor's selected operator target without opening manual recovery.
 The tick must return the id of the current non-terminal round for the current invocation attempt.
 A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.
 The executor starts the next sequential round when its next tick observes no current non-terminal round.
@@ -214,7 +218,8 @@ Dispatch lease heartbeats run independently of the executor tick, including whil
 Every durable envelope write is fenced against the current lease identity and freshness.
 Lease loss aborts the tick signal and prevents later writes from the former owner.
 The profile-backed repository lock spans at least the longest configured wrapper/probe execution window plus the full verification-command budget and is released only after clean finalization or durable handoff evidence.
-Recovery of an unresolved handoff may reclaim an expired active lock only for the same deterministic invocation after its repository, run, previous holder, attempt, job, and prior deadline still match; subsequent heartbeats and settlement remain fenced by the new holder and attempt.
+Recovery of an unresolved handoff may take over an active lock for the same deterministic invocation after the lock expires or after the scheduler proves and releases the matching stale dispatch owner.
+The repository, run, previous holder, attempt, job, and prior deadline must still match, and subsequent heartbeats and settlement remain fenced by the new holder and attempt.
 
 An executor throw settles the active round and invocation for `manual_recovery_required` with `executor_threw`.
 A malformed or internally inconsistent tick result uses `executor_contract_invalid` instead.
