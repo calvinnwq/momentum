@@ -461,6 +461,199 @@ describe(
       ).rejects.toThrow(/launch evidence.*bounded regular file/);
     });
 
+    it("authorizes only the selected reset during generic handoff", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "reset-handoff");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "gnhf",
+        invocationId: "reset-handoff::implementation::dispatch",
+        attempt: 1,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: true };
+          },
+        },
+        run: () => {
+          fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+          fs.writeFileSync(
+            resultJsonPath,
+            JSON.stringify({
+              success: false,
+              summary: "generic handoff failed",
+              key_changes_made: [],
+              key_learnings: [],
+              remaining_work: [],
+              goal_complete: false,
+              commit: {
+                type: "test",
+                subject: "failed generic handoff",
+                body: "",
+                breaking: false,
+              },
+            }),
+          );
+          return {
+            ok: true,
+            result: {
+              state: "failed",
+              summary: "generic handoff failed",
+              checkpoints: [],
+              artifacts: [],
+              resultDigest: null,
+              errorCode: "command_failed",
+              errorMessage: "generic handoff failed",
+              retryHint: null,
+              recoveryHint: null,
+            },
+            executorLogPath,
+            resultJsonPath,
+          };
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await adapter.handoff({
+        invocation: {} as never,
+        config: { tool: "gnhf" },
+        signal: new AbortController().signal,
+      });
+
+      expect(mutations).toEqual(["reset"]);
+      expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
+        "fixture\n",
+      );
+    });
+
+    it("authorizes only the selected reset during generic recovery", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "reset-recovery");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const resultContent = JSON.stringify({
+        success: false,
+        summary: "interrupted generic handoff failed",
+        key_changes_made: [],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: false,
+        commit: {
+          type: "test",
+          subject: "failed interrupted handoff",
+          body: "",
+          breaking: false,
+        },
+      });
+      fs.writeFileSync(resultJsonPath, resultContent);
+      fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+      runGit(repoPath, ["add", "-A"]);
+      const worktreeTree = runGit(repoPath, ["write-tree"]);
+      runGit(repoPath, ["reset", "--quiet", headSha]);
+      fs.writeFileSync(
+        handoffReceiptPath,
+        JSON.stringify({
+          schemaVersion: 1,
+          tool: "gnhf",
+          invocationId: "reset-recovery::implementation::dispatch",
+          attempt: 1,
+          phase: "completed",
+          baseHead: headSha,
+          branch,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          verificationLogPath,
+          preexistingResultDigest: null,
+          resultDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(resultContent)
+            .digest("hex")}`,
+          worktreeTree,
+          dispatchOutcome: {
+            ok: true,
+            state: "failed",
+            summary: "interrupted generic handoff failed",
+          },
+        }),
+      );
+      const mutations: Array<"commit" | "reset"> = [];
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "gnhf",
+        invocationId: "reset-recovery::implementation::dispatch",
+        attempt: 2,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+          beforeGitMutation: (mutation) => {
+            mutations.push(mutation);
+            return { ok: true };
+          },
+        },
+        run: () => {
+          throw new Error("interrupted handoff must not relaunch");
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await adapter.recoverHandoff!({
+        invocation: {} as never,
+        config: { tool: "gnhf" },
+        signal: new AbortController().signal,
+      });
+
+      expect(mutations).toEqual(["reset"]);
+      expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
+        "fixture\n",
+      );
+    });
+
     it.each([
       {
         expectedOutcome: "accepts",

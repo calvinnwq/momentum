@@ -142,8 +142,6 @@ function createLiveWrapperDelegateToolAdapter(
       writeJsonAtomically(input.handoffReceiptPath, launched);
       const raw = await input.run();
       const resultDigest = fileDigest(input.resultJsonPath);
-      const ownership = input.repoSafety.beforeGitMutation?.("commit");
-      if (ownership?.ok === false) throw new Error(ownership.error);
       const worktreeTree = captureWorktreeTree(
         input.repoPath,
         input.headSha,
@@ -323,8 +321,6 @@ function recoverLiveWrapperDelegateHandoff(
     return persistRecoveredLiveWrapperHandoff(input, receipt, externalState);
   }
 
-  const snapshotOwnership = input.repoSafety.beforeGitMutation?.("commit");
-  if (snapshotOwnership?.ok === false) throw new Error(snapshotOwnership.error);
   const currentTree = captureWorktreeTree(
     input.repoPath,
     receipt.baseHead,
