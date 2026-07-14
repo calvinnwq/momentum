@@ -126,12 +126,13 @@ executor consumed by the real-adapter registry.
 `delegate-supervisor/` owns the SDK executor, canonical external-state
 classification, semantic-progress heartbeat / stall logic, and evidence
 projection. `src/adapters/no-mistakes-tool-adapter.ts` is the narrow external
-edge: it hands off to no-mistakes, preserves terminal handoff evidence, and reads normalized state without owning
+edge: it hands off to no-mistakes, preserves terminal handoff candidate evidence, and reads normalized state without owning
 durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
 recorded `no-mistakes` invocations remain readable.
 The profile-backed host writes its step-scoped receipt before no-mistakes launch and before delegated reset or commit mutation.
 Interrupted recovery requires correlated launch output or exact result and repository proof, so a missing or mismatched receipt preserves the worktree and cannot create a duplicate external run.
+Finalized profile-backed state is bound to the repository's current full `HEAD`, and cached terminal handoff proof still requires a fresh clean read for the same run, branch, and exact head before settlement.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 

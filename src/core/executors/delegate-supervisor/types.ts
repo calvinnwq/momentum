@@ -90,7 +90,7 @@ export type DelegateSupervisorHandoff = {
   externalIdentity: DelegateSupervisorExternalIdentity;
   summary: string;
   artifactPaths?: readonly string[];
-  /** Terminal evidence observed during handoff; later ticks must not downgrade it. */
+  /** Cached candidate; a fresh read must corroborate run, branch, and full head SHA. */
   terminalState?: {
     value: DelegateSupervisorExternalState;
     digest: string;

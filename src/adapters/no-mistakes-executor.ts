@@ -50,8 +50,8 @@
  *   - `awaiting_approval` is `approval_required`: an approval boundary that the
  *     mirror surfaces as a durable `waiting_operator` gate.
  *   - `completed` is `complete` *only when the corroborating evidence agrees* —
- *     no active findings remain, CI is passing or not configured, and every
- *     surfaced decision is resolved.
+ *     the head is a full 40-character SHA, no active findings remain, CI is
+ *     passing or not configured, and every surfaced decision is resolved.
  *     A `completed` claim that contradicts its own CI / decision evidence is not
  *     trusted; it routes to `manual_recovery_required` (`external_state_inconsistent`).
  *   - `failed` is `failed` (`external_run_failed`).
@@ -64,8 +64,9 @@
  *     clears.
  *   - A structurally unreadable snapshot (empty run id, malformed head SHA, a
  *     selected finding id with no surfaced finding, an empty finding title, a
- *     decision with no allowed actions, duplicate ids, an unknown step status,
- *     an unknown CI state) routes to `manual_recovery_required`
+ *     decision with non-canonical, duplicate, or mismatched actions, duplicate
+ *     ids, an unknown step status, an unknown CI state) routes to
+ *     `manual_recovery_required`
  *     (`external_state_unreadable`): untrusted evidence, not authority.
  */
 

@@ -175,8 +175,12 @@ operator can repair the executor entry module and clear recovery without
 restarting the daemon. If the repair changes only a transitive dependency that
 Node already attempted to load or evaluate, restart the daemon before clearing recovery;
 the in-process ESM dependency graph cannot be unloaded safely.
-Registered executors are driven one bounded tick per daemon scheduler pass, and
-a `continue` recommendation leaves the invocation resumable for the next pass.
+Registered executors are normally driven one bounded tick per daemon scheduler
+pass, and a `continue` recommendation leaves the invocation resumable for the
+next pass.
+A new profile-backed delegate handoff may receive a second bounded tick in its
+initial pass so fresh external state corroborates the durable handoff
+immediately.
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
 
@@ -340,8 +344,9 @@ The daemon stores step-scoped `delegate-external-state.json` plus an atomic `del
 For no-mistakes, the receipt records a `launching` intent before the wrapper starts and a `launched` identity after the external run id is known.
 An interrupted `launching` receipt may recover that identity only from its correlated executor log; a missing or mismatched receipt fails closed without launching no-mistakes again.
 Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
-A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again; branch, result, worktree, or receipt drift fails closed and preserves the worktree for inspection.
-When the initial no-mistakes handoff already proves checks passed, that terminal state is stored for its exact commit and reused directly only while current status reports passed or absent CI rather than pending CI.
+A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again; branch, result, worktree, receipt, or current repository `HEAD` drift fails closed and preserves the worktree for inspection.
+When the initial no-mistakes handoff already proves checks passed, that terminal candidate is stored with a full 40-character SHA for the post-finalization repository `HEAD`.
+It settles only after a fresh status read corroborates the same run, branch, and exact head with passed or absent CI, no active findings, and no unresolved decisions; pending CI or another head fails closed.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 

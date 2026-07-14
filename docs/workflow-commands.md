@@ -2380,11 +2380,15 @@ The current coding definition uses `delegate-supervisor` with portable `tool` co
 The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
 The initial dispatcher pass may perform the durable handoff and first read as two ticks under the same workflow claim, while later passes perform one tick.
+If the claim is lost after `delegate_handoff_completed` but before classification, stale auto-release lease recovery makes that unclassified round resumable under the same invocation instead of parking it or repeating the handoff.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
+A retry preserves the correlated handoff and decision history but starts a fresh semantic-progress window for the new attempt.
 
-Terminal success requires the observed external run id and branch to match the handoff, while the head must either match the launch head or carry adapter-verified descendant proof.
+Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
+Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
 It also requires no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
 Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
 The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.

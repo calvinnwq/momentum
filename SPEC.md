@@ -122,6 +122,10 @@ share one driving loop.
 A new delegate-supervisor handoff may use a second bounded tick in its initial
 pass so the first external-state read follows the durable handoff immediately;
 later passes return to one tick.
+If a crash leaves `delegate_handoff_completed` on an unclassified running or
+capturing-result round, stale auto-release dispatch-lease recovery releases the
+abandoned lease and makes that same invocation scheduler-resumable instead of
+parking the run or repeating the handoff.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
@@ -131,6 +135,8 @@ A paused round reopens in place, while a terminal gate round remains immutable
 and the executor starts its next round from the resolved decision.
 Retries preserve earlier rounds under the deterministic invocation and increment
 the attempt, while the driver rejects cross-attempt or non-current round results.
+Delegate retries retain correlated handoff and decision evidence but start a new
+semantic-stall window for the new attempt.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
 
@@ -168,10 +174,18 @@ intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
 Recovery accepts only correlated launch output or an exact result, base, tree, and commit-message or completed-reset proof; missing or mismatched evidence preserves the worktree and forbids a duplicate launch.
+Completed profile-backed state is accepted only while its full 40-character head
+SHA matches the repository's current `HEAD`.
 The external run id and branch are stable correlation identity; an
 observed head may advance as the delegated tool commits fixes and counts as
-semantic progress only when the adapter supplies a `verified_descendant` proof from the launch commit. Terminal state captured during handoff remains authoritative
-across later ticks and process restart. The single-shot lifecycle (`one-shot` and `script` in the current
+semantic progress only when the adapter supplies a `verified_descendant` proof from the launch commit.
+Terminal state captured during handoff is a durable settlement candidate, not
+authority by itself: a fresh adapter read must corroborate the same run, branch,
+and exact full head SHA with passed or absent CI, no active findings, and no
+unresolved decisions.
+Pending CI, another head, or unreadable corroboration fails closed rather than
+settling cached success.
+The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
@@ -423,7 +437,8 @@ The wrapper checks the filtered child environment, executable agent path, no-mis
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
 The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `no-mistakes` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
-That terminal handoff evidence is persisted for its exact commit before supervision and is not downgraded by a later status view for the same commit that still reports monitoring or historical findings with passed or explicitly absent CI.
+That terminal handoff evidence is persisted for a full 40-character commit SHA before supervision.
+It settles only after a fresh status view corroborates the same run, branch, and exact current repository `HEAD` with passed or explicitly absent CI, no active findings, and no unresolved decisions; a compatible lagging monitoring view may corroborate the cached terminal state without replacing it.
 Current pending CI is never promoted by stored terminal proof, and proof for one commit never settles a descendant commit.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
 The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the invocation in manual recovery so operators inspect the external run before clearing recovery.
