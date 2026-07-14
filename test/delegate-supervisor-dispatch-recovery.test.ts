@@ -454,6 +454,146 @@ describe(
       ).rejects.toThrow(/launch evidence.*bounded regular file/);
     });
 
+    it.each(["failed", "cancelled"] as const)(
+      "launches a fresh run after a prior-attempt no-mistakes run is %s",
+      async (terminalStatus) => {
+        const repoPath = initRepo();
+        const branch = runGit(repoPath, ["branch", "--show-current"]);
+        const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+        const root = path.join(
+          repoPath,
+          ".agent-workflows",
+          `terminal-${terminalStatus}-retry`,
+        );
+        fs.mkdirSync(root, { recursive: true });
+        const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+        const statePath = path.join(root, "delegate-external-state.json");
+        const resultJsonPath = path.join(root, "result.json");
+        const executorLogPath = path.join(root, "executor.log");
+        const verificationLogPath = path.join(root, "verification.log");
+        const statusCountPath = path.join(root, "status-count");
+        const statusCommand = path.join(root, "status.sh");
+        const invocationId = `terminal-${terminalStatus}-retry::no-mistakes::dispatch`;
+        fs.writeFileSync(
+          handoffReceiptPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            invocationId,
+            attempt: 1,
+            phase: "launched",
+            branch,
+            headSha,
+            statePath,
+            resultJsonPath,
+            executorLogPath,
+            externalIdentity: {
+              externalRunId: "nm-run-old",
+              branch,
+              headSha,
+            },
+          }),
+        );
+        fs.writeFileSync(
+          statusCommand,
+          `#!/bin/sh
+count=0
+test ! -f '${statusCountPath}' || count=$(cat '${statusCountPath}')
+count=$((count + 1))
+printf '%s\n' "$count" > '${statusCountPath}'
+head=$(git -C '${repoPath}' rev-parse HEAD)
+if test "$count" -eq 1; then
+  printf 'run:\n  id: "nm-run-old"\n  branch: ${branch}\n  status: ${terminalStatus}\n  head: %s\nsteps[1]{step,status,findings,duration_ms}:\n  ci,failed,0,1\n' "$head"
+else
+  printf 'run:\n  id: "nm-run-new"\n  branch: ${branch}\n  status: completed\n  head: %s\noutcome: checks-passed\nsteps[1]{step,status,findings,duration_ms}:\n  ci,completed,0,1\n' "$head"
+fi
+`,
+        );
+        fs.chmodSync(statusCommand, 0o755);
+        let launches = 0;
+        const adapter = createProfileBackedDelegateToolAdapter({
+          tool: "no-mistakes",
+          invocationId,
+          attempt: 2,
+          branch,
+          headSha,
+          statePath,
+          handoffReceiptPath,
+          resultJsonPath,
+          executorLogPath,
+          repoPath,
+          repoSafety: {
+            baseHead: headSha,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath,
+          },
+          run: () => {
+            launches += 1;
+            fs.writeFileSync(executorLogPath, 'run:\n  id: "nm-run-new"\n');
+            fs.writeFileSync(path.join(repoPath, "retried.txt"), "retried\n");
+            fs.writeFileSync(
+              resultJsonPath,
+              JSON.stringify({
+                success: true,
+                summary: "fresh no-mistakes run launched",
+                key_changes_made: [],
+                key_learnings: [],
+                remaining_work: [],
+                goal_complete: false,
+                commit: {
+                  type: "test",
+                  subject: "retry no-mistakes",
+                  body: "",
+                  breaking: false,
+                },
+              }),
+            );
+            return {
+              ok: true,
+              result: {
+                state: "succeeded",
+                summary: "fresh no-mistakes run launched",
+                checkpoints: [],
+                artifacts: [],
+                resultDigest: null,
+                errorCode: null,
+                errorMessage: null,
+                retryHint: null,
+                recoveryHint: null,
+              },
+              executorLogPath,
+              resultJsonPath,
+            };
+          },
+          statusCommand,
+          statusArgsPrefix: [],
+          statusEnv: {},
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        });
+
+        const handoff = await adapter.recoverHandoff!({
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        });
+
+        expect(launches).toBe(1);
+        expect(handoff.externalIdentity.externalRunId).toBe("nm-run-new");
+        expect(handoff.terminalState?.value.stepStatus).toBe("completed");
+        expect(fs.readFileSync(statusCountPath, "utf8")).toBe("2\n");
+        expect(
+          JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+        ).toMatchObject({
+          attempt: 2,
+          phase: "launched",
+          externalIdentity: { externalRunId: "nm-run-new" },
+        });
+      },
+    );
+
     it("namespaces attempt-one artifacts by step", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();
@@ -1424,6 +1564,110 @@ describe(
           "utf8",
         ),
       ).toBe("1\n");
+      db.close();
+    });
+
+    it("launches a fresh no-mistakes run after a failed prior attempt is cleared", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      fs.writeFileSync(
+        path.join(repoPath, "MOMENTUM.md"),
+        "---\nverification:\n  - /usr/bin/false\nverification_timeout_sec: 5\n---\n",
+      );
+      runGit(repoPath, ["add", "MOMENTUM.md"]);
+      runGit(repoPath, ["commit", "--quiet", "-m", "test: fail verification"]);
+      const runId = "no-mistakes-failed-attempt-retry";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(tempDir());
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+        },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "manual_recovery_required", attempt: 1 });
+
+      fs.writeFileSync(
+        path.join(repoPath, "MOMENTUM.md"),
+        "---\nverification:\n  - /usr/bin/true\nverification_timeout_sec: 5\n---\n",
+      );
+      runGit(repoPath, ["add", "MOMENTUM.md"]);
+      runGit(repoPath, ["commit", "--quiet", "-m", "test: fix verification"]);
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "delegate_handoff_failed",
+        },
+      });
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 3), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 4,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded", attempt: 2 });
+      expect(
+        fs.readFileSync(
+          path.join(
+            repoPath,
+            ".agent-workflows",
+            runId,
+            "no-mistakes-launch-count",
+          ),
+          "utf8",
+        ),
+      ).toBe("2\n");
+      expect(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(
+              repoPath,
+              ".agent-workflows",
+              runId,
+              "delegate",
+              stepId,
+              "delegate-handoff.json",
+            ),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ attempt: 2, phase: "launched" });
       db.close();
     });
 

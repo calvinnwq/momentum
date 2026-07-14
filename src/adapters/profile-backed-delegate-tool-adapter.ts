@@ -950,9 +950,7 @@ export function createPersistedProfileDelegateToolAdapter(input: {
 function createProfileNoMistakesToolAdapter(
   input: ProfileBackedDelegateToolInput,
 ): DelegateSupervisorToolAdapter {
-  const handoff = async () => {
-    const recovered = recoverNoMistakesHandoff(input);
-    if (recovered !== null) return recovered;
+  const launchHandoff = async () => {
     const launchingReceipt: NoMistakesDelegateReceipt = {
       schemaVersion: 1,
       invocationId: input.invocationId,
@@ -1098,14 +1096,19 @@ function createProfileNoMistakesToolAdapter(
         : {}),
     };
   };
+  const handoff = async () => {
+    const recovered = recoverNoMistakesHandoff(input);
+    return recovered ?? launchHandoff();
+  };
   const recoverHandoff = async () => {
     const recovered = recoverNoMistakesHandoff(input);
-    if (recovered === null) {
+    if (recovered !== null) return recovered;
+    if (!fs.existsSync(input.handoffReceiptPath)) {
       throw new Error(
         "interrupted no-mistakes handoff has no durable receipt or launch identity; refusing to launch again",
       );
     }
-    return recovered;
+    return launchHandoff();
   };
   return createNoMistakesToolAdapter({
     handoff,
@@ -1160,6 +1163,7 @@ function recoverNoMistakesHandoff(
     );
   }
   if (receipt.phase === "failed") {
+    if (receipt.attempt < input.attempt) return null;
     throw new Error(
       `stored no-mistakes handoff failed finalization: ${receipt.failureSummary}`,
     );
