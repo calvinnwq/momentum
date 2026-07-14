@@ -37,6 +37,7 @@ import {
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
+import { EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE } from "../src/core/executors/sdk/types.js";
 import {
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
   DELEGATE_SUPERVISOR_HANDOFF_STAGE,
@@ -1918,6 +1919,92 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       ]);
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "daemon-old",
+      });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recreates a durable SDK gate after a stale dispatch crash", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "waiting-operator-gate-recovery";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const decisionId = `${roundId}::decision`;
+      envelope.facade.recordDecision(roundId, {
+        decisionId,
+        summary: "Approve delegated completion",
+        allowedActions: ["approve", "reject"],
+        recommendedAction: "approve",
+        chosenAction: null,
+        resolution: null,
+        externalRef: null,
+      });
+      envelope.facade.recordCheckpoint(roundId, {
+        checkpointId: `${roundId}::gate-selector`,
+        sequence: 1,
+        stage: EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
+        detail: JSON.stringify({ decisionId }),
+      });
+      envelope.applyDaemonDecision(
+        {
+          roundId,
+          classification: "approval_required",
+          executorRecommendation: "approval_required",
+          roundState: "waiting_operator",
+          invocationState: "waiting_operator",
+          recoveryCode: null,
+          humanGate: "approval_required",
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: "classification: approval_required",
+          },
+        },
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+
+      const recovery = recoverStaleWorkflowLeases(db, { now: NOW + 1 });
+
+      expect(recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT invocation_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        invocation_id: invocationId,
+        round_id: roundId,
+        evidence: decisionId,
+        resolved_at: null,
+      });
+      expect(
+        getWorkflowLease(db, runId, WORKFLOW_DISPATCH_LEASE_KIND),
+      ).toMatchObject({ releasedAt: NOW + 1 });
       expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
         needsManualRecovery: false,
       });

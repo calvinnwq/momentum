@@ -16,7 +16,8 @@ import {
   resolveWorkflowGate,
   type WorkflowGateRecord,
 } from "../gate/persist.js";
-import { releaseWorkflowLease } from "../leases.js";
+import { getWorkflowLease, releaseWorkflowLease } from "../leases.js";
+import { classifyWorkflowLease } from "../run/reducer.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import type { ClaimedWorkflowStep } from "./scheduler.js";
 
@@ -27,10 +28,29 @@ export function parkRegisteredExecutorAtHumanGate(input: {
   invocationId: string;
   decisionId?: string | null;
   now: number;
+  requireStaleLeaseAt?: { now: number; graceMs: number };
 }): WorkflowGateRecord {
   const { db, claim, invocationId, now } = input;
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (input.requireStaleLeaseAt !== undefined) {
+      const lease = getWorkflowLease(
+        db,
+        claim.lease.runId,
+        claim.lease.leaseKind,
+      );
+      if (
+        lease === undefined ||
+        lease.holder !== claim.lease.holder ||
+        lease.acquiredAt !== claim.lease.acquiredAt ||
+        classifyWorkflowLease(lease, input.requireStaleLeaseAt) !==
+          "stale-auto-release"
+      ) {
+        throw new Error(
+          `Cannot recover registered executor invocation ${invocationId}: dispatch lease is no longer stale.`,
+        );
+      }
+    }
     const invocation = loadExecutorInvocation(db, invocationId);
     if (invocation?.state !== "waiting_operator") {
       throw new Error(

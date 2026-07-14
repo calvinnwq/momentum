@@ -17,6 +17,7 @@ import {
   getActiveRepoLockForJob,
   markRepoLockNeedsManualRecovery,
   reclaimRepoLock,
+  transferRepoLock,
   releaseRepoLock,
   updateRepoLockHeartbeat,
 } from "../repo/locks.js";
@@ -870,8 +871,11 @@ function acquireLiveStepRepoOwnership(input: {
     input.reclaimHandoffAttempt !== undefined &&
     existing.iteration >= input.reclaimHandoffAttempt &&
     existing.iteration <= attempt &&
-    existing.lease_expires_at < acquiredAt &&
-    reclaimRepoLock(context.db, {
+    (existing.lease_expires_at < acquiredAt ||
+      context.staleDispatchTakeover?.previousHolder === existing.holder) &&
+    (existing.lease_expires_at < acquiredAt
+      ? reclaimRepoLock
+      : transferRepoLock)(context.db, {
       lockId: existing.id,
       repoRoot,
       previousHolder: existing.holder,

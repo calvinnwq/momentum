@@ -12,6 +12,7 @@ import {
   markRepoLockNeedsManualRecovery,
   reclaimRepoLock,
   releaseRepoLock,
+  transferRepoLock,
   updateRepoLockHeartbeat,
 } from "../src/core/repo/locks.js";
 
@@ -333,6 +334,61 @@ describe("acquireRepoLock", () => {
           now: 2_400,
         }).ok,
       ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("transfers a fresh lock only with its exact prior identity", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const acquired = acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 2,
+        jobId: "j1",
+        leaseExpiresAt: 5_000,
+        now: 100,
+      });
+      if (!acquired.ok) throw new Error("expected lock acquisition");
+
+      expect(
+        transferRepoLock(db, {
+          lockId: acquired.lockId,
+          repoRoot: REPO_ROOT,
+          previousHolder: "other-worker",
+          holder: "worker-b",
+          goalId: "g1",
+          previousIteration: 2,
+          previousLeaseExpiresAt: 5_000,
+          iteration: 3,
+          jobId: "j1",
+          heartbeatAt: 200,
+          leaseExpiresAt: 6_000,
+        }).ok,
+      ).toBe(false);
+      expect(
+        transferRepoLock(db, {
+          lockId: acquired.lockId,
+          repoRoot: REPO_ROOT,
+          previousHolder: "worker-a",
+          holder: "worker-b",
+          goalId: "g1",
+          previousIteration: 2,
+          previousLeaseExpiresAt: 5_000,
+          iteration: 3,
+          jobId: "j1",
+          heartbeatAt: 200,
+          leaseExpiresAt: 6_000,
+        }).ok,
+      ).toBe(true);
+      expect(getRepoLock(db, acquired.lockId)).toMatchObject({
+        holder: "worker-b",
+        iteration: 3,
+        heartbeat_at: 200,
+        lease_expires_at: 6_000,
+      });
     } finally {
       db.close();
     }

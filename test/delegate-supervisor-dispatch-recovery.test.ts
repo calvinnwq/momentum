@@ -1097,7 +1097,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
       db.close();
     });
 
-    it("reclaims the matching repo lock for an interrupted handoff intent", async () => {
+    it("transfers the matching repo lock after stale dispatch takeover", async () => {
       const dataDir = tempDir();
       const repoPath = initRepo();
       const runId = "delegate-interrupted-intent-lock";
@@ -1186,46 +1186,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
         db,
         workerId: "recovery-worker",
         now: NOW + 4,
-      });
-
-      expect(
-        db
-          .prepare(
-            `SELECT i.state, r.recovery_code AS recoveryCode
-               FROM executor_invocations AS i
-               JOIN executor_rounds AS r ON r.invocation_id = i.invocation_id
-              WHERE i.workflow_run_id = ?
-              ORDER BY r.round_index DESC
-              LIMIT 1`,
-          )
-          .get(runId),
-      ).toEqual({
-        state: "manual_recovery_required",
-        recoveryCode: "delegate_handoff_recovery_required",
-      });
-      expect(
-        db
-          .prepare(
-            "SELECT state, holder, iteration FROM repo_locks WHERE goal_id = ?",
-          )
-          .get(runId),
-      ).toEqual({
-        state: "active",
-        holder: "original-worker",
-        iteration: 2,
-      });
-
-      expect(
-        clearWorkflowRunManualRecoveryGuarded(db, {
-          runId,
-          now: NOW + 120_001,
-        }),
-      ).toMatchObject({ ok: true });
-      const staleLockClaim = claimStep(db, runId, stepId, NOW + 120_002);
-      await resolved.dispatch(staleLockClaim, {
-        db,
-        workerId: "recovery-worker",
-        now: NOW + 120_003,
+        staleDispatchTakeover: { previousHolder: "original-worker" },
       });
 
       expect(
@@ -1244,7 +1205,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
       ).toEqual({
         state: "released",
         holder: "recovery-worker",
-        iteration: 4,
+        iteration: 3,
       });
       expect(
         fs.readFileSync(

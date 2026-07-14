@@ -123,6 +123,27 @@ export function reclaimRepoLock(
   db: MomentumDb,
   input: ReclaimRepoLockInput,
 ): { ok: boolean } {
+  return transferRepoLockOwnership(db, input, true);
+}
+
+/**
+ * Transfer an active lock after the scheduler has already proven the matching
+ * dispatch owner stale. Exact identity fencing prevents a concurrent or newer
+ * owner from being displaced while allowing recovery before the longer repo
+ * verification lease itself expires.
+ */
+export function transferRepoLock(
+  db: MomentumDb,
+  input: ReclaimRepoLockInput,
+): { ok: boolean } {
+  return transferRepoLockOwnership(db, input, false);
+}
+
+function transferRepoLockOwnership(
+  db: MomentumDb,
+  input: ReclaimRepoLockInput,
+  requireExpired: boolean,
+): { ok: boolean } {
   const result = db
     .prepare(
       `UPDATE repo_locks
@@ -132,7 +153,7 @@ export function reclaimRepoLock(
           AND goal_id = ?
           AND iteration = ?
           AND lease_expires_at = ?
-          AND lease_expires_at < ?
+          AND (? = 0 OR lease_expires_at < ?)
           AND job_id = ?
           AND holder = ?
           AND state = 'active'`,
@@ -148,6 +169,7 @@ export function reclaimRepoLock(
       input.goalId,
       input.previousIteration,
       input.previousLeaseExpiresAt,
+      requireExpired ? 1 : 0,
       input.heartbeatAt,
       input.jobId,
       input.previousHolder,
