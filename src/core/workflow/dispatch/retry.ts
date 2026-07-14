@@ -132,6 +132,8 @@ export type PrepareRetryableDispatchedStepForClearResult =
       prepared: true;
       runId: string;
       stepId: string;
+      invocationId: string;
+      attempt: number;
       recoveryCode: string;
     };
 
@@ -168,6 +170,8 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
     prepared: true,
     runId: input.runId,
     stepId: retryable.stepId,
+    invocationId: retryable.invocationId,
+    attempt: retryable.attempt,
     recoveryCode: retryable.recoveryCode,
   };
 }

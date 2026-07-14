@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import { releaseRepoLock } from "../../repo/locks.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "../dispatch/retry.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
 import { loadWorkflowRunDetail } from "./status.js";
@@ -487,6 +488,30 @@ export function clearWorkflowRunManualRecoveryGuarded(
         recoveryCode: recovery.code,
         blockingStepId: recovery.stepId,
       };
+    }
+
+    if (preparedRetry.prepared) {
+      const manualLocks = db
+        .prepare(
+          `SELECT id FROM repo_locks
+            WHERE goal_id = ?
+              AND job_id = ?
+              AND iteration = ?
+              AND state = 'needs_manual_recovery'
+            ORDER BY acquired_at, id`,
+        )
+        .all(
+          input.runId,
+          preparedRetry.invocationId,
+          preparedRetry.attempt,
+        ) as Array<{ id: string }>;
+      for (const lock of manualLocks) {
+        releaseRepoLock(db, {
+          lockId: lock.id,
+          now,
+          recoveryStatus: "workflow_manual_recovery_cleared",
+        });
+      }
     }
 
     const previousReason = detail.run.manualRecoveryReason;

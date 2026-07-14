@@ -14,6 +14,7 @@ import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execu
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
 import { CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR } from "../src/core/workflow/live-wrapper/coding-workflow.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 
 const NOW = 1_700_000_000_000;
@@ -84,6 +85,7 @@ JSON`;
 function writeNoMistakesProfile(
   profileDir: string,
   statusMode: "completed" | "lagging" = "completed",
+  launchIdentityMode: "valid" | "missing" = "valid",
 ): {
   profilePath: string;
   wrapperConfigPath: string;
@@ -125,12 +127,20 @@ ${statusOutput}
       },
     }),
   );
+  const launchMutation =
+    launchIdentityMode === "valid"
+      ? `printf 'validated\n' > "$MOMENTUM_REPO_PATH/no-mistakes.txt"`
+      : "";
+  const launchOutput =
+    launchIdentityMode === "valid"
+      ? `printf 'run:\n  id: "nm-run-1"\n'`
+      : `printf 'launch completed without identity\n'`;
   const launchScript = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/no-mistakes-launch-count"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
 printf '%s\n' "$((count + 1))" > "$count_file"
-printf 'validated\n' > "$MOMENTUM_REPO_PATH/no-mistakes.txt"
-printf 'run:\n  id: "nm-run-1"\n'
+${launchMutation}
+${launchOutput}
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
 {"success":true,"summary":"no-mistakes launched","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"launch no-mistakes","body":"","breaking":false}}
 JSON`;
@@ -494,6 +504,110 @@ describe(
       expect(
         fs.existsSync(path.join(artifactRoot, "delegate-external-state.json")),
       ).toBe(false);
+      db.close();
+    });
+
+    it("releases a failed handoff lock before the production retry reacquires it", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = "no-mistakes-handoff-lock-retry";
+      const stepId = "no-mistakes";
+      const profile = writeNoMistakesProfile(tempDir(), "completed", "missing");
+      const db = prepareRun({
+        dataDir,
+        repoPath,
+        runId,
+        stepKeys: [stepId],
+        tool: "no-mistakes",
+      });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profile.profilePath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: profile.wrapperConfigPath,
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+        },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "manual_recovery_required", attempt: 1 });
+      expect(
+        db
+          .prepare(
+            "SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?",
+          )
+          .get(runId),
+      ).toEqual({ needs_manual_recovery: 1 });
+      expect(
+        db
+          .prepare(
+            "SELECT state, iteration FROM repo_locks WHERE goal_id = ? ORDER BY acquired_at DESC LIMIT 1",
+          )
+          .get(runId),
+      ).toEqual({ state: "needs_manual_recovery", iteration: 1 });
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "delegate_handoff_failed",
+        },
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM repo_locks WHERE goal_id = ? AND iteration = 1",
+          )
+          .get(runId),
+      ).toEqual({ state: "released" });
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 3), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 4,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "manual_recovery_required", attempt: 2 });
+      expect(
+        db
+          .prepare(
+            "SELECT state, iteration FROM repo_locks WHERE goal_id = ? ORDER BY iteration",
+          )
+          .all(runId),
+      ).toEqual([
+        { state: "released", iteration: 1 },
+        { state: "needs_manual_recovery", iteration: 2 },
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+          )
+          .get(runId),
+      ).toEqual({ recovery_code: "delegate_handoff_failed" });
       db.close();
     });
 

@@ -2459,6 +2459,62 @@ describe("no-mistakes tool adapter", () => {
     ).toEqual({ ok: true, value: identity });
   });
 
+  it("ignores launch identities nested under historical sections", () => {
+    expect(
+      parseNoMistakesLaunchIdentity(
+        ["historical:", '  id: "nm-run-old"'].join("\n"),
+        { branch: identity.branch, headSha: identity.headSha },
+      ),
+    ).toEqual({
+      ok: false,
+      error: "no-mistakes launch output did not report the delegated run id",
+    });
+  });
+
+  it("reads the current launch identity after historical output", () => {
+    expect(
+      parseNoMistakesLaunchIdentity(
+        [
+          "historical:",
+          "  run:",
+          '    id: "nm-run-old"',
+          "run:",
+          '  id: "nm-run-1"',
+        ].join("\n"),
+        { branch: identity.branch, headSha: identity.headSha },
+      ),
+    ).toEqual({ ok: true, value: identity });
+  });
+
+  it.each([
+    [
+      "conflicting launch id fields",
+      ["run:", '  id: "nm-run-1"', 'id: "nm-run-other"'].join("\n"),
+    ],
+    [
+      "duplicate launch run sections",
+      ["run:", '  id: "nm-run-1"', "run:", '  id: "nm-run-other"'].join("\n"),
+    ],
+    [
+      "conflicting top-level launch id fields",
+      ['id: "nm-run-1"', 'id: "nm-run-other"'].join("\n"),
+    ],
+    [
+      "duplicate top-level launch id fields",
+      ['id: "nm-run-1"', 'id: "nm-run-1"'].join("\n"),
+    ],
+  ])("rejects %s", (_label, raw) => {
+    expect(
+      parseNoMistakesLaunchIdentity(raw, {
+        branch: identity.branch,
+        headSha: identity.headSha,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("ambiguous"),
+    });
+  });
+
   it("normalizes axi status into canonical delegated state", () => {
     const parsed = parseStatus(
       [

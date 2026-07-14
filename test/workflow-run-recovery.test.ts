@@ -5,6 +5,10 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
+  acquireRepoLock,
+  markRepoLockNeedsManualRecovery,
+} from "../src/core/repo/locks.js";
+import {
   clearWorkflowRunManualRecovery,
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
@@ -93,6 +97,80 @@ function seedStep(
     at,
     at,
   );
+}
+
+function seedRetryableDelegateRecovery(db: MomentumDb): {
+  runId: string;
+  stepId: string;
+  invocationId: string;
+  at: number;
+  lockId: string;
+} {
+  const runId = "run-delegate-retry";
+  const stepId = "implementation";
+  const invocationId = `${runId}::${stepId}::dispatch`;
+  const at = 1_730_000_500_000;
+  seedRun(db, runId);
+  seedStep(db, runId, stepId, "running", { at });
+  db.prepare(
+    `INSERT INTO executor_invocations (
+       invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, state, attempt, started_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "delegate-supervisor",
+    "manual_recovery_required",
+    2,
+    at,
+    at,
+    at,
+  );
+  db.prepare(
+    `INSERT INTO executor_rounds (
+       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt, round_index, state, recovery_code,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${invocationId}::round-2`,
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "delegate-supervisor",
+    2,
+    1,
+    "manual_recovery_required",
+    "delegate_handoff_failed",
+    at,
+    at,
+  );
+  markWorkflowRunNeedsManualRecovery(db, {
+    runId,
+    reason: "delegate_handoff_failed",
+    now: at,
+  });
+  const acquired = acquireRepoLock(db, {
+    repoRoot: "/repos/delegate-retry",
+    holder: "delegate-worker",
+    goalId: runId,
+    iteration: 2,
+    jobId: invocationId,
+    leaseExpiresAt: at + 30_000,
+    now: at,
+  });
+  if (!acquired.ok) throw new Error(acquired.reason);
+  const parked = markRepoLockNeedsManualRecovery(db, {
+    lockId: acquired.lockId,
+    now: at + 1,
+    recoveryStatus: "unproven delegated handoff",
+  });
+  if (!parked.ok) throw new Error("failed to park delegate repo lock");
+  return { runId, stepId, invocationId, at, lockId: acquired.lockId };
 }
 
 function seedNoMistakesCheckpoint(
@@ -492,6 +570,129 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         manual_recovery_reason: null,
         manual_recovery_at: null,
         updated_at: 1_730_000_900_000,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("releases the retryable dispatch repo lock owned by the cleared attempt", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, invocationId, at, lockId } =
+        seedRetryableDelegateRecovery(db);
+      const priorAttempt = acquireRepoLock(db, {
+        repoRoot: "/repos/prior-attempt-recovery",
+        holder: "other-worker",
+        goalId: runId,
+        iteration: 1,
+        jobId: invocationId,
+        leaseExpiresAt: at + 30_000,
+        now: at,
+      });
+      if (!priorAttempt.ok) throw new Error(priorAttempt.reason);
+      if (
+        !markRepoLockNeedsManualRecovery(db, {
+          lockId: priorAttempt.lockId,
+          now: at + 1,
+        }).ok
+      ) {
+        throw new Error("failed to park prior-attempt repo lock");
+      }
+      const otherInvocation = acquireRepoLock(db, {
+        repoRoot: "/repos/other-invocation-recovery",
+        holder: "other-worker",
+        goalId: runId,
+        iteration: 2,
+        jobId: `${runId}::other-step::dispatch`,
+        leaseExpiresAt: at + 30_000,
+        now: at,
+      });
+      if (!otherInvocation.ok) throw new Error(otherInvocation.reason);
+      if (
+        !markRepoLockNeedsManualRecovery(db, {
+          lockId: otherInvocation.lockId,
+          now: at + 1,
+        }).ok
+      ) {
+        throw new Error("failed to park other-invocation repo lock");
+      }
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "delegate_handoff_failed",
+        },
+      });
+      expect(
+        db.prepare("SELECT state FROM repo_locks WHERE id = ?").get(lockId),
+      ).toEqual({ state: "released" });
+      expect(
+        db
+          .prepare("SELECT state FROM repo_locks WHERE id = ?")
+          .get(priorAttempt.lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        db
+          .prepare("SELECT state FROM repo_locks WHERE id = ?")
+          .get(otherInvocation.lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        acquireRepoLock(db, {
+          repoRoot: "/repos/delegate-retry",
+          holder: "retry-worker",
+          goalId: runId,
+          iteration: 3,
+          jobId: invocationId,
+          leaseExpiresAt: at + 60_000,
+          now: at + 3,
+        }).ok,
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back retry preparation and lock release when recovery clear fails", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, at, lockId } = seedRetryableDelegateRecovery(db);
+      db.exec(
+        `CREATE TRIGGER fail_workflow_recovery_clear
+         BEFORE UPDATE OF needs_manual_recovery ON workflow_runs
+         WHEN OLD.id = '${runId}' AND NEW.needs_manual_recovery = 0
+         BEGIN
+           SELECT RAISE(ABORT, 'forced workflow recovery clear failure');
+         END`,
+      );
+
+      expect(() =>
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toThrow("forced workflow recovery clear failure");
+      expect(
+        db.prepare("SELECT state FROM repo_locks WHERE id = ?").get(lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "running" });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+        reason: "delegate_handoff_failed",
       });
     } finally {
       db.close();

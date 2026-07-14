@@ -163,17 +163,32 @@ export function parseNoMistakesLaunchIdentity(
   raw: string,
   expected: Pick<DelegateSupervisorExternalIdentity, "branch" | "headSha">,
 ): NoMistakesLaunchIdentityRead {
-  const externalRunId =
-    toonSectionScalar(raw, "run", "id") ??
-    topLevelToonScalar(raw, "id") ??
-    /^\s*id:\s*"?([^"\s]+)"?\s*$/m.exec(raw)?.[1] ??
-    null;
-  if (externalRunId === null || externalRunId.trim().length === 0) {
+  const currentRaw = stripHistoricalToonSections(raw);
+  const scalarAmbiguity = findNoMistakesScalarAmbiguity(currentRaw);
+  if (scalarAmbiguity !== null) {
+    return {
+      ok: false,
+      error: `no-mistakes launch output reported ambiguous ${scalarAmbiguity}`,
+    };
+  }
+  const externalRunIds = [
+    toonSectionScalar(currentRaw, "run", "id"),
+    ...topLevelToonScalars(currentRaw, "id"),
+  ].filter((value): value is string => value !== null);
+  if (externalRunIds.length === 0 || externalRunIds[0]!.trim().length === 0) {
     return {
       ok: false,
       error: "no-mistakes launch output did not report the delegated run id",
     };
   }
+  if (externalRunIds.length !== 1) {
+    return {
+      ok: false,
+      error:
+        "no-mistakes launch output reported ambiguous delegated run id fields",
+    };
+  }
+  const externalRunId = externalRunIds[0]!;
   return {
     ok: true,
     value: {
@@ -682,8 +697,13 @@ function stripHistoricalToonSections(raw: string): string {
 }
 
 function topLevelToonScalar(raw: string, key: string): string | null {
-  const match = new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m").exec(raw);
-  return match?.[1] === undefined ? null : unquote(match[1]);
+  return topLevelToonScalars(raw, key)[0] ?? null;
+}
+
+function topLevelToonScalars(raw: string, key: string): string[] {
+  return [...raw.matchAll(new RegExp(`^${key}:\\s*(.+?)\\s*$`, "gm"))].map(
+    (match) => unquote(match[1]!),
+  );
 }
 
 function toonSectionScalar(
