@@ -95,7 +95,9 @@ export type UpdateRepoLockHeartbeatInput = {
   lockId: string;
   heartbeatAt: number;
   leaseExpiresAt: number;
+  /** When supplied, fence the update to this current owner. */
   holder?: string;
+  /** When supplied, fence the update to this current attempt. */
   iteration?: number;
 };
 
@@ -113,6 +115,10 @@ export type ReclaimRepoLockInput = {
   leaseExpiresAt: number;
 };
 
+/**
+ * Transfer an expired active lock for the same repository, goal, and job with
+ * compare-and-swap fencing over its previous holder, attempt, and deadline.
+ */
 export function reclaimRepoLock(
   db: MomentumDb,
   input: ReclaimRepoLockInput,
@@ -186,7 +192,9 @@ export type ReleaseRepoLockInput = {
   lockId: string;
   now?: number;
   recoveryStatus?: string;
+  /** When supplied, fence release to this current owner. */
   holder?: string;
+  /** When supplied, fence release to this current attempt. */
   iteration?: number;
 };
 
@@ -224,7 +232,9 @@ export type MarkRepoLockNeedsManualRecoveryInput = {
   lockId: string;
   now?: number;
   recoveryStatus?: string;
+  /** When supplied, fence parking to this current owner. */
   holder?: string;
+  /** When supplied, fence parking to this current attempt. */
   iteration?: number;
 };
 

@@ -40,6 +40,7 @@ export const DELEGATE_SUPERVISOR_EXECUTOR_NAME = "delegate-supervisor";
 export const DELEGATE_SUPERVISOR_STALL_AFTER_MS = 4 * 60 * 1000;
 
 export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
+/** Durable before an adapter launch so interrupted handoff recovery can resume. */
 export const DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE =
   "delegate_handoff_intent";
 const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";

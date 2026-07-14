@@ -926,6 +926,7 @@ Options:
   Structured no-mistakes evidence uses `schemaVersion: 1` and must include the workflow run id, issue scope identifiers, branch name and head SHA, pull request id, head SHA, state, draft flag, and check state when a pull request exists, the no-mistakes run id, successful no-mistakes outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
   Required no-mistakes phases must be current and complete: `review`, `tests`, and `push` must be `passed`, while the remaining phases must be `passed` or `not_applicable`.
   The structured path refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown pull request checks, and partial or non-success phase evidence.
+  Expected external identity comes only from the current invocation attempt's latest legacy no-mistakes checkpoint or latest eligible `delegate-supervisor` identity checkpoint authorized by a same-attempt handoff intent with `tool: "no-mistakes"`; older attempts and other-tool delegate checkpoints cannot authorize reconciliation.
   Without `--evidence-pointer`, the command refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 - `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an evidence-backed step is reconciled.
   Use this to reference the specific ledger entry where the tail step's partial execution stopped (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
@@ -947,7 +948,7 @@ Behaviour:
 - Registered SDK `executor_threw` and `executor_contract_invalid` refusals are also retryable after the executor implementation or result contract is repaired.
 - Delegate-supervisor `tool_adapter_unavailable`, `delegate_handoff_failed`, `delegate_handoff_recovery_required`, `external_state_unreadable`, and `external_state_inconsistent` refusals are retryable after the adapter, handoff evidence, or correlated external state is repaired.
   An `external_state_blocked` invocation is also retryable after the external blocker clears.
-  Guarded clear increments the existing deterministic invocation's attempt, reconciles any unresolved handoff intent before another launch, reuses a valid correlated handoff and prior decisions when available, and starts a fresh semantic-stall window for the new attempt.
+  Guarded clear increments the existing deterministic invocation's attempt, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
@@ -2388,21 +2389,24 @@ The first successful tick persists a handoff intent and correlated handoff check
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
 Only the invocation's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
 Later passes and every retry attempt perform one tick, including a retry that launches a fresh external run, and continuation-only daemon cycles wait the configured poll interval before another read.
-If the claim is lost after durable handoff evidence exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
+If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
 Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
-A retry preserves a valid non-terminal correlated handoff and decision history but starts a fresh semantic-progress window for the new attempt.
+A retry reconciles a valid non-terminal correlated handoff through adapter recovery before reuse, preserves decision history, and starts a fresh semantic-progress window for the new attempt.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure does not establish that the correlated external run failed.
-The retry reads and reattaches that run when it is still running or complete, and launches again only after matching failed or cancelled external state.
+The retry reads that run first.
+A matching failed or cancelled state permits one fresh launch; every other status reruns failed local finalization before the same run is reattached for supervision.
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
 Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
 It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+For no-mistakes, every pending or running canonical steps-table row counts as an active step.
 Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
 A lagging `running` read can corroborate cached terminal state only when it reports no active step, no findings or selected findings, no unresolved decisions, and passed or absent CI.
 Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
+The executor's selected durable decision id is checkpointed before classification so a recovered parking operation mirrors the same decision; absent selection keeps the legacy last-unresolved behavior.
 The supervisor reserves its synthetic approval identity and offers `approve` / `reject`; only the latest resolved `approve` allows later terminal completion.
 Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
 The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.

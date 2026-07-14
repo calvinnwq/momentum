@@ -135,6 +135,7 @@ The shipped single-shot compatibility host currently accepts a validated recomme
 
 The built-in `delegate-supervisor` uses the same interface.
 Its strict portable config is `{ "tool": "<adapter-name>" }`.
+The resolved adapter's declared `name` must exactly match that selected tool or the executor treats the adapter as unavailable.
 The current coding definition uses `gnhf` for implementation and `no-mistakes` for validation without adding either tool as a new executor identity.
 Profile-backed tool bindings are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
 
@@ -158,15 +159,17 @@ Finalized profile-backed state must also carry a full 40-character head SHA that
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
 Checkpoint precedence follows durable round index and checkpoint sequence, so a newer delegate intent or handoff cannot be overridden by an older legacy completion.
-A later attempt reuses the latest valid non-terminal handoff and prior decision history rather than relaunching the delegated tool, while starting a fresh semantic-stall window for that attempt.
+A later attempt sends the latest valid non-terminal handoff through `recoverHandoff` before reuse, preserves prior decision history, and starts a fresh semantic-stall window instead of relaunching the delegated tool.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains durable evidence but permits one fresh launch on the newer attempt.
 A locally failed wrapper-finalization receipt is not proof that its external run failed.
-The newer attempt reads the correlated run first, reattaches it when it is still running or complete, and launches again only after that same run is conclusively failed or cancelled.
+The newer attempt reads the correlated run first.
+A conclusively failed or cancelled run permits one fresh launch without repeating local finalization; every other status reruns the failed local finalization before the same run is reattached for supervision.
 
 Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
 The external run id and branch remain the stable correlation identity; exact launch head matching is the default, while an adapter may mark a changed head as `verified_descendant` after proving the tool committed forward from the launch commit.
 The external status is one of `running`, `awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, `cancelled`, or `completed`; CI is `passed`, `failed`, `pending`, or `none`.
 The no-mistakes adapter accepts only the canonical current AXI sections and validated steps-table shape, ignores explicitly historical sections, and rejects duplicate or conflicting scalar fields, duplicate or malformed step rows, unknown step statuses, and CI evidence outside that table.
+Any pending or running row in that table is an active step and blocks terminal monitoring success.
 Momentum rejects malformed state, run or branch identity drift, selected findings without matching surfaced findings, invalid decision action sets, external decisions that use the supervisor-reserved synthetic approval id, and completed claims that still have an active step, findings, unresolved current or previously mirrored decisions, or pending/failed CI.
 Every allowed action must be a unique non-blank canonical string without surrounding whitespace, and any recommended or chosen action must belong to that set.
 An approval or decision state is projected into durable executor decisions and a round-scoped workflow gate.
@@ -196,7 +199,7 @@ The managed daemon normally drives at most one registered-executor tick per sche
 For the first completed delegate-supervisor handoff in an invocation, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
-If a process dies after durable handoff evidence exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
+If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
 The tick must return the id of the current non-terminal round for the current invocation attempt.
@@ -211,6 +214,7 @@ Dispatch lease heartbeats run independently of the executor tick, including whil
 Every durable envelope write is fenced against the current lease identity and freshness.
 Lease loss aborts the tick signal and prevents later writes from the former owner.
 The profile-backed repository lock spans at least the longest configured wrapper/probe execution window plus the full verification-command budget and is released only after clean finalization or durable handoff evidence.
+Recovery of an unresolved handoff may reclaim an expired active lock only for the same deterministic invocation after its repository, run, previous holder, attempt, job, and prior deadline still match; subsequent heartbeats and settlement remain fenced by the new holder and attempt.
 
 An executor throw settles the active round and invocation for `manual_recovery_required` with `executor_threw`.
 A malformed or internally inconsistent tick result uses `executor_contract_invalid` instead.

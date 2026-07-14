@@ -189,6 +189,8 @@ Later passes and retry attempts use one tick, including a retry that launches a 
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
 The profile-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
+For an unresolved handoff intent, the next dispatcher may reclaim an expired active lock only for the same deterministic invocation through repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks.
+Heartbeat and settlement then require the reclaimed holder and attempt, preventing the former owner from mutating the lock.
 
 ### Workflow live-wrapper profile
 
@@ -346,6 +348,7 @@ The no-mistakes adapter uses the configured wrapper command for the initial `axi
 Status read-back must match the pinned run id and branch.
 The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
 Only canonical current AXI sections and a validated steps table contribute status; duplicate or conflicting scalar fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside that table fail closed.
+Pending or running table rows count as an active step and block terminal monitoring success.
 Unreadable status, identity drift, pending CI behind a terminal claim, an active step, active findings, or unresolved decisions fail closed instead of settling success.
 The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
 For no-mistakes, the receipt records `launching` before the wrapper starts, `resetting` or `finalizing` before repository mutation, `failed` after an unsuccessful finalization, and `launched` only after successful wrapper finalization and external identity capture.
@@ -355,6 +358,7 @@ A retry can therefore recognize a completed reset or reconstruct an exact parent
 When the initial no-mistakes handoff already proves checks passed, that terminal candidate is stored with a full 40-character SHA for the post-finalization repository `HEAD`.
 It settles only after a fresh status read corroborates the same run, branch, and exact head with passed or absent CI, no active findings, and no unresolved decisions; pending CI or another head fails closed.
 Approval boundaries use a supervisor-owned `approve` / `reject` decision that external state cannot forge; only the latest resolved `approve` permits later completion.
+The daemon checkpoints that supervisor decision id before gate classification so recovery cannot accidentally park a different mirrored external decision.
 On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
@@ -407,6 +411,8 @@ new scheduler attempt after the operator repairs the wrapper path or external
 runner state.
 Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked invocation is retryable after its blocker clears.
 The retry keeps the deterministic invocation identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
+It sends a prior handoff through adapter recovery before reuse.
+For a locally failed no-mistakes receipt, a correlated failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 An `unsupported_platform` refusal is separately retryable for every dispatched
 step after the workflow moves to Linux or macOS and recovery is cleared there.

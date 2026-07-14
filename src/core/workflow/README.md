@@ -113,11 +113,12 @@ The step-scoped `delegate-handoff.json` receipt records no-mistakes launch inten
 Correlated no-mistakes launch output cannot recover a launch-only receipt without wrapper-finalization proof.
 Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
 Finalized profile-backed delegate state must match the repository's current full `HEAD`.
-After durable handoff evidence exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
+After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
-A valid non-terminal handoff is reused across retry attempts.
+A valid non-terminal handoff is reconciled through adapter recovery before reuse across retry attempts.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
-A local wrapper-finalization failure first triggers a correlated status read on the newer attempt; a running or completed run is reattached rather than relaunched.
+A local wrapper-finalization failure first triggers a correlated status read on the newer attempt.
+A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 Only the invocation's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
 
 The daemon-dispatchable `external-apply` adapter:

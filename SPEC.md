@@ -123,7 +123,7 @@ The first delegate-supervisor handoff completed anywhere in an invocation may us
 Later passes and every retry attempt use one tick, even when a conclusively failed or cancelled prior external run allows the retry to launch a fresh run.
 Continuation-only passes observe the daemon poll interval before the next external-state read.
 If a crash leaves an unclassified running, capturing-result, or
-`mirroring_external_state` round with durable handoff evidence, stale
+`mirroring_external_state` round with durable handoff intent or completed handoff evidence, stale
 auto-release dispatch-lease recovery releases the abandoned lease and makes
 that same invocation scheduler-resumable instead of parking the run or
 repeating the handoff.
@@ -131,6 +131,7 @@ The same recovery applies after a completed `continue` poll when its succeeded
 or failed round has a durable handoff in its history.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
+An executor may select that decision with `humanGateDecisionId`; the daemon persists the selector before classification, and an omitted or null selector retains last-unresolved-decision compatibility.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
 gate resolution records the chosen action and makes the invocation
 scheduler-resumable.
@@ -140,13 +141,15 @@ Retries preserve earlier rounds under the deterministic invocation and increment
 the attempt, while the driver rejects cross-attempt or non-current round results.
 Delegate retries retain correlated handoff and decision evidence but start a new
 semantic-stall window for the new attempt.
-A valid non-terminal handoff is reused.
+A valid non-terminal handoff is reconciled through adapter recovery before reuse.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior
 external run remains evidence but permits one fresh launch on the newer attempt.
-Local wrapper-finalization failure alone is not external terminal evidence: the newer attempt first reads the correlated run and reattaches it when it is still running or has completed.
+Local wrapper-finalization failure alone is not external terminal evidence: the newer attempt first reads the correlated run.
+A conclusively failed or cancelled run permits one fresh launch; every other status reruns the failed local finalization before the same run is reattached for supervision.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
 The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
+An unresolved delegate intent can reclaim an expired active lock only for the same deterministic invocation through repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing; later lock writes are fenced by the new holder and attempt.
 
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
@@ -197,6 +200,7 @@ A lagging `running` read can provide that corroboration only when it also report
 Pending CI, another head, or unreadable corroboration fails closed rather than
 settling cached success.
 No-mistakes normalization rejects ambiguous current AXI fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside the canonical steps table.
+Pending or running table rows remain active steps and cannot support terminal monitoring success.
 The supervisor reserves its synthetic approval identity, and only the latest resolved `approve` action authorizes completion after an approval boundary.
 The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
@@ -463,6 +467,7 @@ Interrupted no-mistakes success reconciliation is surfaced as `nextAction.action
 Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed no-mistakes row.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
 That reconciliation accepts the legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` path and a structured deterministic evidence JSON path whose schema records the workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
+Its expected identity comes only from the current invocation attempt's latest no-mistakes legacy checkpoint or a `delegate-supervisor` attempt whose durable handoff intent selects `tool: "no-mistakes"`; prior-attempt and other-tool checkpoints cannot authorize reconciliation.
 Structured evidence is refused when its schema, identity, findings, check state, outcome, or phase statuses are unknown, stale, ambiguous, partial, mismatched, unresolved, pending, failed, or otherwise non-successful.
 
 ## Runtime Consolidation

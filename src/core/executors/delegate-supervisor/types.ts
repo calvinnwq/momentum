@@ -117,12 +117,15 @@ export type DelegateSupervisorToolContext = {
  * liveness, stalls, gates, and terminal classification.
  */
 export interface DelegateSupervisorToolAdapter {
+  /** Must exactly match the portable `tool` value that selects this adapter. */
   readonly name: string;
   handoff(
     context: DelegateSupervisorToolContext,
   ): DelegateSupervisorHandoff | Promise<DelegateSupervisorHandoff>;
   /**
    * Reconcile an interrupted intent without duplicating an unresolved launch.
+   * Retry attempts also call this before reusing a prior valid handoff so the
+   * adapter can reconcile host-local receipts and finalization evidence.
    * A newer attempt may launch once after prior evidence is conclusively failed
    * or cancelled.
    */

@@ -16,12 +16,15 @@ the folder now carries the domain (`repo-guard.ts` → `guard.ts`, `repo-locks.t
 
 ## Local structure
 
-| Concern | Modules |
-| --- | --- |
-| Guards / locks | `guard.ts`, `locks.ts` |
-| Verification | `verification.ts` |
+| Concern                | Modules                 |
+| ---------------------- | ----------------------- |
+| Guards / locks         | `guard.ts`, `locks.ts`  |
+| Verification           | `verification.ts`       |
 | Iteration finalization | `iteration-finalize.ts` |
-| Project rollup | `project-rollup.ts` |
+| Project rollup         | `project-rollup.ts`     |
+
+`locks.ts` keeps active repository ownership lease-based and fences heartbeat, release, and recovery transitions by the current holder and attempt when the caller supplies them.
+Interrupted delegate recovery may reclaim an expired active lock only for the same repository, run, and deterministic dispatch job through compare-and-swap checks over the previous holder, attempt, and deadline.
 
 The step-finalization reconciliation seam is not
 part of this mechanical regrouping; `iteration-finalize.ts` keeps its existing

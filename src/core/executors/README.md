@@ -136,8 +136,10 @@ Correlated no-mistakes launch output identifies a possible external run but cann
 Generic interrupted recovery requires a bounded regular result whose exact digest matches the receipt plus exact repository proof, so symbolic links and missing or mismatched evidence preserve the worktree and cannot create a duplicate external run.
 Finalized profile-backed state is bound to the repository's current full `HEAD`, and cached terminal handoff proof still requires a fresh clean read for the same run, branch, and exact head before settlement.
 That lagging clean read must report no active step.
-After local wrapper-finalization failure, a later attempt reads and reattaches the correlated running or completed external run before considering a fresh launch.
+After local wrapper-finalization failure, a later attempt reads the correlated external run first.
+A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 Canonical no-mistakes normalization rejects ambiguous AXI fields and malformed steps tables, while the supervisor's reserved approval decision permits terminal completion only after its latest action is `approve`.
+The selected supervisor decision id is persisted before gate classification, and profile-backed recovery may reclaim only an expired active lock for the same interrupted deterministic invocation with compare-and-swap fencing.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
