@@ -52,7 +52,7 @@ import type {
   NoMistakesExternalDecision,
   NoMistakesExternalFinding,
   NoMistakesExternalState,
-  NoMistakesExternalStepStatus
+  NoMistakesExternalStepStatus,
 } from "../../../adapters/no-mistakes-executor.js";
 
 /** A successful read: the typed snapshot plus the raw-bytes content digest. */
@@ -77,8 +77,7 @@ export type NoMistakesExternalStateReadError = {
  * one of these two shapes.
  */
 export type NoMistakesExternalStateRead =
-  | NoMistakesExternalStateReadSuccess
-  | NoMistakesExternalStateReadError;
+  NoMistakesExternalStateReadSuccess | NoMistakesExternalStateReadError;
 
 /** The inputs to {@link readNoMistakesExternalState}: the external state file path. */
 export type ReadNoMistakesExternalStateInput = {
@@ -96,7 +95,7 @@ export const MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES = 1024 * 1024;
  * Total: a missing file or unreadable path becomes an `error`, never a throw.
  */
 export function readNoMistakesExternalState(
-  input: ReadNoMistakesExternalStateInput
+  input: ReadNoMistakesExternalStateInput,
 ): NoMistakesExternalStateRead {
   let raw: Buffer;
   try {
@@ -104,13 +103,13 @@ export function readNoMistakesExternalState(
     if (!stat.isFile()) {
       return {
         ok: false,
-        error: "external no-mistakes state path is not a regular file"
+        error: "external no-mistakes state path is not a regular file",
       };
     }
     if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
       return {
         ok: false,
-        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`,
       };
     }
     const read = readRegularFileBounded(input.statePath);
@@ -122,32 +121,30 @@ export function readNoMistakesExternalState(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state file is unreadable: ${detail}`
+      error: `external no-mistakes state file is unreadable: ${detail}`,
     };
   }
   return parseNoMistakesExternalState(raw);
 }
 
-function readRegularFileBounded(
-  statePath: string
-): FieldRead<Buffer> {
+function readRegularFileBounded(statePath: string): FieldRead<Buffer> {
   let fd: number | null = null;
   try {
     fd = fs.openSync(
       statePath,
-      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK
+      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
     );
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) {
       return {
         ok: false,
-        error: "external no-mistakes state path is not a regular file"
+        error: "external no-mistakes state path is not a regular file",
       };
     }
     if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
       return {
         ok: false,
-        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`,
       };
     }
     const chunks: Buffer[] = [];
@@ -164,20 +161,19 @@ function readRegularFileBounded(
     }
     return {
       ok: false,
-      error: `external no-mistakes state file is too large: more than ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES} bytes`
+      error: `external no-mistakes state file is too large: more than ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES} bytes`,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state file is unreadable: ${detail}`
+      error: `external no-mistakes state file is unreadable: ${detail}`,
     };
   } finally {
     if (fd !== null) {
       try {
         fs.closeSync(fd);
-      } catch {
-      }
+      } catch {}
     }
   }
 }
@@ -193,7 +189,7 @@ function readRegularFileBounded(
  * content digest of `raw`.
  */
 export function parseNoMistakesExternalState(
-  raw: string | Buffer
+  raw: string | Buffer,
 ): NoMistakesExternalStateRead {
   const decoded = decodeNoMistakesExternalStateText(raw);
   if (!decoded.ok) {
@@ -207,13 +203,13 @@ export function parseNoMistakesExternalState(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state is not valid JSON: ${detail}`
+      error: `external no-mistakes state is not valid JSON: ${detail}`,
     };
   }
   if (!isPlainObject(parsed)) {
     return {
       ok: false,
-      error: "external no-mistakes state must be a JSON object"
+      error: "external no-mistakes state must be a JSON object",
     };
   }
 
@@ -251,7 +247,7 @@ export function parseNoMistakesExternalState(
     selectedFindingIds: selectedFindingIds.value,
     decisions: decisions.value,
     prUrl: prUrl.value,
-    ciState: ciState.value as NoMistakesCiState
+    ciState: ciState.value as NoMistakesCiState,
   };
   return { ok: true, value, digest: contentDigest(raw) };
 }
@@ -259,20 +255,22 @@ export function parseNoMistakesExternalState(
 /** A field-read outcome: the typed value, or the read error to short-circuit on. */
 type FieldRead<T> = { ok: true; value: T } | NoMistakesExternalStateReadError;
 
-function decodeNoMistakesExternalStateText(raw: string | Buffer): FieldRead<string> {
+function decodeNoMistakesExternalStateText(
+  raw: string | Buffer,
+): FieldRead<string> {
   if (typeof raw === "string") {
     return { ok: true, value: raw };
   }
   try {
     return {
       ok: true,
-      value: new TextDecoder("utf-8", { fatal: true }).decode(raw)
+      value: new TextDecoder("utf-8", { fatal: true }).decode(raw),
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state is not valid UTF-8: ${detail}`
+      error: `external no-mistakes state is not valid UTF-8: ${detail}`,
     };
   }
 }
@@ -284,11 +282,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** Read a required string field, erroring when absent or not a string. */
 function readString(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string> {
   const value = obj[key];
   if (typeof value !== "string") {
-    return { ok: false, error: `external no-mistakes state ${key} must be a string` };
+    return {
+      ok: false,
+      error: `external no-mistakes state ${key} must be a string`,
+    };
   }
   return { ok: true, value };
 }
@@ -296,7 +297,7 @@ function readString(
 /** Read a `string | null` field, erroring when present but neither. Absent -> null. */
 function readNullableString(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string | null> {
   const value = obj[key];
   if (value === undefined || value === null) {
@@ -305,7 +306,7 @@ function readNullableString(
   if (typeof value !== "string") {
     return {
       ok: false,
-      error: `external no-mistakes state ${key} must be a string or null`
+      error: `external no-mistakes state ${key} must be a string or null`,
     };
   }
   return { ok: true, value };
@@ -315,7 +316,7 @@ function readNullableString(
 function readOptionalString(
   obj: Record<string, unknown>,
   key: string,
-  context: string
+  context: string,
 ): FieldRead<string | null> {
   const value = obj[key];
   if (value === undefined || value === null) {
@@ -324,7 +325,7 @@ function readOptionalString(
   if (typeof value !== "string") {
     return {
       ok: false,
-      error: `external no-mistakes state ${context} ${key} must be a string or null`
+      error: `external no-mistakes state ${context} ${key} must be a string or null`,
     };
   }
   return { ok: true, value };
@@ -333,18 +334,21 @@ function readOptionalString(
 /** Read a required array-of-strings field. */
 function readStringArray(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string[]> {
   const value = obj[key];
   if (!Array.isArray(value)) {
-    return { ok: false, error: `external no-mistakes state ${key} must be an array` };
+    return {
+      ok: false,
+      error: `external no-mistakes state ${key} must be an array`,
+    };
   }
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") {
       return {
         ok: false,
-        error: `external no-mistakes state ${key} must contain only strings`
+        error: `external no-mistakes state ${key} must contain only strings`,
       };
     }
     out.push(entry);
@@ -354,27 +358,36 @@ function readStringArray(
 
 /** Read the `findings` array into typed {@link NoMistakesExternalFinding} rows. */
 function readFindings(
-  obj: Record<string, unknown>
+  obj: Record<string, unknown>,
 ): FieldRead<NoMistakesExternalFinding[]> {
   const value = obj.findings;
   if (!Array.isArray(value)) {
-    return { ok: false, error: "external no-mistakes state findings must be an array" };
+    return {
+      ok: false,
+      error: "external no-mistakes state findings must be an array",
+    };
   }
   const out: NoMistakesExternalFinding[] = [];
   for (const entry of value) {
     if (!isPlainObject(entry)) {
       return {
         ok: false,
-        error: "external no-mistakes state finding must be an object"
+        error: "external no-mistakes state finding must be an object",
       };
     }
     const externalId = readString(entry, "externalId");
     if (!externalId.ok) {
-      return { ok: false, error: "external no-mistakes state finding externalId must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state finding externalId must be a string",
+      };
     }
     const title = readString(entry, "title");
     if (!title.ok) {
-      return { ok: false, error: "external no-mistakes state finding title must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state finding title must be a string",
+      };
     }
     const severity = readOptionalString(entry, "severity", "finding");
     if (!severity.ok) return severity;
@@ -384,7 +397,7 @@ function readFindings(
       externalId: externalId.value,
       title: title.value,
       severity: severity.value,
-      detail: detail.value
+      detail: detail.value,
     });
   }
   return { ok: true, value: out };
@@ -392,39 +405,50 @@ function readFindings(
 
 /** Read the `decisions` array into typed {@link NoMistakesExternalDecision} rows. */
 function readDecisions(
-  obj: Record<string, unknown>
+  obj: Record<string, unknown>,
 ): FieldRead<NoMistakesExternalDecision[]> {
   const value = obj.decisions;
   if (!Array.isArray(value)) {
-    return { ok: false, error: "external no-mistakes state decisions must be an array" };
+    return {
+      ok: false,
+      error: "external no-mistakes state decisions must be an array",
+    };
   }
   const out: NoMistakesExternalDecision[] = [];
   for (const entry of value) {
     if (!isPlainObject(entry)) {
       return {
         ok: false,
-        error: "external no-mistakes state decision must be an object"
+        error: "external no-mistakes state decision must be an object",
       };
     }
     const externalId = readString(entry, "externalId");
     if (!externalId.ok) {
-      return { ok: false, error: "external no-mistakes state decision externalId must be a string" };
+      return {
+        ok: false,
+        error:
+          "external no-mistakes state decision externalId must be a string",
+      };
     }
     const summary = readString(entry, "summary");
     if (!summary.ok) {
-      return { ok: false, error: "external no-mistakes state decision summary must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state decision summary must be a string",
+      };
     }
     const allowedActions = readStringArray(entry, "allowedActions");
     if (!allowedActions.ok) {
       return {
         ok: false,
-        error: "external no-mistakes state decision allowedActions must be an array of strings"
+        error:
+          "external no-mistakes state decision allowedActions must be an array of strings",
       };
     }
     const recommendedAction = readOptionalString(
       entry,
       "recommendedAction",
-      "decision"
+      "decision",
     );
     if (!recommendedAction.ok) return recommendedAction;
     const chosenAction = readOptionalString(entry, "chosenAction", "decision");
@@ -437,7 +461,7 @@ function readDecisions(
       allowedActions: allowedActions.value,
       recommendedAction: recommendedAction.value,
       chosenAction: chosenAction.value,
-      resolution: resolution.value
+      resolution: resolution.value,
     });
   }
   return { ok: true, value: out };

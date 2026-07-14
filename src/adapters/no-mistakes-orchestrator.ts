@@ -81,7 +81,7 @@ import {
   loadExecutorRound,
   updateExecutorInvocationState,
   updateExecutorRound,
-  type ExecutorRoundUpdate
+  type ExecutorRoundUpdate,
 } from "../core/executors/loop/persist.js";
 import {
   isTerminalExecutorInvocationState,
@@ -89,7 +89,7 @@ import {
   type ExecutorDecisionRecord,
   type ExecutorFindingRecord,
   type ExecutorInvocationRecord,
-  type ExecutorRoundRecord
+  type ExecutorRoundRecord,
 } from "../core/executors/loop/reducer.js";
 import {
   decideNoMistakesMirror,
@@ -102,7 +102,7 @@ import {
   planNoMistakesRoundStart,
   type NoMistakesExternalState,
   type NoMistakesMirrorDecision,
-  type NoMistakesRoundRuntimeInputs
+  type NoMistakesRoundRuntimeInputs,
 } from "./no-mistakes-executor.js";
 import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes/mechanism.js";
 
@@ -114,7 +114,7 @@ class NoMistakesMirrorRoundFamilyError extends Error {
 
   constructor(roundId: string, executorFamily: string) {
     super(
-      `No-mistakes mirror cannot poll non-no-mistakes round ${roundId} with family ${executorFamily}`
+      `No-mistakes mirror cannot poll non-no-mistakes round ${roundId} with family ${executorFamily}`,
     );
     this.name = "NoMistakesMirrorRoundFamilyError";
     this.roundId = roundId;
@@ -128,7 +128,7 @@ class NoMistakesMirrorRoundTerminalError extends Error {
 
   constructor(roundId: string, state: string) {
     super(
-      `No-mistakes mirror cannot poll terminal round ${roundId} in state ${state}`
+      `No-mistakes mirror cannot poll terminal round ${roundId} in state ${state}`,
     );
     this.name = "NoMistakesMirrorRoundTerminalError";
     this.roundId = roundId;
@@ -148,7 +148,7 @@ class NoMistakesMirrorRoundTerminalError extends Error {
  * inject a deterministic fake.
  */
 export type NoMistakesMirrorReader = (
-  round: ExecutorRoundRecord
+  round: ExecutorRoundRecord,
 ) => NoMistakesExternalStateRead;
 
 type NoMistakesExternalIdentity = Pick<
@@ -175,24 +175,24 @@ function noMistakesProgressDigest(state: NoMistakesExternalState): string {
         selectedFindingIds: state.selectedFindingIds,
         decisions: state.decisions,
         prUrl: state.prUrl,
-        ciState: state.ciState
-      })
+        ciState: state.ciState,
+      }),
     )
     .digest("hex")}`;
 }
 
 function externalIdentity(
-  state: NoMistakesExternalState
+  state: NoMistakesExternalState,
 ): NoMistakesExternalIdentity {
   return {
     externalRunId: state.externalRunId,
     branch: state.branch,
-    headSha: state.headSha
+    headSha: state.headSha,
   };
 }
 
 function externalIdentityFromCheckpointDetail(
-  detail: string | null
+  detail: string | null,
 ): NoMistakesExternalIdentity | null {
   if (detail === null) {
     return null;
@@ -223,13 +223,13 @@ function externalIdentityFromCheckpointDetail(
   return {
     externalRunId: identity.externalRunId,
     branch: identity.branch,
-    headSha: identity.headSha
+    headSha: identity.headSha,
   };
 }
 
 function pinnedExternalIdentity(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): NoMistakesExternalIdentity | null {
   for (const checkpoint of listExecutorCheckpointsForRound(db, roundId)) {
     if (checkpoint.stage !== EXTERNAL_STATE_MIRRORED_STAGE) {
@@ -245,7 +245,7 @@ function pinnedExternalIdentity(
 
 function durableExpectedExternalIdentity(
   db: MomentumDb,
-  roundId: string
+  roundId: string,
 ): NoMistakesExternalIdentity | null {
   for (const checkpoint of listExecutorCheckpointsForRound(db, roundId)) {
     if (checkpoint.stage !== EXPECTED_EXTERNAL_IDENTITY_STAGE) {
@@ -262,7 +262,7 @@ function durableExpectedExternalIdentity(
 function externalIdentityAnchor(
   db: MomentumDb,
   roundId: string,
-  expected: NoMistakesExpectedExternalIdentity | null
+  expected: NoMistakesExpectedExternalIdentity | null,
 ): NoMistakesExternalIdentity | null {
   return (
     pinnedExternalIdentity(db, roundId) ??
@@ -273,7 +273,7 @@ function externalIdentityAnchor(
 
 function describeExternalIdentityMismatch(
   expected: NoMistakesExternalIdentity,
-  state: NoMistakesExternalState
+  state: NoMistakesExternalState,
 ): string | null {
   const actual = externalIdentity(state);
   const changed: string[] = [];
@@ -291,14 +291,16 @@ function externalIdentityMismatchReason(
   db: MomentumDb,
   roundId: string,
   state: NoMistakesExternalState,
-  expected: NoMistakesExpectedExternalIdentity | null
+  expected: NoMistakesExpectedExternalIdentity | null,
 ): string | null {
   const anchor = externalIdentityAnchor(db, roundId, expected);
-  return anchor === null ? null : describeExternalIdentityMismatch(anchor, state);
+  return anchor === null
+    ? null
+    : describeExternalIdentityMismatch(anchor, state);
 }
 
 function noMistakesExternalStateInconsistent(
-  reason: string
+  reason: string,
 ): NoMistakesMirrorDecision {
   return {
     classification: "manual_recovery_required",
@@ -306,11 +308,13 @@ function noMistakesExternalStateInconsistent(
     invocationState: "manual_recovery_required",
     humanGate: "manual_recovery_required",
     recoveryCode: "external_state_inconsistent",
-    reason
+    reason,
   };
 }
 
-function noMistakesExternalStateStalled(reason: string): NoMistakesMirrorDecision {
+function noMistakesExternalStateStalled(
+  reason: string,
+): NoMistakesMirrorDecision {
   return noMistakesExternalStateInconsistent(reason);
 }
 
@@ -318,17 +322,17 @@ function insertNewFindings(
   db: MomentumDb,
   roundId: string,
   projected: readonly ExecutorFindingRecord[],
-  now: number
+  now: number,
 ): void {
   const existing = listExecutorFindingsForRound(db, roundId);
   const existingIds = new Set(existing.map((finding) => finding.findingId));
   const reservedIds = new Set([
     ...existingIds,
-    ...projected.map((finding) => finding.findingId)
+    ...projected.map((finding) => finding.findingId),
   ]);
   for (const finding of projected) {
     const related = existing.filter(
-      (candidate) => candidate.externalRef === finding.externalRef
+      (candidate) => candidate.externalRef === finding.externalRef,
     );
     const latest = related.at(-1);
     if (latest !== undefined && sameFindingEvidence(latest, finding)) {
@@ -349,17 +353,17 @@ function insertNewDecisions(
   db: MomentumDb,
   roundId: string,
   projected: readonly ExecutorDecisionRecord[],
-  now: number
+  now: number,
 ): void {
   const existing = listExecutorDecisionsForRound(db, roundId);
   const existingIds = new Set(existing.map((decision) => decision.decisionId));
   const reservedIds = new Set([
     ...existingIds,
-    ...projected.map((decision) => decision.decisionId)
+    ...projected.map((decision) => decision.decisionId),
   ]);
   for (const decision of projected) {
-    const related = existing.filter(
-      (candidate) => sameDecisionEvidenceStream(candidate, decision)
+    const related = existing.filter((candidate) =>
+      sameDecisionEvidenceStream(candidate, decision),
     );
     const latest = related.at(-1);
     if (latest !== undefined && sameDecisionEvidence(latest, decision)) {
@@ -391,7 +395,7 @@ function decisionEvidenceBaseId(decisionId: string): string {
 
 function sameDecisionEvidenceStream(
   left: ExecutorDecisionRecord,
-  right: ExecutorDecisionRecord
+  right: ExecutorDecisionRecord,
 ): boolean {
   if (right.externalRef !== undefined && right.externalRef !== null) {
     return (
@@ -411,7 +415,7 @@ function decisionEvidenceStreamKey(decision: ExecutorDecisionRecord): string {
 
 function sameFindingEvidence(
   left: ExecutorFindingRecord,
-  right: ExecutorFindingRecord
+  right: ExecutorFindingRecord,
 ): boolean {
   return (
     left.severity === right.severity &&
@@ -424,7 +428,7 @@ function sameFindingEvidence(
 
 function sameDecisionEvidence(
   left: ExecutorDecisionRecord,
-  right: ExecutorDecisionRecord
+  right: ExecutorDecisionRecord,
 ): boolean {
   return (
     left.summary === right.summary &&
@@ -437,7 +441,7 @@ function sameDecisionEvidence(
 
 function stringArraysEqual(
   left: readonly string[],
-  right: readonly string[]
+  right: readonly string[],
 ): boolean {
   return (
     left.length === right.length &&
@@ -449,7 +453,7 @@ function insertExternalStateCheckpoint(
   db: MomentumDb,
   roundId: string,
   state: NoMistakesExternalState,
-  now: number
+  now: number,
 ): void {
   const sequence = listExecutorCheckpointsForRound(db, roundId).length;
   insertExecutorCheckpoint(
@@ -466,10 +470,10 @@ function insertExternalStateCheckpoint(
         activeStep: state.activeStep,
         stepStatus: state.stepStatus,
         prUrl: state.prUrl,
-        ciState: state.ciState
-      })
+        ciState: state.ciState,
+      }),
     },
-    { now }
+    { now },
   );
 }
 
@@ -477,7 +481,7 @@ function insertExpectedExternalIdentityCheckpoint(
   db: MomentumDb,
   roundId: string,
   identity: NoMistakesExpectedExternalIdentity,
-  now: number
+  now: number,
 ): void {
   const sequence = listExecutorCheckpointsForRound(db, roundId).length;
   insertExecutorCheckpoint(
@@ -487,9 +491,9 @@ function insertExpectedExternalIdentityCheckpoint(
       roundId,
       sequence,
       stage: EXPECTED_EXTERNAL_IDENTITY_STAGE,
-      detail: JSON.stringify(identity)
+      detail: JSON.stringify(identity),
     },
-    { now }
+    { now },
   );
 }
 
@@ -497,7 +501,7 @@ function noMistakesPollRoundUpdate(
   current: ExecutorRoundRecord,
   decision: NoMistakesMirrorDecision,
   stateRead: NoMistakesExternalStateRead,
-  polledAt: number
+  polledAt: number,
 ): ExecutorRoundUpdate {
   const finishedAt = isTerminalExecutorRoundState(decision.roundState)
     ? polledAt
@@ -518,7 +522,7 @@ function noMistakesPollRoundUpdate(
         inputDigest: stateRead.digest,
         resultDigest: progressDigest,
         heartbeatAt,
-        finishedAt
+        finishedAt,
       }
     : { ...baseUpdate, heartbeatAt, finishedAt };
 }
@@ -527,21 +531,21 @@ function updateInvocationForDecision(
   db: MomentumDb,
   invocationId: string,
   decision: NoMistakesMirrorDecision,
-  polledAt: number
+  polledAt: number,
 ): void {
   updateExecutorInvocationState(db, invocationId, decision.invocationState, {
     heartbeatAt: polledAt,
     finishedAt: isTerminalExecutorInvocationState(decision.invocationState)
       ? polledAt
       : null,
-    now: polledAt
+    now: polledAt,
   });
 }
 
 function resumeWaitingInvocationBeforeSuccess(
   db: MomentumDb,
   invocationId: string,
-  polledAt: number
+  polledAt: number,
 ): void {
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation?.state !== "waiting_operator") {
@@ -550,12 +554,12 @@ function resumeWaitingInvocationBeforeSuccess(
   updateExecutorInvocationState(db, invocationId, "running", {
     heartbeatAt: polledAt,
     finishedAt: null,
-    now: polledAt
+    now: polledAt,
   });
 }
 
 function isResolvedDecisionRecord(
-  decision: Pick<ExecutorDecisionRecord, "resolution">
+  decision: Pick<ExecutorDecisionRecord, "resolution">,
 ): boolean {
   return (
     typeof decision.resolution === "string" &&
@@ -566,15 +570,15 @@ function isResolvedDecisionRecord(
 function unresolvedPriorDecisionCount(
   db: MomentumDb,
   roundId: string,
-  state: NoMistakesExternalState
+  state: NoMistakesExternalState,
 ): number {
   const currentlyResolved = new Set(
     planNoMistakesRoundDecisions({ roundId, decisions: state.decisions })
       .filter(isResolvedDecisionRecord)
       .flatMap((decision) => [
         decisionEvidenceStreamKey(decision),
-        decisionEvidenceBaseId(decision.decisionId)
-      ])
+        decisionEvidenceBaseId(decision.decisionId),
+      ]),
   );
   const latest = new Map<string, ExecutorDecisionRecord>();
   for (const decision of listExecutorDecisionsForRound(db, roundId)) {
@@ -584,23 +588,19 @@ function unresolvedPriorDecisionCount(
     ([baseId, decision]) =>
       !isResolvedDecisionRecord(decision) &&
       !currentlyResolved.has(baseId) &&
-      !currentlyResolved.has(decisionEvidenceBaseId(decision.decisionId))
+      !currentlyResolved.has(decisionEvidenceBaseId(decision.decisionId)),
   ).length;
 }
 
 function hasPinnedOrExpectedExternalIdentity(
   db: MomentumDb,
   roundId: string,
-  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
+  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null,
 ): boolean {
   return externalIdentityAnchor(db, roundId, expectedExternalIdentity) !== null;
 }
 
-function withSavepoint<T>(
-  db: MomentumDb,
-  name: string,
-  fn: () => T
-): T {
+function withSavepoint<T>(db: MomentumDb, name: string, fn: () => T): T {
   db.exec(`SAVEPOINT ${name}`);
   try {
     const result = fn();
@@ -612,8 +612,7 @@ function withSavepoint<T>(
     } finally {
       try {
         db.exec(`RELEASE SAVEPOINT ${name}`);
-      } catch {
-      }
+      } catch {}
     }
     throw error;
   }
@@ -624,7 +623,7 @@ function reconcileNoMistakesTerminalDecision(
   roundId: string,
   stateRead: NoMistakesExternalStateRead,
   decision: NoMistakesMirrorDecision,
-  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
+  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null,
 ): NoMistakesMirrorDecision {
   if (!stateRead.ok) {
     return decision;
@@ -635,7 +634,7 @@ function reconcileNoMistakesTerminalDecision(
     !hasPinnedOrExpectedExternalIdentity(db, roundId, expectedExternalIdentity)
   ) {
     return noMistakesExternalStateInconsistent(
-      `external no-mistakes run reached terminal ${stateRead.value.stepStatus} before external identity was pinned`
+      `external no-mistakes run reached terminal ${stateRead.value.stepStatus} before external identity was pinned`,
     );
   }
   if (decision.classification !== "complete") {
@@ -644,13 +643,13 @@ function reconcileNoMistakesTerminalDecision(
   const unresolvedCount = unresolvedPriorDecisionCount(
     db,
     roundId,
-    stateRead.value
+    stateRead.value,
   );
   if (unresolvedCount === 0) {
     return decision;
   }
   return noMistakesExternalStateInconsistent(
-    `external no-mistakes run claims completed but ${unresolvedCount} previously mirrored decision(s) are unresolved`
+    `external no-mistakes run claims completed but ${unresolvedCount} previously mirrored decision(s) are unresolved`,
   );
 }
 
@@ -658,7 +657,7 @@ function reconcileNoMistakesStalledDecision(
   current: ExecutorRoundRecord,
   stateRead: NoMistakesExternalStateRead,
   decision: NoMistakesMirrorDecision,
-  polledAt: number
+  polledAt: number,
 ): NoMistakesMirrorDecision {
   if (!stateRead.ok || decision.classification !== "continue") {
     return decision;
@@ -673,7 +672,7 @@ function reconcileNoMistakesStalledDecision(
   }
   const step = stateRead.value.activeStep ?? "unknown";
   return noMistakesExternalStateStalled(
-    `external no-mistakes state for step ${step} has not changed for ${stalledForMs}ms; inspect the external no-mistakes run and clear recovery only after it produces fresh progress or terminal evidence`
+    `external no-mistakes state for step ${step} has not changed for ${stalledForMs}ms; inspect the external no-mistakes run and clear recovery only after it produces fresh progress or terminal evidence`,
   );
 }
 
@@ -731,14 +730,14 @@ export type RunNoMistakesMirrorRoundResult = {
  * round transition.
  */
 export function runNoMistakesMirrorRound(
-  input: RunNoMistakesMirrorRoundInput
+  input: RunNoMistakesMirrorRoundInput,
 ): RunNoMistakesMirrorRoundResult {
   const {
     db,
     roundId,
     read,
     expectedExternalIdentity = null,
-    polledAt
+    polledAt,
   } = input;
 
   // 1. Load the live round (it must already exist) so the reader can locate the
@@ -763,14 +762,15 @@ export function runNoMistakesMirrorRound(
   const hasIdentityAnchor = stateRead.ok
     ? hasPinnedOrExpectedExternalIdentity(db, roundId, expectedExternalIdentity)
     : false;
-  const identityMismatchReason = stateRead.ok && hasIdentityAnchor
-    ? externalIdentityMismatchReason(
-        db,
-        roundId,
-        stateRead.value,
-        expectedExternalIdentity
-      )
-    : null;
+  const identityMismatchReason =
+    stateRead.ok && hasIdentityAnchor
+      ? externalIdentityMismatchReason(
+          db,
+          roundId,
+          stateRead.value,
+          expectedExternalIdentity,
+        )
+      : null;
   const identityUnpinnedReason =
     stateRead.ok &&
     !hasIdentityAnchor &&
@@ -790,13 +790,13 @@ export function runNoMistakesMirrorRound(
     roundId,
     stateRead,
     identityReconciled,
-    expectedExternalIdentity
+    expectedExternalIdentity,
   );
   const decision = reconcileNoMistakesStalledDecision(
     current,
     stateRead,
     terminalDecision,
-    polledAt
+    polledAt,
   );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
@@ -807,7 +807,7 @@ export function runNoMistakesMirrorRound(
       current,
       decision,
       stateRead,
-      polledAt
+      polledAt,
     );
     if (decision.invocationState === "succeeded") {
       resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
@@ -823,13 +823,13 @@ export function runNoMistakesMirrorRound(
           ...roundUpdate,
           toState: "mirroring_external_state",
           classification: "continue",
-          finishedAt: null
+          finishedAt: null,
         },
-        { now: polledAt }
+        { now: polledAt },
       );
     }
     const round = updateExecutorRound(db, roundId, roundUpdate, {
-      now: polledAt
+      now: polledAt,
     });
     updateInvocationForDecision(db, current.invocationId, decision, polledAt);
 
@@ -844,18 +844,18 @@ export function runNoMistakesMirrorRound(
           planNoMistakesRoundFindings({
             roundId,
             findings: stateRead.value.findings,
-            selectedFindingIds: stateRead.value.selectedFindingIds
+            selectedFindingIds: stateRead.value.selectedFindingIds,
           }),
-          polledAt
+          polledAt,
         );
         insertNewDecisions(
           db,
           roundId,
           planNoMistakesRoundDecisions({
             roundId,
-            decisions: stateRead.value.decisions
+            decisions: stateRead.value.decisions,
           }),
-          polledAt
+          polledAt,
         );
       }
     }
@@ -864,7 +864,7 @@ export function runNoMistakesMirrorRound(
       round,
       decision,
       findings: listExecutorFindingsForRound(db, roundId),
-      decisions: listExecutorDecisionsForRound(db, roundId)
+      decisions: listExecutorDecisionsForRound(db, roundId),
     };
   });
 }
@@ -935,7 +935,7 @@ export type RunNoMistakesMirrorStepResult = {
  * @throws {ExecutorRoundConflictError} if the round id already exists.
  */
 export function runNoMistakesMirrorStep(
-  input: RunNoMistakesMirrorStepInput
+  input: RunNoMistakesMirrorStepInput,
 ): RunNoMistakesMirrorStepResult {
   const now = input.now ?? Date.now;
   const { db } = input;
@@ -951,7 +951,7 @@ export function runNoMistakesMirrorStep(
         stepRunId: input.stepRunId,
         stepKey: input.stepKey,
         attempt: input.attempt,
-        startedAt: invocationStartedAt
+        startedAt: invocationStartedAt,
       });
       insertExecutorInvocation(db, invocation, { now: invocationStartedAt });
 
@@ -962,17 +962,17 @@ export function runNoMistakesMirrorStep(
       const startRecord = planNoMistakesRoundStart({
         invocation,
         runtime: input.resolveRoundInputs(),
-        startedAt: roundStartedAt
+        startedAt: roundStartedAt,
       });
       insertExecutorRound(db, startRecord, { now: roundStartedAt });
       insertExpectedExternalIdentityCheckpoint(
         db,
         startRecord.roundId,
         input.expectedExternalIdentity,
-        roundStartedAt
+        roundStartedAt,
       );
       return { invocation, startRecord };
-    }
+    },
   );
 
   // 3. Run the first poll against the freshly-born round.
@@ -982,7 +982,7 @@ export function runNoMistakesMirrorStep(
     roundId: startRecord.roundId,
     read: input.read,
     expectedExternalIdentity: input.expectedExternalIdentity,
-    polledAt
+    polledAt,
   };
   const round = runNoMistakesMirrorRound(roundInput);
 
@@ -1000,8 +1000,8 @@ export function runNoMistakesMirrorStep(
       finishedAt: isTerminalExecutorInvocationState(invocationState)
         ? polledAt
         : null,
-      now: polledAt
-    }
+      now: polledAt,
+    },
   );
 
   return { invocation: finalInvocation, round };
