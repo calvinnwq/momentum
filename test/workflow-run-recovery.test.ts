@@ -16,6 +16,10 @@ import {
   markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
 import { findRetryableDispatchedStepRecovery } from "../src/core/workflow/dispatch/retry.js";
+import {
+  insertWorkflowGate,
+  loadWorkflowGate,
+} from "../src/core/workflow/gate/persist.js";
 
 const tempRoots: string[] = [];
 
@@ -774,6 +778,45 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           now: at + 3,
         }).ok,
       ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves the matching manual-recovery gate when retry is prepared", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, at } = seedRetryableDelegateRecovery(db);
+      const gateId = `${runId}::${stepId}::reconcile-recovery::manual_recovery_required`;
+      insertWorkflowGate(
+        db,
+        {
+          gateId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          targetScope: "step",
+          gateType: "manual_recovery_required",
+          reason: "Delegated handoff requires operator recovery.",
+          evidence: "delegate_handoff_failed",
+          allowedActions: ["clear_recovery", "abort_run"],
+          recommendedAction: "clear_recovery",
+        },
+        { now: at },
+      );
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(loadWorkflowGate(db, gateId)).toMatchObject({
+        resolvedAt: at + 2,
+        resolvedBy: "workflow run clear-recovery",
+        resolutionMode: "operator",
+        chosenAction: "clear_recovery",
+      });
     } finally {
       db.close();
     }

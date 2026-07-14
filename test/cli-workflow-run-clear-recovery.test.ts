@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
   code: number;
@@ -798,6 +799,17 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         state: "succeeded",
         order: 1
       });
+      insertWorkflowGate(db, {
+        gateId: `${runId}::no-mistakes::reconcile-recovery::manual_recovery_required`,
+        workflowRunId: runId,
+        stepRunId: "no-mistakes",
+        targetScope: "step",
+        gateType: "manual_recovery_required",
+        reason: "External state required operator recovery.",
+        evidence: "external_state_inconsistent",
+        allowedActions: ["clear_recovery", "abort_run"],
+        recommendedAction: "clear_recovery"
+      });
       db.prepare(
         `UPDATE workflow_runs
             SET monitor_last_seen_state = 'running',
@@ -841,6 +853,27 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       monitor_last_seen_digest: null,
       monitor_last_emitted_digest: null
     });
+
+    const statusResult = await run([
+      "workflow",
+      "status",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as {
+      gates: Array<Record<string, unknown>>;
+    };
+    expect(statusPayload.gates).toEqual([
+      expect.objectContaining({
+        open: false,
+        resolvedBy: "workflow run clear-recovery",
+        resolutionMode: "operator",
+        chosenAction: "clear_recovery"
+      })
+    ]);
 
     const monitorResult = await run([
       "workflow",

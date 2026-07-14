@@ -40,6 +40,10 @@ import {
   classifyNoMistakesDeterministicEvidence,
   type NoMistakesEvidenceExpectedIdentity,
 } from "../recovery/no-mistakes-evidence.js";
+import {
+  listOpenWorkflowGatesForRun,
+  resolveWorkflowGate,
+} from "../gate/persist.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -527,6 +531,24 @@ export function clearWorkflowRunManualRecoveryGuarded(
         reason: "run_not_found",
         message: `Workflow run ${input.runId} disappeared during clear.`,
       };
+    }
+    for (const gate of listOpenWorkflowGatesForRun(db, input.runId)) {
+      if (
+        gate.gateType !== "manual_recovery_required" ||
+        !gate.allowedActions.includes("clear_recovery")
+      ) {
+        continue;
+      }
+      resolveWorkflowGate(
+        db,
+        gate.gateId,
+        {
+          action: "clear_recovery",
+          actor: "workflow run clear-recovery",
+          mode: "operator",
+        },
+        { now },
+      );
     }
     db.exec("COMMIT");
 
