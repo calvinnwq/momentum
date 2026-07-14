@@ -741,78 +741,108 @@ describe(
       db.close();
     });
 
-    it("recovers a completed reset from its durable reset intent", async () => {
-      const dataDir = tempDir();
-      const repoPath = initRepo();
-      const runId = "delegate-reset-recovery";
-      const stepId = "implementation";
-      const profilePath = writeProfile(tempDir());
-      const db = prepareRun({
-        dataDir,
-        repoPath,
-        runId,
-        stepKeys: [stepId],
-      });
-      const resolved = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
-        executeWorkflowStepDispatch,
-        {},
-      );
-      if (!resolved.ok) throw new Error(resolved.message);
-      const stepRoot = path.join(
-        repoPath,
-        ".agent-workflows",
-        runId,
-        "delegate",
-        stepId,
-      );
-      const receiptPath = path.join(stepRoot, "delegate-handoff.json");
-      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
-        db,
-        workerId: "delegate-test-worker",
-        now: NOW + 1,
-      });
+    it.each([
+      {
+        alterResult: false,
+        expectedPhase: "finalized",
+        expectedState: "failed",
+        name: "recovers a completed reset from its durable reset intent",
+      },
+      {
+        alterResult: true,
+        expectedPhase: "resetting",
+        expectedState: "manual_recovery_required",
+        name: "refuses a completed reset with altered result evidence",
+      },
+    ] as const)(
+      "$name",
+      async ({ alterResult, expectedPhase, expectedState }) => {
+        const dataDir = tempDir();
+        const repoPath = initRepo();
+        const runId = alterResult
+          ? "delegate-reset-altered-result"
+          : "delegate-reset-recovery";
+        const stepId = "implementation";
+        const profilePath = writeProfile(tempDir());
+        const db = prepareRun({
+          dataDir,
+          repoPath,
+          runId,
+          stepKeys: [stepId],
+        });
+        const resolved = resolveDaemonWorkflowStepDispatch(
+          { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+          executeWorkflowStepDispatch,
+          {},
+        );
+        if (!resolved.ok) throw new Error(resolved.message);
+        const stepRoot = path.join(
+          repoPath,
+          ".agent-workflows",
+          runId,
+          "delegate",
+          stepId,
+        );
+        const receiptPath = path.join(stepRoot, "delegate-handoff.json");
+        await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+          db,
+          workerId: "delegate-test-worker",
+          now: NOW + 1,
+        });
 
-      const receipt = JSON.parse(
-        fs.readFileSync(receiptPath, "utf8"),
-      ) as Record<string, unknown>;
-      const baseHead = String(receipt["baseHead"]);
-      runGit(repoPath, ["reset", "--hard", baseHead]);
-      delete receipt["externalState"];
-      receipt["phase"] = "resetting";
-      receipt["expectedTree"] = runGit(repoPath, [
-        "rev-parse",
-        `${baseHead}^{tree}`,
-      ]);
-      fs.writeFileSync(receiptPath, JSON.stringify(receipt));
-      fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
-      reopenInterruptedHandoff(db, runId, stepId);
+        const receipt = JSON.parse(
+          fs.readFileSync(receiptPath, "utf8"),
+        ) as Record<string, unknown>;
+        const baseHead = String(receipt["baseHead"]);
+        runGit(repoPath, ["reset", "--hard", baseHead]);
+        delete receipt["externalState"];
+        receipt["phase"] = "resetting";
+        receipt["expectedTree"] = runGit(repoPath, [
+          "rev-parse",
+          `${baseHead}^{tree}`,
+        ]);
+        fs.writeFileSync(receiptPath, JSON.stringify(receipt));
+        if (alterResult) {
+          const resultPath = path.join(stepRoot, "result.json");
+          const result = JSON.parse(fs.readFileSync(resultPath, "utf8")) as {
+            commit: { subject: string };
+          };
+          result.commit.subject = "altered commit intent";
+          fs.writeFileSync(resultPath, JSON.stringify(result));
+        }
+        fs.rmSync(path.join(stepRoot, "delegate-external-state.json"));
+        reopenInterruptedHandoff(db, runId, stepId);
 
-      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
-        db,
-        workerId: "delegate-test-worker",
-        now: NOW + 3,
-      });
+        await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+          db,
+          workerId: "delegate-test-worker",
+          now: NOW + 3,
+        });
 
-      expect(
-        db
-          .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
-          )
-          .get(runId),
-      ).toEqual({ state: "failed", attempt: 2 });
-      expect(
-        fs.readFileSync(
-          path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
-          "utf8",
-        ),
-      ).toBe("1\n");
-      expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
-        phase: "finalized",
-        externalState: { stepStatus: "failed", headSha: baseHead },
-      });
-      db.close();
-    });
+        expect(
+          db
+            .prepare(
+              "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            )
+            .get(runId),
+        ).toEqual({ state: expectedState, attempt: 2 });
+        expect(
+          fs.readFileSync(
+            path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
+            "utf8",
+          ),
+        ).toBe("1\n");
+        expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject(
+          alterResult
+            ? { phase: expectedPhase }
+            : {
+                phase: expectedPhase,
+                externalState: { stepStatus: "failed", headSha: baseHead },
+              },
+        );
+        db.close();
+      },
+    );
 
     it.each([
       {

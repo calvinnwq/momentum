@@ -288,11 +288,7 @@ function recoverLiveWrapperDelegateHandoff(
 
   const recovered = readRecoveredLiveWrapperResult(receipt);
   const digest = fileDigest(receipt.resultJsonPath);
-  if (
-    digest === null ||
-    (receipt.phase === "completed" && digest !== receipt.resultDigest) ||
-    (receipt.phase === "finalizing" && digest !== receipt.resultDigest)
-  ) {
+  if (digest === null || digest !== receipt.resultDigest) {
     throw new Error(
       `interrupted ${input.tool} handoff has no correlated completed result`,
     );
