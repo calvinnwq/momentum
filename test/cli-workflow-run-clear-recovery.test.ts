@@ -38,15 +38,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -68,7 +68,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -87,7 +87,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     null,
     null,
     now,
-    now
+    now,
   );
 }
 
@@ -100,7 +100,7 @@ function seedStep(
     state?: string;
     order: number;
     required?: boolean;
-  }
+  },
 ): void {
   const now = 1_730_000_000_000;
   db.prepare(
@@ -108,7 +108,7 @@ function seedStep(
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -123,13 +123,13 @@ function seedStep(
     null,
     null,
     now,
-    now
+    now,
   );
 }
 
 function readRecoveryState(
   dataDir: string,
-  runId: string
+  runId: string,
 ): {
   needs_manual_recovery: number;
   manual_recovery_reason: string | null;
@@ -140,7 +140,7 @@ function readRecoveryState(
     return db
       .prepare(
         `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
       .get(runId) as {
       needs_manual_recovery: number;
@@ -155,7 +155,7 @@ function readRecoveryState(
 function readStepState(
   dataDir: string,
   runId: string,
-  stepId: string
+  stepId: string,
 ): {
   state: string;
   operator_reason: string | null;
@@ -173,7 +173,7 @@ function readStepState(
         `SELECT state, operator_reason, operator_actor, operator_transition_at,
                 operator_evidence_pointer, operator_ledger_pointer,
                 error_code, error_message
-           FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+           FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
       )
       .get(runId, stepId) as {
       state: string;
@@ -190,7 +190,10 @@ function readStepState(
   }
 }
 
-function readRunMonitor(dataDir: string, runId: string): {
+function readRunMonitor(
+  dataDir: string,
+  runId: string,
+): {
   monitor_last_seen_state: string | null;
   monitor_terminal: number | null;
   monitor_step: string | null;
@@ -203,7 +206,7 @@ function readRunMonitor(dataDir: string, runId: string): {
       .prepare(
         `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
                 monitor_last_seen_digest, monitor_last_emitted_digest
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
       .get(runId) as {
       monitor_last_seen_state: string | null;
@@ -226,14 +229,14 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "clear-recovery",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run clear-recovery",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -246,7 +249,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "cwfp-missing-run",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -254,7 +257,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       ok: false,
       command: "workflow run clear-recovery",
       code: "run_not_found",
-      runId: "cwfp-missing-run"
+      runId: "cwfp-missing-run",
     });
   });
 
@@ -269,7 +272,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -282,7 +285,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -290,7 +293,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       ok: false,
       command: "workflow run clear-recovery",
       code: "not_flagged",
-      runId
+      runId,
     });
   });
 
@@ -303,7 +306,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "required step failed; operator recovery needed"
+        manualRecoveryReason: "required step failed; operator recovery needed",
       });
       // A failed required step keeps the monitor classifying a blocking
       // recovery condition, so the guarded clear must refuse.
@@ -312,7 +315,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "failed",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -325,7 +328,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -334,12 +337,11 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       command: "workflow run clear-recovery",
       code: "recovery_clear_refused",
       runId,
-      recoveryCode: "failed_required_step"
+      recoveryCode: "failed_required_step",
     });
     // The durable flag stays set so transitions remain blocked.
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
   });
-
 
   it("refuses to reconcile an external-side-effect tail step without evidence", async () => {
     const dataDir = makeTempDir();
@@ -350,14 +352,14 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
       seedStep(db, {
         runId,
         stepId: "merge-cleanup",
         kind: "merge-cleanup",
         state: "failed",
-        order: 0
+        order: 0,
       });
     } finally {
       db.close();
@@ -370,7 +372,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -379,14 +381,14 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       command: "workflow run clear-recovery",
       code: "recovery_clear_refused",
       runId,
-      recoveryCode: "failed_external_side_effect_step"
+      recoveryCode: "failed_external_side_effect_step",
     });
     expect(payload["message"]).toContain("--evidence-pointer");
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
     expect(readStepState(dataDir, runId, "merge-cleanup")).toMatchObject({
       state: "failed",
       error_code: null,
-      error_message: null
+      error_message: null,
     });
   });
 
@@ -399,42 +401,42 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
       seedStep(db, {
         runId,
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedStep(db, {
         runId,
         stepId: "postflight",
         kind: "postflight",
         state: "succeeded",
-        order: 2
+        order: 2,
       });
       seedStep(db, {
         runId,
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "succeeded",
-        order: 3
+        order: 3,
       });
       seedStep(db, {
         runId,
         stepId: "merge-cleanup",
         kind: "merge-cleanup",
         state: "failed",
-        order: 4
+        order: 4,
       });
     } finally {
       db.close();
@@ -447,11 +449,11 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(beforeClearEventsResult.code).toBe(0);
     const beforeClearEventsPayload = JSON.parse(
-      beforeClearEventsResult.stdout
+      beforeClearEventsResult.stdout,
     ) as {
       cursor: string | null;
       events: Array<{
@@ -462,7 +464,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     };
     const beforeClearFailedEvent = beforeClearEventsPayload.events.find(
       (event) =>
-        event.stepId === "merge-cleanup" && event.type === "step_failed"
+        event.stepId === "merge-cleanup" && event.type === "step_failed",
     );
     expect(beforeClearFailedEvent).toBeDefined();
 
@@ -477,7 +479,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -491,8 +493,9 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         recoveryCode: "failed_external_side_effect_step",
         state: "succeeded",
         evidencePointer: "github://pulls/123#merged",
-        ledgerPointer: ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42"
-      }
+        ledgerPointer:
+          ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42",
+      },
     });
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
     expect(readStepState(dataDir, runId, "merge-cleanup")).toMatchObject({
@@ -503,12 +506,12 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       operator_ledger_pointer:
         ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42",
       error_code: null,
-      error_message: null
+      error_message: null,
     });
     expect(readRunMonitor(dataDir, runId)).toMatchObject({
       monitor_last_seen_state: "succeeded",
       monitor_terminal: 1,
-      monitor_step: null
+      monitor_step: null,
     });
 
     const eventsResult = await run([
@@ -518,7 +521,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(eventsResult.code).toBe(0);
     const eventsPayload = JSON.parse(eventsResult.stdout) as {
@@ -532,17 +535,17 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     const mergeCleanupEvents = eventsPayload.events.filter(
       (event) =>
         event.stepId === "merge-cleanup" &&
-        (event.type === "step_failed" || event.type === "step_succeeded")
+        (event.type === "step_failed" || event.type === "step_succeeded"),
     );
     expect(mergeCleanupEvents.map((event) => event.type)).toEqual([
       "step_failed",
-      "step_succeeded"
+      "step_succeeded",
     ]);
     expect(mergeCleanupEvents[0]?.id).toBe(beforeClearFailedEvent?.id);
     expect(mergeCleanupEvents[0]?.payload).toMatchObject({
       kind: "merge-cleanup",
       order: 4,
-      required: true
+      required: true,
     });
 
     const catchupResult = await run([
@@ -554,7 +557,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       beforeClearEventsPayload.cursor ?? "",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(catchupResult.code).toBe(0);
     const catchupPayload = JSON.parse(catchupResult.stdout) as {
@@ -566,8 +569,8 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     expect(
       catchupPayload.events.some(
         (event) =>
-          event.stepId === "merge-cleanup" && event.type === "step_failed"
-      )
+          event.stepId === "merge-cleanup" && event.type === "step_failed",
+      ),
     ).toBe(false);
   });
 
@@ -580,14 +583,50 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
-      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
-      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
-      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
-      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
-      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "succeeded", order: 4 });
-      seedStep(db, { runId, stepId: "linear-refresh", kind: "linear-refresh", state: "failed", order: 5 });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "succeeded",
+        order: 2,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "succeeded",
+        order: 3,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "succeeded",
+        order: 4,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "linear-refresh",
+        kind: "linear-refresh",
+        state: "failed",
+        order: 5,
+      });
     } finally {
       db.close();
     }
@@ -603,7 +642,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -617,8 +656,9 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         recoveryCode: "failed_external_side_effect_step",
         state: "succeeded",
         evidencePointer: "https://linear.app/team/issue/KEY-123",
-        ledgerPointer: ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7"
-      }
+        ledgerPointer:
+          ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+      },
     });
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
     expect(readStepState(dataDir, runId, "linear-refresh")).toMatchObject({
@@ -626,9 +666,10 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       operator_reason: "failed_external_side_effect_step",
       operator_actor: "workflow run clear-recovery",
       operator_evidence_pointer: "https://linear.app/team/issue/KEY-123",
-      operator_ledger_pointer: ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+      operator_ledger_pointer:
+        ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
       error_code: null,
-      error_message: null
+      error_message: null,
     });
   });
 
@@ -641,14 +682,14 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
       seedStep(db, {
         runId,
         stepId: "merge-cleanup",
         kind: "merge-cleanup",
         state: "failed",
-        order: 0
+        order: 0,
       });
     } finally {
       db.close();
@@ -661,7 +702,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitorResult.code).toBe(0);
     const payload = JSON.parse(monitorResult.stdout) as Record<string, unknown>;
@@ -674,7 +715,10 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       reportable: true,
       needsManualRecovery: true,
       nextAction: { code: "clear_recovery" },
-      recovery: { code: "failed_external_side_effect_step", stepId: "merge-cleanup" }
+      recovery: {
+        code: "failed_external_side_effect_step",
+        stepId: "merge-cleanup",
+      },
     });
   });
 
@@ -687,40 +731,88 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
-      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
-      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
-      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
-      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
-      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "failed", order: 4 });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "succeeded",
+        order: 2,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "succeeded",
+        order: 3,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 4,
+      });
     } finally {
       db.close();
     }
 
     // Before: monitor must report recover.
     const beforeResult = await run([
-      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(beforeResult.code).toBe(0);
     const before = JSON.parse(beforeResult.stdout) as Record<string, unknown>;
     expect(before).toMatchObject({
       disposition: "recover",
       reportReason: "recovery_required",
-      recovery: { code: "failed_external_side_effect_step" }
+      recovery: { code: "failed_external_side_effect_step" },
     });
 
     // Clear recovery with evidence pointer.
     const clearResult = await run([
-      "workflow", "run", "clear-recovery", runId,
-      "--evidence-pointer", "github://pulls/99#merged",
-      "--data-dir", dataDir, "--json"
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--evidence-pointer",
+      "github://pulls/99#merged",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(clearResult.code).toBe(0);
 
     // After: monitor must report terminal_succeeded.
     const afterResult = await run([
-      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(afterResult.code).toBe(0);
     const after = JSON.parse(afterResult.stdout) as Record<string, unknown>;
@@ -730,7 +822,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       reportable: true,
       needsManualRecovery: false,
       nextAction: { code: "no_action" },
-      recovery: null
+      recovery: null,
     });
   });
 
@@ -743,27 +835,75 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "failed_external_side_effect_step"
+        manualRecoveryReason: "failed_external_side_effect_step",
       });
-      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
-      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
-      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
-      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
-      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "failed", order: 4 });
-      seedStep(db, { runId, stepId: "linear-refresh", kind: "linear-refresh", state: "pending", order: 5 });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "succeeded",
+        order: 2,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "succeeded",
+        order: 3,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 4,
+      });
+      seedStep(db, {
+        runId,
+        stepId: "linear-refresh",
+        kind: "linear-refresh",
+        state: "pending",
+        order: 5,
+      });
     } finally {
       db.close();
     }
 
     const clearResult = await run([
-      "workflow", "run", "clear-recovery", runId,
-      "--evidence-pointer", "github://pulls/99#merged",
-      "--data-dir", dataDir, "--json"
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--evidence-pointer",
+      "github://pulls/99#merged",
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(clearResult.code).toBe(0);
 
     const afterResult = await run([
-      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
     ]);
     expect(afterResult.code).toBe(0);
     const after = JSON.parse(afterResult.stdout) as Record<string, unknown>;
@@ -775,7 +915,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runState: "pending",
       activeStep: { stepId: "linear-refresh", state: "pending" },
       nextAction: { code: "await_approval", stepId: "linear-refresh" },
-      recovery: null
+      recovery: null,
     });
   });
 
@@ -788,7 +928,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "ghost active step recovered by operator"
+        manualRecoveryReason: "ghost active step recovered by operator",
       });
       // The previously-failed required step has since been re-driven to a
       // healthy terminal state, so no blocking recovery code remains.
@@ -797,7 +937,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       insertWorkflowGate(db, {
         gateId: `${runId}::no-mistakes::reconcile-recovery::manual_recovery_required`,
@@ -808,7 +948,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         reason: "External state required operator recovery.",
         evidence: "external_state_inconsistent",
         allowedActions: ["clear_recovery", "abort_run"],
-        recommendedAction: "clear_recovery"
+        recommendedAction: "clear_recovery",
       });
       db.prepare(
         `UPDATE workflow_runs
@@ -817,7 +957,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
                 monitor_step = 'stale-step',
                 monitor_last_seen_digest = 'stale-digest',
                 monitor_last_emitted_digest = 'stale-digest'
-          WHERE id = ?`
+          WHERE id = ?`,
       ).run(runId);
     } finally {
       db.close();
@@ -830,7 +970,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -838,7 +978,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       ok: true,
       command: "workflow run clear-recovery",
       runId,
-      previousReason: "ghost active step recovered by operator"
+      previousReason: "ghost active step recovered by operator",
     });
     expect(typeof payload["clearedAt"]).toBe("number");
 
@@ -851,7 +991,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       monitor_terminal: 1,
       monitor_step: null,
       monitor_last_seen_digest: null,
-      monitor_last_emitted_digest: null
+      monitor_last_emitted_digest: null,
     });
 
     const statusResult = await run([
@@ -860,7 +1000,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
     const statusPayload = JSON.parse(statusResult.stdout) as {
@@ -871,8 +1011,8 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         open: false,
         resolvedBy: "workflow run clear-recovery",
         resolutionMode: "operator",
-        chosenAction: "clear_recovery"
-      })
+        chosenAction: "clear_recovery",
+      }),
     ]);
 
     const monitorResult = await run([
@@ -882,7 +1022,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitorResult.code).toBe(0);
     const monitorPayload = JSON.parse(monitorResult.stdout) as Record<
@@ -892,7 +1032,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     expect(monitorPayload).toMatchObject({
       ok: true,
       disposition: "report",
-      reportReason: "terminal_succeeded"
+      reportReason: "terminal_succeeded",
     });
   });
 
@@ -905,14 +1045,14 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         runId,
         state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "operator resolved the blocking lease"
+        manualRecoveryReason: "operator resolved the blocking lease",
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -924,10 +1064,12 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "clear-recovery",
       runId,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(`Manual recovery cleared for run: ${runId}`);
+    expect(result.stdout).toContain(
+      `Manual recovery cleared for run: ${runId}`,
+    );
     expect(result.stdout).toContain("operator resolved the blocking lease");
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
   });
@@ -942,7 +1084,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "surprise",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     // Extra positionals are a usage error (exit code 2), mirroring the
     // sibling `workflow run update-step` unexpected-argument handling.
