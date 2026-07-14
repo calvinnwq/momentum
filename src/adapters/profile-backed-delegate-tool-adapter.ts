@@ -628,7 +628,10 @@ function readLiveWrapperDelegateReceipt(
 }
 
 function readRecoveredLiveWrapperResult(
-  receipt: LiveWrapperDelegateReceipt,
+  receipt: Pick<
+    LiveWrapperDelegateReceipt,
+    "executorLogPath" | "resultJsonPath"
+  >,
 ): WorkflowStepExecutorDispatchResult {
   let raw: string;
   try {
@@ -1230,11 +1233,10 @@ function recoverNoMistakesHandoff(
     ...(previousState !== undefined ? { previousState } : {}),
   });
   if (!status.ok) throw new Error(status.error);
-  const observed = settleNoMistakesHandoffState(
+  let observed = settleNoMistakesHandoffState(
     status,
     locallyFailed ? null : (receipt.terminalProofHeadSha ?? null),
   );
-  writeJsonAtomically(receipt.statePath, observed.value);
   if (
     receipt.attempt < input.attempt &&
     (observed.value.stepStatus === "failed" ||
@@ -1242,12 +1244,101 @@ function recoverNoMistakesHandoff(
   ) {
     return null;
   }
+  if (locallyFailed) {
+    receipt = retryFailedNoMistakesFinalization(input, receipt);
+    observed = settleNoMistakesHandoffState(
+      status,
+      receipt.terminalProofHeadSha ?? null,
+    );
+  }
+  writeJsonAtomically(receipt.statePath, observed.value);
   return recoveredNoMistakesHandoff(
     input.repoPath,
     expected,
     artifactPaths,
     observed,
   );
+}
+
+function retryFailedNoMistakesFinalization(
+  input: ProfileBackedDelegateToolInput,
+  receipt: NoMistakesDelegateReceipt,
+): NoMistakesDelegateReceipt {
+  let preparedReceipt = receipt;
+  const raw = readRecoveredLiveWrapperResult(receipt);
+  const finalized = finalizeLiveStepResult(
+    raw,
+    input.repoPath,
+    {
+      ...input.repoSafety,
+      beforeGitMutation: (mutation) => {
+        const ownership = input.repoSafety.beforeGitMutation?.(mutation);
+        if (ownership?.ok === false) return ownership;
+        if (mutation !== "reset") return { ok: true };
+        preparedReceipt = {
+          ...preparedReceipt,
+          phase: "resetting",
+        };
+        try {
+          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `delegated handoff receipt could not be persisted before reset: ${errorMessage(error)}`,
+          };
+        }
+      },
+      beforeCommit: (evidence) => {
+        const prepared = input.repoSafety.beforeCommit?.(evidence);
+        if (prepared?.ok === false) return prepared;
+        preparedReceipt = {
+          ...preparedReceipt,
+          phase: "finalizing",
+          expectedTree: evidence.expectedTree,
+          expectedMessage: evidence.message,
+        };
+        try {
+          writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
+          return { ok: true };
+        } catch (error) {
+          return {
+            ok: false,
+            error: `delegated handoff receipt could not be persisted before commit: ${errorMessage(error)}`,
+          };
+        }
+      },
+    },
+    { acceptVerifiedNoChanges: true },
+  );
+  if (
+    !isProvenClean(finalized) ||
+    !finalized.ok ||
+    finalized.result.state !== "succeeded"
+  ) {
+    const failureSummary = finalized.ok
+      ? (finalized.result.errorMessage ?? finalized.result.summary)
+      : finalized.error;
+    const failedReceipt: NoMistakesDelegateReceipt = {
+      ...preparedReceipt,
+      phase: "failed",
+      failureSummary,
+    };
+    writeJsonAtomically(input.handoffReceiptPath, failedReceipt);
+    throw new Error(
+      `stored no-mistakes handoff failed finalization: ${failureSummary}`,
+    );
+  }
+  const recovered: NoMistakesDelegateReceipt = {
+    ...preparedReceipt,
+    phase: "launched",
+    terminalProofHeadSha: resolveTerminalProofHead(
+      input.repoPath,
+      receipt.headSha,
+    ),
+  };
+  writeJsonAtomically(input.handoffReceiptPath, recovered);
+  return recovered;
 }
 
 function recoveredNoMistakesHandoff(

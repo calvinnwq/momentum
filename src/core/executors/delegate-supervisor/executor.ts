@@ -178,14 +178,13 @@ export class DelegateSupervisorExecutor implements Executor<
       return invalidCompletionEvidenceResult(context, priorHandoff);
     }
     if (attemptRounds.length === 0 && priorHandoff.status === "valid") {
-      return this.supervise(
-        context,
-        adapter,
-        priorHandoff.value,
-        context.state.rounds,
-        attemptRounds,
-        true,
-      );
+      const priorHandoffAttempt = priorRounds.find(
+        ({ round }) => round.roundId === priorHandoff.roundId,
+      )?.round.attempt;
+      if (priorHandoffAttempt === undefined) {
+        throw new Error("prior delegate handoff round is missing");
+      }
+      return this.handoff(context, adapter, priorHandoffAttempt);
     }
     const handoffRecord = findHandoff(attemptRounds);
     if (handoffRecord.status === "invalid") {

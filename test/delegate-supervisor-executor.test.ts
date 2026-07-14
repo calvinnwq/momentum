@@ -1105,7 +1105,7 @@ describe("delegate-supervisor SDK executor", () => {
       hostBindings: { tools: { "no-mistakes": adapter } },
       now: () => 7,
     });
-    expect(recoveries).toBe(1);
+    expect(recoveries).toBe(2);
     expect(retried.lastRound).toMatchObject({
       state: "succeeded",
       classification: "continue",
@@ -1116,6 +1116,7 @@ describe("delegate-supervisor SDK executor", () => {
   it("reattaches a completed handoff when retrying an external-state read", async () => {
     const { db, invocation } = openDelegateDb();
     let handoffs = 0;
+    let recoveries = 0;
     let reads = 0;
     const handoff = {
       externalIdentity: {
@@ -1129,6 +1130,10 @@ describe("delegate-supervisor SDK executor", () => {
       name: "no-mistakes",
       handoff: () => {
         handoffs += 1;
+        return handoff;
+      },
+      recoverHandoff: () => {
+        recoveries += 1;
         return handoff;
       },
       readExternalState: () => {
@@ -1164,9 +1169,20 @@ describe("delegate-supervisor SDK executor", () => {
           SET attempt = 2, state = 'running', finished_at = NULL
         WHERE invocation_id = ?`,
     ).run(invocation.invocationId);
-    const retried = await driveExecutorTicks(input);
+    const recovered = await driveExecutorTicks(input);
 
     expect(handoffs).toBe(1);
+    expect(recoveries).toBe(1);
+    expect(reads).toBe(1);
+    expect(recovered.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "continue",
+      recoveryCode: null,
+    });
+
+    const retried = await driveExecutorTicks(input);
+
+    expect(recoveries).toBe(1);
     expect(reads).toBe(2);
     expect(retried.lastRound).toMatchObject({
       state: "succeeded",
@@ -1178,16 +1194,18 @@ describe("delegate-supervisor SDK executor", () => {
 
   it("resets the semantic stall window for a new retry attempt", async () => {
     const { db, invocation } = openDelegateDb();
+    const handoff = {
+      externalIdentity: {
+        externalRunId: "nm-run-1",
+        branch: "feature/delegate-supervisor",
+        headSha: HEAD,
+      },
+      summary: "handoff complete",
+    };
     const adapter: DelegateSupervisorToolAdapter = {
       name: "no-mistakes",
-      handoff: () => ({
-        externalIdentity: {
-          externalRunId: "nm-run-1",
-          branch: "feature/delegate-supervisor",
-          headSha: HEAD,
-        },
-        summary: "handoff complete",
-      }),
+      handoff: () => handoff,
+      recoverHandoff: () => handoff,
       readExternalState: () => ({
         ok: true,
         value: state(),
@@ -1263,6 +1281,14 @@ describe("delegate-supervisor SDK executor", () => {
         },
         summary: "handoff complete",
       }),
+      recoverHandoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "reattached handoff",
+      }),
       readExternalState: () => ({
         ok: true,
         value: external,
@@ -1292,6 +1318,7 @@ describe("delegate-supervisor SDK executor", () => {
       decisions: [],
     });
 
+    await driveExecutorTicks(input);
     const retried = await driveExecutorTicks(input);
 
     expect(retried.invocation.state).toBe("manual_recovery_required");

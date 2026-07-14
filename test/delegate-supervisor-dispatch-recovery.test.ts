@@ -777,6 +777,23 @@ fi
           }),
         );
         fs.writeFileSync(
+          resultJsonPath,
+          JSON.stringify({
+            success: true,
+            summary: "prior no-mistakes run completed",
+            key_changes_made: [],
+            key_learnings: [],
+            remaining_work: [],
+            goal_complete: false,
+            commit: {
+              type: "test",
+              subject: "complete no-mistakes",
+              body: "",
+              breaking: false,
+            },
+          }),
+        );
+        fs.writeFileSync(
           statusCommand,
           `#!/bin/sh
 printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n  head: ${headSha}\nsteps[1]{step,status,findings,duration_ms}:\n  ci,running,0,1\n'
@@ -1751,6 +1768,45 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
       ) as Record<string, unknown>;
       expect(receipt).toMatchObject({ phase: "failed" });
       expect(fs.existsSync(path.join(repoPath, "no-mistakes.txt"))).toBe(false);
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "delegate_handoff_failed",
+        },
+      });
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 3), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 4,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "manual_recovery_required", attempt: 2 });
+      expect(JSON.parse(fs.readFileSync(receiptPath, "utf8"))).toMatchObject({
+        attempt: 1,
+        phase: "failed",
+      });
+      expect(
+        fs.readFileSync(
+          path.join(
+            repoPath,
+            ".agent-workflows",
+            runId,
+            "no-mistakes-launch-count",
+          ),
+          "utf8",
+        ),
+      ).toBe("1\n");
       receipt["phase"] = "resetting";
       delete receipt["failureSummary"];
       fs.writeFileSync(receiptPath, JSON.stringify(receipt));
@@ -1978,7 +2034,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
             "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
           )
           .get(runId),
-      ).toEqual({ state: "blocked", attempt: 2 });
+      ).toEqual({ state: "running", attempt: 2 });
       expect(fs.readFileSync(statusCountPath, "utf8")).toBe("1\n");
       db.close();
     });
@@ -2083,7 +2139,11 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
             "utf8",
           ),
         ),
-      ).toMatchObject({ attempt: 1, phase: "failed" });
+      ).toMatchObject({
+        attempt: 1,
+        phase: "launched",
+        terminalProofHeadSha: runGit(repoPath, ["rev-parse", "HEAD"]),
+      });
       expect(
         JSON.parse(
           fs.readFileSync(
