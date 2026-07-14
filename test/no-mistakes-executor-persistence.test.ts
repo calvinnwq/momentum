@@ -12,7 +12,7 @@ import {
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   loadExecutorRound,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import {
   noMistakesInvocationId,
@@ -22,7 +22,7 @@ import {
   planNoMistakesRoundFindings,
   planNoMistakesRoundPersistence,
   planNoMistakesRoundStart,
-  type NoMistakesExternalState
+  type NoMistakesExternalState,
 } from "../src/adapters/no-mistakes-executor.js";
 
 // Integration twin of the pure projections in no-mistakes-executor.test.ts: this
@@ -62,7 +62,7 @@ const HEAD_SHA = "a".repeat(40);
 const INVOCATION_ID = noMistakesInvocationId(
   WORKFLOW_RUN_ID,
   STEP_RUN_ID,
-  ATTEMPT
+  ATTEMPT,
 );
 const ROUND_ID = noMistakesRoundId(INVOCATION_ID);
 
@@ -77,7 +77,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-no-mistakes-persistence-")
+    path.join(os.tmpdir(), "momentum-no-mistakes-persistence-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -90,18 +90,18 @@ function makeTempDir(): string {
 function openMirrorRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`
+       VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
   ).run();
   const invocation = planNoMistakesInvocation({
     workflowRunId: WORKFLOW_RUN_ID,
     stepRunId: STEP_RUN_ID,
     stepKey: STEP_KEY,
     attempt: ATTEMPT,
-    startedAt: 1
+    startedAt: 1,
   });
   insertExecutorInvocation(db, invocation, { now: 1 });
   const round = planNoMistakesRoundStart({
@@ -109,9 +109,9 @@ function openMirrorRoundDb(): MomentumDb {
     runtime: {
       inputDigest: "sha256:poll-0",
       artifactRoot: "/artifacts/nm-0",
-      logPaths: ["/artifacts/nm-0/state.json"]
+      logPaths: ["/artifacts/nm-0/state.json"],
     },
-    startedAt: 1_000
+    startedAt: 1_000,
   });
   insertExecutorRound(db, round, { now: 1_000 });
   return db;
@@ -120,20 +120,20 @@ function openMirrorRoundDb(): MomentumDb {
 // A well-formed external no-mistakes snapshot; each test overrides the fields its
 // status path exercises.
 function externalState(
-  overrides: Partial<NoMistakesExternalState> = {}
+  overrides: Partial<NoMistakesExternalState> = {},
 ): NoMistakesExternalState {
   return {
     externalRunId: "nm-run-9",
     branch: "feat/x",
     headSha: HEAD_SHA,
-    activeStep: "review",
+    activeStep: overrides.stepStatus === "completed" ? null : "review",
     stepStatus: "running",
     findings: [],
     selectedFindingIds: [],
     decisions: [],
     prUrl: null,
     ciState: "none",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -167,7 +167,7 @@ describe("no-mistakes mirror round persistence — running snapshot", () => {
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ stepStatus: "running" })
+      state: externalState({ stepStatus: "running" }),
     });
     expect(plan.decision.classification).toBe("continue");
 
@@ -175,7 +175,7 @@ describe("no-mistakes mirror round persistence — running snapshot", () => {
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: null },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     // The same-state transition is legal and keeps the round live for the next poll.
@@ -203,10 +203,10 @@ describe("no-mistakes mirror round persistence — completed snapshot", () => {
             externalId: "D-1",
             summary: "ship it",
             allowedActions: ["approve"],
-            resolution: "approved"
-          }
-        ]
-      })
+            resolution: "approved",
+          },
+        ],
+      }),
     });
     expect(plan.decision.classification).toBe("complete");
 
@@ -217,7 +217,7 @@ describe("no-mistakes mirror round persistence — completed snapshot", () => {
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 3_000, finishedAt: 3_000 },
-      { now: 3_000 }
+      { now: 3_000 },
     );
 
     expect(final.state).toBe("succeeded");
@@ -240,10 +240,10 @@ describe("no-mistakes mirror round persistence — human gates", () => {
           {
             externalId: "D-1",
             summary: "pick a fix",
-            allowedActions: ["fix-a", "fix-b"]
-          }
-        ]
-      })
+            allowedActions: ["fix-a", "fix-b"],
+          },
+        ],
+      }),
     });
     expect(plan.decision.classification).toBe("operator_decision_required");
 
@@ -251,7 +251,7 @@ describe("no-mistakes mirror round persistence — human gates", () => {
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: null },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("waiting_operator");
@@ -266,7 +266,7 @@ describe("no-mistakes mirror round persistence — human gates", () => {
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ stepStatus: "awaiting_approval" })
+      state: externalState({ stepStatus: "awaiting_approval" }),
     });
     expect(plan.decision.classification).toBe("approval_required");
 
@@ -274,7 +274,7 @@ describe("no-mistakes mirror round persistence — human gates", () => {
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: null },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("waiting_operator");
@@ -289,14 +289,14 @@ describe("no-mistakes mirror round persistence — failure and blockage", () => 
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ stepStatus: "failed" })
+      state: externalState({ stepStatus: "failed" }),
     });
 
     const final = updateExecutorRound(
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: 2_000 },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("failed");
@@ -310,14 +310,14 @@ describe("no-mistakes mirror round persistence — failure and blockage", () => 
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ stepStatus: "blocked" })
+      state: externalState({ stepStatus: "blocked" }),
     });
 
     const final = updateExecutorRound(
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: 2_000 },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("blocked");
@@ -332,7 +332,7 @@ describe("no-mistakes mirror round persistence — untrusted evidence routes to 
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ stepStatus: "completed", ciState: "failed" })
+      state: externalState({ stepStatus: "completed", ciState: "failed" }),
     });
     expect(plan.decision.classification).toBe("manual_recovery_required");
 
@@ -340,7 +340,7 @@ describe("no-mistakes mirror round persistence — untrusted evidence routes to 
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: 2_000 },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("manual_recovery_required");
@@ -352,14 +352,14 @@ describe("no-mistakes mirror round persistence — untrusted evidence routes to 
     const db = openMirrorRoundDb();
 
     const plan = planNoMistakesRoundPersistence({
-      state: externalState({ headSha: "not-a-sha" })
+      state: externalState({ headSha: "not-a-sha" }),
     });
 
     const final = updateExecutorRound(
       db,
       ROUND_ID,
       { ...plan.roundUpdate, heartbeatAt: 2_000, finishedAt: 2_000 },
-      { now: 2_000 }
+      { now: 2_000 },
     );
 
     expect(final.state).toBe("manual_recovery_required");
@@ -379,11 +379,11 @@ describe("no-mistakes mirror findings — durable round-trip", () => {
           externalId: "F-1",
           title: "missing regression test",
           severity: "high",
-          detail: "cover the empty-input path"
+          detail: "cover the empty-input path",
         },
-        { externalId: "F-2", title: "typo in comment", severity: "low" }
+        { externalId: "F-2", title: "typo in comment", severity: "low" },
       ],
-      selectedFindingIds: ["F-1"]
+      selectedFindingIds: ["F-1"],
     });
     findings.forEach((finding, index) => {
       insertExecutorFinding(db, finding, { now: 2_000 + index });
@@ -394,7 +394,7 @@ describe("no-mistakes mirror findings — durable round-trip", () => {
     expect(loaded).toEqual(findings);
     expect(loaded.map((finding) => finding.findingId)).toEqual([
       `${ROUND_ID}-finding-F-1`,
-      `${ROUND_ID}-finding-F-2`
+      `${ROUND_ID}-finding-F-2`,
     ]);
     // The selected finding ids survive as durable booleans.
     expect(loaded[0]!.selected).toBe(true);
@@ -418,14 +418,14 @@ describe("no-mistakes mirror decisions — durable round-trip", () => {
           allowedActions: ["approve", "reject"],
           recommendedAction: "approve",
           chosenAction: "approve",
-          resolution: "approved"
+          resolution: "approved",
         },
         {
           externalId: "D-2",
           summary: "still open — outside the delegated envelope",
-          allowedActions: ["merge", "hold"]
-        }
-      ]
+          allowedActions: ["merge", "hold"],
+        },
+      ],
     });
     decisions.forEach((decision, index) => {
       insertExecutorDecision(db, decision, { now: 2_000 + index });

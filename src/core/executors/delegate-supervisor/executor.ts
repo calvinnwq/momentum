@@ -24,14 +24,15 @@ import {
   classifyDelegateSupervisorUnreadable,
   delegateSupervisorProgressDigest,
 } from "./classifier.js";
-import type {
-  DelegateSupervisorDecision,
-  DelegateSupervisorExternalIdentity,
-  DelegateSupervisorExternalState,
-  DelegateSupervisorExternalStateRead,
-  DelegateSupervisorHandoff,
-  DelegateSupervisorHostBindings,
-  DelegateSupervisorToolAdapter,
+import {
+  DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
+  type DelegateSupervisorDecision,
+  type DelegateSupervisorExternalIdentity,
+  type DelegateSupervisorExternalState,
+  type DelegateSupervisorExternalStateRead,
+  type DelegateSupervisorHandoff,
+  type DelegateSupervisorHostBindings,
+  type DelegateSupervisorToolAdapter,
 } from "./types.js";
 
 export const DELEGATE_SUPERVISOR_EXECUTOR_NAME = "delegate-supervisor";
@@ -42,8 +43,6 @@ export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
 const HANDOFF_INTENT_STAGE = "delegate_handoff_intent";
 const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
 const MIRRORED_STAGE = "delegate_external_state_mirrored";
-const SYNTHETIC_APPROVAL_EXTERNAL_ID =
-  "delegate-supervisor:synthetic-approval-gate";
 
 export type DelegateSupervisorConfig = {
   tool: string;
@@ -664,10 +663,11 @@ function mirrorEvidence(
       ? [
           ...state.decisions.filter(
             (decision) =>
-              decision.externalId !== SYNTHETIC_APPROVAL_EXTERNAL_ID,
+              decision.externalId !==
+              DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
           ),
           {
-            externalId: SYNTHETIC_APPROVAL_EXTERNAL_ID,
+            externalId: DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
             summary: "Approve the delegated tool boundary.",
             allowedActions: ["approve", "reject"] as const,
             recommendedAction: "approve",
@@ -1083,7 +1083,7 @@ function countUnresolvedPriorDecisions(
   }
   return [...latest.entries()].filter(
     ([externalRef, resolution]) =>
-      externalRef !== SYNTHETIC_APPROVAL_EXTERNAL_ID &&
+      externalRef !== DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID &&
       (resolution === null || resolution.trim().length === 0) &&
       !resolvedNow.has(externalRef),
   ).length;

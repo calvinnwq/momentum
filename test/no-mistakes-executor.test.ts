@@ -50,7 +50,7 @@ function externalState(
     externalRunId: "nm-run-1",
     branch: "feat/ngx-351",
     headSha: HEAD_SHA,
-    activeStep: "review",
+    activeStep: overrides.stepStatus === "completed" ? null : "review",
     stepStatus: "running",
     findings: [
       {

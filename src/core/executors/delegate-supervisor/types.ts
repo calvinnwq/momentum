@@ -45,6 +45,10 @@ export type DelegateSupervisorExternalDecision = {
   resolution?: string | null;
 };
 
+/** Reserved for the supervisor-owned approval gate; adapters must not emit it. */
+export const DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID =
+  "delegate-supervisor:synthetic-approval-gate";
+
 /** Canonical state every delegated-tool adapter normalizes into. */
 export type DelegateSupervisorExternalState = {
   externalRunId: string;

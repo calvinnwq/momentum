@@ -156,7 +156,7 @@ A later attempt reuses the latest valid handoff and prior decision history rathe
 Each later bounded executor tick reads one canonical state containing the external identity, current observed head, active step, status, findings, selected finding ids, decisions, pull request URL, and CI state.
 The external run id and branch remain the stable correlation identity; exact launch head matching is the default, while an adapter may mark a changed head as `verified_descendant` after proving the tool committed forward from the launch commit.
 The external status is one of `running`, `awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, `cancelled`, or `completed`; CI is `passed`, `failed`, `pending`, or `none`.
-Momentum rejects malformed state, run or branch identity drift, selected findings without matching surfaced findings, invalid decision action sets, and completed claims that still have findings, unresolved current or previously mirrored decisions, or pending/failed CI.
+Momentum rejects malformed state, run or branch identity drift, selected findings without matching surfaced findings, invalid decision action sets, external decisions that use the supervisor-reserved synthetic approval id, and completed claims that still have an active step, findings, unresolved current or previously mirrored decisions, or pending/failed CI.
 Every allowed action must be a unique non-blank canonical string without surrounding whitespace, and any recommended or chosen action must belong to that set.
 An approval or decision state is projected into durable executor decisions and a round-scoped workflow gate.
 Findings and decision revisions are append-only projections keyed by their external identities.
@@ -166,7 +166,7 @@ The semantic digest ignores ordering differences in findings, selected ids, deci
 Each unchanged running read still refreshes durable liveness, but it carries forward the time of the last semantic change.
 After four minutes without semantic progress or terminal evidence, the invocation enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
-Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Profile-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
 Terminal evidence captured by the handoff is persisted in the same envelope as a settlement candidate, but a fresh adapter read must corroborate the same run, branch, and exact full head SHA before the executor can settle it.
 A lagging `running` response can corroborate the candidate only when it reports passed or absent CI, no findings or selected findings, and no unresolved decisions.

@@ -1257,7 +1257,11 @@ describe("delegate-supervisor SDK executor", () => {
       },
       readExternalState: () => ({
         ok: true,
-        value: state({ stepStatus: "completed", ciState: "passed" }),
+        value: state({
+          activeStep: null,
+          stepStatus: "completed",
+          ciState: "passed",
+        }),
         digest: "sha256:terminal",
       }),
     };
@@ -2759,6 +2763,36 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
+  it("refuses terminal no-mistakes state while a step row is still active", () => {
+    const parsed = parseStatus(
+      [
+        "run:",
+        '  id: "nm-run-1"',
+        "  branch: feature/delegate-supervisor",
+        "  status: completed",
+        "  head: aaaaaaaa",
+        "  steps[2]{step,status,findings,duration_ms}:",
+        "    review,failed,0,1000",
+        "    ci,completed,0,1000",
+        "outcome: checks-passed",
+      ].join("\n"),
+      identity,
+    );
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        activeStep: "review",
+        stepStatus: "completed",
+        ciState: "passed",
+      },
+    });
+    if (!parsed.ok) throw new Error(parsed.error);
+    expect(classifyDelegateSupervisorState(parsed.value)).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_inconsistent",
+    });
+  });
+
   it("preserves ungated phase changes as supervisor progress", () => {
     const review = parseStatus(
       [
@@ -3028,6 +3062,29 @@ describe("no-mistakes tool adapter", () => {
               summary: "choose the review disposition",
               allowedActions: [" approve "],
               recommendedAction: " approve ",
+              chosenAction: null,
+              resolution: null,
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      classification: "manual_recovery_required",
+      recoveryCode: "external_state_unreadable",
+    });
+  });
+
+  it("rejects the supervisor's reserved synthetic approval decision id", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          stepStatus: "awaiting_decision",
+          decisions: [
+            {
+              externalId: "delegate-supervisor:synthetic-approval-gate",
+              summary: "real delegated-tool decision",
+              allowedActions: ["approve"],
+              recommendedAction: "approve",
               chosenAction: null,
               resolution: null,
             },

@@ -1,13 +1,12 @@
 import crypto from "node:crypto";
 
-import type {
-  DelegateSupervisorDecision,
-  DelegateSupervisorExternalDecision,
-  DelegateSupervisorExternalState,
-} from "./types.js";
 import {
   DELEGATE_SUPERVISOR_CI_STATES,
   DELEGATE_SUPERVISOR_EXTERNAL_STATUSES,
+  DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID,
+  type DelegateSupervisorDecision,
+  type DelegateSupervisorExternalDecision,
+  type DelegateSupervisorExternalState,
 } from "./types.js";
 
 const COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
@@ -125,6 +124,11 @@ function findUnreadableReason(
     }
     if (!isNonBlank(decision.externalId)) {
       return "a decision is missing its external id";
+    }
+    if (
+      decision.externalId === DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID
+    ) {
+      return `decision id ${decision.externalId} is reserved for supervisor-owned approval evidence`;
     }
     if (!isNonBlank(decision.summary)) {
       return `decision ${decision.externalId} is missing its summary`;
@@ -269,6 +273,12 @@ export function classifyDelegateSupervisorState(
       if (!FULL_COMMIT_SHA_RE.test(state.headSha)) {
         return classifyDelegateSupervisorUnreadable(
           `${subject} completed state requires a full 40-character head SHA`,
+        );
+      }
+      if (state.activeStep !== null) {
+        return manualRecovery(
+          "external_state_inconsistent",
+          `${subject} run claims completed but step ${state.activeStep} remains active`,
         );
       }
       if (state.findings.length > 0 || state.selectedFindingIds.length > 0) {
