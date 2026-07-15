@@ -1757,6 +1757,91 @@ function seedCheckpointedDelegateHandoff(
   return { envelope, invocationId, roundId };
 }
 
+function seedRegisteredSdkContinuation(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+) {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const invocationId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorInvocation(
+    db,
+    {
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "fixture-executor",
+      state: "running",
+      attempt: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId,
+    now: () => NOW,
+  });
+  const roundId = `${invocationId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executorFamily: "fixture-executor",
+    attempt: 1,
+    roundIndex: 0,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "fixture continuation",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  updateExecutorRound(db, roundId, {
+    toState: "capturing_result",
+  });
+  envelope.applyDaemonDecision(
+    {
+      roundId,
+      classification: "continue",
+      executorRecommendation: "continue",
+      roundState: "succeeded",
+      invocationState: "running",
+      recoveryCode: null,
+      humanGate: null,
+    },
+    {
+      allocateClassificationCheckpointIdentity: true,
+      classificationCheckpoint: {
+        stage: "classified",
+        detail: "classification: continue",
+      },
+    },
+  );
+  return { invocationId, roundId };
+}
+
 describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
   it("lets runnable work proceed between persisted delegate poll deadlines", () => {
     const db = openDb(makeTempDir());
@@ -1790,6 +1875,58 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(result.code).toBe("dispatched");
       if (result.code !== "dispatched") throw new Error("expected dispatch");
       expect(result.claim.runId).toBe("run-runnable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("alternates overdue continuations with runnable work independently of lease duration", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + 7_235_000,
+      });
+      seedRun(db, { runId: "run-runnable", state: "approved" });
+      seedStep(db, {
+        runId: "run-runnable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      const recorder = recordingDispatch();
+
+      const runnable = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 7_235_000,
+        continuationPollIntervalMs: 15_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 20_000,
+      });
+      expect(runnable).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-runnable" },
+      });
+
+      const continuation = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 7_235_000,
+        continuationPollIntervalMs: 15_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 31_000,
+      });
+      expect(continuation).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-continuation" },
+      });
     } finally {
       db.close();
     }
@@ -2118,6 +2255,42 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
       expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a stale generic registered SDK continuation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-generic-sdk-continuation";
+      const stepId = "implementation";
+      seedRegisteredSdkContinuation(db, runId, stepId);
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result).toMatchObject({
+        code: "dispatched",
+        claim: { runId, stepId },
+      });
+      expect(recorder.calls).toHaveLength(1);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
     } finally {
       db.close();
     }

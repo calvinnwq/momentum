@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { commitVerifiedChanges } from "./git-transaction.js";
+import { commitVerifiedChanges, resetToBase } from "./git-transaction.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "./live-step-wrapper.js";
 import {
   commitIdentitiesMatch,
@@ -196,7 +196,8 @@ export function resolvePreparedDelegateCommitEvidence(
       receipt.dispatchOutcome === undefined ||
       !receipt.dispatchOutcome.ok ||
       !recovered.ok ||
-      recovered.result.state !== "succeeded" ||
+      (receipt.phase !== "resetting" &&
+        recovered.result.state !== "succeeded") ||
       recovered.result.state !== receipt.dispatchOutcome.state ||
       recovered.result.summary !== receipt.dispatchOutcome.summary
     ) {
@@ -486,6 +487,34 @@ function recoverLiveWrapperDelegateHandoff(
     throw new Error(
       `interrupted ${input.tool} handoff worktree does not match its durable completion receipt`,
     );
+  }
+  if (receipt.phase === "resetting") {
+    if (!resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)) {
+      throw new Error(
+        "delegated recovered result no longer matches its durable reset receipt",
+      );
+    }
+    const ownership = input.repoSafety.beforeGitMutation?.("reset");
+    if (ownership?.ok === false) throw new Error(ownership.error);
+    const permit = input.repoSafety.beginGitMutation?.("reset");
+    if (permit?.ok === false) throw new Error(permit.error);
+    const resetPermit = permit ?? { ok: true as const, release: () => {} };
+    let reset: ReturnType<typeof resetToBase>;
+    try {
+      reset = resetToBase({
+        repoPath: input.repoPath,
+        baseHead: receipt.baseHead,
+      });
+    } finally {
+      resetPermit.release();
+    }
+    if (!reset.ok) throw new Error(reset.error);
+    const externalState = liveWrapperDelegateExternalState(
+      receipt,
+      "failed",
+      receipt.baseHead,
+    );
+    return persistRecoveredLiveWrapperHandoff(input, receipt, externalState);
   }
   if (receipt.phase === "finalizing") {
     const runnerResult = readRecoveredRunnerResult(receipt.resultJsonPath);

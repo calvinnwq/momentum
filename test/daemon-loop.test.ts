@@ -1148,6 +1148,41 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
     }
   });
 
+  it("refreshes the daemon heartbeat after a long async dispatch settles", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      let dispatchStartedAt = 0;
+      let settledHeartbeatAt = 0;
+      const dispatch: AsyncWorkflowStepDispatch = async (_claim, context) => {
+        dispatchStartedAt = context.now;
+        await Promise.resolve();
+        return { status: "dispatched" };
+      };
+
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-settled-heartbeat",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(1_700_000_000_000, 60_000),
+        sleep: async () => undefined,
+        workflowLane: { dispatch, leaseDurationMs: 1_000_000 },
+        onCycleComplete: () => {
+          settledHeartbeatAt = getDaemonRun(db, runId)?.heartbeat_at ?? 0;
+        },
+      });
+
+      expect(settledHeartbeatAt).toBeGreaterThan(dispatchStartedAt);
+    } finally {
+      db.close();
+    }
+  });
+
   it("marks workflow dispatch as the active daemon job while the dispatcher runs", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

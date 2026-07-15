@@ -191,15 +191,16 @@ export async function runDaemonLoop(
           try {
             return await workflowLane.dispatch(claim, context);
           } finally {
+            const settledAt = now();
             setDaemonRunActiveJob(input.db, {
               runId: input.runId,
               jobId: null,
               lockId: null,
-              now: context.now,
+              now: settledAt,
             });
             heartbeatDaemonRun(input.db, {
               runId: input.runId,
-              now: context.now,
+              now: settledAt,
             });
           }
         };
@@ -303,6 +304,7 @@ export async function runDaemonLoop(
           workerId: input.workerId,
           dispatch: dispatchWithHeartbeat,
           now,
+          continuationPollIntervalMs: Math.max(1, pollIntervalMs),
         };
         if (workflowLane.leaseDurationMs !== undefined) {
           schedulerInput.leaseDurationMs = workflowLane.leaseDurationMs;

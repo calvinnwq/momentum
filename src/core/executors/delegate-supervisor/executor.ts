@@ -1177,9 +1177,7 @@ function isLaggingTerminalCorroboration(
     observed.findings.length === 0 &&
     observed.selectedFindingIds.length === 0 &&
     observed.decisions.every(
-      (decision) =>
-        typeof decision.resolution === "string" &&
-        decision.resolution.trim().length > 0,
+      (decision) => !isExecutorDecisionEligibleForHumanGate(decision),
     )
   );
 }

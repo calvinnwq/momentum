@@ -691,7 +691,7 @@ describe(
           tool: "gnhf",
           invocationId: "reset-recovery::implementation::dispatch",
           attempt: 1,
-          phase: "completed",
+          phase: "resetting",
           baseHead: headSha,
           branch,
           statePath,
@@ -709,8 +709,29 @@ describe(
             state: "failed",
             summary: "interrupted generic handoff failed",
           },
+          expectedTree: runGit(repoPath, ["rev-parse", "HEAD^{tree}"]),
         }),
       );
+      expect(
+        resolvePreparedDelegateCommitEvidence({
+          tool: "gnhf",
+          invocationId: "reset-recovery::implementation::dispatch",
+          attempt: 2,
+          repoPath,
+          handoffReceiptPath,
+          statePath,
+          resultJsonPath,
+          executorLogPath,
+          legacyPaths: {
+            rootDir: root,
+            handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+          },
+        }),
+      ).toMatchObject({
+        baseHead: headSha,
+        expectedTree: worktreeTree,
+        treeSource: "worktree",
+      });
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
@@ -2764,7 +2785,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           fs.readFileSync(receiptPath, "utf8"),
         ) as Record<string, unknown>;
         const baseHead = String(receipt["baseHead"]);
-        runGit(repoPath, ["reset", "--hard", baseHead]);
+        runGit(repoPath, ["reset", "--mixed", "--quiet", baseHead]);
         delete receipt["externalState"];
         receipt["phase"] = "resetting";
         receipt["expectedTree"] = runGit(repoPath, [

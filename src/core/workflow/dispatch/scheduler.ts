@@ -765,7 +765,7 @@ function tryParkStaleRunningDispatchLease(
     if (
       invocation !== undefined &&
       invocationRounds[0]?.roundIndex === 0 &&
-      hasResumableDelegateCheckpoint(db, invocation, invocationRounds)
+      isResumableRegisteredSdkTick(db, invocation, invocationRounds)
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1133,6 +1133,7 @@ function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
  * workflow leases age on the same cadence.
  */
 export const DEFAULT_WORKFLOW_DISPATCH_LEASE_MS = 30_000;
+export const DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS = 1_000;
 
 export type WorkflowSchedulerNow = () => number;
 
@@ -1210,6 +1211,8 @@ export type RunWorkflowSchedulerOnceInput = {
   graceMs?: number;
   /** Dispatch-lease TTL. Defaults to {@link DEFAULT_WORKFLOW_DISPATCH_LEASE_MS}. */
   leaseDurationMs?: number;
+  /** Registered SDK continuation poll cadence, independent of lease renewal. */
+  continuationPollIntervalMs?: number;
   /** Stale policy stamped on the dispatch lease. Defaults to `auto-release`. */
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Overridable durable primitives (testing seam). */
@@ -1258,6 +1261,7 @@ function selectActiveSubworkflowDispatchRecheck(
     graceMs: number;
     holder: string;
     leaseDurationMs: number;
+    continuationPollIntervalMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
     runId?: string;
   },
@@ -1307,7 +1311,9 @@ function selectActiveSubworkflowDispatchRecheck(
     }
 
     const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
-    if (acquired !== undefined) return { claim: acquired, continuationPending };
+    if (acquired !== undefined) {
+      return { claim: acquired, continuationPending: true };
+    }
   }
 
   return { continuationPending };
@@ -1408,13 +1414,18 @@ function hasResumableDelegateCheckpoint(
 
 function isActiveSubworkflowRecheckDue(
   lease: WorkflowLeaseRecord,
-  input: { now: number; leaseDurationMs: number },
+  input: { now: number; continuationPollIntervalMs: number },
 ): boolean {
-  const heartbeatIntervalMs = Math.max(
-    1,
-    Math.floor(input.leaseDurationMs / 2),
+  return input.now - lease.heartbeatAt >= input.continuationPollIntervalMs;
+}
+
+function isActiveSubworkflowRecheckUrgent(
+  claim: ClaimedWorkflowStep,
+  input: { now: number; continuationPollIntervalMs: number },
+): boolean {
+  return (
+    input.now - claim.lease.heartbeatAt >= input.continuationPollIntervalMs * 2
   );
-  return input.now - lease.heartbeatAt >= heartbeatIntervalMs;
 }
 
 function buildActiveSubworkflowClaim(
@@ -1784,6 +1795,17 @@ function runWorkflowSchedulerOnceCore(
       "runWorkflowSchedulerOnce: leaseDurationMs must be a positive finite number",
     );
   }
+  const continuationPollIntervalMs =
+    input.continuationPollIntervalMs ??
+    DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS;
+  if (
+    !Number.isFinite(continuationPollIntervalMs) ||
+    continuationPollIntervalMs <= 0
+  ) {
+    throw new Error(
+      "runWorkflowSchedulerOnce: continuationPollIntervalMs must be a positive finite number",
+    );
+  }
 
   const now = input.now ?? (() => Date.now());
   const graceMs = input.graceMs ?? 0;
@@ -1827,11 +1849,21 @@ function runWorkflowSchedulerOnceCore(
     graceMs,
     holder: workerId,
     leaseDurationMs,
+    continuationPollIntervalMs,
     stalePolicy,
     ...runScope,
   });
+  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
+  const candidate = scan.runnable[0];
   const activeClaim = activeSelection.claim;
-  if (activeClaim !== undefined) {
+  if (
+    activeClaim !== undefined &&
+    (candidate === undefined ||
+      isActiveSubworkflowRecheckUrgent(activeClaim, {
+        now: tickNow,
+        continuationPollIntervalMs,
+      }))
+  ) {
     const refreshedClaim = heartbeatActiveDispatchClaim(db, {
       claim: activeClaim,
       now: tickNow,
@@ -1854,8 +1886,6 @@ function runWorkflowSchedulerOnceCore(
     }
   }
 
-  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
-  const candidate = scan.runnable[0];
   if (candidate === undefined) {
     return {
       code: "idle",

@@ -859,7 +859,20 @@ describe("delegate-supervisor SDK executor", () => {
         reads += 1;
         return {
           ok: true,
-          value: state({ activeStep: null, ciState: "passed" }),
+          value: state({
+            activeStep: null,
+            ciState: "passed",
+            decisions: [
+              {
+                externalId: "review",
+                summary: "Choose review disposition",
+                allowedActions: ["approve", "reject"],
+                recommendedAction: "approve",
+                chosenAction: "approve",
+                resolution: null,
+              },
+            ],
+          }),
           digest: "sha256:fresh-head-corroboration",
         };
       },
