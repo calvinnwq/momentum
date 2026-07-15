@@ -44,7 +44,8 @@ export const DELEGATE_SUPERVISOR_HANDOFF_STAGE = "delegate_handoff_completed";
 /** Durable before an adapter launch so interrupted handoff recovery can resume. */
 export const DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE =
   "delegate_handoff_intent";
-const LEGACY_COMPLETION_REPLAYED_STAGE = "delegate_legacy_completion_replayed";
+export const DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE =
+  "delegate_legacy_completion_replayed";
 /** Durable canonical external state, including pre-classification gate evidence. */
 export const DELEGATE_SUPERVISOR_MIRRORED_STAGE =
   "delegate_external_state_mirrored";
@@ -138,7 +139,7 @@ export class DelegateSupervisorExecutor implements Executor<
     const legacyCompletion = findLegacyLiveStepCompletion(context.state.rounds);
     const interruptedLegacyReplay = findDurableCheckpoint(
       attemptRounds.filter(({ round }) => round.classification === null),
-      LEGACY_COMPLETION_REPLAYED_STAGE,
+      DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
       parseLegacyCompletionReplay,
     );
     if (interruptedLegacyReplay.status !== "absent") {
@@ -175,7 +176,7 @@ export class DelegateSupervisorExecutor implements Executor<
       new Set([
         DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
         DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-        LEGACY_COMPLETION_REPLAYED_STAGE,
+        DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
       ]),
     );
     if (
@@ -1284,9 +1285,9 @@ function replayLegacyCompletion(
           []),
       ) + 1;
     context.envelope.recordCheckpoint(roundId, {
-      checkpointId: `${roundId}-${LEGACY_COMPLETION_REPLAYED_STAGE}`,
+      checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE}`,
       sequence,
-      stage: LEGACY_COMPLETION_REPLAYED_STAGE,
+      stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
       detail: JSON.stringify({ sourceRoundId: completion.roundId }),
     });
   }

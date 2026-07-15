@@ -1410,6 +1410,20 @@ function createProfileNoMistakesToolAdapter(
         path.dirname(input.handoffReceiptPath),
       ),
     };
+    const correlated = readRecoveredLiveWrapperResult(preparedReceipt);
+    if (
+      preparedReceipt.dispatchOutcome === undefined ||
+      preparedReceipt.dispatchOutcome.ok !== correlated.ok ||
+      (preparedReceipt.dispatchOutcome.ok &&
+        correlated.ok &&
+        (preparedReceipt.dispatchOutcome.state !== correlated.result.state ||
+          preparedReceipt.dispatchOutcome.summary !==
+            correlated.result.summary))
+    ) {
+      throw new Error(
+        "delegated no-mistakes result does not match its in-memory dispatch outcome",
+      );
+    }
     writeJsonAtomically(input.handoffReceiptPath, preparedReceipt);
     const finalized = finalizeLiveStepResult(
       raw,

@@ -412,6 +412,105 @@ describe(
       expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
     });
 
+    it("rejects an initial no-mistakes result that contradicts its dispatch outcome", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(
+        repoPath,
+        ".agent-workflows",
+        "initial-outcome-mismatch",
+      );
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "no-mistakes",
+        invocationId: "initial-outcome-mismatch::no-mistakes::dispatch",
+        attempt: 1,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+        },
+        run: () => {
+          fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+          fs.writeFileSync(
+            executorLogPath,
+            'run:\n  id: "nm-run-initial-mismatch"\n',
+          );
+          fs.writeFileSync(
+            resultJsonPath,
+            JSON.stringify({
+              success: true,
+              summary: "replacement file summary",
+              key_changes_made: ["updated README"],
+              key_learnings: [],
+              remaining_work: [],
+              goal_complete: false,
+              commit: {
+                type: "test",
+                subject: "must not commit replacement",
+                body: "",
+                breaking: false,
+              },
+            }),
+          );
+          return {
+            ok: true,
+            result: {
+              state: "succeeded",
+              summary: "original wrapper summary",
+              checkpoints: [],
+              artifacts: [],
+              resultDigest: null,
+              errorCode: null,
+              errorMessage: null,
+              retryHint: null,
+              recoveryHint: null,
+            },
+            executorLogPath,
+            resultJsonPath,
+          };
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        adapter.handoff({
+          invocation: {} as never,
+          config: { tool: "no-mistakes" },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(/does not match its in-memory dispatch outcome/);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+      expect(runGit(repoPath, ["status", "--porcelain"])).toContain(
+        "README.md",
+      );
+      expect(
+        JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+      ).toMatchObject({
+        phase: "launching",
+      });
+    });
+
     it("accepts correlated failed no-mistakes finalization as prepared recovery evidence", () => {
       const repoPath = initRepo();
       const branch = runGit(repoPath, ["branch", "--show-current"]);

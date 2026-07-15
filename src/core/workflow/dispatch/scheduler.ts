@@ -65,6 +65,7 @@ import {
 import {
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
   DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
   DELEGATE_SUPERVISOR_MIRRORED_STAGE,
 } from "../../executors/delegate-supervisor/executor.js";
 import { deriveDispatchInvocationId } from "./execute.js";
@@ -1402,7 +1403,9 @@ function isResumableRegisteredSdkTick(
     return true;
   }
   if (round.classification === "continue") return true;
-  if (hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds)) {
+  if (
+    hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds, rounds)
+  ) {
     return true;
   }
   const resolvedDecision = listExecutorDecisionsForRound(
@@ -1421,9 +1424,10 @@ function isResumableRegisteredSdkTick(
 function hasResumableDelegateCheckpoint(
   db: MomentumDb,
   invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
-  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  currentAttemptRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  invocationRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
 ): boolean {
-  const activeRound = rounds.at(-1);
+  const activeRound = currentAttemptRounds.at(-1);
   if (
     invocation.state !== "running" ||
     invocation.executorFamily !== "delegate-supervisor" ||
@@ -1451,12 +1455,22 @@ function hasResumableDelegateCheckpoint(
     (activeRound.state === "succeeded" || activeRound.state === "failed");
   if (interruptedGate) return true;
   if (!interruptedRound && !completedPoll) return false;
+  if (
+    interruptedRound &&
+    hasResumableLegacyCompletionReplay(
+      db,
+      activeRound.roundId,
+      invocationRounds,
+    )
+  ) {
+    return true;
+  }
   const handoffRounds = completedPoll
-    ? rounds
+    ? currentAttemptRounds
     : activeRound.state === "running" ||
         activeRound.state === "capturing_result"
       ? [activeRound]
-      : rounds.slice(0, -1);
+      : currentAttemptRounds.slice(0, -1);
   return handoffRounds.some((round) =>
     listExecutorCheckpointsForRound(db, round.roundId).some(
       (checkpoint) =>
@@ -1464,6 +1478,39 @@ function hasResumableDelegateCheckpoint(
         checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
     ),
   );
+}
+
+function hasResumableLegacyCompletionReplay(
+  db: MomentumDb,
+  activeRoundId: string,
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+): boolean {
+  const replay = [...listExecutorCheckpointsForRound(db, activeRoundId)]
+    .reverse()
+    .find(
+      (checkpoint) =>
+        checkpoint.stage ===
+        DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+    );
+  if (replay?.detail === null || replay === undefined) return false;
+  try {
+    const parsed: unknown = JSON.parse(replay.detail);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { sourceRoundId?: unknown }).sourceRoundId !== "string"
+    ) {
+      return false;
+    }
+    const sourceRoundId = (parsed as { sourceRoundId: string }).sourceRoundId;
+    if (!rounds.some((round) => round.roundId === sourceRoundId)) return false;
+    return listExecutorCheckpointsForRound(db, sourceRoundId).some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isActiveSubworkflowRecheckDue(
