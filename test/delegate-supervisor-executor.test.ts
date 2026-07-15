@@ -23,6 +23,7 @@ import {
 import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
   DELEGATE_SUPERVISOR_STALL_AFTER_MS,
 } from "../src/core/executors/delegate-supervisor/executor.js";
 import type {
@@ -791,6 +792,50 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("refuses to recover an interrupted intent with a newly configured adapter", async () => {
+    const { db, invocation } = openDelegateDb();
+    seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      JSON.stringify({
+        tool: "no-mistakes",
+        invocationId: invocation.invocationId,
+        attempt: invocation.attempt,
+      }),
+    );
+    let recoveries = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "gnhf" },
+      hostBindings: {
+        tools: {
+          gnhf: {
+            name: "gnhf",
+            handoff: () => {
+              throw new Error("replacement adapter must not launch");
+            },
+            recoverHandoff: () => {
+              recoveries += 1;
+              throw new Error("replacement adapter must not recover");
+            },
+            readExternalState: () => {
+              throw new Error("replacement adapter must not poll");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(recoveries).toBe(0);
+    expect(result.lastRound).toMatchObject({
+      recoveryCode: "delegate_adapter_identity_mismatch",
+    });
+    db.close();
+  });
+
   it.each([HEAD.slice(0, 8), "A".repeat(40)])(
     "rejects a non-canonical handoff head SHA %s",
     async (headSha) => {
@@ -1011,6 +1056,70 @@ describe("delegate-supervisor SDK executor", () => {
 
     expect(replacementReads).toBe(0);
     expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.lastRound).toMatchObject({
+      recoveryCode: "delegate_adapter_identity_mismatch",
+    });
+    db.close();
+  });
+
+  it("refuses to recover a prior-attempt handoff with a newly configured adapter", async () => {
+    const { db, invocation } = openDelegateDb();
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => ({
+              externalIdentity: {
+                externalRunId: "nm-run-1",
+                branch: "feature/delegate-supervisor",
+                headSha: HEAD,
+              },
+              summary: "no-mistakes owns this handoff",
+            }),
+            readExternalState: () => {
+              throw new Error("initial tick only records the handoff");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    let recoveries = 0;
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "gnhf" },
+      hostBindings: {
+        tools: {
+          gnhf: {
+            name: "gnhf",
+            handoff: () => {
+              throw new Error("replacement adapter must not launch");
+            },
+            recoverHandoff: () => {
+              recoveries += 1;
+              throw new Error("replacement adapter must not recover");
+            },
+            readExternalState: () => {
+              throw new Error("replacement adapter must not poll");
+            },
+          },
+        },
+      },
+      now: () => 7,
+    });
+    expect(recoveries).toBe(0);
     expect(result.lastRound).toMatchObject({
       recoveryCode: "delegate_adapter_identity_mismatch",
     });

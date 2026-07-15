@@ -556,7 +556,7 @@ describe(
         },
       });
 
-      await adapter.handoff({
+      const handoff = await adapter.handoff({
         invocation: {} as never,
         config: { tool: "gnhf" },
         signal: new AbortController().signal,
@@ -566,6 +566,29 @@ describe(
       expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
         "fixture\n",
       );
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({
+          externalRunId: "reset-handoff::implementation::dispatch",
+          branch,
+          headSha,
+          activeStep: null,
+          stepStatus: "completed",
+          findings: [],
+          selectedFindingIds: [],
+          decisions: [],
+          prUrl: null,
+          ciState: "passed",
+        }),
+      );
+      expect(
+        await adapter.readExternalState({
+          invocation: {} as never,
+          config: { tool: "gnhf" },
+          signal: new AbortController().signal,
+          handoff,
+        }),
+      ).toMatchObject({ ok: true, value: { stepStatus: "failed" } });
     });
 
     it("refuses an initial generic result that contradicts its dispatch outcome", async () => {
@@ -1473,6 +1496,21 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         const resultJsonPath = path.join(root, "result.json");
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
+        const verificationReceiptPath = path.join(
+          root,
+          "receipt-seen-during-verification.json",
+        );
+        const effectiveVerificationCommand =
+          expectedOutcome === "accepts"
+            ? path.join(root, "capture-receipt.sh")
+            : verificationCommand;
+        if (expectedOutcome === "accepts") {
+          fs.writeFileSync(
+            effectiveVerificationCommand,
+            `#!/bin/sh\ncp ${JSON.stringify(handoffReceiptPath)} ${JSON.stringify(verificationReceiptPath)}\n`,
+          );
+          fs.chmodSync(effectiveVerificationCommand, 0o755);
+        }
         const statusCommand = path.join(root, "status.sh");
         const invocationId = `clean-handoff-${expectedOutcome}::no-mistakes::dispatch`;
         fs.writeFileSync(
@@ -1495,7 +1533,7 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
           repoPath,
           repoSafety: {
             baseHead: headSha,
-            verificationCommands: [verificationCommand],
+            verificationCommands: [effectiveVerificationCommand],
             verificationTimeoutSec: 5,
             verificationLogPath,
           },
@@ -1570,8 +1608,15 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
         expect(handoff.terminalState?.value.stepStatus).toBe("completed");
         expect(handoff.artifactPaths).toContain(verificationLogPath);
         expect(fs.readFileSync(verificationLogPath, "utf8")).toContain(
-          `[verify] running: ${verificationCommand}`,
+          `[verify] running: ${effectiveVerificationCommand}`,
         );
+        expect(
+          JSON.parse(fs.readFileSync(verificationReceiptPath, "utf8")),
+        ).toMatchObject({
+          phase: "completed",
+          resultDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+          worktreeTree: expect.stringMatching(/^[0-9a-f]{40}$/),
+        });
         expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
         expect(
           JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),

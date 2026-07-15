@@ -1932,6 +1932,50 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("polls multiple active SDK continuations in least-recently-polled order", () => {
+    const db = openDb(makeTempDir());
+    try {
+      for (const runId of ["run-a", "run-b"]) {
+        seedRegisteredSdkContinuation(db, runId, "implementation");
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "scheduler-1",
+          acquiredAt: NOW,
+          heartbeatAt: NOW,
+          expiresAt: NOW + 60_000,
+        });
+      }
+      const recorder = recordingDispatch();
+      const first = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        continuationPollIntervalMs: 1_000,
+        leaseDurationMs: 60_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 2_000,
+      });
+      const second = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        continuationPollIntervalMs: 1_000,
+        leaseDurationMs: 60_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 4_000,
+      });
+      expect(first).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-a" },
+      });
+      expect(second).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-b" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("reports a persisted continuation wait separately from true idle", () => {
     const db = openDb(makeTempDir());
     try {
@@ -2475,6 +2519,47 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(result.code).toBe("dispatched");
       expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
         previousHolder: "scheduler-1",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("propagates stale takeover proof after recovery and redispatch occur in separate scheduler ticks", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "restart-boundary-delegate-takeover";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        "implementation",
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+
+      expect(recoverStaleWorkflowLeases(db, { now: NOW + 1 })).toMatchObject({
+        recovered: [{ runId, action: "released" }],
+      });
+
+      const recorder = recordingDispatch();
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-after-restart",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 2,
+      });
+
+      expect(result).toMatchObject({ code: "dispatched", claim: { runId } });
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "daemon-old",
         previousAcquiredAt: NOW - 60_000,
         previousExpiresAt: NOW,
       });

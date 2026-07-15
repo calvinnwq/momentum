@@ -1265,7 +1265,13 @@ function selectActiveSubworkflowDispatchRecheck(
     stalePolicy: WorkflowLeaseStalePolicy;
     runId?: string;
   },
-): { claim?: ClaimedWorkflowStep; continuationPending: boolean } {
+): {
+  claim?: ClaimedWorkflowStep;
+  continuationPending: boolean;
+  staleDispatchTakeover?: NonNullable<
+    WorkflowStepDispatchContext["staleDispatchTakeover"]
+  >;
+} {
   const runs =
     input.runId === undefined
       ? (db
@@ -1274,7 +1280,15 @@ function selectActiveSubworkflowDispatchRecheck(
                FROM workflow_runs
               WHERE needs_manual_recovery = 0
                 AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY created_at ASC, id ASC`,
+              ORDER BY COALESCE(
+                         (SELECT heartbeat_at
+                            FROM workflow_leases
+                           WHERE run_id = workflow_runs.id
+                             AND lease_kind = 'dispatch'),
+                         -1
+                       ) ASC,
+                       created_at ASC,
+                       id ASC`,
           )
           .all() as WorkflowRunScanRow[])
       : (db
@@ -1284,7 +1298,15 @@ function selectActiveSubworkflowDispatchRecheck(
               WHERE id = ?
                 AND needs_manual_recovery = 0
                 AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY created_at ASC, id ASC`,
+              ORDER BY COALESCE(
+                         (SELECT heartbeat_at
+                            FROM workflow_leases
+                           WHERE run_id = workflow_runs.id
+                             AND lease_kind = 'dispatch'),
+                         -1
+                       ) ASC,
+                       created_at ASC,
+                       id ASC`,
           )
           .all(input.runId) as WorkflowRunScanRow[]);
 
@@ -1312,7 +1334,13 @@ function selectActiveSubworkflowDispatchRecheck(
 
     const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
     if (acquired !== undefined) {
-      return { claim: acquired, continuationPending: true };
+      return {
+        claim: acquired.claim,
+        continuationPending: true,
+        ...(acquired.staleDispatchTakeover === undefined
+          ? {}
+          : { staleDispatchTakeover: acquired.staleDispatchTakeover }),
+      };
     }
   }
 
@@ -1485,7 +1513,14 @@ function acquireActiveSubworkflowDispatchClaim(
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
   },
-): ClaimedWorkflowStep | undefined {
+):
+  | {
+      claim: ClaimedWorkflowStep;
+      staleDispatchTakeover?: NonNullable<
+        WorkflowStepDispatchContext["staleDispatchTakeover"]
+      >;
+    }
+  | undefined {
   db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
@@ -1533,7 +1568,20 @@ function acquireActiveSubworkflowDispatchClaim(
     }
 
     db.exec("COMMIT");
-    return claim;
+    const staleDispatchTakeover =
+      existing !== undefined &&
+      existing.releasedAt !== null &&
+      existing.releasedAt > existing.expiresAt
+        ? {
+            previousHolder: existing.holder,
+            previousAcquiredAt: existing.acquiredAt,
+            previousExpiresAt: existing.expiresAt,
+          }
+        : undefined;
+    return {
+      claim,
+      ...(staleDispatchTakeover === undefined ? {} : { staleDispatchTakeover }),
+    };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -1575,6 +1623,9 @@ function dispatchClaim(
     now: WorkflowSchedulerNow;
     leaseDurationMs: number;
     recoveredDispatchLeases: ReadonlyMap<string, WorkflowLeaseRecord>;
+    durableStaleDispatchTakeover?: NonNullable<
+      WorkflowStepDispatchContext["staleDispatchTakeover"]
+    >;
   },
   dispatch: AsyncWorkflowStepDispatch,
 ): MaybePromise<RunWorkflowSchedulerOnceResult> {
@@ -1587,6 +1638,7 @@ function dispatchClaim(
     now,
     leaseDurationMs,
     recoveredDispatchLeases,
+    durableStaleDispatchTakeover,
   } = input;
   const staleDispatch = recovery.recovered.find(
     (candidate) =>
@@ -1599,15 +1651,17 @@ function dispatchClaim(
     db,
     workerId,
     now: tickNow,
-    ...(staleDispatch === undefined || staleLease === undefined
-      ? {}
-      : {
-          staleDispatchTakeover: {
-            previousHolder: staleDispatch.holder,
-            previousAcquiredAt: staleLease.acquiredAt,
-            previousExpiresAt: staleLease.expiresAt,
-          },
-        }),
+    ...(durableStaleDispatchTakeover !== undefined
+      ? { staleDispatchTakeover: durableStaleDispatchTakeover }
+      : staleDispatch === undefined || staleLease === undefined
+        ? {}
+        : {
+            staleDispatchTakeover: {
+              previousHolder: staleDispatch.holder,
+              previousAcquiredAt: staleLease.acquiredAt,
+              previousExpiresAt: staleLease.expiresAt,
+            },
+          }),
   };
   let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
   try {
@@ -1880,6 +1934,12 @@ function runWorkflowSchedulerOnceCore(
           now,
           leaseDurationMs,
           recoveredDispatchLeases,
+          ...(activeSelection.staleDispatchTakeover === undefined
+            ? {}
+            : {
+                durableStaleDispatchTakeover:
+                  activeSelection.staleDispatchTakeover,
+              }),
         },
         dispatch,
       );

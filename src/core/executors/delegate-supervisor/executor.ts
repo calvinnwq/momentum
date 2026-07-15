@@ -105,6 +105,12 @@ type DurableDelegateHandoff = {
   handoff: DelegateSupervisorHandoff;
 };
 
+type DurableDelegateHandoffIntent = {
+  tool: string;
+  invocationId: string;
+  attempt: number;
+};
+
 /** SDK-native executor that composes one active handoff with repeated polls. */
 export class DelegateSupervisorExecutor implements Executor<
   DelegateSupervisorConfig,
@@ -179,6 +185,21 @@ export class DelegateSupervisorExecutor implements Executor<
           ),
       );
     if (attemptRounds.length === 0 && unresolvedPriorIntent !== undefined) {
+      const intent = findHandoffIntent(unresolvedPriorIntent);
+      if (intent.status === "invalid") {
+        return invalidCompletionEvidenceResult(context, intent);
+      }
+      if (
+        intent.status === "absent" ||
+        intent.value.tool !== context.config.tool ||
+        intent.value.invocationId !== context.state.invocation.invocationId ||
+        intent.value.attempt !== unresolvedPriorIntent.round.attempt
+      ) {
+        return adapterIdentityMismatchResult(
+          context,
+          intent.status === "valid" ? intent.value.tool : "unknown",
+        );
+      }
       return this.handoff(
         context,
         adapter,
@@ -189,6 +210,12 @@ export class DelegateSupervisorExecutor implements Executor<
       return invalidCompletionEvidenceResult(context, priorHandoff);
     }
     if (attemptRounds.length === 0 && priorHandoff.status === "valid") {
+      if (priorHandoff.value.adapterName !== context.config.tool) {
+        return adapterIdentityMismatchResult(
+          context,
+          priorHandoff.value.adapterName,
+        );
+      }
       const priorHandoffAttempt = priorRounds.find(
         ({ round }) => round.roundId === priorHandoff.roundId,
       )?.round.attempt;
@@ -205,20 +232,9 @@ export class DelegateSupervisorExecutor implements Executor<
       return this.handoff(context, adapter);
     }
     if (handoffRecord.value.adapterName !== context.config.tool) {
-      context.hostBindings.settleHandoff?.(false);
-      const active = context.state.currentRound;
-      const roundId =
-        active !== null && !isTerminalExecutorRoundState(active.round.state)
-          ? active.round.roundId
-          : startRound(
-              context,
-              "running",
-              "Validating durable delegated adapter identity.",
-            );
-      return recoveryResult(
-        roundId,
-        "delegate_adapter_identity_mismatch",
-        `Durable delegated handoff belongs to adapter ${JSON.stringify(handoffRecord.value.adapterName)}, not configured adapter ${JSON.stringify(context.config.tool)}.`,
+      return adapterIdentityMismatchResult(
+        context,
+        handoffRecord.value.adapterName,
       );
     }
     if (
@@ -268,6 +284,23 @@ export class DelegateSupervisorExecutor implements Executor<
         (checkpoint) =>
           checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
       ) ?? false;
+    if (hasCurrentHandoffIntent && roundBeforeHandoff !== undefined) {
+      const intent = findHandoffIntent(roundBeforeHandoff);
+      if (intent.status === "invalid") {
+        return invalidCompletionEvidenceResult(context, intent);
+      }
+      if (
+        intent.status === "absent" ||
+        intent.value.tool !== context.config.tool ||
+        intent.value.invocationId !== context.state.invocation.invocationId ||
+        intent.value.attempt !== roundBeforeHandoff.round.attempt
+      ) {
+        return adapterIdentityMismatchResult(
+          context,
+          intent.status === "valid" ? intent.value.tool : "unknown",
+        );
+      }
+    }
     const recoveringInterruptedHandoff =
       recoveringAttempt !== undefined || hasCurrentHandoffIntent;
     if (adapter === undefined) {
@@ -899,6 +932,60 @@ function findHandoff(
   return { status: "absent" };
 }
 
+function findHandoffIntent(
+  snapshot: ExecutorRoundEnvelopeSnapshot,
+): DurableCheckpointRead<DurableDelegateHandoffIntent> {
+  const checkpoint = [...snapshot.checkpoints]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+    );
+  if (checkpoint === undefined) return { status: "absent" };
+  const position = {
+    roundIndex: snapshot.round.roundIndex,
+    sequence: checkpoint.sequence,
+  };
+  if (checkpoint.detail === null) {
+    return {
+      status: "invalid",
+      roundId: snapshot.round.roundId,
+      position,
+      reason: `${DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE} checkpoint detail is missing`,
+    };
+  }
+  try {
+    const parsed: unknown = JSON.parse(checkpoint.detail);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { tool?: unknown }).tool !== "string" ||
+      (parsed as { tool: string }).tool.trim().length === 0 ||
+      typeof (parsed as { invocationId?: unknown }).invocationId !== "string" ||
+      (parsed as { invocationId: string }).invocationId.trim().length === 0 ||
+      typeof (parsed as { attempt?: unknown }).attempt !== "number" ||
+      !Number.isInteger((parsed as { attempt: number }).attempt) ||
+      (parsed as { attempt: number }).attempt < 1
+    ) {
+      throw new Error("durable delegated handoff intent is invalid");
+    }
+    return {
+      status: "valid",
+      roundId: snapshot.round.roundId,
+      position,
+      value: parsed as DurableDelegateHandoffIntent,
+    };
+  } catch (error) {
+    return {
+      status: "invalid",
+      roundId: snapshot.round.roundId,
+      position,
+      reason: errorMessage(error),
+    };
+  }
+}
+
 function isDurableDelegateHandoff(
   value: unknown,
 ): value is DurableDelegateHandoff {
@@ -1173,6 +1260,30 @@ function invalidCompletionEvidenceResult(
     roundId,
     "delegate_handoff_recovery_required",
     `Durable delegated completion evidence in round ${evidence.roundId} is unreadable: ${evidence.reason}; refusing to repeat delegated external work.`,
+  );
+}
+
+function adapterIdentityMismatchResult(
+  context: ExecutorTickContext<
+    DelegateSupervisorConfig,
+    DelegateSupervisorHostBindings
+  >,
+  durableAdapterName: string,
+): ExecutorTickResult {
+  context.hostBindings.settleHandoff?.(false);
+  const active = context.state.currentRound;
+  const roundId =
+    active !== null && !isTerminalExecutorRoundState(active.round.state)
+      ? active.round.roundId
+      : startRound(
+          context,
+          "running",
+          "Validating durable delegated adapter identity.",
+        );
+  return recoveryResult(
+    roundId,
+    "delegate_adapter_identity_mismatch",
+    `Durable delegated handoff belongs to adapter ${JSON.stringify(durableAdapterName)}, not configured adapter ${JSON.stringify(context.config.tool)}.`,
   );
 }
 
