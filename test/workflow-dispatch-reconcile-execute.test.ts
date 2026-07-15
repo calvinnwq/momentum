@@ -16,8 +16,15 @@ import {
   getWorkflowLease,
   releaseWorkflowLease,
 } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import {
+  insertWorkflowGate,
+  listWorkflowGatesForRun,
+  resolveWorkflowGate,
+} from "../src/core/workflow/gate/persist.js";
+import {
+  clearWorkflowRunManualRecovery,
+  getWorkflowRunManualRecoveryState,
+} from "../src/core/workflow/run/recovery.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
@@ -471,6 +478,98 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
 
     expect(second.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+  });
+
+  it("reuses an unresolved legacy recovery gate from a later attempt", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
+    db.prepare(
+      "UPDATE executor_invocations SET attempt = 2 WHERE invocation_id = ?",
+    ).run(dispatchInvocationId("preflight"));
+    const legacyGateId = `${RUN_ID}::preflight::reconcile-recovery::manual_recovery_required`;
+    insertWorkflowGate(
+      db,
+      {
+        gateId: legacyGateId,
+        workflowRunId: RUN_ID,
+        stepRunId: "preflight",
+        targetScope: "step",
+        gateType: "manual_recovery_required",
+        reason: "Persisted before attempt-qualified gate identities.",
+        evidence: "manual_recovery_required",
+        allowedActions: ["clear_recovery", "abort_run"],
+        recommendedAction: "clear_recovery",
+      },
+      { now: RECONCILE_AT - 1 },
+    );
+
+    reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT,
+    });
+
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]?.gateId).toBe(legacyGateId);
+  });
+
+  it("opens a new gate when a retry reaches the same recovery state", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
+    reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT,
+    });
+    const firstGate = listWorkflowGatesForRun(db, RUN_ID)[0]!;
+    resolveWorkflowGate(
+      db,
+      firstGate.gateId,
+      {
+        action: "clear_recovery",
+        actor: "test operator",
+        mode: "operator",
+      },
+      { now: RECONCILE_AT + 1 },
+    );
+    expect(
+      clearWorkflowRunManualRecovery(db, {
+        runId: RUN_ID,
+        now: RECONCILE_AT + 1,
+      }).ok,
+    ).toBe(true);
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2,
+              state = 'manual_recovery_required',
+              finished_at = ?,
+              updated_at = ?
+        WHERE invocation_id = ?`,
+    ).run(
+      RECONCILE_AT + 2,
+      RECONCILE_AT + 2,
+      dispatchInvocationId("preflight"),
+    );
+
+    reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT + 3,
+    });
+
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(2);
+    expect(gates.map((gate) => gate.gateId)).toEqual([
+      expect.stringContaining("attempt-1"),
+      expect.stringContaining("attempt-2"),
+    ]);
+    expect(gates.filter((gate) => gate.resolvedAt === null)).toHaveLength(1);
   });
 
   it("does not park manual recovery over an already-terminal step", () => {

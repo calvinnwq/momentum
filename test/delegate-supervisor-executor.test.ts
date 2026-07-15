@@ -11,7 +11,10 @@ import {
   parseNoMistakesLaunchIdentity,
   settleNoMistakesHandoffState,
 } from "../src/adapters/no-mistakes-tool-adapter.js";
-import { createPersistedProfileDelegateToolAdapter } from "../src/adapters/profile-backed-delegate-tool-adapter.js";
+import {
+  createPersistedProfileDelegateToolAdapter,
+  writeJsonAtomically,
+} from "../src/adapters/profile-backed-delegate-tool-adapter.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../src/adapters/live-step-wrapper.js";
 import {
   classifyDelegateSupervisorState,
@@ -514,8 +517,18 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
     envelope.facade.recordCheckpoint(handoffRoundId, {
-      checkpointId: `${handoffRoundId}-delegate_handoff_completed`,
+      checkpointId: `${handoffRoundId}-delegate_handoff_intent`,
       sequence: 0,
+      stage: "delegate_handoff_intent",
+      detail: JSON.stringify({
+        tool: "no-mistakes",
+        invocationId: invocation.invocationId,
+        attempt: invocation.attempt,
+      }),
+    });
+    envelope.facade.recordCheckpoint(handoffRoundId, {
+      checkpointId: `${handoffRoundId}-delegate_handoff_completed`,
+      sequence: 1,
       stage: "delegate_handoff_completed",
       detail: JSON.stringify({
         externalIdentity: {
@@ -671,6 +684,7 @@ describe("delegate-supervisor SDK executor", () => {
   it("recovers an interrupted handoff intent without launching again", async () => {
     const { db, invocation, root } = openDelegateDb();
     const evidencePath = path.join(root, "handoff.log");
+    const recoveredEvidencePath = path.join(root, "recovered.log");
     const envelope = createDurableExecutorEnvelope({
       db,
       invocationId: invocation.invocationId,
@@ -736,7 +750,7 @@ describe("delegate-supervisor SDK executor", () => {
             headSha: HEAD,
           },
           summary: "reattached interrupted handoff",
-          artifactPaths: [evidencePath],
+          artifactPaths: [recoveredEvidencePath, evidencePath],
         };
       },
       readExternalState: () => {
@@ -763,7 +777,10 @@ describe("delegate-supervisor SDK executor", () => {
       invocationId: invocation.invocationId,
     }).snapshot();
     expect(resumed.rounds).toHaveLength(1);
-    expect(resumed.currentRound?.artifacts).toHaveLength(1);
+    expect(resumed.currentRound?.artifacts).toHaveLength(2);
+    expect(
+      resumed.currentRound?.artifacts.map((artifact) => artifact.path).sort(),
+    ).toEqual([evidencePath, recoveredEvidencePath].sort());
     expect(
       resumed.currentRound?.checkpoints.map((checkpoint) => checkpoint.stage),
     ).toEqual([
@@ -943,6 +960,59 @@ describe("delegate-supervisor SDK executor", () => {
     expect(result.lastRound).toMatchObject({
       classification: "manual_recovery_required",
       recoveryCode: "tool_adapter_unavailable",
+    });
+    db.close();
+  });
+
+  it("refuses to give a durable handoff to a newly configured adapter", async () => {
+    const { db, invocation } = openDelegateDb();
+    const handoff: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "nm-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "no-mistakes owns this handoff",
+      }),
+      readExternalState: () => {
+        throw new Error("initial tick only records the handoff");
+      },
+    };
+    await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": handoff } },
+      now: () => 6,
+    });
+    let replacementReads = 0;
+    const replacement: DelegateSupervisorToolAdapter = {
+      name: "gnhf",
+      handoff: () => {
+        throw new Error("replacement adapter must not launch");
+      },
+      readExternalState: () => {
+        replacementReads += 1;
+        throw new Error("replacement adapter must not receive prior handoff");
+      },
+    };
+
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "gnhf" },
+      hostBindings: { tools: { gnhf: replacement } },
+      now: () => 7,
+    });
+
+    expect(replacementReads).toBe(0);
+    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.lastRound).toMatchObject({
+      recoveryCode: "delegate_adapter_identity_mismatch",
     });
     db.close();
   });
@@ -1459,6 +1529,80 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("does not carry decisions from a replaced external run", async () => {
+    const { db, invocation } = openDelegateDb();
+    let external = state({
+      stepStatus: "awaiting_decision",
+      decisions: [
+        {
+          externalId: "review",
+          summary: "Choose a review disposition",
+          allowedActions: ["approve", "reject"],
+          chosenAction: null,
+          resolution: null,
+        },
+      ],
+    });
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "no-mistakes",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "initial handoff",
+      }),
+      recoverHandoff: () => ({
+        externalIdentity: {
+          externalRunId: external.externalRunId,
+          branch: external.branch,
+          headSha: external.headSha,
+        },
+        summary: "replacement handoff",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: external,
+        digest: `sha256:${external.externalRunId}`,
+      }),
+    };
+    const input = {
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: { tools: { "no-mistakes": adapter } },
+      now: () => 6,
+    };
+    await driveExecutorTicks(input);
+    expect((await driveExecutorTicks(input)).invocation.state).toBe(
+      "waiting_operator",
+    );
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    external = state({
+      externalRunId: "nm-run-2",
+      activeStep: null,
+      stepStatus: "completed",
+      ciState: "passed",
+      decisions: [],
+    });
+
+    await driveExecutorTicks(input);
+    const retried = await driveExecutorTicks(input);
+
+    expect(retried.invocation.state).toBe("succeeded");
+    expect(retried.lastRound).toMatchObject({
+      classification: "complete",
+      recoveryCode: null,
+    });
+    db.close();
+  });
+
   it("finishes an interrupted checkpointed handoff round before supervision", async () => {
     const { db, invocation } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
@@ -1503,12 +1647,15 @@ describe("delegate-supervisor SDK executor", () => {
           sequence: 0,
           stage: "delegate_handoff_completed",
           detail: JSON.stringify({
-            externalIdentity: {
-              externalRunId: "nm-run-1",
-              branch: "feature/delegate-supervisor",
-              headSha: HEAD,
+            adapterName: "no-mistakes",
+            handoff: {
+              externalIdentity: {
+                externalRunId: "nm-run-1",
+                branch: "feature/delegate-supervisor",
+                headSha: HEAD,
+              },
+              summary: "no-mistakes accepted the delegated run",
             },
-            summary: "no-mistakes accepted the delegated run",
           }),
         },
       ],
@@ -2535,6 +2682,82 @@ describe("delegate-supervisor SDK executor", () => {
 });
 
 describe("profile-backed persisted delegate state", () => {
+  it("rejects an external-state path with a symlinked parent directory", async () => {
+    const { db, invocation, root } = openDelegateDb();
+    const outside = fs.mkdtempSync(
+      path.join(os.tmpdir(), "delegate-supervisor-outside-"),
+    );
+    roots.push(outside);
+    const outsideState = path.join(outside, "delegate-external-state.json");
+    writeState(outsideState, state());
+    const linkedDirectory = path.join(root, "artifact-link");
+    fs.symlinkSync(outside, linkedDirectory, "dir");
+    const statePath = path.join(
+      linkedDirectory,
+      "delegate-external-state.json",
+    );
+    const adapter = createPersistedProfileDelegateToolAdapter({
+      tool: "gnhf",
+      repoPath: root,
+      command: "/bin/false",
+      argsPrefix: [],
+      env: {},
+    });
+
+    const read = await adapter.readExternalState({
+      invocation,
+      config: { tool: "gnhf" },
+      signal: new AbortController().signal,
+      handoff: {
+        externalIdentity: {
+          externalRunId: "gnhf-run-1",
+          branch: "feature/delegate-supervisor",
+          headSha: HEAD,
+        },
+        summary: "persisted handoff",
+        artifactPaths: [statePath],
+      },
+    });
+
+    expect(read).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("path contains a symbolic link"),
+    });
+    db.close();
+  });
+
+  it.each(["file sync", "rename"] as const)(
+    "preserves the previous receipt when atomic %s fails",
+    (failure) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "delegate-atomic-"));
+      roots.push(root);
+      const target = path.join(root, "receipt.json");
+      fs.writeFileSync(target, JSON.stringify({ generation: 1 }));
+
+      expect(() =>
+        writeJsonAtomically(
+          target,
+          { generation: 2 },
+          failure === "file sync"
+            ? {
+                fsyncSync: () => {
+                  throw new Error("injected file sync failure");
+                },
+              }
+            : {
+                renameSync: () => {
+                  throw new Error("injected rename failure");
+                },
+              },
+        ),
+      ).toThrow(`injected ${failure} failure`);
+      expect(JSON.parse(fs.readFileSync(target, "utf8"))).toEqual({
+        generation: 1,
+      });
+      expect(fs.readdirSync(root)).toEqual(["receipt.json"]);
+    },
+  );
+
   it.each(["symbolic link", "oversized file", "named pipe"])(
     "rejects a %s before reading external-state bytes",
     async (artifactKind) => {

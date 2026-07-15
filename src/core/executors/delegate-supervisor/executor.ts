@@ -100,6 +100,11 @@ type DurableCheckpointPosition = {
   sequence: number;
 };
 
+type DurableDelegateHandoff = {
+  adapterName: string;
+  handoff: DelegateSupervisorHandoff;
+};
+
 /** SDK-native executor that composes one active handoff with repeated polls. */
 export class DelegateSupervisorExecutor implements Executor<
   DelegateSupervisorConfig,
@@ -199,6 +204,23 @@ export class DelegateSupervisorExecutor implements Executor<
     if (handoffRecord.status === "absent") {
       return this.handoff(context, adapter);
     }
+    if (handoffRecord.value.adapterName !== context.config.tool) {
+      context.hostBindings.settleHandoff?.(false);
+      const active = context.state.currentRound;
+      const roundId =
+        active !== null && !isTerminalExecutorRoundState(active.round.state)
+          ? active.round.roundId
+          : startRound(
+              context,
+              "running",
+              "Validating durable delegated adapter identity.",
+            );
+      return recoveryResult(
+        roundId,
+        "delegate_adapter_identity_mismatch",
+        `Durable delegated handoff belongs to adapter ${JSON.stringify(handoffRecord.value.adapterName)}, not configured adapter ${JSON.stringify(context.config.tool)}.`,
+      );
+    }
     if (
       context.state.currentRound?.round.roundId === handoffRecord.roundId &&
       !isTerminalExecutorRoundState(context.state.currentRound.round.state)
@@ -211,13 +233,13 @@ export class DelegateSupervisorExecutor implements Executor<
         recommendedInvocationState: "running",
         recoveryCode: null,
         humanGate: null,
-        reason: handoffRecord.value.summary,
+        reason: handoffRecord.value.handoff.summary,
       };
     }
     return this.supervise(
       context,
       adapter,
-      handoffRecord.value,
+      handoffRecord.value.handoff,
       context.state.rounds,
       attemptRounds,
     );
@@ -429,8 +451,12 @@ export class DelegateSupervisorExecutor implements Executor<
     if (identityMismatch !== null) {
       decision = classifyDelegateSupervisorInconsistent(identityMismatch);
     }
-    const priorUnresolved = countUnresolvedPriorDecisions(
+    const scopedDecisionHistory = decisionHistoryRoundsForExternalRun(
       decisionHistoryRounds,
+      read.value.externalRunId,
+    );
+    const priorUnresolved = countUnresolvedPriorDecisions(
+      scopedDecisionHistory,
       read.value,
     );
     if (decision.classification === "complete" && priorUnresolved > 0) {
@@ -439,7 +465,7 @@ export class DelegateSupervisorExecutor implements Executor<
       );
     }
     const supervisorApproval = blockingSupervisorApprovalDecision(
-      decisionHistoryRounds,
+      scopedDecisionHistory,
     );
     if (decision.classification === "complete" && supervisorApproval !== null) {
       const disposition =
@@ -503,10 +529,8 @@ export class DelegateSupervisorExecutor implements Executor<
     const existingArtifactPaths = new Set(
       beforeEvidence?.artifacts.map((artifact) => artifact.path) ?? [],
     );
-    for (const [index, artifactPath] of (
-      handoff.artifactPaths ?? []
-    ).entries()) {
-      const artifactId = `${roundId}-handoff-artifact-${index}`;
+    for (const artifactPath of handoff.artifactPaths ?? []) {
+      const artifactId = `${roundId}-handoff-artifact-${stableId(artifactPath)}`;
       if (
         existingArtifactIds.has(artifactId) ||
         existingArtifactPaths.has(artifactPath)
@@ -531,7 +555,7 @@ export class DelegateSupervisorExecutor implements Executor<
           checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_HANDOFF_STAGE}`,
           sequence: beforeEvidence?.checkpoints.length ?? 0,
           stage: DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-          detail: JSON.stringify(handoff),
+          detail: JSON.stringify({ adapterName, handoff }),
         },
       ],
     });
@@ -821,16 +845,101 @@ function resolveToolAdapter(
 
 function findHandoff(
   rounds: readonly ExecutorRoundEnvelopeSnapshot[],
-): DurableCheckpointRead<DelegateSupervisorHandoff> {
-  return findDurableCheckpoint(
-    rounds,
-    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    (detail) => {
-      const parsed = JSON.parse(detail) as DelegateSupervisorHandoff;
-      assertHandoff(parsed);
-      return parsed;
-    },
+): DurableCheckpointRead<DurableDelegateHandoff> {
+  for (const snapshot of [...rounds].reverse()) {
+    const checkpoint = [...snapshot.checkpoints]
+      .reverse()
+      .find(
+        (candidate) => candidate.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+      );
+    if (checkpoint === undefined) continue;
+    const position = {
+      roundIndex: snapshot.round.roundIndex,
+      sequence: checkpoint.sequence,
+    };
+    if (checkpoint.detail === null) {
+      return {
+        status: "invalid",
+        roundId: snapshot.round.roundId,
+        position,
+        reason: `${DELEGATE_SUPERVISOR_HANDOFF_STAGE} checkpoint detail is missing`,
+      };
+    }
+    try {
+      const parsed: unknown = JSON.parse(checkpoint.detail);
+      if (isDurableDelegateHandoff(parsed)) {
+        assertHandoff(parsed.handoff);
+        return {
+          status: "valid",
+          roundId: snapshot.round.roundId,
+          position,
+          value: parsed,
+        };
+      }
+      const legacyHandoff = parsed as DelegateSupervisorHandoff;
+      assertHandoff(legacyHandoff);
+      return {
+        status: "valid",
+        roundId: snapshot.round.roundId,
+        position,
+        value: {
+          adapterName: legacyHandoffIntentTool(snapshot),
+          handoff: legacyHandoff,
+        },
+      };
+    } catch (error) {
+      return {
+        status: "invalid",
+        roundId: snapshot.round.roundId,
+        position,
+        reason: errorMessage(error),
+      };
+    }
+  }
+  return { status: "absent" };
+}
+
+function isDurableDelegateHandoff(
+  value: unknown,
+): value is DurableDelegateHandoff {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { adapterName?: unknown }).adapterName === "string" &&
+    (value as { adapterName: string }).adapterName.trim().length > 0 &&
+    "handoff" in value
   );
+}
+
+function legacyHandoffIntentTool(
+  snapshot: ExecutorRoundEnvelopeSnapshot,
+): string {
+  const intent = [...snapshot.checkpoints]
+    .reverse()
+    .find(
+      (checkpoint) =>
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE &&
+        checkpoint.detail !== null,
+    );
+  if (intent?.detail === null || intent === undefined) {
+    throw new Error(
+      "legacy durable delegated handoff has no adapter identity intent",
+    );
+  }
+  const parsed: unknown = JSON.parse(intent.detail);
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    typeof (parsed as { tool?: unknown }).tool !== "string" ||
+    (parsed as { tool: string }).tool.trim().length === 0
+  ) {
+    throw new Error(
+      "legacy durable delegated handoff adapter identity intent is invalid",
+    );
+  }
+  return (parsed as { tool: string }).tool;
 }
 
 function findLegacyLiveStepCompletion(
@@ -1124,6 +1233,16 @@ function countUnresolvedPriorDecisions(
       isExecutorDecisionEligibleForHumanGate(decision) &&
       !resolvedNow.has(externalRef),
   ).length;
+}
+
+function decisionHistoryRoundsForExternalRun(
+  rounds: readonly ExecutorRoundEnvelopeSnapshot[],
+  externalRunId: string,
+): readonly ExecutorRoundEnvelopeSnapshot[] {
+  return rounds.filter(
+    (round) =>
+      latestMirroredCheckpoint([round])?.state.externalRunId === externalRunId,
+  );
 }
 
 function blockingSupervisorApprovalDecision(

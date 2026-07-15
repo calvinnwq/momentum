@@ -196,7 +196,7 @@ export function resolvePreparedDelegateCommitEvidence(
       receipt.dispatchOutcome === undefined ||
       !receipt.dispatchOutcome.ok ||
       !recovered.ok ||
-      (receipt.phase !== "resetting" &&
+      (receipt.phase === "finalizing" &&
         recovered.result.state !== "succeeded") ||
       recovered.result.state !== receipt.dispatchOutcome.state ||
       recovered.result.summary !== receipt.dispatchOutcome.summary
@@ -914,6 +914,18 @@ function captureWorktreeTree(
         `delegated worktree snapshot returned invalid tree ${tree}`,
       );
     }
+    const indexTree = execFileSync("git", ["-C", repoPath, "write-tree"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (
+      indexTree !== resolveCommitTree(repoPath, baseHead) &&
+      indexTree !== tree
+    ) {
+      throw new Error(
+        "delegated repository index differs from the captured worktree; refusing to discard staged-only evidence",
+      );
+    }
     return tree;
   } finally {
     fs.rmSync(indexPath, { force: true });
@@ -1166,6 +1178,7 @@ function readBoundedResultFile(filePath: string): Buffer {
 }
 
 function readBoundedRegularFile(filePath: string, description: string): Buffer {
+  assertNoSymlinkPathComponents(filePath, description);
   let descriptor: number;
   try {
     descriptor = fs.openSync(
@@ -1184,6 +1197,7 @@ function readBoundedRegularFile(filePath: string, description: string): Buffer {
     throw error;
   }
   try {
+    assertNoSymlinkPathComponents(filePath, description);
     const pathStat = fs.lstatSync(filePath);
     const descriptorStat = fs.fstatSync(descriptor);
     if (
@@ -1216,6 +1230,34 @@ function readBoundedRegularFile(filePath: string, description: string): Buffer {
   } finally {
     fs.closeSync(descriptor);
   }
+}
+
+function assertNoSymlinkPathComponents(
+  filePath: string,
+  description: string,
+): void {
+  const resolved = path.resolve(filePath);
+  const root = path.parse(resolved).root;
+  let current = root;
+  for (const component of resolved.slice(root.length).split(path.sep)) {
+    if (component.length === 0) continue;
+    current = path.join(current, component);
+    if (
+      fs.lstatSync(current).isSymbolicLink() &&
+      !isPlatformFilesystemAlias(current)
+    ) {
+      throw new Error(
+        `${description} is not a bounded regular file: path contains a symbolic link`,
+      );
+    }
+  }
+}
+
+function isPlatformFilesystemAlias(candidate: string): boolean {
+  return (
+    process.platform === "darwin" &&
+    new Set(["/etc", "/tmp", "/var"]).has(candidate)
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -2113,17 +2155,59 @@ function writeProvisionalNoMistakesState(
   writeJsonAtomically(statePath, state);
 }
 
-function writeJsonAtomically(filePath: string, value: unknown): void {
+type AtomicJsonWriteDeps = Pick<
+  typeof fs,
+  | "closeSync"
+  | "fsyncSync"
+  | "openSync"
+  | "renameSync"
+  | "rmSync"
+  | "writeFileSync"
+>;
+
+export function writeJsonAtomically(
+  filePath: string,
+  value: unknown,
+  injected: Partial<AtomicJsonWriteDeps> = {},
+): void {
+  const deps: AtomicJsonWriteDeps = { ...fs, ...injected };
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  let descriptor: number | undefined;
   try {
-    fs.writeFileSync(temporaryPath, JSON.stringify(value), {
+    descriptor = deps.openSync(temporaryPath, "wx", 0o600);
+    deps.writeFileSync(descriptor, JSON.stringify(value), {
       encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
     });
-    fs.renameSync(temporaryPath, filePath);
+    deps.fsyncSync(descriptor);
+    deps.closeSync(descriptor);
+    descriptor = undefined;
+    deps.renameSync(temporaryPath, filePath);
+    syncDirectory(path.dirname(filePath), deps);
   } finally {
-    fs.rmSync(temporaryPath, { force: true });
+    if (descriptor !== undefined) deps.closeSync(descriptor);
+    deps.rmSync(temporaryPath, { force: true });
+  }
+}
+
+function syncDirectory(directoryPath: string, deps: AtomicJsonWriteDeps): void {
+  let descriptor: number | undefined;
+  try {
+    descriptor = deps.openSync(directoryPath, fs.constants.O_RDONLY);
+    deps.fsyncSync(descriptor);
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    if (
+      !new Set(["EACCES", "EINVAL", "EISDIR", "ENOTSUP", "EPERM"]).has(
+        String(code),
+      )
+    ) {
+      throw error;
+    }
+  } finally {
+    if (descriptor !== undefined) deps.closeSync(descriptor);
   }
 }
 

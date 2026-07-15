@@ -156,6 +156,7 @@ export function reconcileDispatchedWorkflowStep(
       stepId,
       dispatchStartedAt: invocation.startedAt,
       executorFamily: invocation.executorFamily,
+      invocationAttempt: invocation.attempt,
       invocationState: plan.invocationState,
       reason:
         recovery === null
@@ -307,6 +308,7 @@ function parkForManualRecovery(
     stepId: string;
     dispatchStartedAt: number | null;
     executorFamily: ExecutorName;
+    invocationAttempt: number;
     invocationState: string;
     reason: string;
     evidence: string;
@@ -319,6 +321,7 @@ function parkForManualRecovery(
     stepId,
     dispatchStartedAt,
     executorFamily,
+    invocationAttempt,
     invocationState,
     reason,
     evidence,
@@ -365,11 +368,22 @@ function parkForManualRecovery(
       now,
     });
     if (marked.ok) {
-      const gateId = deriveReconcileRecoveryGateId(
+      const qualifiedGateId = deriveReconcileRecoveryGateId(
+        runId,
+        stepId,
+        invocationAttempt,
+        invocationState,
+      );
+      const legacyGateId = deriveLegacyReconcileRecoveryGateId(
         runId,
         stepId,
         invocationState,
       );
+      const legacyGate = loadWorkflowGate(db, legacyGateId);
+      const gateId =
+        legacyGate !== undefined && legacyGate.resolvedAt === null
+          ? legacyGateId
+          : qualifiedGateId;
       if (loadWorkflowGate(db, gateId) === undefined) {
         // A step-scoped gate carries the run + step anchors only; the terminal
         // invocation state is recorded as `evidence` (the gate ancestry model
@@ -507,6 +521,15 @@ function releaseHeldDispatchLease(
 
 /** Deterministic, idempotent id for the reconciliation manual-recovery gate. */
 function deriveReconcileRecoveryGateId(
+  runId: string,
+  stepId: string,
+  invocationAttempt: number,
+  invocationState: string,
+): string {
+  return `${runId}::${stepId}::reconcile-recovery::attempt-${invocationAttempt}::${invocationState}`;
+}
+
+function deriveLegacyReconcileRecoveryGateId(
   runId: string,
   stepId: string,
   invocationState: string,
