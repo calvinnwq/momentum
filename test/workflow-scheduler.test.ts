@@ -1757,6 +1757,84 @@ function seedCheckpointedDelegateHandoff(
   return { envelope, invocationId, roundId };
 }
 
+function seedDelegateBeforeCurrentAttemptRound(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  attempt: 1 | 2,
+): void {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const invocationId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorInvocation(
+    db,
+    {
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "delegate-supervisor",
+      state: "running",
+      attempt: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  if (attempt === 1) return;
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId,
+    now: () => NOW,
+  });
+  const roundId = `${invocationId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executorFamily: "delegate-supervisor",
+    attempt: 1,
+    roundIndex: 0,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "prior attempt",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  updateExecutorRound(db, roundId, {
+    toState: "manual_recovery_required",
+    classification: "manual_recovery_required",
+    executorRecommendation: "manual_recovery_required",
+    recoveryCode: "delegate_handoff_failed",
+    humanGate: "manual_recovery_required",
+    finishedAt: NOW,
+  });
+  db.prepare(
+    `UPDATE executor_invocations
+        SET attempt = 2, state = 'running', finished_at = NULL
+      WHERE invocation_id = ?`,
+  ).run(invocationId);
+}
+
 function seedRegisteredSdkContinuation(
   db: MomentumDb,
   runId: string,
@@ -2299,6 +2377,77 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
       expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([1, 2] as const)(
+    "resumes delegate attempt %s after a crash before its first round",
+    (attempt) => {
+      const db = openDb(makeTempDir());
+      try {
+        const runId = `delegate-before-round-attempt-${attempt}`;
+        const stepId = "implementation";
+        seedDelegateBeforeCurrentAttemptRound(db, runId, stepId, attempt);
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          expiresAt: NOW,
+        });
+        const recorder = recordingDispatch();
+
+        const result = runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          now: () => NOW + 1,
+        });
+
+        expect(result).toMatchObject({
+          code: "dispatched",
+          claim: { runId, stepId },
+        });
+        expect(recorder.calls).toHaveLength(1);
+        expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+          needsManualRecovery: false,
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("does not treat an empty legacy retry attempt as an SDK continuation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "legacy-delegate-before-retry-round";
+      const stepId = "implementation";
+      seedDelegateBeforeCurrentAttemptRound(db, runId, stepId, 2);
+      db.prepare(
+        "UPDATE executor_rounds SET round_index = 1 WHERE workflow_run_id = ?",
+      ).run(runId);
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("idle");
+      expect(recorder.calls).toHaveLength(0);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+      });
     } finally {
       db.close();
     }

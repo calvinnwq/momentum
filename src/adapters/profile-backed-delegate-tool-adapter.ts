@@ -70,6 +70,10 @@ function verifyDelegateCommitOwnership(
   return ownership?.ok === false ? ownership : { ok: true };
 }
 
+type DelegateDispatchOutcome =
+  | { ok: true; state: "succeeded" | "failed"; summary: string }
+  | { ok: false; code: string; error: string };
+
 type LiveWrapperDelegateReceipt = {
   schemaVersion: 1;
   tool: string;
@@ -85,9 +89,7 @@ type LiveWrapperDelegateReceipt = {
   preexistingResultDigest: string | null;
   resultDigest?: string | null;
   worktreeTree?: string;
-  dispatchOutcome?:
-    | { ok: true; state: "succeeded" | "failed"; summary: string }
-    | { ok: false; code: string; error: string };
+  dispatchOutcome?: DelegateDispatchOutcome;
   expectedTree?: string;
   expectedMessage?: string;
   externalState?: DelegateSupervisorExternalState;
@@ -110,6 +112,7 @@ type NoMistakesDelegateReceipt = {
   resultJsonPath: string;
   executorLogPath: string;
   externalIdentity?: DelegateSupervisorExternalIdentity;
+  dispatchOutcome?: DelegateDispatchOutcome;
   resultDigest?: string | null;
   worktreeTree?: string;
   expectedTree?: string;
@@ -176,14 +179,25 @@ export function resolvePreparedDelegateCommitEvidence(
     if (!fs.existsSync(canonicalInput.handoffReceiptPath)) return null;
     if (canonicalInput.tool === "no-mistakes") {
       const receipt = readNoMistakesHandoffReceipt(canonicalInput);
-      if (!["completed", "finalizing"].includes(receipt.phase)) return null;
+      if (!["completed", "finalizing", "failed"].includes(receipt.phase)) {
+        return null;
+      }
       if (
         !delegateReceiptPathsMatchConfiguredArtifacts(canonicalInput, receipt)
       ) {
         return null;
       }
+      if (
+        receipt.phase === "failed" &&
+        (typeof receipt.resultDigest !== "string" ||
+          typeof receipt.worktreeTree !== "string" ||
+          receipt.dispatchOutcome?.ok !== true ||
+          receipt.dispatchOutcome.state !== "succeeded")
+      ) {
+        return null;
+      }
       assertNoMistakesResultMatchesReceipt(receipt);
-      if (receipt.phase === "completed") {
+      if (receipt.phase === "completed" || receipt.phase === "failed") {
         return typeof receipt.worktreeTree === "string"
           ? {
               baseHead: receipt.headSha,
@@ -413,6 +427,10 @@ function createLiveWrapperDelegateToolAdapter(
       readRepoBoundPersistedDelegateState(
         input.repoPath,
         handoff.artifactPaths,
+        {
+          tool: input.tool,
+          identity: handoff.externalIdentity,
+        },
       ),
   };
 }
@@ -1132,6 +1150,34 @@ function assertNoMistakesResultMatchesReceipt(
       "stored no-mistakes handoff result does not match its durable finalization receipt",
     );
   }
+  const recovered = readRecoveredLiveWrapperResult(receipt);
+  if (
+    receipt.dispatchOutcome === undefined ||
+    receipt.dispatchOutcome.ok !== recovered.ok ||
+    (receipt.dispatchOutcome.ok &&
+      recovered.ok &&
+      (receipt.dispatchOutcome.state !== recovered.result.state ||
+        receipt.dispatchOutcome.summary !== recovered.result.summary))
+  ) {
+    throw new Error(
+      "stored no-mistakes handoff wrapper outcome is not safely recoverable",
+    );
+  }
+}
+
+function isDelegateDispatchOutcome(
+  value: unknown,
+): value is DelegateDispatchOutcome {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const outcome = value as Record<string, unknown>;
+  return outcome["ok"] === true
+    ? (outcome["state"] === "succeeded" || outcome["state"] === "failed") &&
+        typeof outcome["summary"] === "string"
+    : outcome["ok"] === false &&
+        typeof outcome["code"] === "string" &&
+        typeof outcome["error"] === "string";
 }
 
 function noMistakesTerminalProofOptions(
@@ -1314,6 +1360,10 @@ export function createPersistedProfileDelegateToolAdapter(input: {
       readRepoBoundPersistedDelegateState(
         input.repoPath,
         handoff.artifactPaths,
+        {
+          tool: input.tool,
+          identity: handoff.externalIdentity,
+        },
       ),
   };
 }
@@ -1346,6 +1396,13 @@ function createProfileNoMistakesToolAdapter(
       ...launchingReceipt,
       phase: "completed",
       externalIdentity: launchIdentity.value,
+      dispatchOutcome: raw.ok
+        ? {
+            ok: true,
+            state: raw.result.state === "succeeded" ? "succeeded" : "failed",
+            summary: raw.result.summary,
+          }
+        : { ok: false, code: raw.code, error: raw.error },
       resultDigest,
       worktreeTree: captureWorktreeTree(
         input.repoPath,
@@ -1866,6 +1923,9 @@ function readNoMistakesHandoffReceipt(
       ...(stored.externalIdentity !== undefined
         ? { externalIdentity: stored.externalIdentity }
         : {}),
+      ...(stored.dispatchOutcome !== undefined
+        ? { dispatchOutcome: stored.dispatchOutcome }
+        : {}),
       ...(stored.resultDigest !== undefined
         ? { resultDigest: stored.resultDigest }
         : {}),
@@ -1907,7 +1967,9 @@ function readNoMistakesHandoffReceipt(
         receipt.resultDigest !== null &&
         !/^sha256:[0-9a-f]{64}$/.test(receipt.resultDigest)) ||
       (receipt.worktreeTree !== undefined &&
-        !/^[0-9a-f]{40}$/.test(receipt.worktreeTree))
+        !/^[0-9a-f]{40}$/.test(receipt.worktreeTree)) ||
+      (receipt.dispatchOutcome !== undefined &&
+        !isDelegateDispatchOutcome(receipt.dispatchOutcome))
     ) {
       throw new Error("stored handoff receipt is incomplete");
     }
@@ -1954,9 +2016,22 @@ function readNoMistakesHandoffReceipt(
     if (
       receipt.phase === "completed" &&
       (typeof receipt.resultDigest !== "string" ||
-        typeof receipt.worktreeTree !== "string")
+        typeof receipt.worktreeTree !== "string" ||
+        receipt.dispatchOutcome === undefined)
     ) {
+      // A pre-correlation receipt cannot prove whether a success-shaped result
+      // came from a failed wrapper process. Deriving this field would recreate
+      // the failure-to-success recovery gap, so legacy evidence fails closed.
       throw new Error("stored handoff completion receipt is incomplete");
+    }
+    if (
+      (receipt.phase === "finalizing" ||
+        receipt.phase === "resetting" ||
+        (receipt.phase === "failed" &&
+          typeof receipt.resultDigest === "string")) &&
+      receipt.dispatchOutcome === undefined
+    ) {
+      throw new Error("stored handoff wrapper outcome is incomplete");
     }
     return receipt;
   } catch (error) {
@@ -2497,9 +2572,15 @@ function readPersistedDelegateState(
 function readRepoBoundPersistedDelegateState(
   repoPath: string,
   artifactPaths: readonly string[] | undefined,
+  expected: {
+    tool: string;
+    identity: DelegateSupervisorExternalIdentity;
+  },
 ): ReturnType<typeof readPersistedDelegateState> {
-  const finalizedReceiptState =
-    readFinalizedGenericDelegateState(artifactPaths);
+  const finalizedReceiptState = readFinalizedGenericDelegateState(
+    artifactPaths,
+    expected,
+  );
   const read =
     finalizedReceiptState ?? readPersistedDelegateState(artifactPaths);
   if (!read.ok || delegateStateHeadMatchesRepo(repoPath, read.value.headSha)) {
@@ -2513,6 +2594,10 @@ function readRepoBoundPersistedDelegateState(
 
 function readFinalizedGenericDelegateState(
   artifactPaths: readonly string[] | undefined,
+  expected: {
+    tool: string;
+    identity: DelegateSupervisorExternalIdentity;
+  },
 ): ReturnType<typeof readPersistedDelegateState> | null {
   const receiptPath = artifactPaths?.find(
     (candidate) => path.basename(candidate) === "delegate-handoff.json",
@@ -2531,10 +2616,13 @@ function readFinalizedGenericDelegateState(
     };
     if (
       stored.schemaVersion !== 1 ||
-      typeof stored.tool !== "string" ||
+      stored.tool !== expected.tool ||
       stored.phase !== "finalized"
     ) {
-      return null;
+      return {
+        ok: false,
+        error: "delegated handoff receipt is not a valid finalized receipt",
+      };
     }
     if (
       stored.externalState === null ||
@@ -2548,6 +2636,17 @@ function readFinalizedGenericDelegateState(
       };
     }
     const value = stored.externalState as DelegateSupervisorExternalState;
+    if (
+      value.externalRunId !== expected.identity.externalRunId ||
+      value.branch !== expected.identity.branch ||
+      value.headSha !== expected.identity.headSha
+    ) {
+      return {
+        ok: false,
+        error:
+          "finalized delegated handoff receipt does not match its durable external identity",
+      };
+    }
     const raw = Buffer.from(JSON.stringify(value));
     return {
       ok: true,

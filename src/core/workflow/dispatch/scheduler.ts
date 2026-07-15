@@ -764,7 +764,6 @@ function tryParkStaleRunningDispatchLease(
     }
     if (
       invocation !== undefined &&
-      invocationRounds[0]?.roundIndex === 0 &&
       isResumableRegisteredSdkTick(db, invocation, invocationRounds)
     ) {
       db.exec("ROLLBACK");
@@ -1365,7 +1364,6 @@ function isRegisteredSdkContinuation(
     // executor, whose sequential envelope starts at roundIndex 0. The legacy
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
-    rounds[0]?.roundIndex === 0 &&
     isResumableRegisteredSdkTick(db, invocation, rounds)
   );
 }
@@ -1375,10 +1373,38 @@ function isResumableRegisteredSdkTick(
   invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
   rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
 ): boolean {
-  const round = rounds.at(-1);
-  if (invocation.state !== "running" || round === undefined) return false;
+  if (invocation.state !== "running") return false;
+  const currentAttemptRounds = rounds.filter(
+    (round) => round.attempt === invocation.attempt,
+  );
+  if (rounds.length > 0 && rounds[0]?.roundIndex !== 0) return false;
+  // Legacy dispatch inserts its invocation and first round in one transaction.
+  // Only an SDK-owned dispatch can durably expose a roundless invocation.
+  if (
+    invocation.executorFamily === "delegate-supervisor" &&
+    currentAttemptRounds.length === 0
+  ) {
+    return true;
+  }
+  const round = currentAttemptRounds.at(-1);
+  if (round === undefined) return false;
+  if (
+    invocation.executorFamily === "delegate-supervisor" &&
+    currentAttemptRounds.length === 1 &&
+    round.classification === null &&
+    round.state === "running" &&
+    !listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) =>
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    )
+  ) {
+    return true;
+  }
   if (round.classification === "continue") return true;
-  if (hasResumableDelegateCheckpoint(db, invocation, rounds)) return true;
+  if (hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds)) {
+    return true;
+  }
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1476,7 +1502,6 @@ function buildActiveSubworkflowClaim(
       : listExecutorRoundsForInvocation(db, invocation.invocationId);
   const resumableSdkTick =
     invocation !== undefined &&
-    invocationRounds[0]?.roundIndex === 0 &&
     isResumableRegisteredSdkTick(db, invocation, invocationRounds);
   if (
     invocation === undefined ||

@@ -136,6 +136,40 @@ export class DelegateSupervisorExecutor implements Executor<
       ({ round }) => round.attempt < context.state.invocation.attempt,
     );
     const legacyCompletion = findLegacyLiveStepCompletion(context.state.rounds);
+    const interruptedLegacyReplay = findDurableCheckpoint(
+      attemptRounds.filter(({ round }) => round.classification === null),
+      LEGACY_COMPLETION_REPLAYED_STAGE,
+      parseLegacyCompletionReplay,
+    );
+    if (interruptedLegacyReplay.status !== "absent") {
+      if (
+        interruptedLegacyReplay.status === "invalid" ||
+        legacyCompletion.status !== "valid" ||
+        interruptedLegacyReplay.value.sourceRoundId !== legacyCompletion.roundId
+      ) {
+        return invalidCompletionEvidenceResult(
+          context,
+          interruptedLegacyReplay.status === "invalid"
+            ? interruptedLegacyReplay
+            : {
+                status: "invalid",
+                roundId: interruptedLegacyReplay.roundId,
+                position: interruptedLegacyReplay.position,
+                reason:
+                  "legacy completion replay does not match its durable source round",
+              },
+        );
+      }
+      const fromPriorAttempt = !attemptRounds.some(
+        ({ round }) => round.roundId === legacyCompletion.roundId,
+      );
+      return replayLegacyCompletion(
+        context,
+        legacyCompletion,
+        fromPriorAttempt,
+        true,
+      );
+    }
     const latestDelegateEvidence = latestCheckpointPosition(
       context.state.rounds,
       new Set([
@@ -1086,6 +1120,22 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
   return parsed as LegacyLiveStepDecision;
 }
 
+function parseLegacyCompletionReplay(detail: string): {
+  sourceRoundId: string;
+} {
+  const parsed: unknown = JSON.parse(detail);
+  if (
+    parsed === null ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    typeof (parsed as { sourceRoundId?: unknown }).sourceRoundId !== "string" ||
+    (parsed as { sourceRoundId: string }).sourceRoundId.trim().length === 0
+  ) {
+    throw new Error("legacy completion replay source round is invalid");
+  }
+  return parsed as { sourceRoundId: string };
+}
+
 function includes<T extends string>(
   values: readonly T[],
   value: unknown,
@@ -1180,6 +1230,7 @@ function replayLegacyCompletion(
     { status: "valid" }
   >,
   fromPriorAttempt: boolean,
+  replayCheckpointAlreadyRecorded = false,
 ): ExecutorTickResult {
   context.hostBindings.settleHandoff?.(
     completion.value.recommendation === "complete" ||
@@ -1219,7 +1270,10 @@ function replayLegacyCompletion(
       });
     }
   }
-  if (fromPriorAttempt || completion.value.recommendation === "continue") {
+  if (
+    !replayCheckpointAlreadyRecorded &&
+    (fromPriorAttempt || completion.value.recommendation === "continue")
+  ) {
     const replayRound = context.envelope
       .snapshot()
       .rounds.find(({ round }) => round.roundId === roundId);

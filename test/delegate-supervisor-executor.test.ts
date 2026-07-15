@@ -325,6 +325,80 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("replays an unclassified durable legacy-completion marker without relaunching", async () => {
+    const { db, invocation } = openDelegateDb();
+    const legacyRoundId = seedCurrentRoundCheckpoint(
+      db,
+      invocation,
+      "mechanism_completed",
+      JSON.stringify({
+        recommendation: "complete",
+        recommendedRoundState: "succeeded",
+        recommendedInvocationState: "succeeded",
+        recoveryCode: null,
+        humanGate: null,
+        reason: "legacy wrapper completed cleanly",
+      }),
+    );
+    updateExecutorRound(db, legacyRoundId, { toState: "capturing_result" });
+    updateExecutorRound(db, legacyRoundId, {
+      toState: "succeeded",
+      classification: "complete",
+      executorRecommendation: "complete",
+      recoveryCode: null,
+      humanGate: null,
+      finishedAt: 5,
+    });
+    db.prepare(
+      `UPDATE executor_invocations
+          SET attempt = 2, state = 'running', finished_at = NULL
+        WHERE invocation_id = ?`,
+    ).run(invocation.invocationId);
+    const replayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId: invocation.invocationId,
+      now: () => 6,
+    });
+    envelope.facade.recordCheckpoint(replayRoundId, {
+      checkpointId: `${replayRoundId}-delegate_legacy_completion_replayed`,
+      sequence: 0,
+      stage: "delegate_legacy_completion_replayed",
+      detail: JSON.stringify({ sourceRoundId: legacyRoundId }),
+    });
+    let handoffs = 0;
+
+    const result = await driveExecutorTicks({
+      db,
+      invocationId: invocation.invocationId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("interrupted replay must not relaunch");
+            },
+            readExternalState: () => {
+              throw new Error("interrupted replay must not poll");
+            },
+          },
+        },
+      },
+      now: () => 7,
+    });
+
+    expect(handoffs).toBe(0);
+    expect(result.lastRound).toMatchObject({
+      roundId: replayRoundId,
+      classification: "complete",
+      state: "succeeded",
+    });
+    db.close();
+  });
+
   it("consumes a prior nonterminal legacy completion before handoff", async () => {
     const { db, invocation } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
