@@ -82,13 +82,13 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
   }
 
   const message = formatCommitMessage(commit);
+  let expectedTree: string;
+  try {
+    expectedTree = runGit(repoPath, ["write-tree"]).trim();
+  } catch (error) {
+    return gitFailure("git write-tree failed", error);
+  }
   if (input.beforeCommit !== undefined) {
-    let expectedTree: string;
-    try {
-      expectedTree = runGit(repoPath, ["write-tree"]).trim();
-    } catch (error) {
-      return gitFailure("git write-tree failed", error);
-    }
     const prepared = input.beforeCommit({ expectedTree, message });
     if (!prepared.ok) {
       return { ok: false, code: "precommit_rejected", error: prepared.error };
@@ -119,6 +119,44 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
       ok: false,
       code: "git_failed",
       error: `HEAD did not advance after commit: still at ${baseHead}.`,
+    };
+  }
+
+  let committedParent: string;
+  let committedTree: string;
+  let committedMessage: string;
+  let status: string;
+  try {
+    committedParent = runGit(repoPath, ["rev-parse", `${commitSha}^`]).trim();
+    committedTree = runGit(repoPath, [
+      "rev-parse",
+      `${commitSha}^{tree}`,
+    ]).trim();
+    committedMessage = runGit(repoPath, [
+      "show",
+      "--no-patch",
+      "--format=%B",
+      commitSha,
+    ]).trimEnd();
+    status = runGit(repoPath, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
+  } catch (error) {
+    return gitFailure("git commit verification failed", error);
+  }
+  if (
+    committedParent !== baseHead ||
+    committedTree !== expectedTree ||
+    committedMessage !== message ||
+    status.trim().length > 0
+  ) {
+    return {
+      ok: false,
+      code: "git_failed",
+      error:
+        "Committed repository state does not match the prepared parent/tree/message and clean-worktree evidence; manual recovery is required.",
     };
   }
 

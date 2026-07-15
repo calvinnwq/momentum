@@ -102,6 +102,9 @@ export type FinalizeWorkflowStepInput = {
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
   /** Forwarded commit-intent persistence hook; rejection preserves changes. */
   beforeCommit?: (evidence: {
     expectedTree: string;
@@ -194,6 +197,9 @@ export type FinalizeWorkflowStepFromResultFileInput = {
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
   /** Forwarded commit-intent persistence hook; rejection preserves changes. */
   beforeCommit?: (evidence: {
     expectedTree: string;
@@ -242,6 +248,7 @@ export function finalizeWorkflowStep(
     verificationTimeoutSec,
     verificationLogPath,
     beforeGitMutation,
+    beginGitMutation,
     beforeCommit,
   } = input;
 
@@ -264,6 +271,7 @@ export function finalizeWorkflowStep(
     verificationTimeoutSec,
     verificationLogPath,
     ...(beforeGitMutation !== undefined ? { beforeGitMutation } : {}),
+    ...(beginGitMutation !== undefined ? { beginGitMutation } : {}),
     ...(beforeCommit !== undefined ? { beforeCommit } : {}),
   });
 
@@ -370,6 +378,9 @@ export function finalizeWorkflowStepFromResultFile(
     verificationLogPath: input.verificationLogPath,
     ...(input.beforeGitMutation !== undefined
       ? { beforeGitMutation: input.beforeGitMutation }
+      : {}),
+    ...(input.beginGitMutation !== undefined
+      ? { beginGitMutation: input.beginGitMutation }
       : {}),
     ...(input.beforeCommit !== undefined
       ? { beforeCommit: input.beforeCommit }

@@ -33,6 +33,10 @@ export type FinalizeIterationInput = {
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /** Acquire a cross-worker fence held until the synchronous mutation ends. */
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
   /**
    * Persist the exact staged tree and commit message before commit mutation.
    * A rejection preserves verified changes instead of automatically resetting.
@@ -104,9 +108,14 @@ export function finalizeIteration(
 
   if (!runnerSuccess) {
     writeVerificationSkipNote(verificationLogPath, "runner reported failure");
-    const ownership = checkOwnership(input, "reset");
-    if (ownership !== null) return ownership;
-    const reset = resetToBase({ repoPath, baseHead });
+    const permit = acquireMutationPermit(input, "reset");
+    if (!permit.ok) return { outcome: "ownership_lost", error: permit.error };
+    let reset: ResetSuccess | ResetFailure;
+    try {
+      reset = resetToBase({ repoPath, baseHead });
+    } finally {
+      permit.release();
+    }
     if (!reset.ok) {
       return {
         outcome: "reset_failed",
@@ -126,9 +135,14 @@ export function finalizeIteration(
   });
 
   if (!verification.ok) {
-    const ownership = checkOwnership(input, "reset");
-    if (ownership !== null) return ownership;
-    const reset = resetToBase({ repoPath, baseHead });
+    const permit = acquireMutationPermit(input, "reset");
+    if (!permit.ok) return { outcome: "ownership_lost", error: permit.error };
+    let reset: ResetSuccess | ResetFailure;
+    try {
+      reset = resetToBase({ repoPath, baseHead });
+    } finally {
+      permit.release();
+    }
     if (!reset.ok) {
       return {
         outcome: "reset_failed",
@@ -140,23 +154,36 @@ export function finalizeIteration(
     return { outcome: "reset_verification_failure", verification, reset };
   }
 
-  const ownership = checkOwnership(input, "commit");
-  if (ownership !== null) return ownership;
-
-  const commit = commitVerifiedChanges({
-    repoPath,
-    baseHead,
-    commit: commitIntent,
-    ...(input.beforeCommit !== undefined
-      ? { beforeCommit: input.beforeCommit }
-      : {}),
-  });
+  const commitPermit = acquireMutationPermit(input, "commit");
+  if (!commitPermit.ok) {
+    return { outcome: "ownership_lost", error: commitPermit.error };
+  }
+  let commit: CommitSuccess | CommitFailure;
+  try {
+    commit = commitVerifiedChanges({
+      repoPath,
+      baseHead,
+      commit: commitIntent,
+      ...(input.beforeCommit !== undefined
+        ? { beforeCommit: input.beforeCommit }
+        : {}),
+    });
+  } finally {
+    commitPermit.release();
+  }
 
   if (!commit.ok) {
     if (shouldResetAfterCommitFailure(commit.code)) {
-      const resetOwnership = checkOwnership(input, "reset");
-      if (resetOwnership !== null) return resetOwnership;
-      const reset = resetToBase({ repoPath, baseHead });
+      const resetPermit = acquireMutationPermit(input, "reset");
+      if (!resetPermit.ok) {
+        return { outcome: "ownership_lost", error: resetPermit.error };
+      }
+      let reset: ResetSuccess | ResetFailure;
+      try {
+        reset = resetToBase({ repoPath, baseHead });
+      } finally {
+        resetPermit.release();
+      }
       return { outcome: "commit_failed", verification, commit, reset };
     }
     return { outcome: "commit_failed", verification, commit };
@@ -165,14 +192,14 @@ export function finalizeIteration(
   return { outcome: "committed", verification, commit };
 }
 
-function checkOwnership(
+function acquireMutationPermit(
   input: FinalizeIterationInput,
   mutation: "commit" | "reset",
-): Extract<FinalizeIterationResult, { outcome: "ownership_lost" }> | null {
-  if (input.beforeGitMutation === undefined) return null;
-  const check = input.beforeGitMutation(mutation);
-  if (check.ok) return null;
-  return { outcome: "ownership_lost", error: check.error };
+): { ok: true; release: () => void } | { ok: false; error: string } {
+  const check = input.beforeGitMutation?.(mutation);
+  if (check?.ok === false) return check;
+  const permit = input.beginGitMutation?.(mutation);
+  return permit ?? { ok: true, release: () => {} };
 }
 
 function shouldResetAfterCommitFailure(code: CommitFailure["code"]): boolean {

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export type RepoGuardErrorCode =
@@ -26,6 +27,7 @@ export type RepoGuardResult = RepoGuardError | RepoGuardSuccess;
 export type PreparedCommitEvidence = {
   baseHead: string;
   expectedTree: string;
+  treeSource?: "index" | "worktree";
 };
 
 /**
@@ -143,6 +145,12 @@ function matchesPreparedCommit(
     return false;
   }
   try {
+    if (evidence.treeSource === "worktree") {
+      return (
+        captureWorktreeTree(repoPath, evidence.baseHead) ===
+        evidence.expectedTree
+      );
+    }
     runGit(repoPath, ["diff", "--quiet"]);
     if (
       runGit(repoPath, ["ls-files", "--others", "--exclude-standard"]).trim()
@@ -153,6 +161,31 @@ function matchesPreparedCommit(
     return runGit(repoPath, ["write-tree"]).trim() === evidence.expectedTree;
   } catch {
     return false;
+  }
+}
+
+function captureWorktreeTree(repoPath: string, baseHead: string): string {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-repo-guard-"),
+  );
+  const indexPath = path.join(tempDir, "index");
+  const env = { ...process.env, GIT_INDEX_FILE: indexPath };
+  try {
+    execFileSync("git", ["-C", repoPath, "read-tree", baseHead], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    execFileSync("git", ["-C", repoPath, "add", "-A"], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    return execFileSync("git", ["-C", repoPath, "write-tree"], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }
 

@@ -188,7 +188,7 @@ function findUnreadableReason(
 }
 
 function isResolved(decision: DelegateSupervisorExternalDecision): boolean {
-  return isNonBlank(decision.resolution);
+  return !isExecutorDecisionEligibleForHumanGate(decision);
 }
 
 /** Single classification authority for every delegated tool adapter. */

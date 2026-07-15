@@ -1101,7 +1101,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       });
 
       expect(result.workflowStepsDispatched).toBe(1);
-      expect(result.idleCycles).toBe(1);
+      expect(result.idleCycles).toBe(0);
       expect(sleepCalls).toEqual([7]);
     } finally {
       db.close();

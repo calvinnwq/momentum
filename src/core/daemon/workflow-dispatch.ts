@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
+import { acquireRepoMutationFence } from "../../adapters/repo-mutation-fence.js";
 import {
   createPersistedProfileDelegateToolAdapter,
   createProfileBackedDelegateToolAdapter,
@@ -12,7 +13,7 @@ import {
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
-import { inspectRepo } from "../repo/guard.js";
+import { inspectRepo, type PreparedCommitEvidence } from "../repo/guard.js";
 import {
   acquireRepoLock,
   getActiveRepoLockForJob,
@@ -550,6 +551,7 @@ function createLiveStepHostBindingsResolver(
         path.basename(safety.repoSafety.verificationLogPath),
       ),
       beforeGitMutation: repoOwnership.authorizeMutation,
+      beginGitMutation: repoOwnership.beginMutation,
     };
     const dispatchKind = isDelegate ? delegateStepKind! : step.kind;
     const executorInput = buildDispatchedStepExecutorInput(
@@ -876,6 +878,8 @@ type LiveStepRepoOwnership =
   | {
       ok: true;
       authorizeMutation: () => { ok: true } | { ok: false; error: string };
+      beginMutation: () =>
+        { ok: true; release: () => void } | { ok: false; error: string };
       settle: (provenClean: boolean) => void;
     }
   | { ok: false; error: string; recoveryCode: string };
@@ -898,63 +902,89 @@ function acquireLiveStepRepoOwnership(input: {
     input.runnerWindowMs,
   );
   const acquiredAt = now();
-  const repoRoot = repoSafety.repoRoot ?? repoPath;
-  const jobId = deriveDispatchInvocationId(claim.runId, claim.stepId);
-  const existing =
-    input.reclaimHandoffAttempt !== undefined
-      ? getActiveRepoLockForJob(context.db, jobId)
-      : undefined;
-  const reclaimed =
-    existing !== undefined &&
-    input.reclaimHandoffAttempt !== undefined &&
-    existing.iteration >= input.reclaimHandoffAttempt &&
-    existing.iteration <= attempt &&
-    (existing.lease_expires_at < acquiredAt ||
-      context.staleDispatchTakeover?.previousHolder === existing.holder) &&
-    (existing.lease_expires_at < acquiredAt
-      ? reclaimRepoLock
-      : transferRepoLock)(context.db, {
-      lockId: existing.id,
-      repoRoot,
-      previousHolder: existing.holder,
-      holder: context.workerId,
-      goalId: claim.runId,
-      previousIteration: existing.iteration,
-      previousLeaseExpiresAt: existing.lease_expires_at,
-      iteration: attempt,
-      jobId,
-      heartbeatAt: acquiredAt,
-      leaseExpiresAt: acquiredAt + extensionMs,
-    }).ok;
-  let lockId: string;
-  if (reclaimed && existing !== undefined) {
-    lockId = existing.id;
-  } else {
-    const acquired = acquireRepoLock(context.db, {
-      repoRoot,
-      holder: context.workerId,
-      goalId: claim.runId,
-      iteration: attempt,
-      jobId,
-      leaseExpiresAt: acquiredAt + extensionMs,
-      now: acquiredAt,
-    });
-    if (!acquired.ok) {
-      return {
-        ok: false,
-        error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
-        recoveryCode:
-          existing?.id === acquired.existing.id
-            ? "delegate_handoff_recovery_required"
-            : "repo_lock_lost",
-      };
-    }
-    lockId = acquired.lockId;
+  const dispatchLease = heartbeatWorkflowLease(context.db, {
+    runId: claim.lease.runId,
+    leaseKind: claim.lease.leaseKind,
+    holder: claim.lease.holder,
+    acquiredAt: claim.lease.acquiredAt,
+    heartbeatAt: acquiredAt,
+    expiresAt: acquiredAt + extensionMs,
+  });
+  if (!dispatchLease.ok) {
+    return {
+      ok: false,
+      error: `dispatch lease for ${claim.runId}/${claim.stepId} was lost before repository ownership could be acquired`,
+      recoveryCode: "repo_lock_lost",
+    };
   }
-  let settled = false;
-  return {
-    ok: true,
-    authorizeMutation: () => {
+  const repoRoot = repoSafety.repoRoot ?? repoPath;
+  const mutationFence = acquireRepoMutationFence(repoRoot);
+  if (!mutationFence.ok) {
+    return {
+      ok: false,
+      error: `repository ${repoPath} already has an active mutation owner: ${mutationFence.error}`,
+      recoveryCode: "repo_lock_lost",
+    };
+  }
+  try {
+    const jobId = deriveDispatchInvocationId(claim.runId, claim.stepId);
+    const existing =
+      input.reclaimHandoffAttempt !== undefined
+        ? getActiveRepoLockForJob(context.db, jobId)
+        : undefined;
+    const reclaimed =
+      existing !== undefined &&
+      input.reclaimHandoffAttempt !== undefined &&
+      existing.iteration >= input.reclaimHandoffAttempt &&
+      existing.iteration <= attempt &&
+      (existing.lease_expires_at < acquiredAt ||
+        (context.staleDispatchTakeover?.previousHolder === existing.holder &&
+          context.staleDispatchTakeover.previousAcquiredAt <
+            claim.lease.acquiredAt &&
+          context.staleDispatchTakeover.previousExpiresAt < acquiredAt)) &&
+      (existing.lease_expires_at < acquiredAt
+        ? reclaimRepoLock
+        : transferRepoLock)(context.db, {
+        lockId: existing.id,
+        repoRoot,
+        previousHolder: existing.holder,
+        holder: context.workerId,
+        goalId: claim.runId,
+        previousIteration: existing.iteration,
+        previousLeaseExpiresAt: existing.lease_expires_at,
+        iteration: attempt,
+        jobId,
+        heartbeatAt: acquiredAt,
+        leaseExpiresAt: acquiredAt + extensionMs,
+      }).ok;
+    let lockId: string;
+    if (reclaimed && existing !== undefined) {
+      lockId = existing.id;
+    } else {
+      const acquired = acquireRepoLock(context.db, {
+        repoRoot,
+        holder: context.workerId,
+        goalId: claim.runId,
+        iteration: attempt,
+        jobId,
+        leaseExpiresAt: acquiredAt + extensionMs,
+        now: acquiredAt,
+      });
+      if (!acquired.ok) {
+        mutationFence.release();
+        return {
+          ok: false,
+          error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
+          recoveryCode:
+            existing?.id === acquired.existing.id
+              ? "delegate_handoff_recovery_required"
+              : "repo_lock_lost",
+        };
+      }
+      lockId = acquired.lockId;
+    }
+    let settled = false;
+    const authorizeMutation = () => {
       const mutationAt = now();
       const heartbeat = heartbeatWorkflowLease(context.db, {
         runId: claim.lease.runId,
@@ -966,7 +996,7 @@ function acquireLiveStepRepoOwnership(input: {
       });
       if (!heartbeat.ok) {
         return {
-          ok: false,
+          ok: false as const,
           error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`,
         };
       }
@@ -978,34 +1008,51 @@ function acquireLiveStepRepoOwnership(input: {
         leaseExpiresAt: mutationAt + extensionMs,
       });
       return lockBeat.ok
-        ? { ok: true }
+        ? { ok: true as const }
         : {
-            ok: false,
+            ok: false as const,
             error: `repo lock for ${claim.runId}/${claim.stepId} is no longer active`,
           };
-    },
-    settle: (provenClean) => {
-      if (settled) return;
-      settled = true;
-      const settledAt = now();
-      if (provenClean) {
-        releaseRepoLock(context.db, {
-          lockId,
-          holder: context.workerId,
-          iteration: attempt,
-          now: settledAt,
-        });
-      } else {
-        markRepoLockNeedsManualRecovery(context.db, {
-          lockId,
-          holder: context.workerId,
-          iteration: attempt,
-          now: settledAt,
-          recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
-        });
-      }
-    },
-  };
+    };
+    return {
+      ok: true,
+      authorizeMutation,
+      beginMutation: () => {
+        const authorization = authorizeMutation();
+        return authorization.ok
+          ? { ok: true, release: () => {} }
+          : authorization;
+      },
+      settle: (provenClean) => {
+        if (settled) return;
+        settled = true;
+        const settledAt = now();
+        try {
+          if (provenClean) {
+            releaseRepoLock(context.db, {
+              lockId,
+              holder: context.workerId,
+              iteration: attempt,
+              now: settledAt,
+            });
+          } else {
+            markRepoLockNeedsManualRecovery(context.db, {
+              lockId,
+              holder: context.workerId,
+              iteration: attempt,
+              now: settledAt,
+              recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
+            });
+          }
+        } finally {
+          mutationFence.release();
+        }
+      },
+    };
+  } catch (error) {
+    mutationFence.release();
+    throw error;
+  }
 }
 
 function liveStepOwnershipExtensionMs(
@@ -1021,7 +1068,11 @@ function liveStepOwnershipExtensionMs(
     Math.max(1, repoSafety.verificationCommands.length) *
     repoSafety.verificationTimeoutSec *
     1000;
-  return Math.max(leaseDurationMs, runnerWindowMs) + verificationWindowMs;
+  return (
+    Math.max(leaseDurationMs, runnerWindowMs) +
+    verificationWindowMs +
+    Math.max(leaseDurationMs, 5_000)
+  );
 }
 
 function resolveDaemonDispatchedRepoSafety(
@@ -1029,10 +1080,7 @@ function resolveDaemonDispatchedRepoSafety(
   runId: string,
   repoPath: string,
   runDir: string,
-  preparedCommitEvidence?: {
-    baseHead: string;
-    expectedTree: string;
-  },
+  preparedCommitEvidence?: PreparedCommitEvidence,
 ):
   | {
       ok: true;

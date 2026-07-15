@@ -49,46 +49,61 @@ export function acquireRepoLock(
 ): AcquireRepoLockResult {
   validateAcquireInput(input);
   const now = input.now ?? Date.now();
-
-  const existing = getBlockingRepoLock(db, input.repoRoot);
-  if (existing) {
-    return { ok: false, reason: "already_locked", existing };
-  }
-
-  const lockId = crypto.randomUUID();
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
-    db.prepare(
-      `INSERT INTO repo_locks
-         (id, repo_root, holder, goal_id, iteration, job_id,
-          state, acquired_at, heartbeat_at, lease_expires_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-    ).run(
-      lockId,
-      input.repoRoot,
-      input.holder,
-      input.goalId,
-      input.iteration,
-      input.jobId,
-      now,
-      now,
-      input.leaseExpiresAt,
-      now,
-    );
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      const racing = getActiveRepoLock(db, input.repoRoot);
-      if (racing) {
-        return { ok: false, reason: "already_locked", existing: racing };
+    const existing = getBlockingRepoLock(db, input.repoRoot);
+    if (existing) {
+      if (ownsTransaction) db.exec("COMMIT");
+      return { ok: false, reason: "already_locked", existing };
+    }
+
+    const lockId = crypto.randomUUID();
+    try {
+      db.prepare(
+        `INSERT INTO repo_locks
+           (id, repo_root, holder, goal_id, iteration, job_id,
+            state, acquired_at, heartbeat_at, lease_expires_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+      ).run(
+        lockId,
+        input.repoRoot,
+        input.holder,
+        input.goalId,
+        input.iteration,
+        input.jobId,
+        now,
+        now,
+        input.leaseExpiresAt,
+        now,
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const racing = getBlockingRepoLock(db, input.repoRoot);
+        if (racing) {
+          if (ownsTransaction) db.exec("COMMIT");
+          return { ok: false, reason: "already_locked", existing: racing };
+        }
       }
+      throw error;
+    }
+
+    const lock = getRepoLock(db, lockId);
+    if (!lock) {
+      throw new Error(
+        `acquireRepoLock: lock ${lockId} disappeared after insert`,
+      );
+    }
+    if (ownsTransaction) db.exec("COMMIT");
+    return { ok: true, lockId, lock };
+  } catch (error) {
+    if (ownsTransaction) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {}
     }
     throw error;
   }
-
-  const lock = getRepoLock(db, lockId);
-  if (!lock) {
-    throw new Error(`acquireRepoLock: lock ${lockId} disappeared after insert`);
-  }
-  return { ok: true, lockId, lock };
 }
 
 export type UpdateRepoLockHeartbeatInput = {

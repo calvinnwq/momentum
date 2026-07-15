@@ -3727,6 +3727,27 @@ describe("no-mistakes tool adapter", () => {
     });
   });
 
+  it("accepts completed decisions settled by a chosen action without a note", () => {
+    expect(
+      classifyDelegateSupervisorState(
+        state({
+          activeStep: null,
+          stepStatus: "completed",
+          ciState: "passed",
+          decisions: [
+            {
+              externalId: "review-1",
+              summary: "choose the review disposition",
+              allowedActions: ["approve", "reject"],
+              chosenAction: "approve",
+              resolution: null,
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({ classification: "complete", recoveryCode: null });
+  });
+
   it("refuses to gate a chosen decision without resolution evidence", () => {
     expect(
       classifyDelegateSupervisorState(

@@ -17,6 +17,7 @@ import {
   isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorRoundState,
+  isExecutorDecisionEligibleForHumanGate,
 } from "../loop/reducer.js";
 import {
   classifyDelegateSupervisorInconsistent,
@@ -1100,25 +1101,27 @@ function countUnresolvedPriorDecisions(
 ): number {
   const resolvedNow = new Set(
     current.decisions
-      .filter((decision) =>
-        typeof decision.resolution === "string"
-          ? decision.resolution.trim().length > 0
-          : false,
-      )
+      .filter((decision) => !isExecutorDecisionEligibleForHumanGate(decision))
       .map((decision) => decision.externalId),
   );
-  const latest = new Map<string, string | null>();
+  const latest = new Map<
+    string,
+    { chosenAction: string | null; resolution: string | null }
+  >();
   for (const { decisions } of rounds) {
     for (const decision of decisions) {
       if (decision.externalRef !== null && decision.externalRef !== undefined) {
-        latest.set(decision.externalRef, decision.resolution);
+        latest.set(decision.externalRef, {
+          chosenAction: decision.chosenAction,
+          resolution: decision.resolution,
+        });
       }
     }
   }
   return [...latest.entries()].filter(
-    ([externalRef, resolution]) =>
+    ([externalRef, decision]) =>
       externalRef !== DELEGATE_SUPERVISOR_SYNTHETIC_APPROVAL_EXTERNAL_ID &&
-      (resolution === null || resolution.trim().length === 0) &&
+      isExecutorDecisionEligibleForHumanGate(decision) &&
       !resolvedNow.has(externalRef),
   ).length;
 }

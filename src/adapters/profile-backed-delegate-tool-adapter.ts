@@ -130,7 +130,11 @@ type DelegateReceiptReadInput = Pick<
  */
 export function resolvePreparedDelegateCommitEvidence(
   input: DelegateReceiptReadInput,
-): { baseHead: string; expectedTree: string } | null {
+): {
+  baseHead: string;
+  expectedTree: string;
+  treeSource?: "index" | "worktree";
+} | null {
   try {
     const canonicalRepoPath = fs.realpathSync(input.repoPath);
     const requestedRunPath = path.resolve(input.legacyPaths.rootDir);
@@ -180,7 +184,7 @@ export function resolvePreparedDelegateCommitEvidence(
 
     const receipt = readLiveWrapperDelegateReceipt(canonicalInput);
     if (
-      receipt.phase !== "finalizing" ||
+      !["completed", "resetting", "finalizing"].includes(receipt.phase) ||
       !delegateReceiptPathsMatchConfiguredArtifacts(canonicalInput, receipt) ||
       typeof receipt.resultDigest !== "string" ||
       !resultDigestMatches(receipt.resultDigest, receipt.resultJsonPath)
@@ -197,6 +201,14 @@ export function resolvePreparedDelegateCommitEvidence(
       recovered.result.summary !== receipt.dispatchOutcome.summary
     ) {
       return null;
+    }
+    if (receipt.phase === "completed" || receipt.phase === "resetting") {
+      if (typeof receipt.worktreeTree !== "string") return null;
+      return {
+        baseHead: receipt.baseHead,
+        expectedTree: receipt.worktreeTree,
+        treeSource: "worktree",
+      };
     }
     return {
       baseHead: receipt.baseHead,
@@ -263,6 +275,23 @@ function createLiveWrapperDelegateToolAdapter(
             }
           : { ok: false, code: raw.code, error: raw.error },
       };
+      const correlated = readRecoveredLiveWrapperResult(completed);
+      // The dispatch contract intentionally exposes only terminal state and
+      // summary. The normalized result file is authoritative for commit intent
+      // and all other runner fields, and resultDigest binds that complete file
+      // through finalization and recovery.
+      if (
+        completed.dispatchOutcome === undefined ||
+        completed.dispatchOutcome.ok !== correlated.ok ||
+        (completed.dispatchOutcome.ok &&
+          correlated.ok &&
+          (correlated.result.state !== completed.dispatchOutcome.state ||
+            correlated.result.summary !== completed.dispatchOutcome.summary))
+      ) {
+        throw new Error(
+          `delegated ${input.tool} result does not match its in-memory dispatch outcome`,
+        );
+      }
       writeJsonAtomically(input.handoffReceiptPath, completed);
       let preparedReceipt = completed;
       const finalized = finalizeLiveStepResult(raw, input.repoPath, {

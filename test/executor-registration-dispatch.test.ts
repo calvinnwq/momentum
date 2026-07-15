@@ -211,12 +211,18 @@ describe("executor registration and SDK dispatch", () => {
         )
         .get("fixture-run"),
     ).toEqual({ state: "running" });
-    await runWorkflowSchedulerOnceAsync({
+    const lease = db
+      .prepare(
+        "SELECT heartbeat_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
+      )
+      .get("fixture-run") as { heartbeat_at: number };
+    const continuation = await runWorkflowSchedulerOnceAsync({
       db,
       workerId: "fixture-worker",
       dispatch: production.dispatch,
-      now: () => NOW + 2,
+      now: () => lease.heartbeat_at + 15_000,
     });
+    expect(continuation.code).toBe("dispatched");
 
     expect(
       db

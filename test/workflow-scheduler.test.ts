@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import {
   claimRunnableWorkflowStep,
   recoverStaleWorkflowLeases,
   runWorkflowSchedulerOnce,
+  runWorkflowSchedulerOnceAsync,
   selectRunnableWorkflowWork,
   DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
   WORKFLOW_DISPATCH_LEASE_KIND,
@@ -57,6 +58,7 @@ const NOW = 1_730_000_000_000;
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) {
@@ -1756,6 +1758,247 @@ function seedCheckpointedDelegateHandoff(
 }
 
 describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
+  it("lets runnable work proceed between persisted delegate poll deadlines", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
+      });
+      seedRun(db, { runId: "run-runnable", state: "approved" });
+      seedStep(db, {
+        runId: "run-runnable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.claim.runId).toBe("run-runnable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports a persisted continuation wait separately from true idle", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
+      });
+
+      expect(
+        runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recordingDispatch().dispatch,
+          now: () => NOW + 1,
+        }),
+      ).toMatchObject({ code: "idle", continuationPending: true });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("heartbeats the dispatch lease for the complete async dispatch", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async", state: "approved" });
+      seedStep(db, {
+        runId: "run-async",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () =>
+          new Promise((resolve) => {
+            finishDispatch = resolve;
+          }),
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      expect(
+        getWorkflowLease(db, "run-async", WORKFLOW_DISPATCH_LEASE_KIND)
+          ?.heartbeatAt,
+      ).toBe(NOW + 31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).resolves.toMatchObject({ code: "dispatched" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("accepts a completed async dispatch after its lease row is reused", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-reused", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-reused",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () => {
+          db.prepare(
+            "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_id = ?",
+          ).run("run-async-reused", "preflight");
+          db.prepare(
+            "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ?, released_at = NULL WHERE run_id = ? AND lease_kind = ?",
+          ).run(
+            "scheduler-2",
+            NOW + 1,
+            NOW + 1,
+            NOW + 91,
+            "run-async-reused",
+            WORKFLOW_DISPATCH_LEASE_KIND,
+          );
+          return new Promise((resolve) => {
+            finishDispatch = resolve;
+          });
+        },
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).resolves.toMatchObject({ code: "dispatched" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects a retryable async dispatch after its lease row is reused", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-retryable", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-retryable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () => {
+          db.prepare(
+            "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
+          ).run("run-async-retryable", "preflight");
+          db.prepare(
+            "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ?, released_at = NULL WHERE run_id = ? AND lease_kind = ?",
+          ).run(
+            "scheduler-2",
+            NOW + 1,
+            NOW + 1,
+            NOW + 91,
+            "run-async-retryable",
+            WORKFLOW_DISPATCH_LEASE_KIND,
+          );
+          return new Promise((resolve) => {
+            finishDispatch = resolve;
+          });
+        },
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).rejects.toThrow(/lease.*was lost/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("revalidates an async dispatch lease before accepting its result", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-final-check", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-final-check",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () =>
+          new Promise((resolve) => {
+            finishDispatch = resolve;
+          }),
+      });
+
+      now = NOW + 100;
+      db.prepare(
+        "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE run_id = ? AND lease_kind = ?",
+      ).run(
+        "scheduler-2",
+        now,
+        now,
+        now + 90,
+        "run-async-final-check",
+        WORKFLOW_DISPATCH_LEASE_KIND,
+      );
+      finishDispatch({ status: "dispatched" });
+
+      await expect(pending).rejects.toThrow(/lease.*was lost/);
+    } finally {
+      db.close();
+    }
+  });
+
   it("is idle and does not dispatch when no workflow work is runnable", () => {
     const db = openDb(makeTempDir());
     try {
@@ -2018,9 +2261,49 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
       expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
         previousHolder: "daemon-old",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
       });
       expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
         needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("propagates stale takeover proof when the lease holder string is reused", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "same-holder-delegate-takeover";
+      const stepId = "implementation";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "scheduler-1",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
       });
     } finally {
       db.close();

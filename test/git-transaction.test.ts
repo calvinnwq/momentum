@@ -8,7 +8,7 @@ import {
   commitVerifiedChanges,
   formatCommitMessage,
   listCommittedChangedFiles,
-  resetToBase
+  resetToBase,
 } from "../src/adapters/git-transaction.js";
 import type { CommitIntent } from "../src/core/executors/runner/types.js";
 
@@ -33,7 +33,7 @@ function makeTempDir(prefix = "momentum-git-transaction-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -60,7 +60,7 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
     subject: "prove foreground momentum iteration",
     body: "",
     breaking: false,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -77,16 +77,18 @@ describe("formatCommitMessage", () => {
 
   it("adds a bang when breaking=true", () => {
     const msg = formatCommitMessage(
-      baseIntent({ scope: "core", breaking: true })
+      baseIntent({ scope: "core", breaking: true }),
     );
     expect(msg).toBe("feat(core)!: prove foreground momentum iteration");
   });
 
   it("appends body separated by a blank line", () => {
     const msg = formatCommitMessage(
-      baseIntent({ scope: undefined, body: "explains why" })
+      baseIntent({ scope: undefined, body: "explains why" }),
     );
-    expect(msg).toBe("feat: prove foreground momentum iteration\n\nexplains why");
+    expect(msg).toBe(
+      "feat: prove foreground momentum iteration\n\nexplains why",
+    );
   });
 
   it("trims a body that is whitespace only", () => {
@@ -106,7 +108,7 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: dir,
       baseHead,
-      commit: baseIntent()
+      commit: baseIntent(),
     });
 
     expect(result.ok).toBe(true);
@@ -116,7 +118,7 @@ describe("commitVerifiedChanges", () => {
     expect(result.commitSha).not.toBe(baseHead);
     expect(result.commitSha).toMatch(/^[0-9a-f]{40}$/);
     expect(result.message).toBe(
-      "feat(milestone-1): prove foreground momentum iteration"
+      "feat(milestone-1): prove foreground momentum iteration",
     );
 
     const headAfter = runGit(dir, ["rev-parse", "HEAD"]).trim();
@@ -125,9 +127,15 @@ describe("commitVerifiedChanges", () => {
     const status = runGit(dir, ["status", "--porcelain"]).trim();
     expect(status).toBe("");
 
-    const log = runGit(dir, ["log", "--format=%H %s", `${baseHead}..HEAD`]).trim();
+    const log = runGit(dir, [
+      "log",
+      "--format=%H %s",
+      `${baseHead}..HEAD`,
+    ]).trim();
     expect(log.split("\n")).toHaveLength(1);
-    expect(log).toContain("feat(milestone-1): prove foreground momentum iteration");
+    expect(log).toContain(
+      "feat(milestone-1): prove foreground momentum iteration",
+    );
   });
 
   it("preserves multi-line body in the commit message", () => {
@@ -140,8 +148,8 @@ describe("commitVerifiedChanges", () => {
       baseHead,
       commit: baseIntent({
         scope: undefined,
-        body: "first line\nsecond line"
-      })
+        body: "first line\nsecond line",
+      }),
     });
 
     expect(result.ok).toBe(true);
@@ -159,7 +167,7 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: dir,
       baseHead,
-      commit: baseIntent()
+      commit: baseIntent(),
     });
 
     expect(result.ok).toBe(false);
@@ -182,7 +190,7 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: dir,
       baseHead,
-      commit: baseIntent()
+      commit: baseIntent(),
     });
 
     expect(result.ok).toBe(false);
@@ -198,7 +206,7 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: "",
       baseHead: "a".repeat(40),
-      commit: baseIntent()
+      commit: baseIntent(),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("invalid_input");
@@ -211,7 +219,7 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: dir,
       baseHead: "deadbeef",
-      commit: baseIntent()
+      commit: baseIntent(),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("invalid_input");
@@ -224,10 +232,59 @@ describe("commitVerifiedChanges", () => {
     const result = commitVerifiedChanges({
       repoPath: dir,
       baseHead,
-      commit: baseIntent({ subject: "   " })
+      commit: baseIntent({ subject: "   " }),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("invalid_input");
+  });
+
+  it("rejects a commit whose hook changes the prepared tree", () => {
+    const dir = initRepo();
+    const baseHead = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "new.txt"), "prepared\n", "utf-8");
+    const hookPath = path.join(dir, ".git", "hooks", "pre-commit");
+    fs.writeFileSync(
+      hookPath,
+      '#!/bin/sh\nprintf "hooked\\n" > README.md\ngit add README.md\n',
+      { mode: 0o755 },
+    );
+    let expectedTree = "";
+
+    const result = commitVerifiedChanges({
+      repoPath: dir,
+      baseHead,
+      commit: baseIntent(),
+      beforeCommit: (evidence) => {
+        expectedTree = evidence.expectedTree;
+        return { ok: true };
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "git_failed" });
+    expect(runGit(dir, ["rev-parse", "HEAD^{tree}"]).trim()).not.toBe(
+      expectedTree,
+    );
+  });
+
+  it("rejects a commit whose hook changes the prepared message", () => {
+    const dir = initRepo();
+    const baseHead = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "new.txt"), "prepared\n", "utf-8");
+    const hookPath = path.join(dir, ".git", "hooks", "commit-msg");
+    fs.writeFileSync(hookPath, '#!/bin/sh\nprintf "hooked\\n" >> "$1"\n', {
+      mode: 0o755,
+    });
+
+    const result = commitVerifiedChanges({
+      repoPath: dir,
+      baseHead,
+      commit: baseIntent(),
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "git_failed" });
+    expect(
+      runGit(dir, ["show", "--no-patch", "--format=%B", "HEAD"]),
+    ).toContain("hooked");
   });
 });
 
@@ -239,7 +296,11 @@ describe("resetToBase", () => {
     fs.writeFileSync(path.join(dir, "README.md"), "init\nlocal\n", "utf-8");
     fs.writeFileSync(path.join(dir, "scratch.txt"), "untracked\n", "utf-8");
     fs.mkdirSync(path.join(dir, "scratch-dir"));
-    fs.writeFileSync(path.join(dir, "scratch-dir", "x.txt"), "nested\n", "utf-8");
+    fs.writeFileSync(
+      path.join(dir, "scratch-dir", "x.txt"),
+      "nested\n",
+      "utf-8",
+    );
 
     const result = resetToBase({ repoPath: dir, baseHead });
 
@@ -251,7 +312,9 @@ describe("resetToBase", () => {
     expect(status).toBe("");
     expect(fs.existsSync(path.join(dir, "scratch.txt"))).toBe(false);
     expect(fs.existsSync(path.join(dir, "scratch-dir"))).toBe(false);
-    expect(fs.readFileSync(path.join(dir, "README.md"), "utf-8")).toBe("init\n");
+    expect(fs.readFileSync(path.join(dir, "README.md"), "utf-8")).toBe(
+      "init\n",
+    );
   });
 
   it("succeeds as a no-op when the worktree is already clean", () => {
@@ -279,7 +342,7 @@ describe("resetToBase", () => {
     expect(result.code).toBe("head_mismatch");
     expect(result.error).toContain("refusing to reset");
     expect(runGit(dir, ["log", "-1", "--pretty=%s"]).trim()).toBe(
-      "runner commit"
+      "runner commit",
     );
   });
 
@@ -322,7 +385,7 @@ describe("listCommittedChangedFiles", () => {
 
     expect(listCommittedChangedFiles(dir, parent, commit)).toEqual([
       "README.md",
-      "added.txt"
+      "added.txt",
     ]);
   });
 
@@ -337,7 +400,7 @@ describe("listCommittedChangedFiles", () => {
 
     expect(listCommittedChangedFiles(dir, parent, commit)).toEqual([
       "alpha.txt",
-      "zeta.txt"
+      "zeta.txt",
     ]);
   });
 });

@@ -321,11 +321,15 @@ export async function runDaemonLoop(
       // workflow lane starts or retries an invocation. A continuation-only SDK
       // tick has already done its bounded poll, so it observes the configured
       // interval before the next external-state read.
-      const cycleDidWork =
-        workflowResult?.code === "dispatched" &&
-        workflowResult.dispatch.status !==
+      const cycleDidUsefulWork =
+        workflowResult?.code === "dispatched" ||
+        (workflowResult?.code === "idle" &&
+          workflowResult.continuationPending === true);
+      const shouldSleep =
+        workflowResult?.code !== "dispatched" ||
+        workflowResult.dispatch.status ===
           WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched;
-      if (cycleDidWork) {
+      if (!shouldSleep) {
         if (
           !completeCycle(iterations - 1, run.state, cycleStart, workflowResult)
         ) {
@@ -334,7 +338,7 @@ export async function runDaemonLoop(
         continue;
       }
 
-      idleCycles += 1;
+      if (!cycleDidUsefulWork) idleCycles += 1;
       if (
         !completeCycle(iterations - 1, run.state, cycleStart, workflowResult)
       ) {

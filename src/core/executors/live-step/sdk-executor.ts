@@ -21,6 +21,10 @@ export type LiveStepRepoSafetyHostBinding = {
   beforeGitMutation?: (
     mutation: "commit" | "reset",
   ) => { ok: true } | { ok: false; error: string };
+  /** Hold an enforceable cross-worker fence for the complete Git mutation. */
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
   /** Persist the staged tree/message receipt before a delegated commit. */
   beforeCommit?: (evidence: {
     expectedTree: string;
@@ -273,6 +277,9 @@ export function finalizeLiveStepResult(
       verificationLogPath: safety.verificationLogPath,
       ...(safety.beforeGitMutation !== undefined
         ? { beforeGitMutation: safety.beforeGitMutation }
+        : {}),
+      ...(safety.beginGitMutation !== undefined
+        ? { beginGitMutation: safety.beginGitMutation }
         : {}),
       ...(safety.beforeCommit !== undefined
         ? { beforeCommit: safety.beforeCommit }

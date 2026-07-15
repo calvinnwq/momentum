@@ -232,6 +232,34 @@ describe("finalizeIteration", () => {
     ).toBe("from-runner\n");
   });
 
+  it("holds the mutation fence across staging, receipt persistence, and commit", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    let held = false;
+    let observedDuringCommit = false;
+
+    const result = finalizeIteration({
+      repoPath,
+      baseHead,
+      runnerSuccess: true,
+      commitIntent: baseIntent(),
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath,
+      beginGitMutation: () => {
+        held = true;
+        return { ok: true, release: () => (held = false) };
+      },
+      beforeCommit: () => {
+        observedDuringCommit = held;
+        return { ok: true };
+      },
+    });
+
+    expect(result.outcome).toBe("committed");
+    expect(observedDuringCommit).toBe(true);
+    expect(held).toBe(false);
+  });
+
   it("resets staged runner edits when git commit itself fails", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
     const hooksDir = path.join(repoPath, ".git", "hooks");

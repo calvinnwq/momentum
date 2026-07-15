@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
+import { acquireRepoMutationFence } from "../src/adapters/repo-mutation-fence.js";
 import {
   createPersistedProfileDelegateToolAdapter,
   createProfileBackedDelegateToolAdapter,
@@ -16,7 +17,10 @@ import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-d
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
-import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
+import {
+  claimRunnableWorkflowStep,
+  runWorkflowSchedulerOnceAsync,
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR } from "../src/core/workflow/live-wrapper/coding-workflow.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
@@ -92,6 +96,7 @@ function writeNoMistakesProfile(
   statusMode: "completed" | "lagging" | "blocked" = "completed",
   launchIdentityMode: "valid" | "missing" = "valid",
   launchDelaySec = 0,
+  probeMutationFence = false,
 ): {
   profilePath: string;
   wrapperConfigPath: string;
@@ -144,11 +149,18 @@ ${statusOutput}
     launchIdentityMode === "valid"
       ? `printf 'run:\n  id: "nm-run-1"\n'`
       : `printf 'launch completed without identity\n'`;
+  const mutationFenceProbe = probeMutationFence
+    ? `probe_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/mutation-fence-probe"
+common_dir=$(git rev-parse --git-common-dir)
+case "$common_dir" in /*) ;; *) common_dir="$MOMENTUM_REPO_PATH/$common_dir" ;; esac
+"${process.execPath}" -e 'const { DatabaseSync } = require("node:sqlite"); const fs = require("node:fs"); let db; let result = "blocked"; try { db = new DatabaseSync(process.argv[1]); db.exec("PRAGMA busy_timeout = 0"); db.exec("BEGIN IMMEDIATE"); result = "acquired"; db.exec("ROLLBACK"); } catch {} finally { try { db?.close(); } catch {} fs.writeFileSync(process.argv[2], result); }' "$common_dir/momentum-mutation-fence.sqlite" "$probe_file"`
+    : "";
   const launchScript = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/no-mistakes-launch-count"
 mkdir -p "$(dirname "$count_file")"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
 printf '%s\n' "$((count + 1))" > "$count_file"
+${mutationFenceProbe}
 ${launchDelaySec > 0 ? `/bin/sleep ${launchDelaySec}` : ""}
 ${launchMutation}
 ${launchOutput}
@@ -554,6 +566,92 @@ describe(
       expect(fs.readFileSync(path.join(repoPath, "README.md"), "utf8")).toBe(
         "fixture\n",
       );
+    });
+
+    it("refuses an initial generic result that contradicts its dispatch outcome", async () => {
+      const repoPath = initRepo();
+      const branch = runGit(repoPath, ["branch", "--show-current"]);
+      const headSha = runGit(repoPath, ["rev-parse", "HEAD"]);
+      const root = path.join(repoPath, ".agent-workflows", "result-race");
+      fs.mkdirSync(root, { recursive: true });
+      const handoffReceiptPath = path.join(root, "delegate-handoff.json");
+      const statePath = path.join(root, "delegate-external-state.json");
+      const resultJsonPath = path.join(root, "result.json");
+      const executorLogPath = path.join(root, "executor.log");
+      const verificationLogPath = path.join(root, "verification.log");
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: "gnhf",
+        invocationId: "result-race::implementation::dispatch",
+        attempt: 1,
+        branch,
+        headSha,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath,
+        repoSafety: {
+          baseHead: headSha,
+          verificationCommands: [],
+          verificationTimeoutSec: 5,
+          verificationLogPath,
+        },
+        run: () => {
+          fs.writeFileSync(path.join(repoPath, "README.md"), "changed\n");
+          fs.writeFileSync(
+            resultJsonPath,
+            JSON.stringify({
+              success: true,
+              summary: "replacement success",
+              key_changes_made: [],
+              key_learnings: [],
+              remaining_work: [],
+              goal_complete: false,
+              commit: {
+                type: "test",
+                subject: "must not commit replacement",
+                body: "",
+                breaking: false,
+              },
+            }),
+          );
+          return {
+            ok: false,
+            code: "command_failed",
+            error: "original dispatch failed",
+            executorLogPath,
+            resultJsonPath,
+          };
+        },
+        statusCommand: "/usr/bin/false",
+        statusArgsPrefix: [],
+        statusEnv: {},
+        legacyPaths: {
+          rootDir: root,
+          handoffReceiptPath: path.join(root, "legacy-handoff.json"),
+        },
+      });
+
+      await expect(
+        adapter.handoff({
+          invocation: {} as never,
+          config: { tool: "gnhf" },
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toThrow(/does not match its in-memory dispatch outcome/);
+      expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(headSha);
+      expect(
+        JSON.parse(fs.readFileSync(handoffReceiptPath, "utf8")),
+      ).toMatchObject({ phase: "launched" });
+      await expect(
+        Promise.resolve().then(() =>
+          adapter.recoverHandoff!({
+            invocation: {} as never,
+            config: { tool: "gnhf" },
+            signal: new AbortController().signal,
+          }),
+        ),
+      ).rejects.toThrow(/has no durable wrapper-completion evidence/);
     });
 
     it("authorizes only the selected reset during generic recovery", async () => {
@@ -2462,7 +2560,11 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         db,
         workerId: "recovery-worker",
         now: NOW + 4,
-        staleDispatchTakeover: { previousHolder: "original-worker" },
+        staleDispatchTakeover: {
+          previousHolder: "original-worker",
+          previousAcquiredAt: NOW,
+          previousExpiresAt: NOW + 1,
+        },
       });
 
       expect(
@@ -2543,6 +2645,69 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           )
           .get(runId),
       ).toEqual({ recovery_code: "external_state_unreadable" });
+      db.close();
+    });
+
+    it("recovers a completed generic handoff through production dirty-worktree preflight", async () => {
+      const dataDir = tempDir();
+      const repoPath = initRepo();
+      const runId = "delegate-completed-dirty-recovery";
+      const stepId = "implementation";
+      const profilePath = writeProfile(tempDir());
+      const db = prepareRun({ dataDir, repoPath, runId, stepKeys: [stepId] });
+      const resolved = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!resolved.ok) throw new Error(resolved.message);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 1,
+      });
+      const artifactRoot = path.join(
+        repoPath,
+        ".agent-workflows",
+        runId,
+        "delegate",
+        stepId,
+      );
+      const receiptPath = path.join(artifactRoot, "delegate-handoff.json");
+      const receipt = JSON.parse(
+        fs.readFileSync(receiptPath, "utf8"),
+      ) as Record<string, unknown>;
+      runGit(repoPath, ["reset", "--mixed", "--quiet", "HEAD^"]);
+      delete receipt.expectedTree;
+      delete receipt.expectedMessage;
+      delete receipt.externalState;
+      fs.writeFileSync(
+        receiptPath,
+        JSON.stringify({ ...receipt, phase: "completed" }),
+      );
+      reopenInterruptedHandoff(db, runId, stepId);
+
+      await resolved.dispatch(claimStep(db, runId, stepId, NOW + 2), {
+        db,
+        workerId: "delegate-test-worker",
+        now: NOW + 3,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded" });
+      expect(
+        fs.readFileSync(
+          path.join(repoPath, ".agent-workflows", runId, "gnhf-launch-count"),
+          "utf8",
+        ),
+      ).toBe("1\n");
+      expect(runGit(repoPath, ["status", "--porcelain"])).toBe("");
       db.close();
     });
 
@@ -3287,6 +3452,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         "completed",
         "valid",
         1.8,
+        true,
       );
       const db = prepareRun({
         dataDir,
@@ -3307,11 +3473,28 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       );
       if (!resolved.ok) throw new Error(resolved.message);
 
-      await resolved.dispatch(claimStep(db, runId, stepId, NOW, 500), {
+      const startedAt = Date.now();
+      await runWorkflowSchedulerOnceAsync({
         db,
         workerId: "delegate-test-worker",
-        now: NOW + 1,
+        leaseDurationMs: 2_000,
+        now: () => NOW + (Date.now() - startedAt),
+        dispatch: resolved.dispatch,
       });
+      expect(
+        fs.readFileSync(
+          path.join(
+            repoPath,
+            ".agent-workflows",
+            runId,
+            "mutation-fence-probe",
+          ),
+          "utf8",
+        ),
+      ).toBe("blocked");
+      const releasedFence = acquireRepoMutationFence(repoPath);
+      expect(releasedFence.ok).toBe(true);
+      if (releasedFence.ok) releasedFence.release();
 
       expect(
         db
