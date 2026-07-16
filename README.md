@@ -96,7 +96,7 @@ node dist/index.js --help
 `pnpm test` runs the fast default lane for everyday development.
 `pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes.
 `pnpm typecheck` runs the TypeScript test-project check, `pnpm lint` runs oxlint over `src/` and `test/`, and `pnpm format:check` runs Prettier against changed non-`docs/` files. `pnpm format` applies the same Prettier scope in write mode.
-The checked-in `.no-mistakes.yaml` points no-mistakes at the same `pnpm test && pnpm typecheck && pnpm build` and `pnpm lint && pnpm format:check` lanes.
+The checked-in `.no-mistakes.yaml` is the authoritative no-mistakes gate configuration and composes these package-script lanes.
 The suite covers workflow runs and executors, daemon/recovery, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
 
 Releases are managed by Release Please on pushes to `main` or manual workflow dispatch. It opens or updates the release PR, keeps `CHANGELOG.md` current, and creates the GitHub release when that PR is merged; Momentum is still not published to npm.

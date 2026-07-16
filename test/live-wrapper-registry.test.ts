@@ -61,35 +61,64 @@ describe("parseLiveWrapperConfig shape", () => {
     });
   });
 
-  it("accepts camelCase aliases during the durable-config transition", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
-    raw["timeoutSec"] = raw["timeout_sec"];
-    raw["envAllow"] = raw["env_allow"];
-    raw["resultFile"] = raw["result_file"];
-    delete raw["timeout_sec"];
-    delete raw["env_allow"];
-    delete raw["result_file"];
+  it("rejects a retired camelCase alias that replaces its canonical key", () => {
+    for (const [alias, canonical] of [
+      ["timeoutSec", "timeout_sec"],
+      ["envAllow", "env_allow"],
+      ["resultFile", "result_file"],
+    ] as const) {
+      const raw = clone(validWrapper) as Record<string, unknown>;
+      raw[alias] = raw[canonical];
+      delete raw[canonical];
 
-    const result = parseLiveWrapperConfig(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.timeoutSec).toBe(1800);
-    expect(result.config.envAllow).toEqual(["PATH", "HOME"]);
-    expect(result.config.resultFile).toBe("result.json");
+      const result = parseLiveWrapperConfig(raw);
+      expect(result.ok, `expected invalid for ${alias}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.error).toContain(alias);
+      expect(result.error).toContain(canonical);
+    }
   });
 
-  it("prefers canonical snake_case keys when aliases are also present", () => {
+  it("rejects a retired camelCase alias even when the canonical key is also present", () => {
+    for (const [alias, aliasValue] of [
+      ["timeoutSec", 1800],
+      ["envAllow", ["PATH", "HOME"]],
+      ["resultFile", "result.json"],
+    ] as const) {
+      const result = parseLiveWrapperConfig({
+        ...clone(validWrapper),
+        [alias]: aliasValue,
+      });
+      expect(result.ok, `expected invalid for ${alias}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.error).toContain(alias);
+    }
+  });
+
+  it("names a retired alias even when the rest of the config is malformed", () => {
+    for (const [alias, canonical, aliasValue] of [
+      ["timeoutSec", "timeout_sec", 30],
+      ["envAllow", "env_allow", ["PATH"]],
+      ["resultFile", "result_file", "result.json"],
+    ] as const) {
+      // No `command`, `args`, or `cwd`: the alias refusal must still win.
+      const result = parseLiveWrapperConfig({ [alias]: aliasValue });
+      expect(result.ok, `expected invalid for ${alias}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.error).toContain(alias);
+      expect(result.error).toContain(canonical);
+    }
+  });
+
+  it("still tolerates unrelated unknown keys", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
-      timeoutSec: 1,
-      envAllow: ["IGNORED"],
-      resultFile: "ignored.json",
+      nickname: "gnhf",
     });
     expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.timeoutSec).toBe(1800);
-    expect(result.config.envAllow).toEqual(["PATH", "HOME"]);
-    expect(result.config.resultFile).toBe("result.json");
   });
 
   it("rejects a non-mapping value", () => {
@@ -376,14 +405,44 @@ describe("parseLiveWrapperConfig probe", () => {
     );
   });
 
-  it("accepts a probe timeoutSec alias during the durable-config transition", () => {
+  it("rejects the retired probe timeoutSec alias when it replaces probe.timeout_sec", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
       probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 },
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.probe?.timeoutSec).toBe(20);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("probe.timeoutSec");
+    expect(result.error).toContain("probe.timeout_sec");
+  });
+
+  it("names the retired probe timeoutSec alias even when the probe is otherwise malformed", () => {
+    // No probe `command`: the alias refusal must still win.
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      probe: { timeoutSec: 20 },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("probe.timeoutSec");
+    expect(result.error).toContain("probe.timeout_sec");
+  });
+
+  it("rejects the retired probe timeoutSec alias even when probe.timeout_sec is also present", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      probe: {
+        command: "/usr/bin/gnhf-probe",
+        timeout_sec: 15,
+        timeoutSec: 20,
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("probe.timeoutSec");
   });
 
   it("rejects a probe timeout above the built-in supervisor limit", () => {

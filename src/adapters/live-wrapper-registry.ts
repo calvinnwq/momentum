@@ -20,8 +20,9 @@ import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
  *   - `parseLiveWrapperConfig` validates a single wrapper spec (explicit
  *     absolute `command`, argv `args`, `cwd`, bounded `timeout_sec`,
  *     `env_allow`, `result_file`, and an optional pre-flight `probe`).
- *     Durable snake_case keys are canonical; camelCase aliases are accepted
- *     as transitional input while wrappers settle.
+ *     Durable snake_case keys are canonical; the retired transitional
+ *     camelCase aliases (`timeoutSec`, `envAllow`, `resultFile`,
+ *     `probe.timeoutSec`) are rejected whenever present.
  *   - `parseLiveWrapperProfile` validates a named profile whose `wrappers`
  *     mapping is keyed by `WorkflowStepKind`.
  *   - `resolveLiveWrapper` resolves the wrapper config for a requested step
@@ -152,6 +153,14 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
     );
   }
 
+  // Retired aliases are refused before any field validation so the
+  // whenever-present diagnostic is deterministic even for malformed input.
+  const aliasError =
+    rejectDeprecatedAlias(value, "timeoutSec", "timeout_sec") ??
+    rejectDeprecatedAlias(value, "envAllow", "env_allow") ??
+    rejectDeprecatedAlias(value, "resultFile", "result_file");
+  if (aliasError) return aliasError;
+
   const commandResult = parseAbsoluteCommand(value["command"], "command");
   if (!commandResult.ok) return commandResult;
   const command = commandResult.value;
@@ -165,21 +174,17 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   const cwd = cwdResult.value;
 
   const timeoutResult = parseRequiredTimeoutSec(
-    readAlias(value, "timeout_sec", "timeoutSec"),
+    value["timeout_sec"],
     "timeout_sec",
   );
   if (!timeoutResult.ok) return timeoutResult;
   const timeoutSec = timeoutResult.value;
 
-  const envAllowResult = parseEnvAllow(
-    readAlias(value, "env_allow", "envAllow"),
-  );
+  const envAllowResult = parseEnvAllow(value["env_allow"]);
   if (!envAllowResult.ok) return envAllowResult;
   const envAllow = envAllowResult.value;
 
-  const resultFileResult = parseResultFile(
-    readAlias(value, "result_file", "resultFile"),
-  );
+  const resultFileResult = parseResultFile(value["result_file"]);
   if (!resultFileResult.ok) return resultFileResult;
   const resultFile = resultFileResult.value;
 
@@ -342,12 +347,21 @@ function parseRequiredStringArray(
   return parseStringArray(raw, field);
 }
 
-function readAlias(
+/**
+ * Refuse a retired transitional camelCase alias whenever it is present in
+ * serialized wrapper input, even alongside its canonical snake_case key, so
+ * durable configs cannot keep leaning on the removed alias vocabulary.
+ */
+function rejectDeprecatedAlias(
   record: Record<string, unknown>,
-  canonicalKey: string,
-  aliasKey: string,
-): unknown {
-  return record[canonicalKey] ?? record[aliasKey];
+  aliasKey: "timeoutSec" | "envAllow" | "resultFile",
+  canonicalKey: "timeout_sec" | "env_allow" | "result_file",
+  fieldPrefix = "",
+): LiveWrapperConfigError | undefined {
+  if (!(aliasKey in record)) return undefined;
+  return configInvalid(
+    `Live wrapper \`${fieldPrefix}${aliasKey}\` is a removed deprecated alias; use the canonical \`${fieldPrefix}${canonicalKey}\` key.`,
+  );
 }
 
 function parseEnvAllow(
@@ -475,6 +489,16 @@ function parseProbe(
     );
   }
 
+  // Same whenever-present guarantee as the top-level aliases: refuse before
+  // probe field validation so a malformed probe still names the alias.
+  const aliasError = rejectDeprecatedAlias(
+    raw,
+    "timeoutSec",
+    "timeout_sec",
+    "probe.",
+  );
+  if (aliasError) return aliasError;
+
   const commandResult = parseAbsoluteCommand(raw["command"], "probe.command");
   if (!commandResult.ok) return commandResult;
 
@@ -482,7 +506,7 @@ function parseProbe(
   if (!argsResult.ok) return argsResult;
 
   const timeoutResult = parseOptionalTimeoutSec(
-    readAlias(raw, "timeout_sec", "timeoutSec"),
+    raw["timeout_sec"],
     "probe.timeout_sec",
   );
   if (!timeoutResult.ok) return timeoutResult;

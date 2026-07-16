@@ -459,7 +459,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-508-profile",
         objective: "Capture the selected runtime profile",
-        extra: ["--profile", "ngx-499-coding-workflow-live-wrapper"],
+        extra: ["--profile", "coding-workflow-live-wrapper"],
       }),
     );
     expect(result.code).toBe(0);
@@ -470,7 +470,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-508-profile") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toMatchObject({
-        profile: "ngx-499-coding-workflow-live-wrapper",
+        profile: "coding-workflow-live-wrapper",
       });
     } finally {
       db.close();
@@ -488,7 +488,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
     expect(JSON.stringify(statusPayload)).toContain(
-      "ngx-499-coding-workflow-live-wrapper",
+      "coding-workflow-live-wrapper",
     );
   });
 
@@ -1020,7 +1020,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         objective: "Profile plus per-step overrides",
         extra: [
           "--profile",
-          "ngx-499-coding-workflow-live-wrapper",
+          "coding-workflow-live-wrapper",
           "--steps-json",
           JSON.stringify({ postflight: { harness: "claude" } }),
         ],
@@ -1035,7 +1035,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .get("ngx-510-profile-steps") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
         implementationEngine: "gnhf",
-        profile: "ngx-499-coding-workflow-live-wrapper",
+        profile: "coding-workflow-live-wrapper",
         steps: { postflight: { harness: "claude" } },
       });
     } finally {

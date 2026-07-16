@@ -1,5 +1,5 @@
 {
-  "name": "ngx-499-coding-workflow-live-wrapper",
+  "name": "coding-workflow-live-wrapper",
   "wrappers": {
     "preflight": {
       "command": "/usr/bin/env",

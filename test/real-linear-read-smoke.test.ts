@@ -11,7 +11,7 @@ import {
   REAL_SMOKE_EVIDENCE_DIR_ENV_VAR,
   REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR,
   classifyRealSmokeReadOutcome,
-  planLinearReadSmoke
+  planLinearReadSmoke,
 } from "../src/core/executors/smoke/linear-read.js";
 
 /**
@@ -31,7 +31,7 @@ import {
  *
  * Manual run:
  *   MOMENTUM_REAL_SMOKE_LINEAR=1 LINEAR_API_KEY=lin_api_... \
- *     pnpm vitest run test/real-linear-read-smoke.test.ts
+ *     pnpm vitest run --config vitest.integration.config.ts test/real-linear-read-smoke.test.ts
  *
  * Optional read-only scoping / safety knobs:
  *   MOMENTUM_REAL_SMOKE_DRY_RUN=1            # read but never persist locally
@@ -58,7 +58,10 @@ function makeTempDir(prefix = "momentum-ngx-372-real-smoke-"): string {
   return fs.realpathSync(dir);
 }
 
-function recordEvidence(label: string, payload: Record<string, unknown>): string {
+function recordEvidence(
+  label: string,
+  payload: Record<string, unknown>,
+): string {
   const baseDir =
     process.env[REAL_SMOKE_EVIDENCE_DIR_ENV_VAR]?.trim() ||
     path.join(process.cwd(), ".agent-runs", "real-smoke");
@@ -80,8 +83,10 @@ describe.skipIf(plan.mode === "skip")(
       const dataDir = makeTempDir();
       const db: MomentumDb = openDb(dataDir);
       try {
-        const clientOptions: Parameters<typeof buildLinearHttpReconciliationClient>[0] = {
-          apiKey: plan.apiKey
+        const clientOptions: Parameters<
+          typeof buildLinearHttpReconciliationClient
+        >[0] = {
+          apiKey: plan.apiKey,
         };
         if (plan.endpoint !== null) clientOptions.endpoint = plan.endpoint;
         const client = buildLinearHttpReconciliationClient(clientOptions);
@@ -90,7 +95,7 @@ describe.skipIf(plan.mode === "skip")(
           client,
           filters: plan.filters,
           dryRun: plan.dryRun,
-          maxPages: plan.maxPages
+          maxPages: plan.maxPages,
         });
 
         const outcome = classifyRealSmokeReadOutcome(result);
@@ -107,20 +112,23 @@ describe.skipIf(plan.mode === "skip")(
           counts: result.counts,
           paginationStopped: result.paginationStopped,
           outcome,
-          itemsPersisted: plan.dryRun ? 0 : items.length
+          itemsPersisted: plan.dryRun ? 0 : items.length,
         });
         console.log(
-          `[NGX-372 real smoke] outcome=${JSON.stringify(outcome)} evidence=${evidencePath}`
+          `[NGX-372 real smoke] outcome=${JSON.stringify(outcome)} evidence=${evidencePath}`,
         );
 
-        expect(outcome.ok, `real Linear read failed: ${JSON.stringify(outcome)}`).toBe(true);
+        expect(
+          outcome.ok,
+          `real Linear read failed: ${JSON.stringify(outcome)}`,
+        ).toBe(true);
 
         // Read smoke leaves the repo clean: the only durable footprint is the
         // disposable temp SQLite database (and its sidecar files).
         for (const entry of fs.readdirSync(dataDir)) {
           expect(
             entry.startsWith("momentum.db"),
-            `real read smoke wrote an unexpected file: ${entry}`
+            `real read smoke wrote an unexpected file: ${entry}`,
           ).toBe(true);
         }
         expect(fs.existsSync(path.join(dataDir, ".git"))).toBe(false);
@@ -133,7 +141,7 @@ describe.skipIf(plan.mode === "skip")(
         db.close();
       }
     });
-  }
+  },
 );
 
 // Always-on guard so this file is never silently a no-op: it asserts the smoke
@@ -142,7 +150,7 @@ describe("NGX-372 real read smoke gating", () => {
   it("stays opt-in: no run plan without the explicit opt-in switch", () => {
     const offPlan = planLinearReadSmoke({
       [REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR]: undefined,
-      LINEAR_API_KEY: "lin_api_present"
+      LINEAR_API_KEY: "lin_api_present",
     });
     expect(offPlan.mode).toBe("skip");
     if (offPlan.mode !== "skip") throw new Error("expected skip");
