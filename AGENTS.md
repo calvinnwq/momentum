@@ -74,7 +74,7 @@ always migrates in place.
 ## Stack and workflow commands
 
 TypeScript on Node.js with Vitest tests, oxlint linting, and Prettier formatting, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm test:integration`, `pnpm test:full`, `pnpm typecheck`, `pnpm lint`, `pnpm format`, `pnpm build`, `pnpm format:check`, `node dist/index.js --help`, `node dist/index.js doctor`.
-No-mistakes reads `.no-mistakes.yaml` and runs the configured `pnpm` test/typecheck/build plus lint/format-check lanes instead of delegating test discovery to an agent.
+No-mistakes reads the authoritative gate commands from `.no-mistakes.yaml` instead of delegating test discovery to an agent.
 
 ## Coding discipline
 

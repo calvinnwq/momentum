@@ -162,13 +162,16 @@ apply, or dispatches subworkflow children.
 
 ### Dogfood terminalizing dispatch
 
-`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH` swaps the managed loop's workflow lane
-from the production dispatcher to a terminalize-and-continue fixture that marks
-each successfully dispatched local step `succeeded` without running a real
-executor, so a single daemon process can exercise multi-step dispatch.
+`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH` wraps the managed loop's unprofiled
+built-in workflow-family lane with a terminalize-and-continue fixture that marks
+each successfully dispatched local step reaching that lane `succeeded` without
+running a real executor, so a single daemon process can exercise multi-step
+dispatch.
 It applies only when `MOMENTUM_LIVE_WRAPPER_PROFILE` is not configured; when a
 live-wrapper profile is set, profile-backed executors run normally and this
 flag has no effect, so it never suppresses configured real executor work.
+Steps handled by an executor registered through `MOMENTUM_EXECUTOR_CONFIG` also
+bypass this fixture.
 It is off by default; an unset or non-truthy value leaves `daemon start`
 byte-for-byte on the production dispatch.
 It is a test/dogfood-only switch, never part of normal operation.
@@ -241,6 +244,10 @@ live-wrapper command. Each wrapper requires:
 - `probe` — optional pre-flight check with an absolute `command`, optional
   string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
   seconds and uses the same 2,147,453-second maximum.
+
+Serialized profiles must use the canonical `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
+The retired `timeoutSec`, `envAllow`, `resultFile`, and `probe.timeoutSec` aliases are rejected whenever present, including alongside their canonical replacements, and the refusal names the alias and replacement.
+This targeted compatibility refusal does not make wrapper objects strict; unrelated unknown keys remain tolerated.
 
 Example:
 
