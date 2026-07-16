@@ -1263,18 +1263,10 @@ function replayLegacyCompletion(
       : fromPriorAttempt
         ? startRound(context, "running", completion.value.reason)
         : completion.roundId;
-  if (fromPriorAttempt) {
-    if (reusableActiveRound?.state !== "capturing_result") {
-      context.envelope.observeRound(roundId, {
-        phase: "capturing_result",
-        summary: completion.value.reason,
-      });
-    }
-  }
-  if (
+  const shouldRecordReplayCheckpoint =
     !replayCheckpointAlreadyRecorded &&
-    (fromPriorAttempt || completion.value.recommendation === "continue")
-  ) {
+    (fromPriorAttempt || completion.value.recommendation === "continue");
+  if (fromPriorAttempt && shouldRecordReplayCheckpoint) {
     const replayRound = context.envelope
       .snapshot()
       .rounds.find(({ round }) => round.roundId === roundId);
@@ -1284,12 +1276,45 @@ function replayLegacyCompletion(
         ...(replayRound?.checkpoints.map((checkpoint) => checkpoint.sequence) ??
           []),
       ) + 1;
-    context.envelope.recordCheckpoint(roundId, {
-      checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE}`,
-      sequence,
-      stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
-      detail: JSON.stringify({ sourceRoundId: completion.roundId }),
+    context.envelope.recordRoundProgress(roundId, {
+      observation: {
+        phase: "capturing_result",
+        summary: completion.value.reason,
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE}`,
+          sequence,
+          stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+          detail: JSON.stringify({ sourceRoundId: completion.roundId }),
+        },
+      ],
     });
+  } else {
+    if (fromPriorAttempt && reusableActiveRound?.state !== "capturing_result") {
+      context.envelope.observeRound(roundId, {
+        phase: "capturing_result",
+        summary: completion.value.reason,
+      });
+    }
+    if (shouldRecordReplayCheckpoint) {
+      const replayRound = context.envelope
+        .snapshot()
+        .rounds.find(({ round }) => round.roundId === roundId);
+      const sequence =
+        Math.max(
+          -1,
+          ...(replayRound?.checkpoints.map(
+            (checkpoint) => checkpoint.sequence,
+          ) ?? []),
+        ) + 1;
+      context.envelope.recordCheckpoint(roundId, {
+        checkpointId: `${roundId}-${DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE}`,
+        sequence,
+        stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+        detail: JSON.stringify({ sourceRoundId: completion.roundId }),
+      });
+    }
   }
   return { roundId, ...completion.value };
 }

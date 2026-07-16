@@ -2454,155 +2454,169 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
-  it("resumes an interrupted durable legacy-completion replay", () => {
-    const db = openDb(makeTempDir());
-    try {
-      const runId = "interrupted-legacy-completion-replay";
-      const stepId = "implementation";
-      seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
-      seedStep(db, {
-        runId,
-        stepId,
-        kind: "implementation",
-        state: "running",
-        order: 0,
-      });
-      const invocationId = deriveDispatchInvocationId(runId, stepId);
-      insertExecutorInvocation(
-        db,
-        {
+  it.each([
+    {
+      label: "before its replay marker is written",
+      persistReplayMarker: false,
+    },
+    {
+      label: "after its replay marker is written",
+      persistReplayMarker: true,
+    },
+  ])(
+    "resumes an interrupted durable legacy-completion replay $label",
+    ({ persistReplayMarker }) => {
+      const db = openDb(makeTempDir());
+      try {
+        const runId = "interrupted-legacy-completion-replay";
+        const stepId = "implementation";
+        seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+        seedStep(db, {
+          runId,
+          stepId,
+          kind: "implementation",
+          state: "running",
+          order: 0,
+        });
+        const invocationId = deriveDispatchInvocationId(runId, stepId);
+        insertExecutorInvocation(
+          db,
+          {
+            invocationId,
+            workflowRunId: runId,
+            stepRunId: stepId,
+            stepKey: stepId,
+            executorFamily: "delegate-supervisor",
+            state: "running",
+            attempt: 1,
+            startedAt: NOW,
+            heartbeatAt: NOW,
+            finishedAt: null,
+          },
+          { now: NOW },
+        );
+        const envelope = createDurableExecutorEnvelope({
+          db,
+          invocationId,
+          now: () => NOW,
+        });
+        const sourceRoundId = `${invocationId}::round-1`;
+        envelope.facade.startRound({
+          roundId: sourceRoundId,
           invocationId,
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
           executorFamily: "delegate-supervisor",
-          state: "running",
           attempt: 1,
-          startedAt: NOW,
-          heartbeatAt: NOW,
-          finishedAt: null,
-        },
-        { now: NOW },
-      );
-      const envelope = createDurableExecutorEnvelope({
-        db,
-        invocationId,
-        now: () => NOW,
-      });
-      const sourceRoundId = `${invocationId}::round-1`;
-      envelope.facade.startRound({
-        roundId: sourceRoundId,
-        invocationId,
-        workflowRunId: runId,
-        stepRunId: stepId,
-        stepKey: stepId,
-        executorFamily: "delegate-supervisor",
-        attempt: 1,
-        roundIndex: 0,
-        state: "running",
-        agentProvider: null,
-        model: null,
-        effort: null,
-        inputDigest: null,
-        resultDigest: null,
-        artifactRoot: null,
-        logPaths: [],
-        summary: "legacy completion",
-        keyChanges: [],
-        keyLearnings: [],
-        remainingWork: [],
-        changedFiles: [],
-        verificationStatus: null,
-        commitSha: null,
-      });
-      envelope.facade.recordCheckpoint(sourceRoundId, {
-        checkpointId: `${sourceRoundId}-mechanism-completed`,
-        sequence: 0,
-        stage: "mechanism_completed",
-        detail: JSON.stringify({
-          recommendation: "complete",
-          recommendedRoundState: "succeeded",
-          recommendedInvocationState: "succeeded",
+          roundIndex: 0,
+          state: "running",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: "legacy completion",
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+        });
+        envelope.facade.recordCheckpoint(sourceRoundId, {
+          checkpointId: `${sourceRoundId}-mechanism-completed`,
+          sequence: 0,
+          stage: "mechanism_completed",
+          detail: JSON.stringify({
+            recommendation: "complete",
+            recommendedRoundState: "succeeded",
+            recommendedInvocationState: "succeeded",
+            recoveryCode: null,
+            humanGate: null,
+            reason: "legacy wrapper completed cleanly",
+          }),
+        });
+        updateExecutorRound(db, sourceRoundId, {
+          toState: "capturing_result",
+        });
+        updateExecutorRound(db, sourceRoundId, {
+          toState: "succeeded",
+          classification: "complete",
+          executorRecommendation: "complete",
           recoveryCode: null,
           humanGate: null,
-          reason: "legacy wrapper completed cleanly",
-        }),
-      });
-      updateExecutorRound(db, sourceRoundId, {
-        toState: "capturing_result",
-      });
-      updateExecutorRound(db, sourceRoundId, {
-        toState: "succeeded",
-        classification: "complete",
-        executorRecommendation: "complete",
-        recoveryCode: null,
-        humanGate: null,
-        finishedAt: NOW,
-      });
-      db.prepare(
-        `UPDATE executor_invocations
+          finishedAt: NOW,
+        });
+        db.prepare(
+          `UPDATE executor_invocations
             SET attempt = 2, state = 'running', finished_at = NULL
           WHERE invocation_id = ?`,
-      ).run(invocationId);
-      const replayRoundId = `${invocationId}::round-2`;
-      envelope.facade.startRound({
-        roundId: replayRoundId,
-        invocationId,
-        workflowRunId: runId,
-        stepRunId: stepId,
-        stepKey: stepId,
-        executorFamily: "delegate-supervisor",
-        attempt: 2,
-        roundIndex: 1,
-        state: "capturing_result",
-        agentProvider: null,
-        model: null,
-        effort: null,
-        inputDigest: null,
-        resultDigest: null,
-        artifactRoot: null,
-        logPaths: [],
-        summary: "replaying legacy completion",
-        keyChanges: [],
-        keyLearnings: [],
-        remainingWork: [],
-        changedFiles: [],
-        verificationStatus: null,
-        commitSha: null,
-      });
-      envelope.facade.recordCheckpoint(replayRoundId, {
-        checkpointId: `${replayRoundId}-legacy-completion-replayed`,
-        sequence: 0,
-        stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
-        detail: JSON.stringify({ sourceRoundId }),
-      });
-      seedLease(db, {
-        runId,
-        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
-        holder: "daemon-old",
-        expiresAt: NOW,
-      });
-      const recorder = recordingDispatch();
+        ).run(invocationId);
+        const replayRoundId = `${invocationId}::round-2`;
+        envelope.facade.startRound({
+          roundId: replayRoundId,
+          invocationId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executorFamily: "delegate-supervisor",
+          attempt: 2,
+          roundIndex: 1,
+          state: "capturing_result",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: "replaying legacy completion",
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+        });
+        if (persistReplayMarker) {
+          envelope.facade.recordCheckpoint(replayRoundId, {
+            checkpointId: `${replayRoundId}-legacy-completion-replayed`,
+            sequence: 0,
+            stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+            detail: JSON.stringify({ sourceRoundId }),
+          });
+        }
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          expiresAt: NOW,
+        });
+        const recorder = recordingDispatch();
 
-      const result = runWorkflowSchedulerOnce({
-        db,
-        workerId: "scheduler-1",
-        dispatch: recorder.dispatch,
-        now: () => NOW + 1,
-      });
+        const result = runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          now: () => NOW + 1,
+        });
 
-      expect(result).toMatchObject({
-        code: "dispatched",
-        claim: { runId, stepId },
-      });
-      expect(recorder.calls).toHaveLength(1);
-      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
-        needsManualRecovery: false,
-      });
-    } finally {
-      db.close();
-    }
-  });
+        expect(result).toMatchObject({
+          code: "dispatched",
+          claim: { runId, stepId },
+        });
+        expect(recorder.calls).toHaveLength(1);
+        expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+          needsManualRecovery: false,
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("does not reuse delegate handoff evidence from an earlier attempt", () => {
     const db = openDb(makeTempDir());

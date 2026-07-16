@@ -1465,6 +1465,16 @@ function hasResumableDelegateCheckpoint(
   ) {
     return true;
   }
+  if (
+    interruptedRound &&
+    hasResumablePreMarkerLegacyCompletionReplay(
+      db,
+      activeRound,
+      invocationRounds,
+    )
+  ) {
+    return true;
+  }
   const handoffRounds = completedPoll
     ? currentAttemptRounds
     : activeRound.state === "running" ||
@@ -1511,6 +1521,53 @@ function hasResumableLegacyCompletionReplay(
   } catch {
     return false;
   }
+}
+
+function hasResumablePreMarkerLegacyCompletionReplay(
+  db: MomentumDb,
+  activeRound: ReturnType<typeof listExecutorRoundsForInvocation>[number],
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+): boolean {
+  if (
+    activeRound.state !== "capturing_result" ||
+    listExecutorCheckpointsForRound(db, activeRound.roundId).length > 0
+  ) {
+    return false;
+  }
+  let latestCompletion: { roundIndex: number; sequence: number } | undefined;
+  for (const round of rounds) {
+    if (round.attempt >= activeRound.attempt) continue;
+    for (const checkpoint of listExecutorCheckpointsForRound(
+      db,
+      round.roundId,
+    )) {
+      if (checkpoint.stage !== "mechanism_completed") continue;
+      if (
+        latestCompletion === undefined ||
+        round.roundIndex > latestCompletion.roundIndex ||
+        (round.roundIndex === latestCompletion.roundIndex &&
+          checkpoint.sequence > latestCompletion.sequence)
+      ) {
+        latestCompletion = {
+          roundIndex: round.roundIndex,
+          sequence: checkpoint.sequence,
+        };
+      }
+    }
+  }
+  if (latestCompletion === undefined) return false;
+  return !rounds.some((round) =>
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) =>
+        (checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+          checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE ||
+          checkpoint.stage ===
+            DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE) &&
+        (round.roundIndex > latestCompletion.roundIndex ||
+          (round.roundIndex === latestCompletion.roundIndex &&
+            checkpoint.sequence > latestCompletion.sequence)),
+    ),
+  );
 }
 
 function isActiveSubworkflowRecheckDue(
