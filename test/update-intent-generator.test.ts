@@ -6,7 +6,6 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
-  evaluateGoalForSourceSatisfiedIntent,
   evaluateGoalForSourceSatisfiedIntents
 } from "../src/core/source/update-intent-generator.js";
 import {
@@ -116,7 +115,7 @@ function insertEvidenceRecord(
   );
 }
 
-describe("evaluateGoalForSourceSatisfiedIntent", () => {
+describe("evaluateGoalForSourceSatisfiedIntents", () => {
   it("creates one source_satisfied intent for a completed Goal with verification evidence and a linked open source item", () => {
     const db = openDb(makeTempDir());
     try {
@@ -130,11 +129,11 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       });
       insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 5000 }
-      );
+      )[0]!;
 
       expect(result.outcome).toBe("intent_created");
       if (result.outcome !== "intent_created") return;
@@ -179,22 +178,22 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       });
       insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
 
-      const first = evaluateGoalForSourceSatisfiedIntent(
+      const first = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 1000 }
-      );
+      )[0]!;
       expect(first.outcome).toBe("intent_created");
       if (first.outcome !== "intent_created") return;
 
       // Add additional verification evidence; the intent should not duplicate.
       insertEvidenceRecord(db, "ev-2", "verification_passed", "goal-1", 2000);
 
-      const replay = evaluateGoalForSourceSatisfiedIntent(
+      const replay = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
         { now: () => 5000 }
-      );
+      )[0]!;
       expect(replay.outcome).toBe("intent_replayed");
       if (replay.outcome !== "intent_replayed") return;
       expect(replay.intent.id).toBe(first.intent.id);
@@ -227,11 +226,11 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
         "si-source-evidence"
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-source-evidence" },
         { now: () => 5000 }
-      );
+      )[0]!;
 
       expect(result.outcome).toBe("intent_created");
       if (result.outcome !== "intent_created") return;
@@ -280,11 +279,11 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
         1000
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-multi-source" },
         { now: () => 5000 }
-      );
+      )[0]!;
 
       expect(result.outcome).toBe("intent_created");
       const intents = listUpdateIntents(db).sort((a, b) =>
@@ -449,11 +448,11 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       // Insert a non-verification evidence type so we know the predicate is strict.
       insertEvidenceRecord(db, "ev-noise", "plan_created", "goal-2", 500);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-2" },
         { now: () => 5000 }
-      );
+      )[0]!;
 
       expect(result.outcome).toBe("evidence_insufficient");
       if (result.outcome !== "evidence_insufficient") return;
@@ -485,10 +484,10 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       });
       insertEvidenceRecord(db, "ev-3", "no_mistakes_complete", "goal-3", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-3" }
-      );
+      )[0]!;
       expect(result.outcome).toBe("goal_not_terminal");
       if (result.outcome !== "goal_not_terminal") return;
       expect(result.goalState).toBe("queued");
@@ -517,9 +516,9 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
         1000
       );
 
-      const result = evaluateGoalForSourceSatisfiedIntent(db, {
+      const result = evaluateGoalForSourceSatisfiedIntents(db, {
         goalId: "goal-failed"
-      });
+      })[0]!;
       expect(result.outcome).toBe("goal_state_not_completed");
       if (result.outcome !== "goal_state_not_completed") return;
       expect(result.goalState).toBe("failed");
@@ -535,9 +534,9 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       insertGoal(db, "goal-4", "completed");
       insertEvidenceRecord(db, "ev-4", "no_mistakes_complete", "goal-4", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(db, {
+      const result = evaluateGoalForSourceSatisfiedIntents(db, {
         goalId: "goal-4"
-      });
+      })[0]!;
       expect(result.outcome).toBe("no_source_link");
       if (result.outcome !== "no_source_link") return;
       expect(result.goalId).toBe("goal-4");
@@ -560,9 +559,9 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       });
       insertEvidenceRecord(db, "ev-5", "no_mistakes_complete", "goal-5", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(db, {
+      const result = evaluateGoalForSourceSatisfiedIntents(db, {
         goalId: "goal-5"
-      });
+      })[0]!;
       expect(result.outcome).toBe("source_already_terminal");
       if (result.outcome !== "source_already_terminal") return;
       expect(result.sourceItem.id).toBe("si-5");
@@ -576,9 +575,9 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
   it("returns goal_not_found for unknown goal ids", () => {
     const db = openDb(makeTempDir());
     try {
-      const result = evaluateGoalForSourceSatisfiedIntent(db, {
+      const result = evaluateGoalForSourceSatisfiedIntents(db, {
         goalId: "goal-missing"
-      });
+      })[0]!;
       expect(result.outcome).toBe("goal_not_found");
       if (result.outcome !== "goal_not_found") return;
       expect(result.goalId).toBe("goal-missing");
@@ -602,14 +601,14 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
       // but we override the accepted set to include it.
       insertEvidenceRecord(db, "ev-6", "plan_created", "goal-6", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntent(
+      const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         {
           goalId: "goal-6",
           verificationEvidenceTypes: ["plan_created"]
         },
         { now: () => 1000 }
-      );
+      )[0]!;
       expect(result.outcome).toBe("intent_created");
       if (result.outcome !== "intent_created") return;
       expect(result.verificationEvidence.id).toBe("ev-6");
@@ -622,7 +621,7 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
     const db = openDb(makeTempDir());
     try {
       expect(() =>
-        evaluateGoalForSourceSatisfiedIntent(db, { goalId: "" })
+        evaluateGoalForSourceSatisfiedIntents(db, { goalId: "" })
       ).toThrowError(/goalId/);
     } finally {
       db.close();
@@ -640,7 +639,7 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
         externalId: "NGX-7"
       });
       expect(() =>
-        evaluateGoalForSourceSatisfiedIntent(db, {
+        evaluateGoalForSourceSatisfiedIntents(db, {
           goalId: "goal-7",
           verificationEvidenceTypes: []
         })

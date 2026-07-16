@@ -429,7 +429,7 @@ describe("M11 CLI import boundaries", () => {
       rendererTransitionalImportIsAllowed({
         ...updateIntentTypeEdge,
         isTypeOnly: false,
-        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntent"]
+        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntents"]
       })
     ).toBe(false);
 

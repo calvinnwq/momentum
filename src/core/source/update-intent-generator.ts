@@ -106,28 +106,15 @@ type EvidenceRow = {
 /**
  * Inspect a Goal's terminal state, its linked SourceItems, and the goal/source
  * evidence records, then create (or replay) durable `source_satisfied` update
- * intents for every linked open SourceItem with verification evidence. The
- * return value reports the first created/replayed intent for compatibility with
- * the original singular API.
+ * intents for every linked open SourceItem with verification evidence. A
+ * completed Goal can have multiple linked open SourceItems and therefore
+ * multiple pending intents.
  *
  * Idempotency: the intent's idempotency key is bound to the goal + adapter +
  * source external id, so repeated evaluations after additional evidence
  * ingestion do not duplicate intents.
  *
  * No external write is ever performed; the intent's status stays `pending`.
- */
-export function evaluateGoalForSourceSatisfiedIntent(
-  db: MomentumDb,
-  input: EvaluateGoalForSourceSatisfiedIntentInput,
-  clock: UpdateIntentClock = {}
-): EvaluateGoalForSourceSatisfiedIntentResult {
-  return evaluateGoalForSourceSatisfiedIntents(db, input, clock)[0]!;
-}
-
-/**
- * Plural variant for callers that need truthful operator-facing accounting.
- * The singular API remains for compatibility, but a completed Goal can have
- * multiple linked open SourceItems and therefore multiple pending intents.
  */
 export function evaluateGoalForSourceSatisfiedIntents(
   db: MomentumDb,
