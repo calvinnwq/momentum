@@ -977,6 +977,23 @@ describe("buildLinearExternalUpdateClient — auth failure", () => {
     expect(result).toMatchObject({ ok: false, code: "auth_unavailable" });
   });
 
+  it("returns auth_unavailable on HTTP 403 without reading the body", async () => {
+    const fetchResponses: MockGraphqlResponse[] = [
+      { kind: "text", status: 403, text: "forbidden" },
+    ];
+    const { fetch } = buildMockFetch(fetchResponses);
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch,
+    });
+    const result = await client.apply({ preview: buildPreview() });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "auth_unavailable",
+      error: "Linear API rejected credentials (HTTP 403).",
+    });
+  });
+
   it("returns auth_unavailable on a GraphQL AUTHENTICATION extension code", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       {
@@ -1050,6 +1067,25 @@ describe("buildLinearExternalUpdateClient — GraphQL validation error", () => {
   });
 });
 
+describe("buildLinearExternalUpdateClient — HTTP status failure", () => {
+  it("returns write_rejected on a non-auth non-OK HTTP status", async () => {
+    const fetchResponses: MockGraphqlResponse[] = [
+      { kind: "text", status: 500, text: "server error" },
+    ];
+    const { fetch } = buildMockFetch(fetchResponses);
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch,
+    });
+    const result = await client.apply({ preview: buildPreview() });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "write_rejected",
+      error: "Linear API returned HTTP 500.",
+    });
+  });
+});
+
 describe("buildLinearExternalUpdateClient — network / timeout failure", () => {
   it("aborts and returns write_timeout when a request stalls past the configured timeout", async () => {
     const responses: MockGraphqlResponse[] = [{ kind: "hang" }];
@@ -1070,7 +1106,7 @@ describe("buildLinearExternalUpdateClient — network / timeout failure", () => 
     expect(result).toMatchObject({
       ok: false,
       code: "write_timeout",
-      error: expect.stringContaining("timed out after 10ms"),
+      error: "linear external update request timed out after 10ms",
     });
   });
 
@@ -1110,8 +1146,47 @@ describe("buildLinearExternalUpdateClient — transport error", () => {
     expect(result).toMatchObject({
       ok: false,
       code: "adapter_threw",
-      error: expect.stringContaining("ECONNREFUSED"),
+      error: "linear external update transport failed: ECONNREFUSED",
     });
+  });
+
+  it("returns adapter_threw when the response body read rejects", async () => {
+    const fetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      text: () => Promise.reject(new Error("stream interrupted")),
+    });
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch,
+    });
+    const result = await client.apply({ preview: buildPreview() });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "adapter_threw",
+      error:
+        "linear external update response body read failed: stream interrupted",
+    });
+  });
+
+  it("returns validation_failed when no fetch implementation is available", async () => {
+    const globalRef = globalThis as { fetch?: unknown };
+    const originalFetch = globalRef.fetch;
+    try {
+      globalRef.fetch = undefined;
+      const client = buildLinearExternalUpdateClient({
+        apiKey: "lin_api_secret",
+      });
+      const result = await client.apply({ preview: buildPreview() });
+      expect(result).toMatchObject({
+        ok: false,
+        code: "validation_failed",
+        error:
+          "global fetch is unavailable; pass options.fetch to buildLinearExternalUpdateClient.",
+      });
+    } finally {
+      globalRef.fetch = originalFetch;
+    }
   });
 });
 
@@ -1127,6 +1202,10 @@ describe("buildLinearExternalUpdateClient — malformed JSON", () => {
     });
     const result = await client.apply({ preview: buildPreview() });
     expect(result).toMatchObject({ ok: false, code: "malformed_response" });
+    if (result.ok) return;
+    expect(result.error).toMatch(
+      /^linear external update response was not JSON: /,
+    );
   });
 });
 
