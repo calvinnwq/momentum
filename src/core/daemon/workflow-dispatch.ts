@@ -3,14 +3,23 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
+import { acquireRepoMutationFence } from "../../adapters/repo-mutation-fence.js";
+import {
+  createPersistedProfileDelegateToolAdapter,
+  createProfileBackedDelegateToolAdapter,
+  resolveDelegateBranch,
+  resolvePreparedDelegateCommitEvidence,
+} from "../../adapters/profile-backed-delegate-tool-adapter.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
-import { inspectRepo } from "../repo/guard.js";
+import { inspectRepo, type PreparedCommitEvidence } from "../repo/guard.js";
 import {
   acquireRepoLock,
   getActiveRepoLockForJob,
   markRepoLockNeedsManualRecovery,
+  reclaimRepoLock,
+  transferRepoLock,
   releaseRepoLock,
   updateRepoLockHeartbeat,
 } from "../repo/locks.js";
@@ -47,6 +56,13 @@ import {
   liveStepBuiltInConfigSchema,
   type LiveStepSdkHostBindings,
 } from "../executors/live-step/sdk-executor.js";
+import {
+  DelegateSupervisorExecutor,
+  DELEGATE_SUPERVISOR_EXECUTOR_NAME,
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+} from "../executors/delegate-supervisor/executor.js";
+import type { DelegateSupervisorHostBindings } from "../executors/delegate-supervisor/types.js";
 import type { Executor } from "../executors/sdk/types.js";
 import type { ExecutorRegistryLoadResult } from "../executors/sdk/registry.js";
 import {
@@ -58,6 +74,10 @@ import {
   resolveDaemonLiveWrapperProfile,
   DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR,
 } from "../workflow/live-wrapper/daemon-profile.js";
+import {
+  buildCodingWorkflowChildEnv,
+  loadCodingWorkflowWrapperConfig,
+} from "../workflow/live-wrapper/coding-workflow.js";
 import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dispatch/dogfood.js";
 import {
   createExternalApplyWorkflowDispatch,
@@ -88,14 +108,13 @@ import {
   deriveDispatchInvocationId,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
-import {
-  listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
-} from "../executors/loop/persist.js";
+import { loadExecutorInvocation } from "../executors/loop/persist.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
-import { dispatchWorkflowStepExecutor } from "../workflow/step/executor.js";
+import {
+  dispatchWorkflowStepExecutor,
+  type WorkflowStepExecutorKind,
+} from "../workflow/step/executor.js";
 import {
   WORKFLOW_RECOVERY_CLASSIFICATIONS,
   writeWorkflowRecoveryArtifactInRunDir,
@@ -176,6 +195,7 @@ export function resolveDaemonWorkflowStepDispatch(
     const resolveHostBindings = createLiveStepHostBindingsResolver(
       env,
       liveRegistry,
+      profile.profile,
     );
     legacy = {
       ok: true,
@@ -184,6 +204,16 @@ export function resolveDaemonWorkflowStepDispatch(
           createRegisteredExecutorWorkflowDispatch(baseDispatch, {
             registry,
             resolveHostBindings,
+            // A delegated handoff is one durable SDK round; allow only that
+            // executor to perform its first bounded read under the same claim.
+            resolveMaxTicks: ({ executorName, invocation, context }) =>
+              executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
+              !hasAnyCompletedDelegateHandoff(
+                context.db,
+                invocation.invocationId,
+              )
+                ? 2
+                : 1,
           }),
           env,
           deps,
@@ -220,6 +250,7 @@ export function resolveDaemonWorkflowStepDispatch(
       ? createLiveStepHostBindingsResolver(
           env,
           buildRealWorkflowStepExecutorRegistry({ profile: profile.profile }),
+          profile.profile,
         )
       : undefined;
   return {
@@ -267,14 +298,17 @@ export function resolveDaemonWorkflowStepDispatch(
 function buildProfileBackedSdkExecutors(): Executor[] {
   return WORKFLOW_EXECUTOR_FAMILIES.filter(
     (name) => name !== "external-apply" && name !== "subworkflow",
-  ).map(
-    (name) => new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
+  ).map((name) =>
+    name === "delegate-supervisor"
+      ? new DelegateSupervisorExecutor()
+      : new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
   );
 }
 
 function createLiveStepHostBindingsResolver(
   env: Record<string, string | undefined>,
   liveRegistry: ReturnType<typeof buildRealWorkflowStepExecutorRegistry>,
+  profile: LiveWrapperProfile,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -282,8 +316,13 @@ function createLiveStepHostBindingsResolver(
     executor: Executor;
     executorName: string;
     config: Readonly<Record<string, unknown>>;
-  }): LiveStepSdkHostBindings | Record<string, never> => {
-    if (!(input.executor instanceof LiveStepSdkExecutor)) return {};
+  }):
+    | LiveStepSdkHostBindings
+    | DelegateSupervisorHostBindings
+    | Record<string, never> => {
+    const isLiveStep = input.executor instanceof LiveStepSdkExecutor;
+    const isDelegate = input.executor instanceof DelegateSupervisorExecutor;
+    if (!isLiveStep && !isDelegate) return {};
     const { claim, context } = input;
     const provenance = loadDispatchedStepRunProvenance(context.db, claim.runId);
     if (provenance === undefined) {
@@ -308,7 +347,17 @@ function createLiveStepHostBindingsResolver(
     );
     if (invocation === undefined)
       throw new Error("dispatch_invocation_not_found");
+    const delegateTool = isDelegate
+      ? resolveDelegateToolName(input.config)
+      : undefined;
+    const delegateStepKind = isDelegate
+      ? resolveProfileBackedDelegateToolStepKind(delegateTool!)
+      : null;
+    if (isDelegate && delegateStepKind === null) {
+      return { tools: new Map() };
+    }
     if (
+      isLiveStep &&
       hasCompletedLiveStepMechanism(
         context.db,
         invocation.invocationId,
@@ -332,11 +381,99 @@ function createLiveStepHostBindingsResolver(
         ...(settleRepoOwnership !== undefined ? { settleRepoOwnership } : {}),
       };
     }
+    if (
+      isDelegate &&
+      hasCompletedLiveStepMechanism(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      )
+    ) {
+      const settleHandoff = recoverCompletedLiveStepRepoOwnership(
+        context.db,
+        claim.runId,
+        claim.stepId,
+        invocation.attempt,
+        context.now,
+      );
+      return {
+        tools: new Map(),
+        ...(settleHandoff !== undefined ? { settleHandoff } : {}),
+      };
+    }
+    const noMistakesRuntime =
+      delegateTool === "no-mistakes"
+        ? resolveNoMistakesStatusRuntime(env, profile)
+        : undefined;
+    if (
+      isDelegate &&
+      hasCompletedDelegateHandoff(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      )
+    ) {
+      const adapter = createPersistedProfileDelegateToolAdapter({
+        tool: delegateTool!,
+        repoPath: resolved.exec.repoPath,
+        command: noMistakesRuntime?.command ?? "no-mistakes",
+        argsPrefix: noMistakesRuntime?.argsPrefix ?? [],
+        env: noMistakesRuntime?.env ?? {},
+      });
+      const settleHandoff = recoverCompletedLiveStepRepoOwnership(
+        context.db,
+        claim.runId,
+        claim.stepId,
+        invocation.attempt,
+        context.now,
+      );
+      return {
+        tools: new Map([[adapter.name, adapter]]),
+        ...(settleHandoff !== undefined ? { settleHandoff } : {}),
+      };
+    }
+    const preparedDelegateArtifactRoot = path.join(
+      resolved.exec.runDir,
+      "delegate",
+      claim.stepId,
+    );
+    const preparedCommitEvidence = isDelegate
+      ? resolvePreparedDelegateCommitEvidence({
+          tool: delegateTool!,
+          invocationId: invocation.invocationId,
+          attempt: invocation.attempt,
+          repoPath: resolved.exec.repoPath,
+          handoffReceiptPath: path.join(
+            preparedDelegateArtifactRoot,
+            "delegate-handoff.json",
+          ),
+          statePath: path.join(
+            preparedDelegateArtifactRoot,
+            "delegate-external-state.json",
+          ),
+          resultJsonPath: path.join(
+            preparedDelegateArtifactRoot,
+            path.basename(resolved.exec.resultJsonPath),
+          ),
+          executorLogPath: path.join(
+            preparedDelegateArtifactRoot,
+            path.basename(resolved.exec.executorLogPath),
+          ),
+          legacyPaths: {
+            rootDir: resolved.exec.runDir,
+            handoffReceiptPath: path.join(
+              resolved.exec.runDir,
+              "delegate-handoff.json",
+            ),
+          },
+        })
+      : null;
     const safety = resolveDaemonDispatchedRepoSafety(
       context.db,
       claim.runId,
       resolved.exec.repoPath,
       resolved.exec.runDir,
+      preparedCommitEvidence ?? undefined,
     );
     if (!safety.ok) {
       if (safety.recoveryArtifact !== null) {
@@ -356,10 +493,13 @@ function createLiveStepHostBindingsResolver(
       );
     }
     const attempt = invocation.attempt;
+    const artifactRoot = isDelegate
+      ? path.join(safety.runDir, "delegate", claim.stepId)
+      : safety.runDir;
     const runDir =
       attempt <= 1
-        ? safety.runDir
-        : path.join(safety.runDir, `attempt-${attempt}`);
+        ? artifactRoot
+        : path.join(artifactRoot, `attempt-${attempt}`);
     try {
       fs.mkdirSync(runDir, { recursive: true });
     } catch (error) {
@@ -389,10 +529,18 @@ function createLiveStepHostBindingsResolver(
       repoPath: safety.repoPath,
       attempt,
       repoSafety: safety.repoSafety,
+      runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
+      reclaimHandoffAttempt: isDelegate
+        ? findInterruptedDelegateHandoffAttempt(
+            context.db,
+            invocation.invocationId,
+            attempt,
+          )
+        : undefined,
     });
     if (!repoOwnership.ok) {
       throw new RegisteredExecutorHostBindingsError(
-        "repo_lock_lost",
+        repoOwnership.recoveryCode,
         repoOwnership.error,
       );
     }
@@ -403,9 +551,11 @@ function createLiveStepHostBindingsResolver(
         path.basename(safety.repoSafety.verificationLogPath),
       ),
       beforeGitMutation: repoOwnership.authorizeMutation,
+      beginGitMutation: repoOwnership.beginMutation,
     };
+    const dispatchKind = isDelegate ? delegateStepKind! : step.kind;
     const executorInput = buildDispatchedStepExecutorInput(
-      step.kind,
+      dispatchKind,
       claim.runId,
       claim.stepId,
       {
@@ -419,6 +569,43 @@ function createLiveStepHostBindingsResolver(
       },
       selection.selection,
     );
+    if (isDelegate) {
+      const statePath = path.join(runDir, "delegate-external-state.json");
+      const handoffReceiptPath = path.join(
+        artifactRoot,
+        "delegate-handoff.json",
+      );
+      const adapter = createProfileBackedDelegateToolAdapter({
+        tool: delegateTool!,
+        invocationId: invocation.invocationId,
+        attempt,
+        branch: resolveDelegateBranch(safety.repoPath),
+        headSha: repoSafety.baseHead,
+        statePath,
+        handoffReceiptPath,
+        resultJsonPath,
+        executorLogPath,
+        repoPath: safety.repoPath,
+        repoSafety,
+        statusCommand: noMistakesRuntime?.command ?? "no-mistakes",
+        statusArgsPrefix: noMistakesRuntime?.argsPrefix ?? [],
+        statusEnv: noMistakesRuntime?.env ?? {},
+        legacyPaths: {
+          rootDir: safety.runDir,
+          handoffReceiptPath: path.join(safety.runDir, "delegate-handoff.json"),
+        },
+        run: () =>
+          dispatchWorkflowStepExecutor(
+            dispatchKind,
+            executorInput,
+            liveRegistry,
+          ),
+      });
+      return {
+        tools: new Map([[adapter.name, adapter]]),
+        settleHandoff: repoOwnership.settle,
+      };
+    }
     return {
       repoPath: safety.repoPath,
       repoSafety,
@@ -452,10 +639,17 @@ function recoverCompletedLiveStepRepoOwnership(
     if (settled) return;
     settled = true;
     if (provenClean) {
-      releaseRepoLock(db, { lockId: lock.id, now });
+      releaseRepoLock(db, {
+        lockId: lock.id,
+        holder: lock.holder,
+        iteration: lock.iteration,
+        now,
+      });
     } else {
       markRepoLockNeedsManualRecovery(db, {
         lockId: lock.id,
+        holder: lock.holder,
+        iteration: lock.iteration,
         now,
         recoveryStatus: `completed executor mechanism for ${runId}/${stepId} requires manual repository recovery`,
       });
@@ -468,13 +662,176 @@ function hasCompletedLiveStepMechanism(
   invocationId: string,
   attempt: number,
 ): boolean {
-  return listExecutorRoundsForInvocation(db, invocationId)
-    .filter((round) => round.attempt === attempt)
-    .some((round) =>
-      listExecutorCheckpointsForRound(db, round.roundId).some(
-        (checkpoint) => checkpoint.stage === "mechanism_completed",
-      ),
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    "mechanism_completed",
+    attempt,
+  );
+}
+
+function hasCompletedDelegateHandoff(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): boolean {
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    attempt,
+  );
+}
+
+function findInterruptedDelegateHandoffAttempt(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): number | undefined {
+  const row = db
+    .prepare(
+      `SELECT intent_round.attempt AS attempt
+         FROM executor_rounds AS intent_round
+         JOIN executor_checkpoints AS intent
+           ON intent.round_id = intent_round.round_id
+        WHERE intent_round.invocation_id = ?
+          AND intent_round.attempt <= ?
+          AND intent.stage = ?
+          AND NOT EXISTS (
+            SELECT 1
+              FROM executor_rounds AS completed_round
+              JOIN executor_checkpoints AS completed
+                ON completed.round_id = completed_round.round_id
+             WHERE completed_round.invocation_id = intent_round.invocation_id
+               AND completed_round.round_index >= intent_round.round_index
+               AND completed.stage = ?
+          )
+        ORDER BY intent_round.round_index DESC
+        LIMIT 1`,
+    )
+    .get(
+      invocationId,
+      attempt,
+      DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    ) as { attempt: number } | undefined;
+  return row?.attempt;
+}
+
+function hasAnyCompletedDelegateHandoff(
+  db: MomentumDb,
+  invocationId: string,
+): boolean {
+  return hasExecutorCheckpoint(
+    db,
+    invocationId,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  );
+}
+
+function hasExecutorCheckpoint(
+  db: MomentumDb,
+  invocationId: string,
+  stage: string,
+  attempt?: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.invocation_id = ?
+          AND c.stage = ?
+          ${attempt === undefined ? "" : "AND r.attempt = ?"}
+        LIMIT 1`,
+    )
+    .get(
+      ...(attempt === undefined
+        ? [invocationId, stage]
+        : [invocationId, stage, attempt]),
     );
+  return row !== undefined;
+}
+
+function resolveDelegateToolName(
+  config: Readonly<Record<string, unknown>>,
+): string {
+  const tool = config["tool"];
+  if (typeof tool !== "string" || tool.trim().length === 0) {
+    throw new RegisteredExecutorHostBindingsError(
+      "invalid_input",
+      "delegate-supervisor config requires a non-empty tool name",
+    );
+  }
+  return tool;
+}
+
+/** Map portable built-in tool config to the host's live-wrapper step kind. */
+export function resolveProfileBackedDelegateToolStepKind(
+  tool: string,
+): WorkflowStepExecutorKind | null {
+  switch (tool) {
+    case "gnhf":
+      return "implementation";
+    case "no-mistakes":
+      return "no-mistakes";
+    default:
+      return null;
+  }
+}
+
+function resolveNoMistakesStatusRuntime(
+  daemonEnv: Record<string, string | undefined>,
+  profile: LiveWrapperProfile,
+): {
+  command: string;
+  argsPrefix: readonly string[];
+  env: Record<string, string | undefined>;
+} {
+  const outerWrapper = profile.wrappers.get("no-mistakes");
+  if (outerWrapper === undefined) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      "no-mistakes live-wrapper config is unavailable for status polling",
+    );
+  }
+  const wrapperEnv: NodeJS.ProcessEnv = {};
+  for (const key of outerWrapper.envAllow) {
+    const value = daemonEnv[key];
+    if (value !== undefined) wrapperEnv[key] = value;
+  }
+  const loaded = loadCodingWorkflowWrapperConfig({
+    env: wrapperEnv,
+    readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
+  });
+  if (!loaded.ok) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      loaded.error,
+    );
+  }
+  const stepConfig = loaded.config.steps["no-mistakes"];
+  const argsPrefix =
+    stepConfig?.command !== undefined &&
+    path.basename(stepConfig.command) === "no-mistakes"
+      ? []
+      : stepConfig?.command !== undefined &&
+          path.basename(stepConfig.command) === "env" &&
+          stepConfig.args[0] !== undefined &&
+          path.basename(stepConfig.args[0]) === "no-mistakes"
+        ? [stepConfig.args[0]]
+        : null;
+  if (stepConfig?.command === undefined || argsPrefix === null) {
+    throw new RegisteredExecutorHostBindingsError(
+      "runtime_unavailable",
+      "no-mistakes status polling requires the validated no-mistakes executable from the coding-wrapper config",
+    );
+  }
+  return {
+    command: stepConfig.command,
+    argsPrefix,
+    env: buildCodingWorkflowChildEnv(wrapperEnv, stepConfig.envAllow),
+  };
 }
 
 function writeLiveStepHostRecoveryArtifact(input: {
@@ -521,9 +878,11 @@ type LiveStepRepoOwnership =
   | {
       ok: true;
       authorizeMutation: () => { ok: true } | { ok: false; error: string };
+      beginMutation: () =>
+        { ok: true; release: () => void } | { ok: false; error: string };
       settle: (provenClean: boolean) => void;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; recoveryCode: string };
 
 function acquireLiveStepRepoOwnership(input: {
   claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -531,31 +890,101 @@ function acquireLiveStepRepoOwnership(input: {
   repoPath: string;
   attempt: number;
   repoSafety: DispatchedStepRepoSafetyContext;
+  runnerWindowMs: number;
+  reclaimHandoffAttempt: number | undefined;
 }): LiveStepRepoOwnership {
   const { claim, context, repoPath, attempt, repoSafety } = input;
   const wallClockOffset = context.now - Date.now();
   const now = () => Date.now() + wallClockOffset;
-  const extensionMs = liveStepOwnershipExtensionMs(claim, repoSafety);
+  const extensionMs = liveStepOwnershipExtensionMs(
+    claim,
+    repoSafety,
+    input.runnerWindowMs,
+  );
   const acquiredAt = now();
-  const acquired = acquireRepoLock(context.db, {
-    repoRoot: repoSafety.repoRoot ?? repoPath,
-    holder: context.workerId,
-    goalId: claim.runId,
-    iteration: attempt,
-    jobId: deriveDispatchInvocationId(claim.runId, claim.stepId),
-    leaseExpiresAt: acquiredAt + extensionMs,
-    now: acquiredAt,
+  const dispatchLease = heartbeatWorkflowLease(context.db, {
+    runId: claim.lease.runId,
+    leaseKind: claim.lease.leaseKind,
+    holder: claim.lease.holder,
+    acquiredAt: claim.lease.acquiredAt,
+    heartbeatAt: acquiredAt,
+    expiresAt: acquiredAt + extensionMs,
   });
-  if (!acquired.ok) {
+  if (!dispatchLease.ok) {
     return {
       ok: false,
-      error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
+      error: `dispatch lease for ${claim.runId}/${claim.stepId} was lost before repository ownership could be acquired`,
+      recoveryCode: "repo_lock_lost",
     };
   }
-  let settled = false;
-  return {
-    ok: true,
-    authorizeMutation: () => {
+  const repoRoot = repoSafety.repoRoot ?? repoPath;
+  const mutationFence = acquireRepoMutationFence(repoRoot);
+  if (!mutationFence.ok) {
+    return {
+      ok: false,
+      error: `repository ${repoPath} already has an active mutation owner: ${mutationFence.error}`,
+      recoveryCode: "repo_lock_lost",
+    };
+  }
+  try {
+    const jobId = deriveDispatchInvocationId(claim.runId, claim.stepId);
+    const existing =
+      input.reclaimHandoffAttempt !== undefined
+        ? getActiveRepoLockForJob(context.db, jobId)
+        : undefined;
+    const reclaimed =
+      existing !== undefined &&
+      input.reclaimHandoffAttempt !== undefined &&
+      existing.iteration >= input.reclaimHandoffAttempt &&
+      existing.iteration <= attempt &&
+      (existing.lease_expires_at < acquiredAt ||
+        (context.staleDispatchTakeover?.previousHolder === existing.holder &&
+          context.staleDispatchTakeover.previousAcquiredAt <
+            claim.lease.acquiredAt &&
+          context.staleDispatchTakeover.previousExpiresAt < acquiredAt)) &&
+      (existing.lease_expires_at < acquiredAt
+        ? reclaimRepoLock
+        : transferRepoLock)(context.db, {
+        lockId: existing.id,
+        repoRoot,
+        previousHolder: existing.holder,
+        holder: context.workerId,
+        goalId: claim.runId,
+        previousIteration: existing.iteration,
+        previousLeaseExpiresAt: existing.lease_expires_at,
+        iteration: attempt,
+        jobId,
+        heartbeatAt: acquiredAt,
+        leaseExpiresAt: acquiredAt + extensionMs,
+      }).ok;
+    let lockId: string;
+    if (reclaimed && existing !== undefined) {
+      lockId = existing.id;
+    } else {
+      const acquired = acquireRepoLock(context.db, {
+        repoRoot,
+        holder: context.workerId,
+        goalId: claim.runId,
+        iteration: attempt,
+        jobId,
+        leaseExpiresAt: acquiredAt + extensionMs,
+        now: acquiredAt,
+      });
+      if (!acquired.ok) {
+        mutationFence.release();
+        return {
+          ok: false,
+          error: `repository ${repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id})`,
+          recoveryCode:
+            existing?.id === acquired.existing.id
+              ? "delegate_handoff_recovery_required"
+              : "repo_lock_lost",
+        };
+      }
+      lockId = acquired.lockId;
+    }
+    let settled = false;
+    const authorizeMutation = () => {
       const mutationAt = now();
       const heartbeat = heartbeatWorkflowLease(context.db, {
         runId: claim.lease.runId,
@@ -567,45 +996,69 @@ function acquireLiveStepRepoOwnership(input: {
       });
       if (!heartbeat.ok) {
         return {
-          ok: false,
+          ok: false as const,
           error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`,
         };
       }
       const lockBeat = updateRepoLockHeartbeat(context.db, {
-        lockId: acquired.lockId,
+        lockId,
+        holder: context.workerId,
+        iteration: attempt,
         heartbeatAt: mutationAt,
         leaseExpiresAt: mutationAt + extensionMs,
       });
       return lockBeat.ok
-        ? { ok: true }
+        ? { ok: true as const }
         : {
-            ok: false,
+            ok: false as const,
             error: `repo lock for ${claim.runId}/${claim.stepId} is no longer active`,
           };
-    },
-    settle: (provenClean) => {
-      if (settled) return;
-      settled = true;
-      const settledAt = now();
-      if (provenClean) {
-        releaseRepoLock(context.db, {
-          lockId: acquired.lockId,
-          now: settledAt,
-        });
-      } else {
-        markRepoLockNeedsManualRecovery(context.db, {
-          lockId: acquired.lockId,
-          now: settledAt,
-          recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
-        });
-      }
-    },
-  };
+    };
+    return {
+      ok: true,
+      authorizeMutation,
+      beginMutation: () => {
+        const authorization = authorizeMutation();
+        return authorization.ok
+          ? { ok: true, release: () => {} }
+          : authorization;
+      },
+      settle: (provenClean) => {
+        if (settled) return;
+        settled = true;
+        const settledAt = now();
+        try {
+          if (provenClean) {
+            releaseRepoLock(context.db, {
+              lockId,
+              holder: context.workerId,
+              iteration: attempt,
+              now: settledAt,
+            });
+          } else {
+            markRepoLockNeedsManualRecovery(context.db, {
+              lockId,
+              holder: context.workerId,
+              iteration: attempt,
+              now: settledAt,
+              recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
+            });
+          }
+        } finally {
+          mutationFence.release();
+        }
+      },
+    };
+  } catch (error) {
+    mutationFence.release();
+    throw error;
+  }
 }
 
 function liveStepOwnershipExtensionMs(
   claim: Parameters<AsyncWorkflowStepDispatch>[0],
   repoSafety: DispatchedStepRepoSafetyContext,
+  runnerWindowMs: number,
 ): number {
   const leaseDurationMs = Math.max(
     1,
@@ -615,7 +1068,11 @@ function liveStepOwnershipExtensionMs(
     Math.max(1, repoSafety.verificationCommands.length) *
     repoSafety.verificationTimeoutSec *
     1000;
-  return leaseDurationMs + verificationWindowMs;
+  return (
+    Math.max(leaseDurationMs, runnerWindowMs) +
+    verificationWindowMs +
+    Math.max(leaseDurationMs, 5_000)
+  );
 }
 
 function resolveDaemonDispatchedRepoSafety(
@@ -623,6 +1080,7 @@ function resolveDaemonDispatchedRepoSafety(
   runId: string,
   repoPath: string,
   runDir: string,
+  preparedCommitEvidence?: PreparedCommitEvidence,
 ):
   | {
       ok: true;
@@ -636,7 +1094,7 @@ function resolveDaemonDispatchedRepoSafety(
       recoveryCode: string;
       recoveryArtifact?: { runDir: string; repoPath?: string | null } | null;
     } {
-  const repo = inspectRepo(repoPath);
+  const repo = inspectRepo(repoPath, preparedCommitEvidence);
   if (!repo.ok) {
     const recoveryCode =
       repo.code === "dirty_worktree" || repo.code === "git_failed"

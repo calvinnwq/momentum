@@ -5,12 +5,21 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
+  acquireRepoLock,
+  markRepoLockNeedsManualRecovery,
+} from "../src/core/repo/locks.js";
+import {
   clearWorkflowRunManualRecovery,
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
   isBlockingWorkflowRecoveryCode,
   markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
+import { findRetryableDispatchedStepRecovery } from "../src/core/workflow/dispatch/retry.js";
+import {
+  insertWorkflowGate,
+  loadWorkflowGate,
+} from "../src/core/workflow/gate/persist.js";
 
 const tempRoots: string[] = [];
 
@@ -95,12 +104,96 @@ function seedStep(
   );
 }
 
+function seedRetryableDelegateRecovery(
+  db: MomentumDb,
+  options: {
+    executorFamily?: string;
+    recoveryCode?: string;
+  } = {},
+): {
+  runId: string;
+  stepId: string;
+  invocationId: string;
+  at: number;
+  lockId: string;
+} {
+  const runId = "run-delegate-retry";
+  const stepId = "implementation";
+  const invocationId = `${runId}::${stepId}::dispatch`;
+  const at = 1_730_000_500_000;
+  const executorFamily = options.executorFamily ?? "delegate-supervisor";
+  const recoveryCode = options.recoveryCode ?? "delegate_handoff_failed";
+  seedRun(db, runId);
+  seedStep(db, runId, stepId, "running", { at });
+  db.prepare(
+    `INSERT INTO executor_invocations (
+       invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, state, attempt, started_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    executorFamily,
+    "manual_recovery_required",
+    2,
+    at,
+    at,
+    at,
+  );
+  db.prepare(
+    `INSERT INTO executor_rounds (
+       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt, round_index, state, recovery_code,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${invocationId}::round-2`,
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    executorFamily,
+    2,
+    1,
+    "manual_recovery_required",
+    recoveryCode,
+    at,
+    at,
+  );
+  markWorkflowRunNeedsManualRecovery(db, {
+    runId,
+    reason: recoveryCode,
+    now: at,
+  });
+  const acquired = acquireRepoLock(db, {
+    repoRoot: "/repos/delegate-retry",
+    holder: "delegate-worker",
+    goalId: runId,
+    iteration: 2,
+    jobId: invocationId,
+    leaseExpiresAt: at + 30_000,
+    now: at,
+  });
+  if (!acquired.ok) throw new Error(acquired.reason);
+  const parked = markRepoLockNeedsManualRecovery(db, {
+    lockId: acquired.lockId,
+    now: at + 1,
+    recoveryStatus: "unproven delegated handoff",
+  });
+  if (!parked.ok) throw new Error("failed to park delegate repo lock");
+  return { runId, stepId, invocationId, at, lockId: acquired.lockId };
+}
+
 function seedNoMistakesCheckpoint(
   db: MomentumDb,
   runId: string,
   stepId: string,
   options: {
     executorFamily?: "no-mistakes" | "delegate-supervisor";
+    delegateCheckpoint?: "mirrored" | "handoff" | "handoff-terminal";
+    delegateTool?: string;
     noMistakesRunId?: string;
     branch?: string;
     headSha?: string;
@@ -112,6 +205,52 @@ function seedNoMistakesCheckpoint(
   const executorFamily = options.executorFamily ?? "no-mistakes";
   const invocationId = `${runId}::${stepId}::dispatch`;
   const roundId = `${invocationId}::round-0`;
+  const externalState = {
+    externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
+    branch: options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
+    headSha: options.headSha ?? "1111111111111111111111111111111111111111",
+    activeStep: null,
+    stepStatus: "completed",
+    prUrl:
+      options.prUrl === undefined
+        ? "https://github.com/acme/momentum/pull/193"
+        : options.prUrl,
+    ciState: "passed",
+  };
+  const delegateCheckpoint = options.delegateCheckpoint ?? "mirrored";
+  const checkpointStage =
+    executorFamily === "no-mistakes"
+      ? "external_state_mirrored"
+      : delegateCheckpoint === "mirrored"
+        ? "delegate_external_state_mirrored"
+        : "delegate_handoff_completed";
+  const externalIdentity = {
+    externalRunId: externalState.externalRunId,
+    branch: externalState.branch,
+    headSha: externalState.headSha,
+  };
+  const checkpointDetail =
+    executorFamily === "no-mistakes"
+      ? externalState
+      : delegateCheckpoint === "mirrored"
+        ? {
+            state: externalState,
+            progressDigest: "sha256:delegate-progress",
+            progressAt: at,
+            observedAt: at,
+          }
+        : {
+            externalIdentity,
+            summary: "Delegated handoff completed.",
+            ...(delegateCheckpoint === "handoff-terminal"
+              ? {
+                  terminalState: {
+                    value: externalState,
+                    digest: "sha256:delegate-terminal",
+                  },
+                }
+              : {}),
+          };
   db.prepare(
     `INSERT INTO executor_invocations (
        invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
@@ -156,20 +295,31 @@ function seedNoMistakesCheckpoint(
     `${roundId}::checkpoint-0`,
     roundId,
     0,
-    "external_state_mirrored",
-    JSON.stringify({
-      externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
-      branch:
-        options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
-      headSha: options.headSha ?? "1111111111111111111111111111111111111111",
-      activeStep: null,
-      stepStatus: "completed",
-      prUrl:
-        options.prUrl === undefined
-          ? "https://github.com/acme/momentum/pull/193"
-          : options.prUrl,
-      ciState: "passed",
-    }),
+    executorFamily === "delegate-supervisor"
+      ? "delegate_handoff_intent"
+      : checkpointStage,
+    JSON.stringify(
+      executorFamily === "delegate-supervisor"
+        ? {
+            tool: options.delegateTool ?? "no-mistakes",
+            invocationId,
+            attempt: 1,
+          }
+        : checkpointDetail,
+    ),
+    at,
+  );
+  if (executorFamily !== "delegate-supervisor") return;
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${roundId}::checkpoint-1`,
+    roundId,
+    1,
+    checkpointStage,
+    JSON.stringify(checkpointDetail),
     at,
   );
 }
@@ -498,6 +648,219 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     }
   });
 
+  it.each([
+    "tool_adapter_unavailable",
+    "delegate_handoff_failed",
+    "delegate_handoff_recovery_required",
+    "external_state_unreadable",
+    "external_state_inconsistent",
+    "external_state_blocked",
+  ])(
+    "does not apply delegate recovery code %s to an unrelated executor",
+    (recoveryCode) => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const { runId } = seedRetryableDelegateRecovery(db, {
+          executorFamily: "fixture-executor",
+          recoveryCode,
+        });
+        expect(
+          findRetryableDispatchedStepRecovery(db, {
+            runId,
+            stepState: "running",
+          }),
+        ).toBeUndefined();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("retains delegate recovery semantics for the legacy no-mistakes executor", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = seedRetryableDelegateRecovery(db, {
+        executorFamily: "no-mistakes",
+        recoveryCode: "external_state_unreadable",
+      });
+      expect(
+        findRetryableDispatchedStepRecovery(db, {
+          runId,
+          stepState: "running",
+        }),
+      ).toMatchObject({
+        executorFamily: "no-mistakes",
+        recoveryCode: "external_state_unreadable",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("releases the retryable dispatch repo lock owned by the cleared attempt", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, invocationId, at, lockId } =
+        seedRetryableDelegateRecovery(db);
+      const priorAttempt = acquireRepoLock(db, {
+        repoRoot: "/repos/prior-attempt-recovery",
+        holder: "other-worker",
+        goalId: runId,
+        iteration: 1,
+        jobId: invocationId,
+        leaseExpiresAt: at + 30_000,
+        now: at,
+      });
+      if (!priorAttempt.ok) throw new Error(priorAttempt.reason);
+      if (
+        !markRepoLockNeedsManualRecovery(db, {
+          lockId: priorAttempt.lockId,
+          now: at + 1,
+        }).ok
+      ) {
+        throw new Error("failed to park prior-attempt repo lock");
+      }
+      const otherInvocation = acquireRepoLock(db, {
+        repoRoot: "/repos/other-invocation-recovery",
+        holder: "other-worker",
+        goalId: runId,
+        iteration: 2,
+        jobId: `${runId}::other-step::dispatch`,
+        leaseExpiresAt: at + 30_000,
+        now: at,
+      });
+      if (!otherInvocation.ok) throw new Error(otherInvocation.reason);
+      if (
+        !markRepoLockNeedsManualRecovery(db, {
+          lockId: otherInvocation.lockId,
+          now: at + 1,
+        }).ok
+      ) {
+        throw new Error("failed to park other-invocation repo lock");
+      }
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId,
+          recoveryCode: "delegate_handoff_failed",
+        },
+      });
+      expect(
+        db.prepare("SELECT state FROM repo_locks WHERE id = ?").get(lockId),
+      ).toEqual({ state: "released" });
+      expect(
+        db
+          .prepare("SELECT state FROM repo_locks WHERE id = ?")
+          .get(priorAttempt.lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        db
+          .prepare("SELECT state FROM repo_locks WHERE id = ?")
+          .get(otherInvocation.lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        acquireRepoLock(db, {
+          repoRoot: "/repos/delegate-retry",
+          holder: "retry-worker",
+          goalId: runId,
+          iteration: 3,
+          jobId: invocationId,
+          leaseExpiresAt: at + 60_000,
+          now: at + 3,
+        }).ok,
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resolves the matching manual-recovery gate when retry is prepared", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, at } = seedRetryableDelegateRecovery(db);
+      const gateId = `${runId}::${stepId}::reconcile-recovery::manual_recovery_required`;
+      insertWorkflowGate(
+        db,
+        {
+          gateId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          targetScope: "step",
+          gateType: "manual_recovery_required",
+          reason: "Delegated handoff requires operator recovery.",
+          evidence: "delegate_handoff_failed",
+          allowedActions: ["clear_recovery", "abort_run"],
+          recommendedAction: "clear_recovery",
+        },
+        { now: at },
+      );
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(loadWorkflowGate(db, gateId)).toMatchObject({
+        resolvedAt: at + 2,
+        resolvedBy: "workflow run clear-recovery",
+        resolutionMode: "operator",
+        chosenAction: "clear_recovery",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back retry preparation and lock release when recovery clear fails", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId, stepId, at, lockId } = seedRetryableDelegateRecovery(db);
+      db.exec(
+        `CREATE TRIGGER fail_workflow_recovery_clear
+         BEFORE UPDATE OF needs_manual_recovery ON workflow_runs
+         WHEN OLD.id = '${runId}' AND NEW.needs_manual_recovery = 0
+         BEGIN
+           SELECT RAISE(ABORT, 'forced workflow recovery clear failure');
+         END`,
+      );
+
+      expect(() =>
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: at + 2,
+        }),
+      ).toThrow("forced workflow recovery clear failure");
+      expect(
+        db.prepare("SELECT state FROM repo_locks WHERE id = ?").get(lockId),
+      ).toEqual({ state: "needs_manual_recovery" });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "running" });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+        reason: "delegate_handoff_failed",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses with recovery_clear_refused when the blocking recovery state still exists", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -739,9 +1102,30 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     }
   });
 
-  it.each(["no-mistakes", "delegate-supervisor"] as const)(
-    "reconciles %s no-mistakes checkpoint evidence without a new no-mistakes run",
-    (executorFamily) => {
+  it.each([
+    {
+      label: "legacy mirrored",
+      executorFamily: "no-mistakes" as const,
+      delegateCheckpoint: undefined,
+    },
+    {
+      label: "delegate mirrored",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "mirrored" as const,
+    },
+    {
+      label: "delegate handoff identity",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "handoff" as const,
+    },
+    {
+      label: "delegate terminal handoff",
+      executorFamily: "delegate-supervisor" as const,
+      delegateCheckpoint: "handoff-terminal" as const,
+    },
+  ])(
+    "reconciles $label no-mistakes checkpoint evidence without a new no-mistakes run",
+    ({ executorFamily, delegateCheckpoint }) => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -767,6 +1151,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         });
         seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
           executorFamily,
+          ...(delegateCheckpoint !== undefined ? { delegateCheckpoint } : {}),
         });
 
         const evidence = JSON.parse(
@@ -831,6 +1216,146 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       }
     },
   );
+
+  it("refuses delegate checkpoint evidence owned by another tool", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] },
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3,
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
+        executorFamily: "delegate-supervisor",
+        delegateCheckpoint: "mirrored",
+        delegateTool: "other-tool",
+      });
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-clean-success.json",
+          ),
+          "utf8",
+        ),
+      ) as unknown;
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence,
+      });
+
+      expect(out).toMatchObject({
+        ok: false,
+        reason: "recovery_clear_refused",
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get("run-ngx-561", "no-mistakes"),
+      ).toEqual({ state: "failed" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses no-mistakes evidence when only a prior attempt has identity", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = "run-ngx-561";
+      const stepId = "no-mistakes";
+      const invocationId = `${runId}::${stepId}::dispatch`;
+      const roundId = `${invocationId}::round-1`;
+      seedRunWithState(db, runId, "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] },
+      });
+      seedStep(db, runId, stepId, "failed", {
+        kind: "no-mistakes",
+        order: 3,
+      });
+      seedNoMistakesCheckpoint(db, runId, stepId, {
+        executorFamily: "delegate-supervisor",
+        delegateCheckpoint: "mirrored",
+      });
+      db.prepare(
+        `UPDATE executor_invocations
+            SET attempt = 2, updated_at = ?
+          WHERE invocation_id = ?`,
+      ).run(1_730_000_100_000, invocationId);
+      db.prepare(
+        `INSERT INTO executor_rounds (
+           round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt, round_index, state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        roundId,
+        invocationId,
+        runId,
+        stepId,
+        stepId,
+        "delegate-supervisor",
+        2,
+        1,
+        "running",
+        1_730_000_100_000,
+        1_730_000_100_000,
+      );
+      db.prepare(
+        `INSERT INTO executor_checkpoints (
+           checkpoint_id, round_id, sequence, stage, detail, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `${roundId}::checkpoint-0`,
+        roundId,
+        0,
+        "delegate_handoff_intent",
+        JSON.stringify({ tool: "no-mistakes", invocationId, attempt: 2 }),
+        1_730_000_100_000,
+      );
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-clean-success.json",
+          ),
+          "utf8",
+        ),
+      ) as unknown;
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence,
+      });
+
+      expect(out).toMatchObject({
+        ok: false,
+        reason: "recovery_clear_refused",
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
+          .get(runId, stepId),
+      ).toEqual({ state: "failed" });
+    } finally {
+      db.close();
+    }
+  });
 
   it("keeps no-mistakes blocked when deterministic evidence is stale", () => {
     const dataDir = makeTempDir();

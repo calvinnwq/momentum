@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export type RepoGuardErrorCode =
@@ -22,12 +23,26 @@ export type RepoGuardSuccess = {
 };
 export type RepoGuardResult = RepoGuardError | RepoGuardSuccess;
 
-export function inspectRepo(repoPath: string): RepoGuardResult {
+/** Exact staged-tree evidence that may safely pass dirty-worktree preflight. */
+export type PreparedCommitEvidence = {
+  baseHead: string;
+  expectedTree: string;
+  treeSource?: "index" | "worktree";
+};
+
+/**
+ * Inspect the repository root and HEAD, requiring a clean worktree unless an
+ * exact prepared commit has no unstaged or untracked changes.
+ */
+export function inspectRepo(
+  repoPath: string,
+  preparedCommit?: PreparedCommitEvidence,
+): RepoGuardResult {
   if (typeof repoPath !== "string" || repoPath.trim().length === 0) {
     return {
       ok: false,
       code: "missing",
-      error: "Repo path is required."
+      error: "Repo path is required.",
     };
   }
 
@@ -40,7 +55,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "missing",
-      error: `Repo path does not exist: ${absPath}`
+      error: `Repo path does not exist: ${absPath}`,
     };
   }
 
@@ -48,7 +63,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_directory",
-      error: `Repo path is not a directory: ${absPath}`
+      error: `Repo path is not a directory: ${absPath}`,
     };
   }
 
@@ -59,7 +74,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_git_repo",
-      error: `Path is not inside a git repo: ${absPath}`
+      error: `Path is not inside a git repo: ${absPath}`,
     };
   }
 
@@ -69,7 +84,25 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "not_a_git_repo",
-      error: `Repo path is not the git toplevel: ${absPath} (toplevel: ${topLevel})`
+      error: `Repo path is not the git toplevel: ${absPath} (toplevel: ${topLevel})`,
+    };
+  }
+
+  let head: string;
+  try {
+    head = runGit(topLevel, ["rev-parse", "HEAD"]).trim();
+  } catch {
+    return {
+      ok: false,
+      code: "no_head",
+      error: `Repo has no HEAD commit: ${topLevel}`,
+    };
+  }
+  if (!/^[0-9a-f]{40}$/.test(head)) {
+    return {
+      ok: false,
+      code: "no_head",
+      error: `Unexpected HEAD format: ${head}`,
     };
   }
 
@@ -81,41 +114,84 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     return {
       ok: false,
       code: "git_failed",
-      error: `git status failed: ${detail}`
+      error: `git status failed: ${detail}`,
     };
   }
-  if (statusOutput.trim().length > 0) {
+  if (
+    statusOutput.trim().length > 0 &&
+    !matchesPreparedCommit(topLevel, head, preparedCommit)
+  ) {
     return {
       ok: false,
       code: "dirty_worktree",
-      error: `Repo has uncommitted changes: ${topLevel}`
-    };
-  }
-
-  let head: string;
-  try {
-    head = runGit(topLevel, ["rev-parse", "HEAD"]).trim();
-  } catch {
-    return {
-      ok: false,
-      code: "no_head",
-      error: `Repo has no HEAD commit: ${topLevel}`
-    };
-  }
-  if (!/^[0-9a-f]{40}$/.test(head)) {
-    return {
-      ok: false,
-      code: "no_head",
-      error: `Unexpected HEAD format: ${head}`
+      error: `Repo has uncommitted changes: ${topLevel}`,
     };
   }
 
   return { ok: true, repoPath: realTop, head };
 }
 
+function matchesPreparedCommit(
+  repoPath: string,
+  head: string,
+  evidence: PreparedCommitEvidence | undefined,
+): boolean {
+  if (
+    evidence === undefined ||
+    !/^[0-9a-f]{40}$/.test(evidence.baseHead) ||
+    !/^[0-9a-f]{40}$/.test(evidence.expectedTree) ||
+    head !== evidence.baseHead
+  ) {
+    return false;
+  }
+  try {
+    if (evidence.treeSource === "worktree") {
+      return (
+        captureWorktreeTree(repoPath, evidence.baseHead) ===
+        evidence.expectedTree
+      );
+    }
+    runGit(repoPath, ["diff", "--quiet"]);
+    if (
+      runGit(repoPath, ["ls-files", "--others", "--exclude-standard"]).trim()
+        .length > 0
+    ) {
+      return false;
+    }
+    return runGit(repoPath, ["write-tree"]).trim() === evidence.expectedTree;
+  } catch {
+    return false;
+  }
+}
+
+function captureWorktreeTree(repoPath: string, baseHead: string): string {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-repo-guard-"),
+  );
+  const indexPath = path.join(tempDir, "index");
+  const env = { ...process.env, GIT_INDEX_FILE: indexPath };
+  try {
+    execFileSync("git", ["-C", repoPath, "read-tree", baseHead], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    execFileSync("git", ["-C", repoPath, "add", "-A"], {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    return execFileSync("git", ["-C", repoPath, "write-tree"], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }

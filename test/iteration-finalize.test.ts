@@ -28,7 +28,7 @@ function makeTempDir(prefix = "momentum-iter-finalize-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -63,7 +63,7 @@ function setupRepoWithRunnerEdits(): {
   fs.writeFileSync(
     path.join(repoPath, "runner-edit.txt"),
     "from-runner\n",
-    "utf-8"
+    "utf-8",
   );
   return { repoPath, baseHead, logPath: makeLogPath() };
 }
@@ -75,7 +75,7 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
     subject: "prove foreground momentum iteration",
     body: "",
     breaking: false,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -90,7 +90,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("committed");
@@ -101,14 +101,16 @@ describe("finalizeIteration", () => {
     expect(result.commit.parentSha).toBe(baseHead);
     expect(result.commit.commitSha).not.toBe(baseHead);
     expect(result.commit.message).toBe(
-      "feat(milestone-1): prove foreground momentum iteration"
+      "feat(milestone-1): prove foreground momentum iteration",
     );
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(result.commit.commitSha);
 
     const log = fs.readFileSync(logPath, "utf-8");
-    expect(log).toContain("[verify] summary: all 1 verification command(s) passed");
+    expect(log).toContain(
+      "[verify] summary: all 1 verification command(s) passed",
+    );
   });
 
   it("commits when verification commands are empty (vacuous success)", () => {
@@ -121,7 +123,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("committed");
@@ -139,7 +141,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_runner_failure");
@@ -165,7 +167,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_verification_failure");
@@ -193,7 +195,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo nothing-to-commit"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("commit_failed");
@@ -204,6 +206,58 @@ describe("finalizeIteration", () => {
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(baseHead);
+  });
+
+  it("preserves verified changes when the pre-commit hook rejects", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+
+    const result = finalizeIteration({
+      repoPath,
+      baseHead,
+      runnerSuccess: true,
+      commitIntent: baseIntent(),
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath,
+      beforeCommit: () => ({ ok: false, error: "receipt unavailable" }),
+    });
+
+    expect(result.outcome).toBe("commit_failed");
+    if (result.outcome !== "commit_failed") return;
+    expect(result.commit.code).toBe("precommit_rejected");
+    expect(result.reset).toBeUndefined();
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(
+      fs.readFileSync(path.join(repoPath, "runner-edit.txt"), "utf-8"),
+    ).toBe("from-runner\n");
+  });
+
+  it("holds the mutation fence across staging, receipt persistence, and commit", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    let held = false;
+    let observedDuringCommit = false;
+
+    const result = finalizeIteration({
+      repoPath,
+      baseHead,
+      runnerSuccess: true,
+      commitIntent: baseIntent(),
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath,
+      beginGitMutation: () => {
+        held = true;
+        return { ok: true, release: () => (held = false) };
+      },
+      beforeCommit: () => {
+        observedDuringCommit = held;
+        return { ok: true };
+      },
+    });
+
+    expect(result.outcome).toBe("committed");
+    expect(observedDuringCommit).toBe(true);
+    expect(held).toBe(false);
   });
 
   it("resets staged runner edits when git commit itself fails", () => {
@@ -221,7 +275,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("commit_failed");
@@ -250,7 +304,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_failed");
@@ -273,7 +327,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["false"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_failed");
@@ -292,7 +346,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: "/tmp/verification.log"
+      verificationLogPath: "/tmp/verification.log",
     });
 
     expect(result.outcome).toBe("invalid_input");
@@ -308,7 +362,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: "/tmp/verification.log"
+      verificationLogPath: "/tmp/verification.log",
     });
 
     expect(result.outcome).toBe("invalid_input");
@@ -324,7 +378,7 @@ describe("finalizeIteration", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 0,
-      verificationLogPath: "/tmp/verification.log"
+      verificationLogPath: "/tmp/verification.log",
     });
 
     expect(result.outcome).toBe("invalid_input");

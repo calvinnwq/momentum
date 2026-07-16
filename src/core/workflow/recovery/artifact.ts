@@ -52,7 +52,8 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * wrapper process dispatch failures (`unsupported_platform`,
  * `runtime_unavailable`, `auth_unavailable`,
  * `command_failed`, `command_timed_out`, `output_overflow`), trapped executor
- * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
+ * throws (`executor_threw`), delegated handoff/state reconciliation failures,
+ * and wrapper-reported `manual_recovery_required` outcomes
  * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
  * here is explicitly sanctioned by SPEC.md
  * ("live-wrapper can extend the operator-recovery taxonomy, but it cannot collapse distinct failure
@@ -75,6 +76,11 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "command_timed_out",
   "output_overflow",
   "executor_threw",
+  "tool_adapter_unavailable",
+  "delegate_handoff_failed",
+  "delegate_handoff_recovery_required",
+  "external_state_unreadable",
+  "external_state_inconsistent",
   "manual_recovery_required",
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
@@ -225,6 +231,31 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the executor error and run directory.",
     "Confirm whether the executor left partial worktree edits before throwing.",
     "Clean up or preserve any partial worktree changes before clearing recovery.",
+  ],
+  tool_adapter_unavailable: [
+    "Inspect the delegated executor configuration and registered tool adapters.",
+    "Confirm whether any external run was launched before the adapter became unavailable.",
+    "Restore the configured adapter before clearing recovery and retrying the step.",
+  ],
+  delegate_handoff_failed: [
+    "Inspect the delegated handoff receipt, executor log, and external tool state.",
+    "Reconcile whether the external run was launched before the handoff failed.",
+    "Preserve correlated external evidence before clearing recovery and retrying.",
+  ],
+  delegate_handoff_recovery_required: [
+    "Inspect the prior handoff intent, receipt, and external tool run before retrying.",
+    "Correlate the existing external run; do not launch a duplicate side effect.",
+    "Restore recoverable handoff evidence before clearing recovery and retrying.",
+  ],
+  external_state_unreadable: [
+    "Inspect the delegated external-state artifact and tool status output.",
+    "Restore a readable, correlated state snapshot without launching a new external run.",
+    "Clear recovery only after the supervisor can read the external state again.",
+  ],
+  external_state_inconsistent: [
+    "Inspect the mirrored external identity, findings, decisions, and terminal evidence.",
+    "Reconcile the external run until its durable state is internally consistent.",
+    "Clear recovery only after the supervisor can safely resume classification.",
   ],
   manual_recovery_required: [
     "Inspect the live step executor log and run directory for the manual recovery request.",

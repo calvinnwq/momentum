@@ -5,6 +5,7 @@ const integrationTestFiles = [
   "test/cli-workflow-run-approve.test.ts",
   "test/cli.test.ts",
   "test/daemon-loop.test.ts",
+  "test/delegate-supervisor-dispatch-recovery.test.ts",
   "test/full-adapter-e2e.test.ts",
   "test/git-transaction.test.ts",
   "test/goal-loop-mechanism.test.ts",

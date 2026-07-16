@@ -1,11 +1,14 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   updateExecutorInvocationState,
   updateExecutorRound,
 } from "../../executors/loop/persist.js";
+import { selectExecutorDecisionForHumanGate } from "../../executors/loop/reducer.js";
+import { EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE } from "../../executors/sdk/types.js";
 import type { GateDecisionRequest } from "../gate/gate.js";
 import {
   insertWorkflowGate,
@@ -13,7 +16,8 @@ import {
   resolveWorkflowGate,
   type WorkflowGateRecord,
 } from "../gate/persist.js";
-import { releaseWorkflowLease } from "../leases.js";
+import { getWorkflowLease, releaseWorkflowLease } from "../leases.js";
+import { classifyWorkflowLease } from "../run/reducer.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import type { ClaimedWorkflowStep } from "./scheduler.js";
 
@@ -22,11 +26,31 @@ export function parkRegisteredExecutorAtHumanGate(input: {
   db: MomentumDb;
   claim: ClaimedWorkflowStep;
   invocationId: string;
+  decisionId?: string | null;
   now: number;
+  requireStaleLeaseAt?: { now: number; graceMs: number };
 }): WorkflowGateRecord {
   const { db, claim, invocationId, now } = input;
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (input.requireStaleLeaseAt !== undefined) {
+      const lease = getWorkflowLease(
+        db,
+        claim.lease.runId,
+        claim.lease.leaseKind,
+      );
+      if (
+        lease === undefined ||
+        lease.holder !== claim.lease.holder ||
+        lease.acquiredAt !== claim.lease.acquiredAt ||
+        classifyWorkflowLease(lease, input.requireStaleLeaseAt) !==
+          "stale-auto-release"
+      ) {
+        throw new Error(
+          `Cannot recover registered executor invocation ${invocationId}: dispatch lease is no longer stale.`,
+        );
+      }
+    }
     const invocation = loadExecutorInvocation(db, invocationId);
     if (invocation?.state !== "waiting_operator") {
       throw new Error(
@@ -45,9 +69,10 @@ export function parkRegisteredExecutorAtHumanGate(input: {
         `Cannot park registered executor invocation ${invocationId}: no resumable operator round exists.`,
       );
     }
-    const decision = listExecutorDecisionsForRound(db, round.roundId)
-      .filter((candidate) => candidate.chosenAction === null)
-      .at(-1);
+    const decision = selectExecutorDecisionForHumanGate(
+      listExecutorDecisionsForRound(db, round.roundId),
+      resolveHumanGateDecisionId(db, round.roundId, input.decisionId),
+    );
     if (decision === undefined || decision.allowedActions.length === 0) {
       throw new Error(
         `Cannot park registered executor round ${round.roundId}: no unresolved durable decision exists.`,
@@ -100,6 +125,37 @@ export function parkRegisteredExecutorAtHumanGate(input: {
     safeRollback(db);
     throw error;
   }
+}
+
+function resolveHumanGateDecisionId(
+  db: MomentumDb,
+  roundId: string,
+  decisionId: string | null | undefined,
+): string | null | undefined {
+  if (decisionId !== undefined) return decisionId;
+  const checkpoint = listExecutorCheckpointsForRound(db, roundId)
+    .filter(
+      (candidate) =>
+        candidate.stage === EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
+    )
+    .at(-1);
+  if (checkpoint === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(checkpoint.detail ?? "null") as unknown;
+  } catch {
+    throw new Error(
+      `Cannot park registered executor round ${roundId}: its durable gate decision selector is invalid.`,
+    );
+  }
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const selected = (parsed as Record<string, unknown>)["decisionId"];
+    if (selected === null) return null;
+    if (typeof selected === "string" && selected.length > 0) return selected;
+  }
+  throw new Error(
+    `Cannot park registered executor round ${roundId}: its durable gate decision selector is invalid.`,
+  );
 }
 
 /** Resolve any workflow gate, resuming its SDK round when it owns one. */

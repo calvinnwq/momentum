@@ -6,12 +6,25 @@ import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
 
-const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
+const GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "unsupported_platform",
   "runtime_unavailable",
   "executor_threw",
   "executor_contract_invalid",
 ]);
+
+const DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set(
+  [
+    "tool_adapter_unavailable",
+    "delegate_handoff_failed",
+    "delegate_handoff_recovery_required",
+    "external_state_unreadable",
+    "external_state_inconsistent",
+    "external_state_blocked",
+  ],
+);
+
+type RetryableInvocationState = "manual_recovery_required" | "blocked";
 
 type RetryableStepState = "approved" | "running";
 
@@ -33,7 +46,7 @@ export type RetryableDispatchedStepRecovery = {
   kind: WorkflowStepKind;
   invocationId: string;
   executorFamily: ExecutorName;
-  invocationState: "manual_recovery_required";
+  invocationState: RetryableInvocationState;
   attempt: number;
   latestRoundIndex: number;
   recoveryCode: string;
@@ -127,6 +140,8 @@ export type PrepareRetryableDispatchedStepForClearResult =
       prepared: true;
       runId: string;
       stepId: string;
+      invocationId: string;
+      attempt: number;
       recoveryCode: string;
     };
 
@@ -163,6 +178,8 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
     prepared: true,
     runId: input.runId,
     stepId: retryable.stepId,
+    invocationId: retryable.invocationId,
+    attempt: retryable.attempt,
     recoveryCode: retryable.recoveryCode,
   };
 }
@@ -208,7 +225,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
               finished_at = NULL,
               updated_at = ?
         WHERE invocation_id = ?
-          AND state = 'manual_recovery_required'
+          AND state = ?
           AND attempt = ?`,
     )
     .run(
@@ -216,6 +233,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
       input.now,
       input.now,
       retryable.invocationId,
+      retryable.invocationState,
       retryable.attempt,
     );
   if (Number(updated.changes) === 0) return { reopened: false };
@@ -253,7 +271,6 @@ function parseRetryableDispatchRow(
 ): RetryableDispatchedStepRecovery | undefined {
   if (row === undefined) return undefined;
   if (!isWorkflowStepKind(row.kind)) return undefined;
-  if (row.invocation_state !== "manual_recovery_required") return undefined;
   if (!isExecutorName(row.executor_family)) return undefined;
   if (
     row.executor_family === "external-apply" ||
@@ -264,7 +281,8 @@ function parseRetryableDispatchRow(
   if (
     row.round_index === null ||
     row.recovery_code === null ||
-    !isRetryableDispatchRecovery(row.kind, row.recovery_code)
+    !isRetryableInvocationState(row.invocation_state, row.recovery_code) ||
+    !isRetryableDispatchRecovery(row.executor_family, row.recovery_code)
   ) {
     return undefined;
   }
@@ -275,7 +293,7 @@ function parseRetryableDispatchRow(
     kind: row.kind,
     invocationId: row.invocation_id,
     executorFamily: row.executor_family,
-    invocationState: "manual_recovery_required",
+    invocationState: row.invocation_state,
     attempt: row.attempt,
     latestRoundIndex: row.round_index,
     recoveryCode: row.recovery_code,
@@ -356,8 +374,23 @@ function isWorkflowStepKind(value: string): value is WorkflowStepKind {
 }
 
 function isRetryableDispatchRecovery(
-  _kind: WorkflowStepKind,
+  executorFamily: ExecutorName,
   recoveryCode: string,
 ): boolean {
-  return RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode);
+  if (GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return true;
+  return (
+    (executorFamily === "delegate-supervisor" ||
+      executorFamily === "no-mistakes") &&
+    DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)
+  );
+}
+
+function isRetryableInvocationState(
+  invocationState: string,
+  recoveryCode: string,
+): invocationState is RetryableInvocationState {
+  return (
+    invocationState === "manual_recovery_required" ||
+    (invocationState === "blocked" && recoveryCode === "external_state_blocked")
+  );
 }

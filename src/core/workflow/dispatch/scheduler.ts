@@ -51,12 +51,23 @@ import {
   heartbeatWorkflowLease,
   releaseWorkflowLease,
 } from "../leases.js";
-import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
+import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import {
+  isTerminalExecutorInvocationState,
+  selectExecutorDecisionForHumanGate,
+} from "../../executors/loop/reducer.js";
+import {
+  listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../../executors/loop/persist.js";
+import {
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+  DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+} from "../../executors/delegate-supervisor/executor.js";
 import { deriveDispatchInvocationId } from "./execute.js";
 import {
   reconcileDispatchedWorkflowStep,
@@ -72,6 +83,7 @@ import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
   isTerminalRunState,
+  isTerminalStepState,
   WORKFLOW_RUN_TERMINAL_STATES,
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
@@ -444,6 +456,17 @@ export function recoverStaleWorkflowLeases(
       continue;
     }
 
+    const parkedGate = tryRecoverWaitingOperatorDispatchGate(
+      db,
+      candidate,
+      now,
+      graceMs,
+    );
+    if (parkedGate !== undefined) {
+      recovered.push(parkedGate);
+      continue;
+    }
+
     const parkedDispatch = tryParkStaleRunningDispatchLease(
       db,
       candidate,
@@ -555,6 +578,80 @@ export function recoverStaleWorkflowLeases(
   return { recovered, skipped };
 }
 
+function tryRecoverWaitingOperatorDispatchGate(
+  db: MomentumDb,
+  candidate: StaleWorkflowLease,
+  now: number,
+  graceMs: number,
+): RecoveredStaleWorkflowLease | undefined {
+  if (
+    candidate.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND ||
+    candidate.stalePolicy !== "auto-release"
+  ) {
+    return undefined;
+  }
+
+  const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
+  if (
+    live === undefined ||
+    classifyWorkflowLease(live, { now, graceMs }) !== "stale-auto-release"
+  ) {
+    return undefined;
+  }
+  const runningStep = loadStepRecords(db, candidate.runId).find(
+    (step) => step.state === "running",
+  );
+  if (runningStep === undefined) return undefined;
+  const invocationId = deriveDispatchInvocationId(
+    candidate.runId,
+    runningStep.stepId,
+  );
+  const invocation = loadExecutorInvocation(db, invocationId);
+  const rounds =
+    invocation === undefined
+      ? []
+      : listExecutorRoundsForInvocation(db, invocationId);
+  if (invocation?.state !== "waiting_operator" || rounds[0]?.roundIndex !== 0) {
+    return undefined;
+  }
+  const run = db
+    .prepare("SELECT repo_path FROM workflow_runs WHERE id = ?")
+    .get(candidate.runId) as { repo_path: string | null } | undefined;
+  if (run === undefined) return undefined;
+  const steps = loadStepRecords(db, candidate.runId);
+  const leases = loadLeaseRecords(db, candidate.runId);
+
+  try {
+    parkRegisteredExecutorAtHumanGate({
+      db,
+      claim: {
+        runId: candidate.runId,
+        stepId: runningStep.stepId,
+        kind: runningStep.kind,
+        stepOrder: runningStep.order,
+        required: runningStep.required,
+        repoPath: run.repo_path,
+        runState: deriveWorkflowRunState(steps, { leases, now, graceMs }),
+        lease: live,
+      },
+      invocationId,
+      now,
+      requireStaleLeaseAt: { now, graceMs },
+    });
+  } catch {
+    return undefined;
+  }
+
+  return {
+    runId: live.runId,
+    leaseKind: live.leaseKind,
+    holder: live.holder,
+    stalePolicy: live.stalePolicy,
+    action: "released",
+    recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+  };
+}
+
 function tryRecoverTerminalDispatchEvidence(
   db: MomentumDb,
   candidate: StaleWorkflowLease,
@@ -654,14 +751,21 @@ function tryParkStaleRunningDispatchLease(
       db,
       deriveDispatchInvocationId(candidate.runId, runningStep.stepId),
     );
-    // Only the established subworkflow lane auto-reattaches after lease expiry.
-    // A registered SDK `continue` round is re-driven while its lease is fresh;
-    // after daemon downtime makes that lease stale, preserve the existing
-    // fail-closed recovery policy until stale-invocation adoption is landed.
+    const invocationRounds =
+      invocation === undefined
+        ? []
+        : listExecutorRoundsForInvocation(db, invocation.invocationId);
     if (
       invocation !== undefined &&
       invocation.executorFamily === "subworkflow" &&
       !isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+    if (
+      invocation !== undefined &&
+      isResumableRegisteredSdkTick(db, invocation, invocationRounds)
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1029,6 +1133,7 @@ function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
  * workflow leases age on the same cadence.
  */
 export const DEFAULT_WORKFLOW_DISPATCH_LEASE_MS = 30_000;
+export const DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS = 1_000;
 
 export type WorkflowSchedulerNow = () => number;
 
@@ -1041,6 +1146,12 @@ export type WorkflowStepDispatchContext = {
   now: number;
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
+  /** Stale dispatch owner proven and released during this scheduler tick. */
+  staleDispatchTakeover?: {
+    previousHolder: string;
+    previousAcquiredAt: number;
+    previousExpiresAt: number;
+  };
 };
 
 /**
@@ -1100,6 +1211,8 @@ export type RunWorkflowSchedulerOnceInput = {
   graceMs?: number;
   /** Dispatch-lease TTL. Defaults to {@link DEFAULT_WORKFLOW_DISPATCH_LEASE_MS}. */
   leaseDurationMs?: number;
+  /** Registered SDK continuation poll cadence, independent of lease renewal. */
+  continuationPollIntervalMs?: number;
   /** Stale policy stamped on the dispatch lease. Defaults to `auto-release`. */
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Overridable durable primitives (testing seam). */
@@ -1119,6 +1232,7 @@ export type RunWorkflowSchedulerOnceResult =
       code: "idle";
       workerId: string;
       recovery: RecoverStaleWorkflowLeasesResult;
+      continuationPending?: true;
     }
   | {
       /**
@@ -1147,10 +1261,17 @@ function selectActiveSubworkflowDispatchRecheck(
     graceMs: number;
     holder: string;
     leaseDurationMs: number;
+    continuationPollIntervalMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
     runId?: string;
   },
-): ClaimedWorkflowStep | undefined {
+): {
+  claim?: ClaimedWorkflowStep;
+  continuationPending: boolean;
+  staleDispatchTakeover?: NonNullable<
+    WorkflowStepDispatchContext["staleDispatchTakeover"]
+  >;
+} {
   const runs =
     input.runId === undefined
       ? (db
@@ -1159,7 +1280,15 @@ function selectActiveSubworkflowDispatchRecheck(
                FROM workflow_runs
               WHERE needs_manual_recovery = 0
                 AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY created_at ASC, id ASC`,
+              ORDER BY COALESCE(
+                         (SELECT heartbeat_at
+                            FROM workflow_leases
+                           WHERE run_id = workflow_runs.id
+                             AND lease_kind = 'dispatch'),
+                         -1
+                       ) ASC,
+                       created_at ASC,
+                       id ASC`,
           )
           .all() as WorkflowRunScanRow[])
       : (db
@@ -1169,10 +1298,19 @@ function selectActiveSubworkflowDispatchRecheck(
               WHERE id = ?
                 AND needs_manual_recovery = 0
                 AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY created_at ASC, id ASC`,
+              ORDER BY COALESCE(
+                         (SELECT heartbeat_at
+                            FROM workflow_leases
+                           WHERE run_id = workflow_runs.id
+                             AND lease_kind = 'dispatch'),
+                         -1
+                       ) ASC,
+                       created_at ASC,
+                       id ASC`,
           )
           .all(input.runId) as WorkflowRunScanRow[]);
 
+  let continuationPending = false;
   for (const run of runs) {
     const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
     if (lease !== undefined && lease.releasedAt === null) {
@@ -1185,21 +1323,28 @@ function selectActiveSubworkflowDispatchRecheck(
       }
 
       const claim = buildActiveSubworkflowClaim(db, run, lease, input);
-      if (
-        claim !== undefined &&
-        (isRegisteredSdkContinuation(db, claim) ||
-          isActiveSubworkflowRecheckDue(lease, input))
-      ) {
-        return claim;
+      if (claim !== undefined && isActiveSubworkflowRecheckDue(lease, input)) {
+        return { claim, continuationPending };
+      }
+      if (claim !== undefined && isRegisteredSdkContinuation(db, claim)) {
+        continuationPending = true;
       }
       continue;
     }
 
     const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
-    if (acquired !== undefined) return acquired;
+    if (acquired !== undefined) {
+      return {
+        claim: acquired.claim,
+        continuationPending: true,
+        ...(acquired.staleDispatchTakeover === undefined
+          ? {}
+          : { staleDispatchTakeover: acquired.staleDispatchTakeover }),
+      };
+    }
   }
 
-  return undefined;
+  return { continuationPending };
 }
 
 function isRegisteredSdkContinuation(
@@ -1220,18 +1365,49 @@ function isRegisteredSdkContinuation(
     // executor, whose sequential envelope starts at roundIndex 0. The legacy
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
-    rounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(db, invocation.state, rounds.at(-1))
+    isResumableRegisteredSdkTick(db, invocation, rounds)
   );
 }
 
 function isResumableRegisteredSdkTick(
   db: MomentumDb,
-  invocationState: string,
-  round: ReturnType<typeof listExecutorRoundsForInvocation>[number] | undefined,
+  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
 ): boolean {
-  if (invocationState !== "running" || round === undefined) return false;
+  if (invocation.state !== "running") return false;
+  const currentAttemptRounds = rounds.filter(
+    (round) => round.attempt === invocation.attempt,
+  );
+  if (rounds.length > 0 && rounds[0]?.roundIndex !== 0) return false;
+  // Legacy dispatch inserts its invocation and first round in one transaction.
+  // Only an SDK-owned dispatch can durably expose a roundless invocation.
+  if (
+    invocation.executorFamily === "delegate-supervisor" &&
+    currentAttemptRounds.length === 0
+  ) {
+    return true;
+  }
+  const round = currentAttemptRounds.at(-1);
+  if (round === undefined) return false;
+  if (
+    invocation.executorFamily === "delegate-supervisor" &&
+    currentAttemptRounds.length === 1 &&
+    round.classification === null &&
+    round.state === "running" &&
+    !listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) =>
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    )
+  ) {
+    return true;
+  }
   if (round.classification === "continue") return true;
+  if (
+    hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds, rounds)
+  ) {
+    return true;
+  }
   const resolvedDecision = listExecutorDecisionsForRound(
     db,
     round.roundId,
@@ -1245,15 +1421,169 @@ function isResumableRegisteredSdkTick(
   );
 }
 
+function hasResumableDelegateCheckpoint(
+  db: MomentumDb,
+  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
+  currentAttemptRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  invocationRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+): boolean {
+  const activeRound = currentAttemptRounds.at(-1);
+  if (
+    invocation.state !== "running" ||
+    invocation.executorFamily !== "delegate-supervisor" ||
+    activeRound === undefined
+  ) {
+    return false;
+  }
+  const interruptedRound =
+    activeRound.classification === null &&
+    (activeRound.state === "running" ||
+      activeRound.state === "capturing_result" ||
+      activeRound.state === "mirroring_external_state");
+  const interruptedGate =
+    activeRound.classification === null &&
+    activeRound.state === "waiting_operator" &&
+    listExecutorCheckpointsForRound(db, activeRound.roundId).some(
+      (checkpoint) => checkpoint.stage === DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+    ) &&
+    selectExecutorDecisionForHumanGate(
+      listExecutorDecisionsForRound(db, activeRound.roundId),
+      undefined,
+    ) !== undefined;
+  const completedPoll =
+    activeRound.classification === "continue" &&
+    (activeRound.state === "succeeded" || activeRound.state === "failed");
+  if (interruptedGate) return true;
+  if (!interruptedRound && !completedPoll) return false;
+  if (
+    interruptedRound &&
+    hasResumableLegacyCompletionReplay(
+      db,
+      activeRound.roundId,
+      invocationRounds,
+    )
+  ) {
+    return true;
+  }
+  if (
+    interruptedRound &&
+    hasResumablePreMarkerLegacyCompletionReplay(
+      db,
+      activeRound,
+      invocationRounds,
+    )
+  ) {
+    return true;
+  }
+  const handoffRounds = completedPoll
+    ? currentAttemptRounds
+    : activeRound.state === "running" ||
+        activeRound.state === "capturing_result"
+      ? [activeRound]
+      : currentAttemptRounds.slice(0, -1);
+  return handoffRounds.some((round) =>
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) =>
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+        checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+    ),
+  );
+}
+
+function hasResumableLegacyCompletionReplay(
+  db: MomentumDb,
+  activeRoundId: string,
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+): boolean {
+  const replay = [...listExecutorCheckpointsForRound(db, activeRoundId)]
+    .reverse()
+    .find(
+      (checkpoint) =>
+        checkpoint.stage ===
+        DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+    );
+  if (replay?.detail === null || replay === undefined) return false;
+  try {
+    const parsed: unknown = JSON.parse(replay.detail);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof (parsed as { sourceRoundId?: unknown }).sourceRoundId !== "string"
+    ) {
+      return false;
+    }
+    const sourceRoundId = (parsed as { sourceRoundId: string }).sourceRoundId;
+    if (!rounds.some((round) => round.roundId === sourceRoundId)) return false;
+    return listExecutorCheckpointsForRound(db, sourceRoundId).some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasResumablePreMarkerLegacyCompletionReplay(
+  db: MomentumDb,
+  activeRound: ReturnType<typeof listExecutorRoundsForInvocation>[number],
+  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+): boolean {
+  if (
+    activeRound.state !== "capturing_result" ||
+    listExecutorCheckpointsForRound(db, activeRound.roundId).length > 0
+  ) {
+    return false;
+  }
+  let latestCompletion: { roundIndex: number; sequence: number } | undefined;
+  for (const round of rounds) {
+    if (round.attempt >= activeRound.attempt) continue;
+    for (const checkpoint of listExecutorCheckpointsForRound(
+      db,
+      round.roundId,
+    )) {
+      if (checkpoint.stage !== "mechanism_completed") continue;
+      if (
+        latestCompletion === undefined ||
+        round.roundIndex > latestCompletion.roundIndex ||
+        (round.roundIndex === latestCompletion.roundIndex &&
+          checkpoint.sequence > latestCompletion.sequence)
+      ) {
+        latestCompletion = {
+          roundIndex: round.roundIndex,
+          sequence: checkpoint.sequence,
+        };
+      }
+    }
+  }
+  if (latestCompletion === undefined) return false;
+  return !rounds.some((round) =>
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) =>
+        (checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE ||
+          checkpoint.stage === DELEGATE_SUPERVISOR_HANDOFF_STAGE ||
+          checkpoint.stage ===
+            DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE) &&
+        (round.roundIndex > latestCompletion.roundIndex ||
+          (round.roundIndex === latestCompletion.roundIndex &&
+            checkpoint.sequence > latestCompletion.sequence)),
+    ),
+  );
+}
+
 function isActiveSubworkflowRecheckDue(
   lease: WorkflowLeaseRecord,
-  input: { now: number; leaseDurationMs: number },
+  input: { now: number; continuationPollIntervalMs: number },
 ): boolean {
-  const heartbeatIntervalMs = Math.max(
-    1,
-    Math.floor(input.leaseDurationMs / 2),
+  return input.now - lease.heartbeatAt >= input.continuationPollIntervalMs;
+}
+
+function isActiveSubworkflowRecheckUrgent(
+  claim: ClaimedWorkflowStep,
+  input: { now: number; continuationPollIntervalMs: number },
+): boolean {
+  return (
+    input.now - claim.lease.heartbeatAt >= input.continuationPollIntervalMs * 2
   );
-  return input.now - lease.heartbeatAt >= heartbeatIntervalMs;
 }
 
 function buildActiveSubworkflowClaim(
@@ -1275,12 +1605,8 @@ function buildActiveSubworkflowClaim(
       ? []
       : listExecutorRoundsForInvocation(db, invocation.invocationId);
   const resumableSdkTick =
-    invocationRounds[0]?.roundIndex === 0 &&
-    isResumableRegisteredSdkTick(
-      db,
-      invocation?.state ?? "missing",
-      invocationRounds.at(-1),
-    );
+    invocation !== undefined &&
+    isResumableRegisteredSdkTick(db, invocation, invocationRounds);
   if (
     invocation === undefined ||
     (invocation.executorFamily !== "subworkflow" && !resumableSdkTick) ||
@@ -1316,7 +1642,14 @@ function acquireActiveSubworkflowDispatchClaim(
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
   },
-): ClaimedWorkflowStep | undefined {
+):
+  | {
+      claim: ClaimedWorkflowStep;
+      staleDispatchTakeover?: NonNullable<
+        WorkflowStepDispatchContext["staleDispatchTakeover"]
+      >;
+    }
+  | undefined {
   db.exec("BEGIN IMMEDIATE");
   try {
     const run = db
@@ -1364,7 +1697,20 @@ function acquireActiveSubworkflowDispatchClaim(
     }
 
     db.exec("COMMIT");
-    return claim;
+    const staleDispatchTakeover =
+      existing !== undefined &&
+      existing.releasedAt !== null &&
+      existing.releasedAt > existing.expiresAt
+        ? {
+            previousHolder: existing.holder,
+            previousAcquiredAt: existing.acquiredAt,
+            previousExpiresAt: existing.expiresAt,
+          }
+        : undefined;
+    return {
+      claim,
+      ...(staleDispatchTakeover === undefined ? {} : { staleDispatchTakeover }),
+    };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -1403,13 +1749,52 @@ function dispatchClaim(
     recovery: RecoverStaleWorkflowLeasesResult;
     claim: ClaimedWorkflowStep;
     tickNow: number;
+    now: WorkflowSchedulerNow;
+    leaseDurationMs: number;
+    recoveredDispatchLeases: ReadonlyMap<string, WorkflowLeaseRecord>;
+    durableStaleDispatchTakeover?: NonNullable<
+      WorkflowStepDispatchContext["staleDispatchTakeover"]
+    >;
   },
   dispatch: AsyncWorkflowStepDispatch,
 ): MaybePromise<RunWorkflowSchedulerOnceResult> {
-  const { db, workerId, recovery, claim, tickNow } = input;
+  const {
+    db,
+    workerId,
+    recovery,
+    claim,
+    tickNow,
+    now,
+    leaseDurationMs,
+    recoveredDispatchLeases,
+    durableStaleDispatchTakeover,
+  } = input;
+  const staleDispatch = recovery.recovered.find(
+    (candidate) =>
+      candidate.runId === claim.runId &&
+      candidate.leaseKind === WORKFLOW_DISPATCH_LEASE_KIND &&
+      candidate.action === "released",
+  );
+  const staleLease = recoveredDispatchLeases.get(claim.runId);
+  const context: WorkflowStepDispatchContext = {
+    db,
+    workerId,
+    now: tickNow,
+    ...(durableStaleDispatchTakeover !== undefined
+      ? { staleDispatchTakeover: durableStaleDispatchTakeover }
+      : staleDispatch === undefined || staleLease === undefined
+        ? {}
+        : {
+            staleDispatchTakeover: {
+              previousHolder: staleDispatch.holder,
+              previousAcquiredAt: staleLease.acquiredAt,
+              previousExpiresAt: staleLease.expiresAt,
+            },
+          }),
+  };
   let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
   try {
-    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
+    dispatchResult = dispatch(claim, context);
   } catch (error) {
     try {
       releaseWorkflowLease(db, {
@@ -1424,15 +1809,85 @@ function dispatchClaim(
   }
 
   if (isPromiseLike(dispatchResult)) {
+    let leaseFailure: Error | null = null;
+    const heartbeatIntervalMs = Math.max(1, Math.floor(leaseDurationMs / 3));
+    const heartbeatDispatchLease = (): boolean => {
+      if (leaseFailure !== null) return false;
+      try {
+        const heartbeatAt = now();
+        const liveLease = getWorkflowLease(
+          db,
+          claim.lease.runId,
+          claim.lease.leaseKind,
+        );
+        const heartbeat = heartbeatWorkflowLease(db, {
+          runId: claim.lease.runId,
+          leaseKind: claim.lease.leaseKind,
+          holder: claim.lease.holder,
+          acquiredAt: claim.lease.acquiredAt,
+          heartbeatAt,
+          expiresAt: Math.max(
+            heartbeatAt + leaseDurationMs,
+            liveLease?.expiresAt ?? 0,
+          ),
+        });
+        if (!heartbeat.ok) {
+          const invocation = loadExecutorInvocation(
+            db,
+            deriveDispatchInvocationId(claim.runId, claim.stepId),
+          );
+          const step = db
+            .prepare(
+              "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+            )
+            .get(claim.runId, claim.stepId) as
+            { state: WorkflowStepState } | undefined;
+          const completedDispatch =
+            (liveLease !== undefined &&
+              liveLease.holder === claim.lease.holder &&
+              liveLease.acquiredAt === claim.lease.acquiredAt &&
+              liveLease.releasedAt !== null) ||
+            (invocation !== undefined &&
+              isTerminalExecutorInvocationState(invocation.state)) ||
+            (step !== undefined && isTerminalStepState(step.state));
+          if (completedDispatch) {
+            return false;
+          }
+          leaseFailure = new Error(
+            `workflow dispatch lease for ${claim.runId}/${claim.stepId} was lost while dispatch remained active`,
+          );
+          return false;
+        }
+        return true;
+      } catch (error) {
+        leaseFailure =
+          error instanceof Error
+            ? error
+            : new Error(
+                `workflow dispatch lease heartbeat failed: ${String(error)}`,
+              );
+        return false;
+      }
+    };
+    const heartbeatTimer = setInterval(() => {
+      if (!heartbeatDispatchLease()) clearInterval(heartbeatTimer);
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
     return dispatchResult
-      .then((resolvedDispatchResult) => ({
-        code: "dispatched" as const,
-        workerId,
-        recovery,
-        claim,
-        dispatch: resolvedDispatchResult,
-      }))
+      .then((resolvedDispatchResult) => {
+        clearInterval(heartbeatTimer);
+        heartbeatDispatchLease();
+        if (leaseFailure !== null) throw leaseFailure;
+        return {
+          code: "dispatched" as const,
+          workerId,
+          recovery,
+          claim,
+          dispatch: resolvedDispatchResult,
+        };
+      })
       .catch((error) => {
+        clearInterval(heartbeatTimer);
         try {
           releaseWorkflowLease(db, {
             runId: claim.lease.runId,
@@ -1523,6 +1978,17 @@ function runWorkflowSchedulerOnceCore(
       "runWorkflowSchedulerOnce: leaseDurationMs must be a positive finite number",
     );
   }
+  const continuationPollIntervalMs =
+    input.continuationPollIntervalMs ??
+    DEFAULT_REGISTERED_SDK_CONTINUATION_POLL_MS;
+  if (
+    !Number.isFinite(continuationPollIntervalMs) ||
+    continuationPollIntervalMs <= 0
+  ) {
+    throw new Error(
+      "runWorkflowSchedulerOnce: continuationPollIntervalMs must be a positive finite number",
+    );
+  }
 
   const now = input.now ?? (() => Date.now());
   const graceMs = input.graceMs ?? 0;
@@ -1543,16 +2009,44 @@ function runWorkflowSchedulerOnceCore(
     graceMs,
     ...runScope,
   });
+  const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
+  for (const recovered of recovery.recovered) {
+    if (
+      recovered.action !== "released" ||
+      recovered.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND
+    ) {
+      continue;
+    }
+    const released = getWorkflowLease(
+      db,
+      recovered.runId,
+      WORKFLOW_DISPATCH_LEASE_KIND,
+    );
+    if (released !== undefined && released.releasedAt !== null) {
+      recoveredDispatchLeases.set(recovered.runId, released);
+    }
+  }
 
-  const activeClaim = selectActiveSubworkflowDispatchRecheck(db, {
+  const activeSelection = selectActiveSubworkflowDispatchRecheck(db, {
     now: tickNow,
     graceMs,
     holder: workerId,
     leaseDurationMs,
+    continuationPollIntervalMs,
     stalePolicy,
     ...runScope,
   });
-  if (activeClaim !== undefined) {
+  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
+  const candidate = scan.runnable[0];
+  const activeClaim = activeSelection.claim;
+  if (
+    activeClaim !== undefined &&
+    (candidate === undefined ||
+      isActiveSubworkflowRecheckUrgent(activeClaim, {
+        now: tickNow,
+        continuationPollIntervalMs,
+      }))
+  ) {
     const refreshedClaim = heartbeatActiveDispatchClaim(db, {
       claim: activeClaim,
       now: tickNow,
@@ -1560,16 +2054,36 @@ function runWorkflowSchedulerOnceCore(
     });
     if (refreshedClaim !== undefined) {
       return dispatchClaim(
-        { db, workerId, recovery, claim: refreshedClaim, tickNow },
+        {
+          db,
+          workerId,
+          recovery,
+          claim: refreshedClaim,
+          tickNow,
+          now,
+          leaseDurationMs,
+          recoveredDispatchLeases,
+          ...(activeSelection.staleDispatchTakeover === undefined
+            ? {}
+            : {
+                durableStaleDispatchTakeover:
+                  activeSelection.staleDispatchTakeover,
+              }),
+        },
         dispatch,
       );
     }
   }
 
-  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
-  const candidate = scan.runnable[0];
   if (candidate === undefined) {
-    return { code: "idle", workerId, recovery };
+    return {
+      code: "idle",
+      workerId,
+      recovery,
+      ...(activeSelection.continuationPending
+        ? { continuationPending: true as const }
+        : {}),
+    };
   }
 
   const claimResult = claimStep(db, {
@@ -1586,7 +2100,19 @@ function runWorkflowSchedulerOnceCore(
   }
 
   const claim = claimResult.claim;
-  return dispatchClaim({ db, workerId, recovery, claim, tickNow }, dispatch);
+  return dispatchClaim(
+    {
+      db,
+      workerId,
+      recovery,
+      claim,
+      tickNow,
+      now,
+      leaseDurationMs,
+      recoveredDispatchLeases,
+    },
+    dispatch,
+  );
 }
 
 function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {

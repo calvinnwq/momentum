@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
 import { runCli } from "../src/cli.js";
-import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
+import {
+  resolveDaemonWorkflowStepDispatch,
+  resolveProfileBackedDelegateToolStepKind,
+} from "../src/core/daemon/workflow-dispatch.js";
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
 import {
@@ -42,6 +45,18 @@ afterEach(() => {
   while (tempDirs.length > 0) {
     fs.rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
+});
+
+describe("profile-backed delegated tool dispatch", () => {
+  it("selects the live-wrapper kind from portable tool config", () => {
+    expect(resolveProfileBackedDelegateToolStepKind("gnhf")).toBe(
+      "implementation",
+    );
+    expect(resolveProfileBackedDelegateToolStepKind("no-mistakes")).toBe(
+      "no-mistakes",
+    );
+    expect(resolveProfileBackedDelegateToolStepKind("custom-tool")).toBeNull();
+  });
 });
 
 function tempDir(): string {
@@ -196,12 +211,18 @@ describe("executor registration and SDK dispatch", () => {
         )
         .get("fixture-run"),
     ).toEqual({ state: "running" });
-    await runWorkflowSchedulerOnceAsync({
+    const lease = db
+      .prepare(
+        "SELECT heartbeat_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
+      )
+      .get("fixture-run") as { heartbeat_at: number };
+    const continuation = await runWorkflowSchedulerOnceAsync({
       db,
       workerId: "fixture-worker",
       dispatch: production.dispatch,
-      now: () => NOW + 2,
+      now: () => lease.heartbeat_at + 15_000,
     });
+    expect(continuation.code).toBe("dispatched");
 
     expect(
       db
@@ -1592,9 +1613,15 @@ describe("executor registration and SDK dispatch", () => {
       action: "apply",
       roundState: "failed" as const,
     },
+    {
+      classification: "approval_required" as const,
+      action: "acknowledge",
+      roundState: "waiting_operator" as const,
+      legacySelection: true,
+    },
   ])(
     "persists and resumes a registered executor $classification gate after a $roundState round",
-    async ({ classification, action, roundState }) => {
+    async ({ classification, action, roundState, legacySelection = false }) => {
       const dataDir = tempDir();
       const runId = `registered-gate-${classification}`;
       const definition = fixtureDefinition({});
@@ -1700,15 +1727,37 @@ describe("executor registration and SDK dispatch", () => {
               verificationStatus: null,
               commitSha: null,
             });
+            const gateDecision = context.envelope.recordDecision(
+              round.roundId,
+              {
+                decisionId: `${round.roundId}::decision-1`,
+                summary: "Choose how the executor should continue",
+                allowedActions: [action, "cancel"],
+                recommendedAction: action,
+                chosenAction: null,
+                resolution: null,
+                externalRef: null,
+              },
+            );
             context.envelope.recordDecision(round.roundId, {
-              decisionId: `${round.roundId}::decision-1`,
-              summary: "Choose how the executor should continue",
-              allowedActions: [action, "cancel"],
-              recommendedAction: action,
+              decisionId: `${round.roundId}::decision-2`,
+              summary: "Mirrored external decision",
+              allowedActions: ["acknowledge", "cancel"],
+              recommendedAction: "acknowledge",
               chosenAction: null,
               resolution: null,
-              externalRef: null,
+              externalRef: "external-decision",
             });
+            if (legacySelection) {
+              context.envelope.recordCheckpoint(round.roundId, {
+                checkpointId: `${round.roundId}::stale-gate-selector`,
+                sequence: 0,
+                stage: "human_gate_decision_selected",
+                detail: JSON.stringify({
+                  decisionId: gateDecision.decisionId,
+                }),
+              });
+            }
             return {
               roundId: round.roundId,
               recommendation: classification,
@@ -1716,6 +1765,9 @@ describe("executor registration and SDK dispatch", () => {
               recommendedInvocationState: "waiting_operator",
               recoveryCode: null,
               humanGate: classification,
+              humanGateDecisionId: legacySelection
+                ? null
+                : gateDecision.decisionId,
               reason: "The executor needs an operator decision.",
             };
           },
@@ -1741,21 +1793,37 @@ describe("executor registration and SDK dispatch", () => {
 
       const gate = db
         .prepare(
-          "SELECT gate_id, gate_type, reason, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+          "SELECT gate_id, gate_type, reason, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
         )
         .get(runId) as
         | {
             gate_id: string;
             gate_type: string;
             reason: string;
+            evidence: string;
             resolved_at: number | null;
           }
         | undefined;
-      expect(gate?.reason).toBe("Choose how the executor should continue");
+      expect(gate?.reason).toBe(
+        legacySelection
+          ? "Mirrored external decision"
+          : "Choose how the executor should continue",
+      );
       expect(gate).toMatchObject({
         gate_type: classification,
         resolved_at: null,
       });
+      expect(
+        db
+          .prepare(
+            `SELECT json_extract(detail, '$.decisionId') AS decisionId
+              FROM executor_checkpoints
+              WHERE stage = 'human_gate_decision_selected'
+              ORDER BY sequence DESC
+              LIMIT 1`,
+          )
+          .get(),
+      ).toEqual({ decisionId: legacySelection ? null : gate?.evidence });
       expect(
         db
           .prepare(
@@ -1814,7 +1882,7 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
-            "SELECT d.chosen_action FROM executor_decisions AS d JOIN executor_rounds AS r ON r.round_id = d.round_id WHERE r.workflow_run_id = ? ORDER BY r.round_index DESC LIMIT 1",
+            "SELECT d.chosen_action FROM executor_decisions AS d JOIN executor_rounds AS r ON r.round_id = d.round_id WHERE r.workflow_run_id = ? AND d.chosen_action IS NOT NULL ORDER BY r.round_index DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ chosen_action: action });
@@ -1906,7 +1974,11 @@ describe("executor registration and SDK dispatch", () => {
     ).toBeNull();
     const dispatch = createRegisteredExecutorWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, maxTicks: 2 },
+      {
+        registry,
+        resolveMaxTicks: ({ executorName }) =>
+          executorName === "fixture-executor" ? 2 : 1,
+      },
     );
     await dispatch(claim.claim, {
       db,
@@ -1949,95 +2021,111 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
-  it("retries an executor_threw invocation after the executor is repaired", async () => {
-    const definition = fixtureDefinition({});
-    const db = openDb(tempDir());
-    persistWorkflowDefinition(db, definition, { now: NOW });
-    persistWorkflowRunStart(db, {
-      definition,
-      runId: "thrown-tick-run",
-      repoPath: "/repos/fixture",
-      objective: "Retry a repaired executor throw",
-      now: NOW,
-    });
-    db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-    ).run("thrown-tick-run");
-    const claim = claimRunnableWorkflowStep(db, {
-      runId: "thrown-tick-run",
-      stepId: "preflight",
-      holder: "fixture-worker",
-      leaseExpiresAt: NOW + 30_000,
-      now: NOW,
-    });
-    if (!claim.ok) throw new Error(claim.reason);
-
-    let repaired = false;
-    const registry = new Map();
-    expect(
-      registerExecutor(registry, "fixture-executor", {
-        name: "fixture-executor",
-        configSchema: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-        tick: (
-          context: ExecutorTickContext<
-            Record<string, never>,
-            Record<string, never>
-          >,
-        ) => {
-          if (!repaired) throw new Error("broken executor implementation");
-          return completeRegisteredExecutorTick(context, "repaired throw");
-        },
-      }),
-    ).toBeNull();
-    const dispatch = createRegisteredExecutorWorkflowDispatch(
-      executeWorkflowStepDispatch,
-      { registry },
-    );
-    await dispatch(claim.claim, {
-      db,
-      workerId: "fixture-worker",
-      now: NOW + 1,
-    });
-    expect(
-      db
-        .prepare(
-          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
-        )
-        .get("thrown-tick-run"),
-    ).toEqual({ recovery_code: "executor_threw" });
-
-    repaired = true;
-    expect(
-      clearWorkflowRunManualRecoveryGuarded(db, {
+  it.each(["executor_threw"])(
+    "retries a %s invocation after the registered executor is repaired",
+    async (recoveryCode) => {
+      const definition = fixtureDefinition({});
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
         runId: "thrown-tick-run",
-        now: NOW + 2,
-      }),
-    ).toMatchObject({
-      ok: true,
-      retryPrepared: {
+        repoPath: "/repos/fixture",
+        objective: "Retry a repaired executor throw",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run("thrown-tick-run");
+      const claim = claimRunnableWorkflowStep(db, {
+        runId: "thrown-tick-run",
         stepId: "preflight",
-        recoveryCode: "executor_threw",
-      },
-    });
-    await runWorkflowSchedulerOnceAsync({
-      db,
-      workerId: "fixture-worker",
-      dispatch,
-      now: () => NOW + 3,
-    });
-    expect(
-      db
-        .prepare(
-          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
-        )
-        .get("thrown-tick-run"),
-    ).toEqual({ state: "succeeded", attempt: 2 });
-    db.close();
-  });
+        holder: "fixture-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+
+      let repaired = false;
+      const registry = new Map();
+      expect(
+        registerExecutor(registry, "fixture-executor", {
+          name: "fixture-executor",
+          configSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          },
+          tick: (
+            context: ExecutorTickContext<
+              Record<string, never>,
+              Record<string, never>
+            >,
+          ) => {
+            if (!repaired) throw new Error("broken executor implementation");
+            return completeRegisteredExecutorTick(context, "repaired throw");
+          },
+        }),
+      ).toBeNull();
+      const dispatch = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        { registry },
+      );
+      await dispatch(claim.claim, {
+        db,
+        workerId: "fixture-worker",
+        now: NOW + 1,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index DESC LIMIT 1",
+          )
+          .get("thrown-tick-run"),
+      ).toEqual({ recovery_code: "executor_threw" });
+      if (recoveryCode !== "executor_threw") {
+        db.prepare(
+          `UPDATE executor_rounds
+            SET recovery_code = ?
+          WHERE round_id = (
+            SELECT round_id
+              FROM executor_rounds
+             WHERE workflow_run_id = ?
+             ORDER BY round_index DESC
+             LIMIT 1
+          )`,
+        ).run(recoveryCode, "thrown-tick-run");
+      }
+
+      repaired = true;
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId: "thrown-tick-run",
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId: "preflight",
+          recoveryCode,
+        },
+      });
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "fixture-worker",
+        dispatch,
+        now: () => NOW + 3,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get("thrown-tick-run"),
+      ).toEqual({ state: "succeeded", attempt: 2 });
+      db.close();
+    },
+  );
 
   it("durably settles hostile values thrown by executor ticks", async () => {
     const definition = fixtureDefinition({});

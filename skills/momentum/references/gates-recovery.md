@@ -60,10 +60,26 @@ For the older goal compatibility surface:
 
 If evidence is missing or ambiguous, report the recovery reason and the
 inspection command instead of clearing recovery.
+On success, this command also resolves open `manual_recovery_required` gates
+for the run when they explicitly allow `clear_recovery`.
+Do not use it to close other gate types.
 For `unsupported_platform`, move the workflow to Linux or macOS, confirm from
 the executor log and worktree that no process ran and no edits were made, then
 clear recovery on that supported host so Momentum can prepare the step's next
 attempt.
+For `tool_adapter_unavailable`, `delegate_handoff_failed`,
+`delegate_handoff_recovery_required`, `external_state_unreadable`, or
+`external_state_inconsistent`, inspect the step-scoped handoff receipt, executor
+log, mirrored state, and external tool before clearing recovery.
+Prove whether a correlated external run already launched, and never relaunch
+from missing or ambiguous evidence.
+Treat a local wrapper-finalization failure as local evidence only.
+Read the correlated external run first.
+If it is conclusively failed or cancelled, one fresh launch is allowed; otherwise rerun local finalization before reattaching the same run for supervision.
+Restore the adapter or reconcile the same external run until the supervisor can
+read and classify it safely.
+For `external_state_blocked`, clear recovery only after the external blocker is
+resolved.
 
 ## Manual Step Repair
 

@@ -14,7 +14,7 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import {
@@ -22,7 +22,7 @@ import {
   noMistakesRoundId,
   planNoMistakesInvocation,
   planNoMistakesRoundStart,
-  type NoMistakesExternalState
+  type NoMistakesExternalState,
 } from "../src/adapters/no-mistakes-executor.js";
 import { readNoMistakesExternalState } from "../src/core/executors/no-mistakes/mechanism.js";
 import {
@@ -30,7 +30,7 @@ import {
   runNoMistakesMirrorRound,
   runNoMistakesMirrorStep,
   type NoMistakesMirrorReader,
-  type RunNoMistakesMirrorStepInput
+  type RunNoMistakesMirrorStepInput,
 } from "../src/adapters/no-mistakes-orchestrator.js";
 
 // The stateful seam twin of the pure projections (no-mistakes-executor.test.ts)
@@ -52,13 +52,13 @@ const HEAD_SHA = "a".repeat(40);
 const INVOCATION_ID = noMistakesInvocationId(
   WORKFLOW_RUN_ID,
   STEP_RUN_ID,
-  ATTEMPT
+  ATTEMPT,
 );
 const ROUND_ID = noMistakesRoundId(INVOCATION_ID);
 const EXPECTED_EXTERNAL_IDENTITY = {
   externalRunId: "nm-run-9",
   branch: "feat/x",
-  headSha: HEAD_SHA
+  headSha: HEAD_SHA,
 };
 
 const tempRoots: string[] = [];
@@ -72,7 +72,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-no-mistakes-orchestrator-")
+    path.join(os.tmpdir(), "momentum-no-mistakes-orchestrator-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -83,11 +83,11 @@ function makeTempDir(): string {
 // invocation + round itself.
 function seedParents(db: MomentumDb): void {
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`
+       VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
   ).run();
 }
 
@@ -102,7 +102,7 @@ function openMirrorRoundDb(): MomentumDb {
     stepRunId: STEP_RUN_ID,
     stepKey: STEP_KEY,
     attempt: ATTEMPT,
-    startedAt: 1
+    startedAt: 1,
   });
   insertExecutorInvocation(db, invocation, { now: 1 });
   const round = planNoMistakesRoundStart({
@@ -110,9 +110,9 @@ function openMirrorRoundDb(): MomentumDb {
     runtime: {
       inputDigest: "sha256:seed",
       artifactRoot: "/artifacts/nm-0",
-      logPaths: ["/artifacts/nm-0/state.json"]
+      logPaths: ["/artifacts/nm-0/state.json"],
     },
-    startedAt: 1_000
+    startedAt: 1_000,
   });
   insertExecutorRound(db, round, { now: 1_000 });
   return db;
@@ -122,27 +122,27 @@ function openMirrorRoundDb(): MomentumDb {
 // status path exercises. Empty findings/decisions by default so the status-path
 // tests stay focused.
 function externalState(
-  overrides: Partial<NoMistakesExternalState> = {}
+  overrides: Partial<NoMistakesExternalState> = {},
 ): NoMistakesExternalState {
   return {
     externalRunId: "nm-run-9",
     branch: "feat/x",
     headSha: HEAD_SHA,
-    activeStep: "review",
+    activeStep: overrides.stepStatus === "completed" ? null : "review",
     stepStatus: "running",
     findings: [],
     selectedFindingIds: [],
     decisions: [],
     prUrl: null,
     ciState: "none",
-    ...overrides
+    ...overrides,
   };
 }
 
 // A reader that hands back a typed snapshot (the mechanism's success shape).
 function okReader(
   overrides: Partial<NoMistakesExternalState> = {},
-  digest = "sha256:poll"
+  digest = "sha256:poll",
 ): NoMistakesMirrorReader {
   return () => ({ ok: true, value: externalState(overrides), digest });
 }
@@ -162,7 +162,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.decision.classification).toBe("continue");
@@ -185,7 +185,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.decision.classification).toBe("manual_recovery_required");
@@ -193,7 +193,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.round.state).toBe("manual_recovery_required");
     expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toEqual([]);
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
   });
 
@@ -212,11 +212,11 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
             externalId: "D-1",
             summary: "ship it",
             allowedActions: ["approve"],
-            resolution: "approved"
-          }
-        ]
+            resolution: "approved",
+          },
+        ],
       }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(result.decision.classification).toBe("complete");
@@ -236,10 +236,14 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "pick a fix", allowedActions: ["a", "b"] }
-        ]
+          {
+            externalId: "D-1",
+            summary: "pick a fix",
+            allowedActions: ["a", "b"],
+          },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("waiting_operator");
@@ -257,7 +261,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "awaiting_approval" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("waiting_operator");
@@ -273,7 +277,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "failed" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("failed");
@@ -289,7 +293,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "blocked" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("blocked");
@@ -305,7 +309,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "failed" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("manual_recovery_required");
@@ -320,14 +324,14 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
   });
 
@@ -338,14 +342,14 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "failed" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
   });
 
@@ -356,14 +360,14 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "blocked" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
   });
 
@@ -374,7 +378,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ headSha: "not-a-sha" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.state).toBe("manual_recovery_required");
@@ -389,9 +393,9 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: failReader(
-        "external no-mistakes state file is unreadable: ENOENT no such file"
+        "external no-mistakes state file is unreadable: ENOENT no such file",
       ),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     // A reader failure is untrusted evidence too: it settles the same way as a
@@ -401,7 +405,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.round.recoveryCode).toBe("external_state_unreadable");
     expect(result.round.humanGate).toBe("manual_recovery_required");
     expect(result.round.summary).toBe(
-      "external no-mistakes state file is unreadable: ENOENT no such file"
+      "external no-mistakes state file is unreadable: ENOENT no such file",
     );
   });
 
@@ -416,7 +420,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }, "sha256:tick-7"),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.inputDigest).toBe("sha256:tick-7");
@@ -430,7 +434,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: failReader("external no-mistakes state must be a JSON object"),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.round.inputDigest).toBe("sha256:seed");
@@ -448,7 +452,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
         seen = round;
         return { ok: true, value: externalState(), digest: "sha256:poll" };
       },
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(seen).not.toBeNull();
@@ -464,7 +468,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(first.round.state).toBe("succeeded");
     const before = loadExecutorRound(db, ROUND_ID)!;
@@ -479,26 +483,29 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
           readCalls += 1;
           return {
             ok: true,
-            value: externalState({ stepStatus: "completed", ciState: "passed" }),
-            digest: "sha256:terminal-repoll"
+            value: externalState({
+              stepStatus: "completed",
+              ciState: "passed",
+            }),
+            digest: "sha256:terminal-repoll",
           };
         },
-        polledAt: 3_000
-      })
+        polledAt: 3_000,
+      }),
     ).toThrow(/terminal/i);
 
     expect(readCalls).toBe(0);
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(before);
     expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toEqual(
-      checkpointsBefore
+      checkpointsBefore,
     );
   });
 
   it("refuses to poll a live round outside the no-mistakes family", () => {
     const db = openMirrorRoundDb();
-    db.prepare("UPDATE executor_rounds SET executor_family = 'goal-loop' WHERE round_id = ?").run(
-      ROUND_ID
-    );
+    db.prepare(
+      "UPDATE executor_rounds SET executor_family = 'goal-loop' WHERE round_id = ?",
+    ).run(ROUND_ID);
     let readCalls = 0;
 
     expect(() =>
@@ -509,11 +516,13 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
           readCalls += 1;
           return { ok: true, value: externalState(), digest: "sha256:foreign" };
         },
-        polledAt: 2_000
-      })
+        polledAt: 2_000,
+      }),
     ).toThrow(/non-no-mistakes/i);
     expect(readCalls).toBe(0);
-    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe("mirroring_external_state");
+    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
+      "mirroring_external_state",
+    );
   });
 });
 
@@ -532,18 +541,18 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
             externalId: "F-1",
             title: "missing regression test",
             severity: "high",
-            detail: "cover the empty-input path"
+            detail: "cover the empty-input path",
           },
-          { externalId: "F-2", title: "typo in comment", severity: "low" }
+          { externalId: "F-2", title: "typo in comment", severity: "low" },
         ],
-        selectedFindingIds: ["F-1"]
+        selectedFindingIds: ["F-1"],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.findings.map((f) => f.findingId)).toEqual([
       `${ROUND_ID}-finding-F-1`,
-      `${ROUND_ID}-finding-F-2`
+      `${ROUND_ID}-finding-F-2`,
     ]);
     expect(result.findings[0]!.selected).toBe(true);
     expect(result.findings[1]!.selected).toBe(false);
@@ -568,16 +577,16 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
             allowedActions: ["approve", "reject"],
             recommendedAction: "approve",
             chosenAction: "approve",
-            resolution: "approved"
+            resolution: "approved",
           },
           {
             externalId: "D-2",
             summary: "still open — outside the delegated envelope",
-            allowedActions: ["merge", "hold"]
-          }
-        ]
+            allowedActions: ["merge", "hold"],
+          },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.decisions[0]!.resolution).toBe("approved");
@@ -585,7 +594,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     expect(result.decisions[1]!.resolution).toBeNull();
     expect(result.decisions[1]!.allowedActions).toEqual(["merge", "hold"]);
     expect(listExecutorDecisionsForRound(db, ROUND_ID)).toEqual(
-      result.decisions
+      result.decisions,
     );
   });
 
@@ -596,7 +605,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
       db,
       roundId: ROUND_ID,
       read: failReader("external no-mistakes state headSha must be a string"),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.findings).toEqual([]);
@@ -613,15 +622,15 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
         stepStatus: "running",
         findings: [
           { externalId: "F-1", title: "first duplicate" },
-          { externalId: "F-1", title: "second duplicate" }
+          { externalId: "F-1", title: "second duplicate" },
         ],
         selectedFindingIds: ["F-1"],
         decisions: [
           { externalId: "D-1", summary: "first", allowedActions: ["a"] },
-          { externalId: "D-1", summary: "second", allowedActions: ["b"] }
-        ]
+          { externalId: "D-1", summary: "second", allowedActions: ["b"] },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     expect(result.decision.recoveryCode).toBe("external_state_unreadable");
@@ -641,10 +650,14 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
         findings: [{ externalId: "F-1", title: "needs fix" }],
         selectedFindingIds: [],
         decisions: [
-          { externalId: "D-1", summary: "choose path", allowedActions: ["a", "b"] }
-        ]
+          {
+            externalId: "D-1",
+            summary: "choose path",
+            allowedActions: ["a", "b"],
+          },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     const second = runNoMistakesMirrorRound({
       db,
@@ -660,23 +673,27 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
             summary: "choose path",
             allowedActions: ["a", "b"],
             chosenAction: "a",
-            resolution: "approved"
-          }
-        ]
+            resolution: "approved",
+          },
+        ],
       }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(second.findings).toHaveLength(2);
     expect(second.findings[0]!.selected).toBe(false);
     expect(second.findings[0]!.severity).toBeNull();
-    expect(second.findings[1]!.findingId).not.toBe(second.findings[0]!.findingId);
+    expect(second.findings[1]!.findingId).not.toBe(
+      second.findings[0]!.findingId,
+    );
     expect(second.findings[1]!.selected).toBe(true);
     expect(second.findings[1]!.severity).toBe("high");
     expect(second.decisions).toHaveLength(2);
     expect(second.decisions[0]!.chosenAction).toBeNull();
     expect(second.decisions[0]!.resolution).toBeNull();
-    expect(second.decisions[1]!.decisionId).not.toBe(second.decisions[0]!.decisionId);
+    expect(second.decisions[1]!.decisionId).not.toBe(
+      second.decisions[0]!.decisionId,
+    );
     expect(second.decisions[1]!.chosenAction).toBe("a");
     expect(second.decisions[1]!.resolution).toBe("approved");
   });
@@ -690,7 +707,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
       expectedExternalIdentity: {
         externalRunId: "nm-run-123",
         branch: "feat/mirror",
-        headSha: "b".repeat(40)
+        headSha: "b".repeat(40),
       },
       read: okReader({
         externalRunId: "nm-run-123",
@@ -699,9 +716,9 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
         activeStep: "ci",
         stepStatus: "running",
         prUrl: "https://github.com/acme/repo/pull/7",
-        ciState: "pending"
+        ciState: "pending",
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     const checkpoints = listExecutorCheckpointsForRound(db, ROUND_ID);
@@ -714,7 +731,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
       activeStep: "ci",
       stepStatus: "running",
       prUrl: "https://github.com/acme/repo/pull/7",
-      ciState: "pending"
+      ciState: "pending",
     });
   });
 });
@@ -725,7 +742,7 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
     const read = okReader({
       stepStatus: "running",
       findings: [{ externalId: "F-1", title: "missing test" }],
-      selectedFindingIds: ["F-1"]
+      selectedFindingIds: ["F-1"],
     });
 
     runNoMistakesMirrorRound({
@@ -733,7 +750,7 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read,
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     // A second poll of the same long-lived round re-derives the same finding ids;
     // the append-only evidence table must not be re-inserted (it would throw).
@@ -741,11 +758,11 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       db,
       roundId: ROUND_ID,
       read,
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(second.findings.map((f) => f.findingId)).toEqual([
-      `${ROUND_ID}-finding-F-1`
+      `${ROUND_ID}-finding-F-1`,
     ]);
     expect(listExecutorFindingsForRound(db, ROUND_ID)).toHaveLength(1);
   });
@@ -759,9 +776,9 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "running",
-        findings: [{ externalId: "F-1", title: "first finding" }]
+        findings: [{ externalId: "F-1", title: "first finding" }],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     const second = runNoMistakesMirrorRound({
       db,
@@ -770,15 +787,15 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
         stepStatus: "running",
         findings: [
           { externalId: "F-1", title: "first finding" },
-          { externalId: "F-2", title: "second finding surfaced later" }
-        ]
+          { externalId: "F-2", title: "second finding surfaced later" },
+        ],
       }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(second.findings.map((f) => f.findingId)).toEqual([
       `${ROUND_ID}-finding-F-1`,
-      `${ROUND_ID}-finding-F-2`
+      `${ROUND_ID}-finding-F-2`,
     ]);
   });
 
@@ -787,8 +804,8 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
     const read = okReader({
       stepStatus: "awaiting_decision",
       decisions: [
-        { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
-      ]
+        { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] },
+      ],
     });
 
     runNoMistakesMirrorRound({
@@ -796,7 +813,7 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read,
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     runNoMistakesMirrorRound({ db, roundId: ROUND_ID, read, polledAt: 3_000 });
 
@@ -811,9 +828,9 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
         {
           externalId: "D-1-snapshot-2",
           summary: "decide with suffix-like external id",
-          allowedActions: ["a", "b"]
-        }
-      ]
+          allowedActions: ["a", "b"],
+        },
+      ],
     });
 
     runNoMistakesMirrorRound({
@@ -821,17 +838,17 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read,
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     const second = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read,
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(second.decisions.map((decision) => decision.decisionId)).toEqual([
-      `${ROUND_ID}-decision-D-1-snapshot-2`
+      `${ROUND_ID}-decision-D-1-snapshot-2`,
     ]);
     expect(listExecutorDecisionsForRound(db, ROUND_ID)).toHaveLength(1);
   });
@@ -846,7 +863,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(first.round.state).toBe("mirroring_external_state");
 
@@ -854,7 +871,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
     expect(second.round.state).toBe("mirroring_external_state");
 
@@ -862,7 +879,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 4_000
+      polledAt: 4_000,
     });
     expect(third.round.state).toBe("succeeded");
     expect(third.round.finishedAt).toBe(4_000);
@@ -879,7 +896,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read,
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(first.round.state).toBe("mirroring_external_state");
 
@@ -887,7 +904,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read,
-      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS,
     });
 
     expect(stalled.decision.classification).toBe("manual_recovery_required");
@@ -897,7 +914,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(stalled.round.summary).toContain("has not changed");
     expect(stalled.round.summary).toContain("review");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
   });
 
@@ -913,13 +930,13 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read,
-      polledAt: firstPollAt
+      polledAt: firstPollAt,
     });
     const intermediate = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read,
-      polledAt: intermediatePollAt
+      polledAt: intermediatePollAt,
     });
     expect(intermediate.decision.classification).toBe("continue");
 
@@ -927,13 +944,13 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read,
-      polledAt: firstPollAt + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+      polledAt: firstPollAt + NO_MISTAKES_MIRROR_STALL_AFTER_MS,
     });
 
     expect(stalled.decision.classification).toBe("manual_recovery_required");
     expect(stalled.round.state).toBe("manual_recovery_required");
     expect(stalled.round.summary).toContain(
-      `has not changed for ${NO_MISTAKES_MIRROR_STALL_AFTER_MS}ms`
+      `has not changed for ${NO_MISTAKES_MIRROR_STALL_AFTER_MS}ms`,
     );
   });
 
@@ -944,7 +961,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       activeStep: "test-agent",
       findings: [],
       selectedFindingIds: [],
-      decisions: []
+      decisions: [],
     };
 
     const first = runNoMistakesMirrorRound({
@@ -952,7 +969,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader(runningStartupOnly, "sha256:startup-json-1"),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(first.round.inputDigest).toBe("sha256:startup-json-1");
     const semanticProgressDigest = first.round.resultDigest;
@@ -962,7 +979,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read: okReader(runningStartupOnly, "sha256:startup-json-2"),
-      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS,
     });
 
     expect(stalled.round.inputDigest).toBe("sha256:startup-json-2");
@@ -981,18 +998,18 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader(
         { stepStatus: "running", activeStep: "review" },
-        "sha256:first"
+        "sha256:first",
       ),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     const moved = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read: okReader(
         { stepStatus: "running", activeStep: "test" },
-        "sha256:second"
+        "sha256:second",
       ),
-      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS,
     });
 
     expect(moved.decision.classification).toBe("continue");
@@ -1008,38 +1025,30 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     db.prepare(
       `INSERT INTO executor_checkpoints
          (checkpoint_id, round_id, sequence, stage, detail, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      `${ROUND_ID}-external-state-2`,
-      ROUND_ID,
-      2,
-      "reserved",
-      null,
-      2_500
-    );
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(`${ROUND_ID}-external-state-2`, ROUND_ID, 2, "reserved", null, 2_500);
 
     expect(() =>
       runNoMistakesMirrorRound({
         db,
         roundId: ROUND_ID,
         read: okReader({ stepStatus: "completed", ciState: "passed" }),
-        polledAt: 3_000
-      })
+        polledAt: 3_000,
+      }),
     ).toThrow(/checkpoint/i);
 
     expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
-      "mirroring_external_state"
+      "mirroring_external_state",
     );
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
-    expect(listExecutorCheckpointsForRound(db, ROUND_ID).map((c) => c.stage)).toEqual([
-      "external_state_mirrored",
-      "reserved"
-    ]);
+    expect(
+      listExecutorCheckpointsForRound(db, ROUND_ID).map((c) => c.stage),
+    ).toEqual(["external_state_mirrored", "reserved"]);
   });
 
   it("resumes a waiting_operator round back into mirroring when the decision clears", () => {
@@ -1052,10 +1061,10 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
-        ]
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(gated.round.state).toBe("waiting_operator");
 
@@ -1065,7 +1074,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "running" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
     expect(resumed.round.state).toBe("mirroring_external_state");
     expect(resumed.round.finishedAt).toBeNull();
@@ -1082,10 +1091,10 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
-        ]
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
 
     const completed = runNoMistakesMirrorRound({
@@ -1094,18 +1103,20 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({
         stepStatus: "completed",
         ciState: "passed",
-        decisions: []
+        decisions: [],
       }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(completed.decision.classification).toBe("manual_recovery_required");
     expect(completed.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(completed.round.state).toBe("manual_recovery_required");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "manual_recovery_required"
+      "manual_recovery_required",
     );
-    expect(listExecutorDecisionsForRound(db, ROUND_ID)[0]!.resolution).toBeNull();
+    expect(
+      listExecutorDecisionsForRound(db, ROUND_ID)[0]!.resolution,
+    ).toBeNull();
   });
 
   it("allows completion when a previously mirrored decision was resolved before being omitted", () => {
@@ -1118,10 +1129,10 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
-        ]
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] },
+        ],
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     runNoMistakesMirrorRound({
       db,
@@ -1134,11 +1145,11 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
             summary: "decide",
             allowedActions: ["a", "b"],
             chosenAction: "a",
-            resolution: "approved"
-          }
-        ]
+            resolution: "approved",
+          },
+        ],
       }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     const completed = runNoMistakesMirrorRound({
@@ -1147,9 +1158,9 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       read: okReader({
         stepStatus: "completed",
         ciState: "passed",
-        decisions: []
+        decisions: [],
       }),
-      polledAt: 4_000
+      polledAt: 4_000,
     });
 
     expect(completed.round.state).toBe("succeeded");
@@ -1161,7 +1172,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     const mismatches: Partial<NoMistakesExternalState>[] = [
       { externalRunId: "nm-run-swapped" },
       { branch: "feat/swapped" },
-      { headSha: "b".repeat(40) }
+      { headSha: "b".repeat(40) },
     ];
 
     for (const mismatch of mismatches) {
@@ -1172,7 +1183,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
         roundId: ROUND_ID,
         expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
         read: okReader({ stepStatus: "running" }, "sha256:first"),
-        polledAt: 2_000
+        polledAt: 2_000,
       });
 
       const completed = runNoMistakesMirrorRound({
@@ -1182,23 +1193,23 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
           {
             ...mismatch,
             stepStatus: "completed",
-            ciState: "passed"
+            ciState: "passed",
           },
-          "sha256:swapped"
+          "sha256:swapped",
         ),
-        polledAt: 3_000
+        polledAt: 3_000,
       });
 
       expect(completed.decision.classification).toBe(
-        "manual_recovery_required"
+        "manual_recovery_required",
       );
       expect(completed.decision.recoveryCode).toBe(
-        "external_state_inconsistent"
+        "external_state_inconsistent",
       );
       expect(completed.round.state).toBe("manual_recovery_required");
       expect(completed.round.inputDigest).toBe("sha256:swapped");
       expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-        "manual_recovery_required"
+        "manual_recovery_required",
       );
       expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toHaveLength(1);
     }
@@ -1212,20 +1223,20 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
-        stepStatus: "awaiting_approval"
+        stepStatus: "awaiting_approval",
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     expect(gated.round.state).toBe("waiting_operator");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "waiting_operator"
+      "waiting_operator",
     );
 
     const settled = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(settled.round.state).toBe("succeeded");
@@ -1242,9 +1253,9 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       roundId: ROUND_ID,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
-        stepStatus: "awaiting_approval"
+        stepStatus: "awaiting_approval",
       }),
-      polledAt: 2_000
+      polledAt: 2_000,
     });
     updateExecutorRound(
       db,
@@ -1252,19 +1263,19 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       {
         toState: "mirroring_external_state",
         classification: "continue",
-        finishedAt: null
+        finishedAt: null,
       },
-      { now: 2_500 }
+      { now: 2_500 },
     );
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
-      "waiting_operator"
+      "waiting_operator",
     );
 
     const settled = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 3_000
+      polledAt: 3_000,
     });
 
     expect(settled.round.state).toBe("succeeded");
@@ -1273,19 +1284,18 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
 });
 
 describe("runNoMistakesMirrorStep — materialize invocation + round + first poll", () => {
-  type ExpectedIdentityIsRequired =
-    RunNoMistakesMirrorStepInput extends {
-      expectedExternalIdentity: typeof EXPECTED_EXTERNAL_IDENTITY;
-    }
-      ? true
-      : false;
+  type ExpectedIdentityIsRequired = RunNoMistakesMirrorStepInput extends {
+    expectedExternalIdentity: typeof EXPECTED_EXTERNAL_IDENTITY;
+  }
+    ? true
+    : false;
   const expectedIdentityIsRequired: ExpectedIdentityIsRequired = true;
 
   function resolveRoundInputs() {
     return {
       inputDigest: "sha256:start",
       artifactRoot: "/artifacts/nm-step",
-      logPaths: ["/artifacts/nm-step/state.json"]
+      logPaths: ["/artifacts/nm-step/state.json"],
     };
   }
 
@@ -1301,7 +1311,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       read,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       resolveRoundInputs,
-      now
+      now,
     });
     return { db, result };
   }
@@ -1325,7 +1335,9 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(result.round.round.model).toBeNull();
     expect(result.round.round.effort).toBeNull();
     // Both rows are durable.
-    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(result.invocation);
+    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(
+      result.invocation,
+    );
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(result.round.round);
   });
 
@@ -1333,7 +1345,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     const { result } = runStep(okReader({ stepStatus: "running" }));
     expect(result.round.round.artifactRoot).toBe("/artifacts/nm-step");
     expect(result.round.round.logPaths).toEqual([
-      "/artifacts/nm-step/state.json"
+      "/artifacts/nm-step/state.json",
     ]);
   });
 
@@ -1349,7 +1361,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
 
   it("settles the round succeeded and the invocation succeeded on a corroborated completed first poll", () => {
     const { result } = runStep(
-      okReader({ stepStatus: "completed", ciState: "passed" })
+      okReader({ stepStatus: "completed", ciState: "passed" }),
     );
 
     expect(result.round.round.state).toBe("succeeded");
@@ -1362,9 +1374,9 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       okReader({
         stepStatus: "awaiting_decision",
         decisions: [
-          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
-        ]
-      })
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] },
+        ],
+      }),
     );
 
     expect(result.invocation.state).toBe("waiting_operator");
@@ -1397,7 +1409,9 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
 
   it("settles the invocation manual_recovery_required on an unreadable first poll", () => {
     const { result } = runStep(
-      failReader("external no-mistakes state is not valid JSON: Unexpected token")
+      failReader(
+        "external no-mistakes state is not valid JSON: Unexpected token",
+      ),
     );
     expect(result.invocation.state).toBe("manual_recovery_required");
     expect(result.round.round.state).toBe("manual_recovery_required");
@@ -1419,15 +1433,15 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
         },
         expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
         resolveRoundInputs,
-        now: stubClock()
-      })
+        now: stubClock(),
+      }),
     ).toThrow("simulated poll crash");
 
     const reattached = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
-      polledAt: 5_000
+      polledAt: 5_000,
     });
 
     expect(reattached.decision.classification).toBe("complete");
@@ -1442,9 +1456,9 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
         findings: [{ externalId: "F-1", title: "missing test" }],
         selectedFindingIds: ["F-1"],
         decisions: [
-          { externalId: "D-1", summary: "decide", allowedActions: ["a"] }
-        ]
-      })
+          { externalId: "D-1", summary: "decide", allowedActions: ["a"] },
+        ],
+      }),
     );
 
     expect(listExecutorFindingsForRound(db, ROUND_ID)).toHaveLength(1);
@@ -1461,18 +1475,26 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       stepKey: STEP_KEY,
       read: okReader({ stepStatus: "failed" }),
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
-      resolveRoundInputs
+      resolveRoundInputs,
     };
 
-    const first = runNoMistakesMirrorStep({ ...base, attempt: 1, now: stubClock() });
-    const second = runNoMistakesMirrorStep({ ...base, attempt: 2, now: stubClock() });
+    const first = runNoMistakesMirrorStep({
+      ...base,
+      attempt: 1,
+      now: stubClock(),
+    });
+    const second = runNoMistakesMirrorStep({
+      ...base,
+      attempt: 2,
+      now: stubClock(),
+    });
 
     // A re-run is a fresh attempt minting a fresh invocation, never mutating the prior one.
     expect(first.invocation.invocationId).not.toBe(
-      second.invocation.invocationId
+      second.invocation.invocationId,
     );
     expect(second.invocation.invocationId).toBe(
-      noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2)
+      noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2),
     );
   });
 
@@ -1492,7 +1514,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       attempt: ATTEMPT,
       read: okReader({ stepStatus: "failed" }),
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
-      resolveRoundInputs
+      resolveRoundInputs,
     };
 
     const first = runNoMistakesMirrorStep({ ...base, now: stubClock() });
@@ -1505,14 +1527,14 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     // A second dispatch under the same attempt collides on the invocation id and
     // fails closed — never a silent second owner.
     expect(() =>
-      runNoMistakesMirrorStep({ ...base, now: stubClock() })
+      runNoMistakesMirrorStep({ ...base, now: stubClock() }),
     ).toThrow(ExecutorInvocationConflictError);
 
     // The durable owner + its round are byte-for-byte unchanged: the start
     // savepoint left no half-written round behind.
     expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(ownerBefore);
     expect(listExecutorRoundsForInvocation(db, INVOCATION_ID)).toEqual(
-      roundsBefore
+      roundsBefore,
     );
   });
 });
@@ -1529,14 +1551,14 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
         externalRunId: "nm-run-42",
         branch: "feat/x",
         headSha: HEAD_SHA,
-        activeStep: "merge",
+        activeStep: null,
         stepStatus: "completed",
         findings: [],
         selectedFindingIds: [],
         decisions: [],
         prUrl: "https://github.com/x/y/pull/1",
-        ciState: "passed"
-      })
+        ciState: "passed",
+      }),
     );
 
     const result = runNoMistakesMirrorStep({
@@ -1549,13 +1571,13 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
       expectedExternalIdentity: {
         externalRunId: "nm-run-42",
         branch: "feat/x",
-        headSha: HEAD_SHA
+        headSha: HEAD_SHA,
       },
       resolveRoundInputs: () => ({
         inputDigest: null,
         artifactRoot: dir,
-        logPaths: []
-      })
+        logPaths: [],
+      }),
     });
 
     // The full M10-07 stack — reader -> brain -> persistence — composes.
@@ -1577,18 +1599,18 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
       attempt: ATTEMPT,
       read: () =>
         readNoMistakesExternalState({
-          statePath: path.join(makeTempDir(), "does-not-exist.json")
+          statePath: path.join(makeTempDir(), "does-not-exist.json"),
         }),
       expectedExternalIdentity: {
         externalRunId: "nm-run-42",
         branch: "feat/x",
-        headSha: HEAD_SHA
+        headSha: HEAD_SHA,
       },
       resolveRoundInputs: () => ({
         inputDigest: null,
         artifactRoot: null,
-        logPaths: []
-      })
+        logPaths: [],
+      }),
     });
 
     expect(result.round.round.state).toBe("manual_recovery_required");

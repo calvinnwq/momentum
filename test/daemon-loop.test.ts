@@ -9,23 +9,23 @@ import {
   getDaemonRun,
   requestDaemonRunImmediateStop,
   requestDaemonRunStop,
-  startDaemonRun
+  startDaemonRun,
 } from "../src/core/daemon/runs.js";
 import {
   runDaemonLoop,
   type DaemonLoopCycle,
-  type DaemonLoopInput
+  type DaemonLoopInput,
 } from "../src/core/daemon/loop.js";
-import {
-  acquireRepoLock,
-  getRepoLock
-} from "../src/core/repo/locks.js";
+import { acquireRepoLock, getRepoLock } from "../src/core/repo/locks.js";
 import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
-  getQueueJob
+  getQueueJob,
 } from "../src/core/daemon/queue-jobs.js";
-import { JOB_RECOVERED_AUTO_REPENDED_STATUS, REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS } from "../src/core/daemon/stale-recovery.js";
+import {
+  JOB_RECOVERED_AUTO_REPENDED_STATUS,
+  REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
+} from "../src/core/daemon/stale-recovery.js";
 import {
   WORKFLOW_DISPATCH_LEASE_KIND,
   type AsyncWorkflowStepDispatch,
@@ -33,9 +33,10 @@ import {
   type RunWorkflowSchedulerOnceResult,
   type WorkflowStepDispatch,
   type WorkflowStepDispatchContext,
-  type WorkflowStepDispatchResult
+  type WorkflowStepDispatchResult,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { WORKFLOW_DISPATCH_RESULT_STATUS } from "../src/core/workflow/dispatch/execute.js";
 
 const tempRoots: string[] = [];
 
@@ -58,7 +59,7 @@ function seedDaemonRun(db: MomentumDb): string {
   const { runId } = startDaemonRun(db, {
     pid: 1234,
     host: "daemon-loop-test",
-    now: 100_000
+    now: 100_000,
   });
   return runId;
 }
@@ -78,7 +79,7 @@ function makeRecordingSleep() {
     calls,
     sleep: async (ms: number) => {
       calls.push(ms);
-    }
+    },
   };
 }
 
@@ -98,7 +99,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 25,
         maxIdleCycles: 3,
         now: makeMonotonicNow(),
-        sleep
+        sleep,
       });
 
       expect(result.exitReason).toBe("max_idle_cycles");
@@ -133,7 +134,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 0,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(idleResult.exitReason).toBe("max_idle_cycles");
@@ -155,7 +156,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 0,
         maxIdleCycles: 0,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(zeroResult.exitReason).toBe("max_idle_cycles");
@@ -178,7 +179,7 @@ describe("runDaemonLoop", () => {
       requestDaemonRunStop(db, {
         runId,
         reason: "operator stop",
-        now: 100_500
+        now: 100_500,
       });
       const { calls, sleep } = makeRecordingSleep();
 
@@ -188,7 +189,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop",
         sleep,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("stop_requested");
@@ -225,10 +226,10 @@ describe("runDaemonLoop", () => {
             requestDaemonRunStop(db, {
               runId,
               reason: "operator stop",
-              now: 200_000
+              now: 200_000,
             });
           }
-        }
+        },
       });
 
       expect(result.exitReason).toBe("stop_requested");
@@ -251,7 +252,7 @@ describe("runDaemonLoop", () => {
       requestDaemonRunImmediateStop(db, {
         runId,
         reason: "operator-now",
-        now: 100_500
+        now: 100_500,
       });
 
       const result = await runDaemonLoop({
@@ -260,7 +261,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop-now-idle",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("stop_now_requested");
@@ -287,13 +288,13 @@ describe("runDaemonLoop", () => {
       requestDaemonRunImmediateStop(db, {
         runId,
         reason: "operator-now",
-        now: 100_500
+        now: 100_500,
       });
       finishDaemonRun(db, {
         runId,
         terminalState: "canceled",
         cancelOutcome: "idle",
-        now: 100_750
+        now: 100_750,
       });
 
       const result = await runDaemonLoop({
@@ -302,7 +303,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-terminal-canceled",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -325,12 +326,12 @@ describe("runDaemonLoop", () => {
       requestDaemonRunStop(db, {
         runId,
         reason: "graceful",
-        now: 100_100
+        now: 100_100,
       });
       requestDaemonRunImmediateStop(db, {
         runId,
         reason: "now-upgrade",
-        now: 100_500
+        now: 100_500,
       });
 
       const result = await runDaemonLoop({
@@ -339,7 +340,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop-now-upgrade",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("stop_now_requested");
@@ -370,7 +371,7 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         sleep: async () => {
           throw new Error("sleep boom");
-        }
+        },
       });
 
       expect(result.exitReason).toBe("internal_error");
@@ -403,7 +404,7 @@ describe("runDaemonLoop", () => {
       workerId: "daemon-loop-db-error",
       pollIntervalMs: 0,
       now: makeMonotonicNow(),
-      sleep: async () => undefined
+      sleep: async () => undefined,
     });
 
     expect(result.exitReason).toBe("internal_error");
@@ -427,7 +428,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-missing",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("run_missing");
@@ -448,7 +449,7 @@ describe("runDaemonLoop", () => {
       finishDaemonRun(db, {
         runId,
         terminalState: "stopped",
-        now: 100_500
+        now: 100_500,
       });
 
       const result = await runDaemonLoop({
@@ -458,7 +459,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-terminal",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -481,7 +482,7 @@ describe("runDaemonLoop", () => {
         runId,
         terminalState: "error",
         now: 100_500,
-        error: "previous daemon failure"
+        error: "previous daemon failure",
       });
 
       const result = await runDaemonLoop({
@@ -491,7 +492,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-terminal-error",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -526,20 +527,20 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         onCycleComplete: (cycle) => {
           cycles.push(cycle);
-        }
+        },
       });
 
       expect(cycles).toEqual([
         {
           cycleIndex: 0,
           observedState: "running",
-          startedAt: 1_700_000_000_000
+          startedAt: 1_700_000_000_000,
         },
         {
           cycleIndex: 1,
           observedState: "running",
-          startedAt: 1_700_000_001_000
-        }
+          startedAt: 1_700_000_001_000,
+        },
       ]);
       // Without a workflowLane config the tick never runs, so the payload
       // carries no workflowResult key at all.
@@ -562,7 +563,7 @@ describe("runDaemonLoop", () => {
         onCycleComplete: (cycle) => {
           laneCycles.push(cycle);
         },
-        workflowLane: { dispatch: async () => ({ status: "dispatched" }) }
+        workflowLane: { dispatch: async () => ({ status: "dispatched" }) },
       });
 
       expect(laneCycles).toHaveLength(1);
@@ -590,7 +591,7 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         onCycleComplete: () => {
           throw new Error("observer failed");
-        }
+        },
       });
 
       expect(result.ok).toBe(false);
@@ -618,11 +619,9 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-validate",
         pollIntervalMs: -1,
         sleep: async () => undefined,
-        now: makeMonotonicNow()
+        now: makeMonotonicNow(),
       };
-      await expect(runDaemonLoop(input)).rejects.toThrow(
-        /pollIntervalMs/
-      );
+      await expect(runDaemonLoop(input)).rejects.toThrow(/pollIntervalMs/);
     } finally {
       db.close();
     }
@@ -636,14 +635,21 @@ describe("runDaemonLoop", () => {
       db.prepare(
         `INSERT INTO goals
            (id, title, branch, artifact_dir, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      ).run("goal-recover", "recover", "momentum/recover", "/tmp/recover", 1, 1);
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "goal-recover",
+        "recover",
+        "momentum/recover",
+        "/tmp/recover",
+        1,
+        1,
+      );
       const enqueued = enqueueGoalIterationJob(db, {
         goalId: "goal-recover",
         iteration: 1,
         idempotencyKey: "goal-recover:1",
         artifactPath: "/tmp/recover/iterations/1",
-        now: 100
+        now: 100,
       });
       const lock = acquireRepoLock(db, {
         repoRoot: "/tmp/recover",
@@ -652,11 +658,11 @@ describe("runDaemonLoop", () => {
         iteration: 1,
         jobId: enqueued.jobId,
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       if (!lock.ok) throw new Error("acquire failed in test setup");
       db.prepare(
-        "UPDATE jobs SET state = 'succeeded', updated_at = updated_at WHERE id = ?"
+        "UPDATE jobs SET state = 'succeeded', updated_at = updated_at WHERE id = ?",
       ).run(enqueued.jobId);
 
       // Stale claimed job with no live owner: also re-pendable.
@@ -665,12 +671,12 @@ describe("runDaemonLoop", () => {
         iteration: 2,
         idempotencyKey: "goal-recover:2",
         artifactPath: "/tmp/recover/iterations/2",
-        now: 200
+        now: 200,
       });
       const claimed = claimPendingGoalIterationJob(db, {
         workerId: "previous-worker",
         leaseDurationMs: 900,
-        now: 200
+        now: 200,
       });
       if (!claimed.ok) throw new Error("claim failed in test setup");
 
@@ -684,7 +690,7 @@ describe("runDaemonLoop", () => {
         maxLoopIterations: 1,
         startupRecoveryGraceMs: 0,
         now: makeMonotonicNow(1_000_000, 1),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -693,22 +699,22 @@ describe("runDaemonLoop", () => {
       expect(recovery.repoLocks.recovered).toHaveLength(1);
       expect(recovery.repoLocks.recovered[0]!.lock.id).toBe(lock.lockId);
       expect(recovery.repoLocks.recovered[0]!.recoveryStatus).toBe(
-        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
       );
       expect(recovery.claimedJobs.recovered).toHaveLength(1);
       expect(recovery.claimedJobs.recovered[0]!.jobBefore.id).toBe(
-        enqueued2.jobId
+        enqueued2.jobId,
       );
       expect(recovery.claimedJobs.recovered[0]!.recoveryStatus).toBe(
-        JOB_RECOVERED_AUTO_REPENDED_STATUS
+        JOB_RECOVERED_AUTO_REPENDED_STATUS,
       );
       // The loop's own daemon run is skipped via excludeRunId so the startup
       // pass does not finalize the row that just registered itself.
       expect(recovery.daemonRuns.recovered).toEqual([]);
       expect(
         recovery.daemonRuns.skipped.some(
-          (entry) => entry.run.id === runId && entry.reason === "self"
-        )
+          (entry) => entry.run.id === runId && entry.reason === "self",
+        ),
       ).toBe(true);
 
       // Side effects landed: lock released, claimed job re-pended.
@@ -718,12 +724,12 @@ describe("runDaemonLoop", () => {
       // Recovery events were emitted.
       const events = db
         .prepare(
-          "SELECT type FROM events WHERE type IN ('repo_lock.recovered', 'job.recovered') ORDER BY id"
+          "SELECT type FROM events WHERE type IN ('repo_lock.recovered', 'job.recovered') ORDER BY id",
         )
         .all() as Array<{ type: string }>;
       expect(events.map((e) => e.type)).toEqual([
         "repo_lock.recovered",
-        "job.recovered"
+        "job.recovered",
       ]);
     } finally {
       db.close();
@@ -744,7 +750,7 @@ describe("runDaemonLoop", () => {
         maxIdleCycles: 1,
         skipStartupRecovery: true,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(result.startupRecovery).toBeNull();
@@ -766,7 +772,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 1,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -798,7 +804,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 1,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -816,38 +822,56 @@ describe("runDaemonLoop", () => {
       db.close();
     }
   });
-
 });
 
 const WF_NOW = 1_700_000_000_000;
 
 function seedWorkflowRun(
   db: MomentumDb,
-  input: { runId: string; state?: string; repoPath?: string | null; createdAt?: number }
+  input: {
+    runId: string;
+    state?: string;
+    repoPath?: string | null;
+    createdAt?: number;
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, repo_path, issue_scope_json, route_json,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', 0, ?, ?)`
+     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', 0, ?, ?)`,
   ).run(
     input.runId,
     input.state ?? "approved",
     input.repoPath ?? null,
     input.createdAt ?? WF_NOW,
-    input.createdAt ?? WF_NOW
+    input.createdAt ?? WF_NOW,
   );
 }
 
 function seedWorkflowStep(
   db: MomentumDb,
-  input: { runId: string; stepId: string; kind: string; state: string; order: number }
+  input: {
+    runId: string;
+    stepId: string;
+    kind: string;
+    state: string;
+    order: number;
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
-  ).run(input.runId, input.stepId, input.kind, input.state, input.order, WF_NOW, WF_NOW);
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+  ).run(
+    input.runId,
+    input.stepId,
+    input.kind,
+    input.state,
+    input.order,
+    WF_NOW,
+    WF_NOW,
+  );
 }
 
 /**
@@ -855,31 +879,38 @@ function seedWorkflowStep(
  * leases, predecessors clear), so the scheduler lane scans it as runnable.
  */
 function seedRunnableWorkflow(db: MomentumDb, runId = "wf-run-a"): string {
-  seedWorkflowRun(db, { runId, state: "approved", repoPath: `/repos/${runId}` });
+  seedWorkflowRun(db, {
+    runId,
+    state: "approved",
+    repoPath: `/repos/${runId}`,
+  });
   seedWorkflowStep(db, {
     runId,
     stepId: "preflight",
     kind: "preflight",
     state: "approved",
-    order: 0
+    order: 0,
   });
   seedWorkflowStep(db, {
     runId,
     stepId: "implementation",
     kind: "implementation",
     state: "pending",
-    order: 1
+    order: 1,
   });
   return runId;
 }
 
 type WorkflowDispatchRecorder = {
   dispatch: WorkflowStepDispatch | AsyncWorkflowStepDispatch;
-  calls: Array<{ claim: ClaimedWorkflowStep; context: WorkflowStepDispatchContext }>;
+  calls: Array<{
+    claim: ClaimedWorkflowStep;
+    context: WorkflowStepDispatchContext;
+  }>;
 };
 
 function recordingWorkflowDispatch(
-  result: WorkflowStepDispatchResult = { status: "dispatched" }
+  result: WorkflowStepDispatchResult = { status: "dispatched" },
 ): WorkflowDispatchRecorder {
   const calls: WorkflowDispatchRecorder["calls"] = [];
   const dispatch: WorkflowStepDispatch = (claim, context) => {
@@ -890,7 +921,7 @@ function recordingWorkflowDispatch(
 }
 
 function asyncRecordingWorkflowDispatch(
-  result: WorkflowStepDispatchResult = { status: "dispatched" }
+  result: WorkflowStepDispatchResult = { status: "dispatched" },
 ): WorkflowDispatchRecorder {
   const calls: WorkflowDispatchRecorder["calls"] = [];
   const dispatch: AsyncWorkflowStepDispatch = async (claim, context) => {
@@ -917,14 +948,14 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         pollIntervalMs: 0,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined
+        sleep: async () => undefined,
       });
 
       expect(result.workflowStepsDispatched).toBe(0);
       expect(result.lastWorkflowCode).toBeNull();
       // The runnable workflow run was never claimed: no dispatch lease exists.
       expect(
-        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND)
+        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND),
       ).toBeUndefined();
     } finally {
       db.close();
@@ -938,7 +969,8 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       const runId = seedDaemonRun(db);
       const wfRunId = seedRunnableWorkflow(db);
       const recorder = recordingWorkflowDispatch();
-      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> =
+        [];
 
       const result = await runDaemonLoop({
         db,
@@ -950,7 +982,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         now: makeMonotonicNow(),
         sleep: async () => undefined,
         onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
-        workflowLane: { dispatch: recorder.dispatch }
+        workflowLane: { dispatch: recorder.dispatch },
       });
 
       expect(result.workflowStepsDispatched).toBe(1);
@@ -959,7 +991,9 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       expect(recorder.calls).toHaveLength(1);
       expect(recorder.calls[0]?.claim.runId).toBe(wfRunId);
       expect(recorder.calls[0]?.claim.stepId).toBe("preflight");
-      expect(recorder.calls[0]?.context.workerId).toBe("daemon-loop-wf-dispatch");
+      expect(recorder.calls[0]?.context.workerId).toBe(
+        "daemon-loop-wf-dispatch",
+      );
 
       // The dispatch lease is durable and left held for the executor to own.
       const lease = getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND);
@@ -981,9 +1015,10 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       const runId = seedDaemonRun(db);
       const wfRunId = seedRunnableWorkflow(db);
       const recorder = asyncRecordingWorkflowDispatch({
-        status: "async-dispatched"
+        status: "async-dispatched",
       });
-      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> =
+        [];
 
       const result = await runDaemonLoop({
         db,
@@ -995,7 +1030,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         now: makeMonotonicNow(),
         sleep: async () => undefined,
         onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
-        workflowLane: { dispatch: recorder.dispatch }
+        workflowLane: { dispatch: recorder.dispatch },
       });
 
       expect(result.workflowStepsDispatched).toBe(1);
@@ -1028,7 +1063,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxIdleCycles: 2,
         now: makeMonotonicNow(),
         sleep,
-        workflowLane: { dispatch: recorder.dispatch }
+        workflowLane: { dispatch: recorder.dispatch },
       });
 
       // Cycle 0 dispatched (active: no idle, no sleep); only the two later
@@ -1042,18 +1077,51 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
     }
   });
 
+  it("observes the poll interval after a continuation-only dispatch", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch({
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
+      });
+      const { calls: sleepCalls, sleep } = makeRecordingSleep();
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-continuation",
+        pollIntervalMs: 7,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep,
+        workflowLane: { dispatch: recorder.dispatch },
+      });
+
+      expect(result.workflowStepsDispatched).toBe(1);
+      expect(result.idleCycles).toBe(0);
+      expect(sleepCalls).toEqual([7]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("refreshes the daemon heartbeat as it hands a claimed step to the dispatcher", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       const runId = seedDaemonRun(db);
       seedRunnableWorkflow(db);
-      let observed: { heartbeatAt: number | null | undefined; ctxNow: number } | null =
-        null;
+      let observed: {
+        heartbeatAt: number | null | undefined;
+        ctxNow: number;
+      } | null = null;
       const dispatch: WorkflowStepDispatch = (_claim, context) => {
         observed = {
           heartbeatAt: getDaemonRun(db, runId)?.heartbeat_at,
-          ctxNow: context.now
+          ctxNow: context.now,
         };
         return { status: "dispatched" };
       };
@@ -1067,7 +1135,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 1,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        workflowLane: { dispatch }
+        workflowLane: { dispatch },
       });
 
       expect(observed).not.toBeNull();
@@ -1075,6 +1143,41 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       // the row the dispatcher observes is freshly stamped (not the older
       // cycle-start heartbeat).
       expect(observed!.heartbeatAt).toBe(observed!.ctxNow);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refreshes the daemon heartbeat after a long async dispatch settles", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      let dispatchStartedAt = 0;
+      let settledHeartbeatAt = 0;
+      const dispatch: AsyncWorkflowStepDispatch = async (_claim, context) => {
+        dispatchStartedAt = context.now;
+        await Promise.resolve();
+        return { status: "dispatched" };
+      };
+
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-settled-heartbeat",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(1_700_000_000_000, 60_000),
+        sleep: async () => undefined,
+        workflowLane: { dispatch, leaseDurationMs: 1_000_000 },
+        onCycleComplete: () => {
+          settledHeartbeatAt = getDaemonRun(db, runId)?.heartbeat_at ?? 0;
+        },
+      });
+
+      expect(settledHeartbeatAt).toBeGreaterThan(dispatchStartedAt);
     } finally {
       db.close();
     }
@@ -1089,7 +1192,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       let observed: { activeJobId: string | null | undefined } | null = null;
       const dispatch: WorkflowStepDispatch = () => {
         observed = {
-          activeJobId: getDaemonRun(db, runId)?.active_job_id
+          activeJobId: getDaemonRun(db, runId)?.active_job_id,
         };
         return { status: "dispatched" };
       };
@@ -1103,11 +1206,11 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 1,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        workflowLane: { dispatch }
+        workflowLane: { dispatch },
       });
 
       expect(observed).toEqual({
-        activeJobId: `workflow:${wfRunId}:preflight`
+        activeJobId: `workflow:${wfRunId}:preflight`,
       });
       expect(getDaemonRun(db, runId)?.active_job_id).toBeNull();
     } finally {
@@ -1141,11 +1244,11 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
             requestDaemonRunStop(db, {
               runId,
               reason: "operator stop",
-              now: 200_000
+              now: 200_000,
             });
           }
         },
-        workflowLane: { dispatch: recorder.dispatch }
+        workflowLane: { dispatch: recorder.dispatch },
       });
 
       expect(result.exitReason).toBe("stop_requested");
@@ -1158,7 +1261,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       expect(calls).toEqual([7]);
       expect(wfRunId).not.toBeNull();
       expect(
-        getWorkflowLease(db, wfRunId!, WORKFLOW_DISPATCH_LEASE_KIND)
+        getWorkflowLease(db, wfRunId!, WORKFLOW_DISPATCH_LEASE_KIND),
       ).toBeUndefined();
 
       const row = getDaemonRun(db, runId);
@@ -1187,7 +1290,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 3,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        workflowLane: { dispatch }
+        workflowLane: { dispatch },
       });
 
       expect(result.exitReason).toBe("internal_error");
@@ -1224,8 +1327,8 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         workflowLane: {
           dispatch: recorder.dispatch,
           leaseDurationMs: 12_345,
-          stalePolicy: "manual-recovery-required"
-        }
+          stalePolicy: "manual-recovery-required",
+        },
       });
 
       const lease = getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND);

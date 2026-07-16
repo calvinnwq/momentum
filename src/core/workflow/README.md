@@ -106,8 +106,26 @@ paths. The registered host-binding resolver keeps portable step config separate
 from executable paths, environment, repo ownership, verification, and commit-or-
 reset policy. Missing host bindings become precise durable recovery evidence
 rather than escaping across the scheduler boundary. `dispatch/retry.ts` reopens
-the same deterministic invocation with the next attempt and scopes later attempt
-evidence beneath `attempt-<n>/`.
+the same deterministic invocation with the next attempt. Ordinary live-wrapper
+evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
+evidence is first isolated beneath `delegate/<step-id>/`.
+The step-scoped `delegate-handoff.json` receipt records no-mistakes launch intent before process start and generic delegate reset or commit intent before repository mutation.
+After no-mistakes returns, its receipt also binds the exact bounded result digest used to authorize the selected reset or commit, verified no-change acceptance, and any later failed-finalization retry or prepared-commit recovery.
+Correlated no-mistakes launch output cannot recover a launch-only receipt without wrapper-finalization proof.
+Generic retry recovery requires a bounded regular result whose exact digest matches the receipt plus exact base, tree, message, and clean-worktree proof; otherwise it preserves the worktree and refuses another external launch.
+If a verified commit is staged when the process stops, recovery accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
+Repository ownership and commit evidence are checked again immediately before the recovered commit.
+Finalized profile-backed delegate state must match the repository's current full `HEAD`.
+After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
+A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
+An invocation classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
+An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same invocation can finish classification and gate parking.
+A scheduler pass that releases a stale dispatch owner can transfer the same invocation's matching active repo lock to the replacement holder before the longer repo lock expires, with full identity compare-and-swap fencing.
+A valid non-terminal handoff is reconciled through adapter recovery before reuse across retry attempts.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+A local wrapper-finalization failure first triggers a correlated status read on the newer attempt.
+A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
+Only the invocation's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,
@@ -140,6 +158,7 @@ compatibility.
 Before spawning, the helper validates that the run-local config has only a `steps` object and canonical snake_case per-step keys, rejects malformed `env_allow` and unsafe or mismatched `result_file` values as setup failures, and writes no runner evidence for rejected configs.
 The no-mistakes step also requires an explicit `runner_profile` with `interface: "axi"`, `stdin: "closed"`, `agent` set to one of `claude`, `codex`, `opencode`, or `rovodev`, `required_env` containing the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and an absolute executable `agent_path`; missing profile fields, missing filtered environment, `agent=auto`, a missing/non-executable agent path, or a no-mistakes `agent` / `agent_path_override.<agent>` mismatch fail closed before the no-mistakes command is spawned.
 The no-mistakes config check reads `HOME/.no-mistakes/config.yaml` with YAML semantics, accepts aliases and reordered top-level keys, and rejects malformed YAML, duplicate keys, non-mapping overrides, nested-only overrides, missing separators, and non-absolute override paths before any no-mistakes child process is spawned.
+For current coding definitions, that wrapper invocation is the no-mistakes handoff beneath `delegate-supervisor`; later ticks call the validated no-mistakes executable with `axi status --run <external-run-id>` and normalize the correlated run id, branch, current head commit id, findings, decisions, pull request, and CI state through `src/adapters/no-mistakes-tool-adapter.ts`.
 For `no-mistakes`, the helper also normalizes upstream terminal-success evidence: `checks-passed`, or a still-monitoring upstream run with current clean pull request evidence and green or explicitly absent checks, becomes successful runner evidence only when current blockers, active findings, unresolved gates, dirty / draft pull request state, and non-successful checks are absent.
 It parks missing branch-start state and current no-mistakes cancellation status or outcome evidence as retryable setup recovery instead of terminal failed verification.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, guarded `clear-recovery` can reconcile only the failed required `no-mistakes` step with either legacy `no-mistakes:<run-id>#checks-passed` evidence or a readable structured deterministic evidence JSON file.

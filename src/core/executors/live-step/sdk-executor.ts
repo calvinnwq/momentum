@@ -6,6 +6,7 @@ import type {
   ExecutorTickContext,
   ExecutorTickResult,
 } from "../sdk/types.js";
+import { DELEGATE_SUPERVISOR_CONFIG_SCHEMA } from "../delegate-supervisor/executor.js";
 import type {
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorErrorCode,
@@ -16,7 +17,19 @@ export type LiveStepRepoSafetyHostBinding = {
   verificationCommands: readonly string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  /** Prove repository ownership immediately before the named mutation. */
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
+  /** Hold an enforceable cross-worker fence for the complete Git mutation. */
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
+  /** Persist the staged tree/message receipt before a delegated commit. */
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 export type LiveStepSdkHostBindings = {
@@ -179,15 +192,6 @@ const EMPTY_CONFIG_SCHEMA = {
   additionalProperties: false,
 } as const satisfies ExecutorConfigSchema;
 
-const DELEGATE_SUPERVISOR_CONFIG_SCHEMA = {
-  type: "object",
-  properties: {
-    tool: { type: "string", enum: ["gnhf", "no-mistakes"] },
-  },
-  required: ["tool"],
-  additionalProperties: false,
-} as const satisfies ExecutorConfigSchema;
-
 /** Current built-in schemas used by the profile-backed compatibility bridge. */
 export function liveStepBuiltInConfigSchema(
   name: string,
@@ -249,29 +253,38 @@ function parseDurableDecision(detail: string): DurableLiveStepDecision {
   return parsed;
 }
 
-function finalizeLiveStepResult(
+/**
+ * Finalize one profile-backed result through shared repo safety.
+ * Callers may accept a verified clean worktree with nothing to commit when the
+ * delegated tool's successful handoff is itself the intended evidence.
+ */
+export function finalizeLiveStepResult(
   result: WorkflowStepExecutorDispatchResult,
   repoPath: string,
   safety: LiveStepRepoSafetyHostBinding | undefined,
+  options: { acceptVerifiedNoChanges?: boolean } = {},
 ): WorkflowStepExecutorDispatchResult {
   if (!result.ok || safety === undefined || result.result.state === "skipped") {
     return result;
   }
-  const ownership = safety.beforeGitMutation?.();
   const finalize: FinalizeWorkflowStepFromResultFileResult =
-    ownership?.ok === false
-      ? { outcome: "repo_lock_lost", error: ownership.error }
-      : finalizeWorkflowStepFromResultFile({
-          repoPath,
-          baseHead: safety.baseHead,
-          resultFilePath: result.resultJsonPath,
-          verificationCommands: [...safety.verificationCommands],
-          verificationTimeoutSec: safety.verificationTimeoutSec,
-          verificationLogPath: safety.verificationLogPath,
-          ...(safety.beforeGitMutation !== undefined
-            ? { beforeGitMutation: safety.beforeGitMutation }
-            : {}),
-        });
+    finalizeWorkflowStepFromResultFile({
+      repoPath,
+      baseHead: safety.baseHead,
+      resultFilePath: result.resultJsonPath,
+      verificationCommands: [...safety.verificationCommands],
+      verificationTimeoutSec: safety.verificationTimeoutSec,
+      verificationLogPath: safety.verificationLogPath,
+      ...(safety.beforeGitMutation !== undefined
+        ? { beforeGitMutation: safety.beforeGitMutation }
+        : {}),
+      ...(safety.beginGitMutation !== undefined
+        ? { beginGitMutation: safety.beginGitMutation }
+        : {}),
+      ...(safety.beforeCommit !== undefined
+        ? { beforeCommit: safety.beforeCommit }
+        : {}),
+    });
   switch (finalize.outcome) {
     case "committed":
       return withVerificationArtifact(result, safety.verificationLogPath);
@@ -291,6 +304,12 @@ function finalizeLiveStepResult(
         safety.verificationLogPath,
       );
     case "commit_failed":
+      if (
+        finalize.commit.code === "nothing_to_commit" &&
+        options.acceptVerifiedNoChanges === true
+      ) {
+        return withVerificationArtifact(result, safety.verificationLogPath);
+      }
       if (
         finalize.commit.code === "nothing_to_commit" ||
         (finalize.reset !== undefined && finalize.reset.ok)
@@ -436,7 +455,10 @@ function artifactClassForPath(
   return "result_document";
 }
 
-function isProvenClean(result: WorkflowStepExecutorDispatchResult): boolean {
+/** Whether finalization proved repository ownership can be released. */
+export function isProvenClean(
+  result: WorkflowStepExecutorDispatchResult,
+): boolean {
   return (
     result.ok &&
     (result.result.state === "succeeded" || result.result.state === "failed")

@@ -1,36 +1,35 @@
 /**
- * no-mistakes executor mirror — external-state reader.
+ * Shared no-mistakes external-state reader.
  *
- * `no-mistakes-executor.ts` owns the *pure* half of the mirror: the
- * {@link NoMistakesExternalState} snapshot shape, the daemon classification
- * (`decideNoMistakesMirror`), and the durable finding / decision projections. It
- * is a pure function of an *already-typed* snapshot. This module is the IO seam
- * that produces that snapshot: it reads the untrusted external no-mistakes state
- * store and turns its raw bytes into a typed {@link NoMistakesExternalState} the
- * brain can classify — exactly the way `goal-loop/mechanism.ts` is the seam
+ * This module is the shared no-mistakes external-state reader used by both the
+ * legacy `no-mistakes` mirror and the current delegated-tool adapter.
+ * `no-mistakes-executor.ts` preserves the legacy snapshot and projection API,
+ * while `delegate-supervisor/classifier.ts` owns the shared semantic
+ * classification authority.
+ * This IO seam reads the untrusted external no-mistakes state store and turns
+ * its raw bytes into a typed {@link NoMistakesExternalState} that authority can
+ * classify, exactly the way `goal-loop/mechanism.ts` is the seam
  * between "the round's agent wrote a result document" and "the daemon classifies
  * and persists", and `single-shot/mechanism.ts` is the seam that runs the bounded
  * command. Here the bounded work is a *read*: no-mistakes owns and runs its own
- * pipeline (ticket "No rewrite of no-mistakes"; contract "Replacement of GNHF or
- * no-mistakes internals" is a non-goal), so Momentum only mirrors enough state to
- * decide workflow progress (contract "External Executor Mirroring").
+ * pipeline, so Momentum mirrors only enough state to decide workflow progress.
  *
- * The defining discipline is the ticket's "Treat external no-mistakes state as
- * evidence to classify, not blindly trusted authority" and the contract's
- * "External state strings are never enough on their own." That splits cleanly
- * across the two modules:
+ * External state is evidence to classify, not trusted authority.
+ * That splits cleanly across the reader and classifier:
  *
  *   - This reader owns *structural* (JSON-type) validation: is the store even the
  *     right shape? It rejects a missing / unreadable file, non-JSON bytes, a
  *     non-object root, and any field whose JSON type does not match the snapshot
  *     (a numeric `headSha`, a string `findings`, a finding that is not an object,
  *     a non-string selected id, a decision with non-array `allowedActions`). It
- *     does *not* re-validate the values the brain owns.
- *   - The brain ({@link decideNoMistakesMirror}) owns *semantic* validation: enum
- *     membership (`stepStatus` / `ciState`), the 40-hex `headSha` format, blank
- *     ids, dangling selected findings, duplicate ids, and the cross-field
- *     completion checks. So a well-typed but semantically bad snapshot — an
- *     unknown `stepStatus`, a dangling selected id — parses *here* and is routed
+ *     does *not* re-validate the values the classifier owns.
+ *   - The shared classifier, exposed to legacy callers through
+ *     {@link decideNoMistakesMirror}, owns *semantic* validation: enum
+ *     membership (`stepStatus` / `ciState`), the 7-to-40-hex `headSha` format,
+ *     blank ids, dangling selected findings, duplicate ids, and the cross-field
+ *     completion checks. Terminal completion additionally requires a full
+ *     40-character SHA. So a well-typed but semantically bad snapshot, such as
+ *     an unknown `stepStatus` or dangling selected id, parses *here* and is routed
  *     to `manual_recovery_required` *there*. Enum-typed string fields are read as
  *     strings and passed through unchecked for exactly this reason.
  *
@@ -40,8 +39,8 @@
  * the raw bytes the snapshot was parsed from (the round-schema `input_digest`
  * reattach fingerprint), so the durable round can fingerprint the exact external
  * evidence it mirrored. The reader is *total*: it never throws on untrusted
- * bytes, returning an `error` reason instead, the same way the brain never throws
- * on an untrusted snapshot.
+ * bytes, returning an `error` reason instead, the same way the shared classifier
+ * never throws on an untrusted snapshot.
  */
 
 import crypto from "node:crypto";
@@ -53,7 +52,7 @@ import type {
   NoMistakesExternalDecision,
   NoMistakesExternalFinding,
   NoMistakesExternalState,
-  NoMistakesExternalStepStatus
+  NoMistakesExternalStepStatus,
 } from "../../../adapters/no-mistakes-executor.js";
 
 /** A successful read: the typed snapshot plus the raw-bytes content digest. */
@@ -78,8 +77,7 @@ export type NoMistakesExternalStateReadError = {
  * one of these two shapes.
  */
 export type NoMistakesExternalStateRead =
-  | NoMistakesExternalStateReadSuccess
-  | NoMistakesExternalStateReadError;
+  NoMistakesExternalStateReadSuccess | NoMistakesExternalStateReadError;
 
 /** The inputs to {@link readNoMistakesExternalState}: the external state file path. */
 export type ReadNoMistakesExternalStateInput = {
@@ -97,7 +95,7 @@ export const MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES = 1024 * 1024;
  * Total: a missing file or unreadable path becomes an `error`, never a throw.
  */
 export function readNoMistakesExternalState(
-  input: ReadNoMistakesExternalStateInput
+  input: ReadNoMistakesExternalStateInput,
 ): NoMistakesExternalStateRead {
   let raw: Buffer;
   try {
@@ -105,13 +103,13 @@ export function readNoMistakesExternalState(
     if (!stat.isFile()) {
       return {
         ok: false,
-        error: "external no-mistakes state path is not a regular file"
+        error: "external no-mistakes state path is not a regular file",
       };
     }
     if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
       return {
         ok: false,
-        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`,
       };
     }
     const read = readRegularFileBounded(input.statePath);
@@ -123,32 +121,30 @@ export function readNoMistakesExternalState(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state file is unreadable: ${detail}`
+      error: `external no-mistakes state file is unreadable: ${detail}`,
     };
   }
   return parseNoMistakesExternalState(raw);
 }
 
-function readRegularFileBounded(
-  statePath: string
-): FieldRead<Buffer> {
+function readRegularFileBounded(statePath: string): FieldRead<Buffer> {
   let fd: number | null = null;
   try {
     fd = fs.openSync(
       statePath,
-      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK
+      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
     );
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) {
       return {
         ok: false,
-        error: "external no-mistakes state path is not a regular file"
+        error: "external no-mistakes state path is not a regular file",
       };
     }
     if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
       return {
         ok: false,
-        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`,
       };
     }
     const chunks: Buffer[] = [];
@@ -165,20 +161,19 @@ function readRegularFileBounded(
     }
     return {
       ok: false,
-      error: `external no-mistakes state file is too large: more than ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES} bytes`
+      error: `external no-mistakes state file is too large: more than ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES} bytes`,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state file is unreadable: ${detail}`
+      error: `external no-mistakes state file is unreadable: ${detail}`,
     };
   } finally {
     if (fd !== null) {
       try {
         fs.closeSync(fd);
-      } catch {
-      }
+      } catch {}
     }
   }
 }
@@ -194,7 +189,7 @@ function readRegularFileBounded(
  * content digest of `raw`.
  */
 export function parseNoMistakesExternalState(
-  raw: string | Buffer
+  raw: string | Buffer,
 ): NoMistakesExternalStateRead {
   const decoded = decodeNoMistakesExternalStateText(raw);
   if (!decoded.ok) {
@@ -208,13 +203,13 @@ export function parseNoMistakesExternalState(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state is not valid JSON: ${detail}`
+      error: `external no-mistakes state is not valid JSON: ${detail}`,
     };
   }
   if (!isPlainObject(parsed)) {
     return {
       ok: false,
-      error: "external no-mistakes state must be a JSON object"
+      error: "external no-mistakes state must be a JSON object",
     };
   }
 
@@ -252,7 +247,7 @@ export function parseNoMistakesExternalState(
     selectedFindingIds: selectedFindingIds.value,
     decisions: decisions.value,
     prUrl: prUrl.value,
-    ciState: ciState.value as NoMistakesCiState
+    ciState: ciState.value as NoMistakesCiState,
   };
   return { ok: true, value, digest: contentDigest(raw) };
 }
@@ -260,20 +255,22 @@ export function parseNoMistakesExternalState(
 /** A field-read outcome: the typed value, or the read error to short-circuit on. */
 type FieldRead<T> = { ok: true; value: T } | NoMistakesExternalStateReadError;
 
-function decodeNoMistakesExternalStateText(raw: string | Buffer): FieldRead<string> {
+function decodeNoMistakesExternalStateText(
+  raw: string | Buffer,
+): FieldRead<string> {
   if (typeof raw === "string") {
     return { ok: true, value: raw };
   }
   try {
     return {
       ok: true,
-      value: new TextDecoder("utf-8", { fatal: true }).decode(raw)
+      value: new TextDecoder("utf-8", { fatal: true }).decode(raw),
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
-      error: `external no-mistakes state is not valid UTF-8: ${detail}`
+      error: `external no-mistakes state is not valid UTF-8: ${detail}`,
     };
   }
 }
@@ -285,11 +282,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** Read a required string field, erroring when absent or not a string. */
 function readString(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string> {
   const value = obj[key];
   if (typeof value !== "string") {
-    return { ok: false, error: `external no-mistakes state ${key} must be a string` };
+    return {
+      ok: false,
+      error: `external no-mistakes state ${key} must be a string`,
+    };
   }
   return { ok: true, value };
 }
@@ -297,7 +297,7 @@ function readString(
 /** Read a `string | null` field, erroring when present but neither. Absent -> null. */
 function readNullableString(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string | null> {
   const value = obj[key];
   if (value === undefined || value === null) {
@@ -306,7 +306,7 @@ function readNullableString(
   if (typeof value !== "string") {
     return {
       ok: false,
-      error: `external no-mistakes state ${key} must be a string or null`
+      error: `external no-mistakes state ${key} must be a string or null`,
     };
   }
   return { ok: true, value };
@@ -316,7 +316,7 @@ function readNullableString(
 function readOptionalString(
   obj: Record<string, unknown>,
   key: string,
-  context: string
+  context: string,
 ): FieldRead<string | null> {
   const value = obj[key];
   if (value === undefined || value === null) {
@@ -325,7 +325,7 @@ function readOptionalString(
   if (typeof value !== "string") {
     return {
       ok: false,
-      error: `external no-mistakes state ${context} ${key} must be a string or null`
+      error: `external no-mistakes state ${context} ${key} must be a string or null`,
     };
   }
   return { ok: true, value };
@@ -334,18 +334,21 @@ function readOptionalString(
 /** Read a required array-of-strings field. */
 function readStringArray(
   obj: Record<string, unknown>,
-  key: string
+  key: string,
 ): FieldRead<string[]> {
   const value = obj[key];
   if (!Array.isArray(value)) {
-    return { ok: false, error: `external no-mistakes state ${key} must be an array` };
+    return {
+      ok: false,
+      error: `external no-mistakes state ${key} must be an array`,
+    };
   }
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") {
       return {
         ok: false,
-        error: `external no-mistakes state ${key} must contain only strings`
+        error: `external no-mistakes state ${key} must contain only strings`,
       };
     }
     out.push(entry);
@@ -355,27 +358,36 @@ function readStringArray(
 
 /** Read the `findings` array into typed {@link NoMistakesExternalFinding} rows. */
 function readFindings(
-  obj: Record<string, unknown>
+  obj: Record<string, unknown>,
 ): FieldRead<NoMistakesExternalFinding[]> {
   const value = obj.findings;
   if (!Array.isArray(value)) {
-    return { ok: false, error: "external no-mistakes state findings must be an array" };
+    return {
+      ok: false,
+      error: "external no-mistakes state findings must be an array",
+    };
   }
   const out: NoMistakesExternalFinding[] = [];
   for (const entry of value) {
     if (!isPlainObject(entry)) {
       return {
         ok: false,
-        error: "external no-mistakes state finding must be an object"
+        error: "external no-mistakes state finding must be an object",
       };
     }
     const externalId = readString(entry, "externalId");
     if (!externalId.ok) {
-      return { ok: false, error: "external no-mistakes state finding externalId must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state finding externalId must be a string",
+      };
     }
     const title = readString(entry, "title");
     if (!title.ok) {
-      return { ok: false, error: "external no-mistakes state finding title must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state finding title must be a string",
+      };
     }
     const severity = readOptionalString(entry, "severity", "finding");
     if (!severity.ok) return severity;
@@ -385,7 +397,7 @@ function readFindings(
       externalId: externalId.value,
       title: title.value,
       severity: severity.value,
-      detail: detail.value
+      detail: detail.value,
     });
   }
   return { ok: true, value: out };
@@ -393,39 +405,50 @@ function readFindings(
 
 /** Read the `decisions` array into typed {@link NoMistakesExternalDecision} rows. */
 function readDecisions(
-  obj: Record<string, unknown>
+  obj: Record<string, unknown>,
 ): FieldRead<NoMistakesExternalDecision[]> {
   const value = obj.decisions;
   if (!Array.isArray(value)) {
-    return { ok: false, error: "external no-mistakes state decisions must be an array" };
+    return {
+      ok: false,
+      error: "external no-mistakes state decisions must be an array",
+    };
   }
   const out: NoMistakesExternalDecision[] = [];
   for (const entry of value) {
     if (!isPlainObject(entry)) {
       return {
         ok: false,
-        error: "external no-mistakes state decision must be an object"
+        error: "external no-mistakes state decision must be an object",
       };
     }
     const externalId = readString(entry, "externalId");
     if (!externalId.ok) {
-      return { ok: false, error: "external no-mistakes state decision externalId must be a string" };
+      return {
+        ok: false,
+        error:
+          "external no-mistakes state decision externalId must be a string",
+      };
     }
     const summary = readString(entry, "summary");
     if (!summary.ok) {
-      return { ok: false, error: "external no-mistakes state decision summary must be a string" };
+      return {
+        ok: false,
+        error: "external no-mistakes state decision summary must be a string",
+      };
     }
     const allowedActions = readStringArray(entry, "allowedActions");
     if (!allowedActions.ok) {
       return {
         ok: false,
-        error: "external no-mistakes state decision allowedActions must be an array of strings"
+        error:
+          "external no-mistakes state decision allowedActions must be an array of strings",
       };
     }
     const recommendedAction = readOptionalString(
       entry,
       "recommendedAction",
-      "decision"
+      "decision",
     );
     if (!recommendedAction.ok) return recommendedAction;
     const chosenAction = readOptionalString(entry, "chosenAction", "decision");
@@ -438,7 +461,7 @@ function readDecisions(
       allowedActions: allowedActions.value,
       recommendedAction: recommendedAction.value,
       chosenAction: chosenAction.value,
-      resolution: resolution.value
+      resolution: resolution.value,
     });
   }
   return { ok: true, value: out };

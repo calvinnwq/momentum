@@ -14,7 +14,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
-- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
+- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag and matching clearable recovery gates after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
@@ -289,8 +289,11 @@ Behaviour:
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
   Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
-  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence.
-  A successful wrapper result is finalized through the shared verify -> commit / reset transaction before reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured profile-backed step wrappers after the scaffold is created.
+  An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
+  A successful no-mistakes handoff with no repository changes is accepted only after verification proves the worktree clean; failed verification still rejects it.
+  The delegate invocation and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
   With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
@@ -923,6 +926,7 @@ Options:
   Structured no-mistakes evidence uses `schemaVersion: 1` and must include the workflow run id, issue scope identifiers, branch name and head SHA, pull request id, head SHA, state, draft flag, and check state when a pull request exists, the no-mistakes run id, successful no-mistakes outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
   Required no-mistakes phases must be current and complete: `review`, `tests`, and `push` must be `passed`, while the remaining phases must be `passed` or `not_applicable`.
   The structured path refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown pull request checks, and partial or non-success phase evidence.
+  Expected external identity comes only from the current invocation attempt's latest legacy no-mistakes checkpoint or latest eligible `delegate-supervisor` identity checkpoint authorized by a same-attempt handoff intent with `tool: "no-mistakes"`; older attempts and other-tool delegate checkpoints cannot authorize reconciliation.
   Without `--evidence-pointer`, the command refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 - `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an evidence-backed step is reconciled.
   Use this to reference the specific ledger entry where the tail step's partial execution stopped (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
@@ -932,6 +936,8 @@ Behaviour:
 
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
   The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
+- After a successful flagged clear, resolves every open `manual_recovery_required` gate for the run whose `allowedActions` includes `clear_recovery` in that same transaction.
+  The gate records `workflow run clear-recovery` as its operator actor and `clear_recovery` as its chosen action; other gate types and manual-recovery gates without that action remain open.
 - Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
   The only `failed_required_step` exception is a failed required `no-mistakes` step with explicit legacy `no-mistakes:<run-id>#checks-passed` proof or a structured deterministic evidence JSON file, used when the wrapper was interrupted after the external no-mistakes run had already proved current success.
 - For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state and `finished_at` from the re-derived terminal or non-terminal state, and clearing the flag.
@@ -942,9 +948,13 @@ Behaviour:
 - An `unsupported_platform` refusal is retryable for any dispatched step after the workflow moves to Linux or macOS; clearing recovery on the supported host prepares the same step for one safe scheduler retry.
 - A `runtime_unavailable` refusal is retryable for any dispatched step after its registered executor, wrapper, credentials, or other runtime dependency is repaired. This includes stale wrapper/build paths, missing no-mistakes branch-start state, current no-mistakes cancellation evidence before clean runner evidence exists, and merge-cleanup auth, target, PR readback, expected-head, cleanup-branch, or mergeability refusals reported before clean runner evidence exists.
 - Registered SDK `executor_threw` and `executor_contract_invalid` refusals are also retryable after the executor implementation or result contract is repaired.
+- Delegate-supervisor `tool_adapter_unavailable`, `delegate_handoff_failed`, `delegate_handoff_recovery_required`, `external_state_unreadable`, and `external_state_inconsistent` refusals are retryable after the adapter, handoff evidence, or correlated external state is repaired.
+  An `external_state_blocked` invocation is also retryable after the external blocker clears.
+  Guarded clear increments the existing deterministic invocation's attempt, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
+  The same transaction releases only the retrying invocation attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
@@ -2374,6 +2384,40 @@ In both cases `gnhf` is not a workflow executor family, and its work must remain
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
 
+## Delegate-supervisor evidence contract
+
+The current coding definition uses `delegate-supervisor` with portable `tool` config for both GNHF implementation and no-mistakes validation.
+The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
+Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
+Only the invocation's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
+Later passes and every retry attempt perform one tick, including a retry that launches a fresh external run, and continuation-only daemon cycles wait the configured poll interval before another read.
+If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
+A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
+The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
+Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
+A retry reconciles a valid non-terminal correlated handoff through adapter recovery before reuse, preserves decision history, and starts a fresh semantic-progress window for the new attempt.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+A local wrapper-finalization failure does not establish that the correlated external run failed.
+The retry reads that run first.
+A matching failed or cancelled state permits one fresh launch; every other status reruns failed local finalization before the same run is reattached for supervision.
+
+Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
+Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
+It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
+For no-mistakes, every pending or running canonical steps-table row counts as an active step.
+Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.
+A lagging `running` read can corroborate cached terminal state only when it reports no active step, no findings or selected findings, no unresolved decisions, and passed or absent CI.
+Approval and decision states produce round-scoped workflow gates that `workflow run decide` resolves through the normal registered-executor gate path.
+The executor's selected durable decision id is checkpointed before classification so a recovered parking operation mirrors the same decision; absent selection keeps the legacy last-unresolved behavior.
+The supervisor reserves its synthetic approval identity and offers `approve` / `reject`; only the latest resolved `approve` allows later terminal completion.
+Unreadable state, identity drift, cancellation, or contradictory completion enters manual recovery rather than being treated as a retryable launch or success.
+The step-scoped handoff receipt is written before no-mistakes launch and before delegated reset or commit mutations.
+For no-mistakes, correlated launch output identifies a launch-only external run but cannot authorize reattachment without wrapper-finalization proof.
+After its wrapper returns, the no-mistakes receipt binds the exact bounded result digest; the selected reset or commit and any later failed-finalization retry or prepared-commit recovery reject changed or missing result bytes before mutation.
+For other profile-backed tools, recovery requires the bounded regular result's exact receipt digest plus completed-reset or parent/tree/message/clean-worktree commit proof; symbolic links or any mismatch refuse a duplicate launch while preserving the worktree.
+No-mistakes status normalization accepts only canonical current AXI fields and a validated steps table, so ambiguous fields, malformed or duplicate rows, unknown statuses, and out-of-table CI evidence fail closed.
+GNHF and no-mistakes remain tool names in portable step config, not new executor identities or authoritative artifact stores.
+
 ## `workflow run logs`
 
 ```text
@@ -2383,6 +2427,8 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
 It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
+The derived `outcome` reports any terminal `succeeded` round as `successful`, including a `continue` round with no commit SHA.
+This distinguishes a successful bounded handoff or poll from a failed continuation while keeping the invocation eligible for its next scheduler tick.
 
 Invocations are returned across the run in step key, attempt, invocation id order.
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.

@@ -20,7 +20,9 @@
  *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
  *     directly; and
  *   - the single-shot executor family - `single-shot/mechanism.ts`, imported
- *     directly.
+ *     directly; and
+ *   - the production live-step SDK finalizer, reused by the profile-backed
+ *     delegate-tool bridge before handoff evidence becomes durable.
  *
  * The ordered contract this transaction enforces:
  *
@@ -51,11 +53,11 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The goal-loop / single-shot mechanisms project the run-level recovery
- * outcomes this seam surfaces (`manual_recovery_required`, `result_missing`,
- * `result_invalid`, unsafe finalization failures such as `reset_failed`,
- * `repo_lock_lost`, `git_failed`, `commit_failed`, or `invalid_input`) into
- * their durable round classification.
+ * The goal-loop, single-shot, and profile-backed delegate paths project the
+ * run-level recovery outcomes this seam surfaces (`manual_recovery_required`,
+ * `result_missing`, `result_invalid`, unsafe finalization failures such as
+ * `reset_failed`, `repo_lock_lost`, `git_failed`, `commit_failed`, or
+ * `invalid_input`) into durable executor evidence.
  */
 
 import { execFileSync } from "node:child_process";
@@ -65,18 +67,18 @@ import type {
   CommitFailure,
   CommitSuccess,
   ResetFailure,
-  ResetSuccess
+  ResetSuccess,
 } from "../../../adapters/git-transaction.js";
 import {
   finalizeIteration,
-  type FinalizeResetTrigger
+  type FinalizeResetTrigger,
 } from "../../repo/iteration-finalize.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../../adapters/live-step-wrapper.js";
 import { parseRunnerResult } from "../runner/result.js";
 import type { CommitIntent, RunnerResult } from "../runner/types.js";
 import type {
   VerificationFailure,
-  VerificationSuccess
+  VerificationSuccess,
 } from "../../repo/verification.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
@@ -93,11 +95,21 @@ export type FinalizeWorkflowStepInput = {
   verificationTimeoutSec: number;
   verificationLogPath: string;
   /**
-   * Ownership proof called immediately before each commit/reset mutation. A
-   * failed check returns `repo_lock_lost` so callers can enter recovery instead
-   * of mutating after losing the repo/workflow lease.
+   * Ownership proof called with the pending mutation immediately before each
+   * commit or reset. A failed check returns `repo_lock_lost` so callers can
+   * enter recovery instead of mutating after losing the repo/workflow lease.
    */
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
+  /** Forwarded commit-intent persistence hook; rejection preserves changes. */
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 /**
@@ -114,9 +126,7 @@ export type WorkflowStepFinalizeRecoveryCode = "head_mismatch";
  * reset primitive's own guard during a finalize race.
  */
 export type WorkflowStepFinalizeRecoveryTrigger =
-  | "pre_finalize"
-  | "commit"
-  | "reset";
+  "pre_finalize" | "commit" | "reset";
 
 export type FinalizeWorkflowStepResult =
   | {
@@ -182,9 +192,19 @@ export type FinalizeWorkflowStepFromResultFileInput = {
   verificationLogPath: string;
   /**
    * Forwarded to {@link finalizeWorkflowStep} to prove ownership before every
-   * commit/reset mutation and surface `repo_lock_lost` on failure.
+   * named commit or reset mutation and surface `repo_lock_lost` on failure.
    */
-  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
+  beforeGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true } | { ok: false; error: string };
+  beginGitMutation?: (
+    mutation: "commit" | "reset",
+  ) => { ok: true; release: () => void } | { ok: false; error: string };
+  /** Forwarded commit-intent persistence hook; rejection preserves changes. */
+  beforeCommit?: (evidence: {
+    expectedTree: string;
+    message: string;
+  }) => { ok: true } | { ok: false; error: string };
 };
 
 /**
@@ -214,7 +234,7 @@ export type FinalizeWorkflowStepFromResultFileResult =
  * reset transaction. See the module doc for the ordered contract.
  */
 export function finalizeWorkflowStep(
-  input: FinalizeWorkflowStepInput
+  input: FinalizeWorkflowStepInput,
 ): FinalizeWorkflowStepResult {
   const invalid = validateInput(input);
   if (invalid !== null) return invalid;
@@ -227,7 +247,9 @@ export function finalizeWorkflowStep(
     verificationCommands,
     verificationTimeoutSec,
     verificationLogPath,
-    beforeGitMutation
+    beforeGitMutation,
+    beginGitMutation,
+    beforeCommit,
   } = input;
 
   // 1. Refuse to touch the worktree if the step moved HEAD off the base.
@@ -248,7 +270,9 @@ export function finalizeWorkflowStep(
     verificationCommands,
     verificationTimeoutSec,
     verificationLogPath,
-    ...(beforeGitMutation !== undefined ? { beforeGitMutation } : {})
+    ...(beforeGitMutation !== undefined ? { beforeGitMutation } : {}),
+    ...(beginGitMutation !== undefined ? { beginGitMutation } : {}),
+    ...(beforeCommit !== undefined ? { beforeCommit } : {}),
   });
 
   // 3. Translate the finalize outcome, routing any moved-HEAD finding to manual
@@ -259,7 +283,7 @@ export function finalizeWorkflowStep(
         outcome: "committed",
         verification: finalize.verification,
         commit: finalize.commit,
-        head: finalize.commit.commitSha
+        head: finalize.commit.commitSha,
       };
     case "reset_runner_failure":
       return { outcome: "reset_step_failure", reset: finalize.reset };
@@ -267,7 +291,7 @@ export function finalizeWorkflowStep(
       return {
         outcome: "reset_verification_failure",
         verification: finalize.verification,
-        reset: finalize.reset
+        reset: finalize.reset,
       };
     case "reset_failed":
       if (finalize.reset.code === "head_mismatch") {
@@ -277,7 +301,7 @@ export function finalizeWorkflowStep(
         outcome: "reset_failed",
         trigger: finalize.trigger,
         verification: finalize.verification,
-        reset: finalize.reset
+        reset: finalize.reset,
       };
     case "commit_failed":
       if (finalize.commit.code === "head_mismatch") {
@@ -292,7 +316,7 @@ export function finalizeWorkflowStep(
         outcome: "commit_failed",
         verification: finalize.verification,
         commit: finalize.commit,
-        ...(finalize.reset !== undefined ? { reset: finalize.reset } : {})
+        ...(finalize.reset !== undefined ? { reset: finalize.reset } : {}),
       };
     case "ownership_lost":
       return { outcome: "repo_lock_lost", error: finalize.error };
@@ -326,7 +350,7 @@ export function finalizeWorkflowStep(
  *     outcomes for the run-level recovery layer.
  */
 export function finalizeWorkflowStepFromResultFile(
-  input: FinalizeWorkflowStepFromResultFileInput
+  input: FinalizeWorkflowStepFromResultFileInput,
 ): FinalizeWorkflowStepFromResultFileResult {
   if (
     typeof input.resultFilePath !== "string" ||
@@ -340,7 +364,7 @@ export function finalizeWorkflowStepFromResultFile(
     return {
       outcome: read.code,
       resultFilePath: input.resultFilePath,
-      error: read.error
+      error: read.error,
     };
   }
 
@@ -354,7 +378,13 @@ export function finalizeWorkflowStepFromResultFile(
     verificationLogPath: input.verificationLogPath,
     ...(input.beforeGitMutation !== undefined
       ? { beforeGitMutation: input.beforeGitMutation }
-      : {})
+      : {}),
+    ...(input.beginGitMutation !== undefined
+      ? { beginGitMutation: input.beginGitMutation }
+      : {}),
+    ...(input.beforeCommit !== undefined
+      ? { beforeCommit: input.beforeCommit }
+      : {}),
   });
 }
 
@@ -375,7 +405,7 @@ type ReadNormalizedResultFile =
  * the neutral symbol names.
  */
 function readNormalizedResultFile(
-  resultFilePath: string
+  resultFilePath: string,
 ): ReadNormalizedResultFile {
   let stat: fs.Stats;
   try {
@@ -385,14 +415,14 @@ function readNormalizedResultFile(
       return {
         ok: false,
         code: "result_missing",
-        error: `live step result file was not written at ${resultFilePath}.`
+        error: `live step result file was not written at ${resultFilePath}.`,
       };
     }
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`
+      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`,
     };
   }
 
@@ -400,7 +430,7 @@ function readNormalizedResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultFilePath} is not a regular file.`
+      error: `live step result file at ${resultFilePath} is not a regular file.`,
     };
   }
 
@@ -408,7 +438,7 @@ function readNormalizedResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`
+      error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
     };
   }
 
@@ -420,7 +450,7 @@ function readNormalizedResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`
+      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`,
     };
   }
 
@@ -429,7 +459,7 @@ function readNormalizedResultFile(
     return {
       ok: false,
       code: "result_invalid",
-      error: `live step result JSON is invalid: ${parsed.error}`
+      error: `live step result JSON is invalid: ${parsed.error}`,
     };
   }
 
@@ -447,7 +477,7 @@ function errnoCode(error: unknown): string | undefined {
 function manualRecovery(
   trigger: WorkflowStepFinalizeRecoveryTrigger,
   expectedHead: string,
-  currentHead: string
+  currentHead: string,
 ): FinalizeWorkflowStepResult {
   return {
     outcome: "manual_recovery_required",
@@ -455,7 +485,7 @@ function manualRecovery(
     trigger,
     expectedHead,
     currentHead,
-    reason: `live workflow step left HEAD at ${currentHead} but expected base ${expectedHead}; entering manual recovery instead of a destructive reset`
+    reason: `live workflow step left HEAD at ${currentHead} but expected base ${expectedHead}; entering manual recovery instead of a destructive reset`,
   };
 }
 
@@ -467,19 +497,19 @@ function manualRecovery(
 function manualRecoveryFromGuard(
   repoPath: string,
   trigger: "commit" | "reset",
-  expectedHead: string
+  expectedHead: string,
 ): FinalizeWorkflowStepResult {
   const head = readHead(repoPath);
   return manualRecovery(trigger, expectedHead, head.ok ? head.head : "unknown");
 }
 
 function readHead(
-  repoPath: string
+  repoPath: string,
 ): { ok: true; head: string } | { ok: false; error: string } {
   try {
     const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
       encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
     }).trim();
     return { ok: true, head };
   } catch (error) {
@@ -489,19 +519,25 @@ function readHead(
 }
 
 function validateInput(
-  input: FinalizeWorkflowStepInput
+  input: FinalizeWorkflowStepInput,
 ): { outcome: "invalid_input"; error: string } | null {
-  if (typeof input.repoPath !== "string" || input.repoPath.trim().length === 0) {
+  if (
+    typeof input.repoPath !== "string" ||
+    input.repoPath.trim().length === 0
+  ) {
     return { outcome: "invalid_input", error: "repoPath is required." };
   }
   if (typeof input.baseHead !== "string" || !SHA40_RE.test(input.baseHead)) {
     return {
       outcome: "invalid_input",
-      error: "baseHead must be a 40-character hex SHA."
+      error: "baseHead must be a 40-character hex SHA.",
     };
   }
   if (typeof input.stepSuccess !== "boolean") {
-    return { outcome: "invalid_input", error: "stepSuccess must be a boolean." };
+    return {
+      outcome: "invalid_input",
+      error: "stepSuccess must be a boolean.",
+    };
   }
   if (input.commitIntent === null || typeof input.commitIntent !== "object") {
     return { outcome: "invalid_input", error: "commitIntent is required." };
@@ -509,7 +545,7 @@ function validateInput(
   if (!Array.isArray(input.verificationCommands)) {
     return {
       outcome: "invalid_input",
-      error: "verificationCommands must be an array of strings."
+      error: "verificationCommands must be an array of strings.",
     };
   }
   if (
@@ -518,7 +554,7 @@ function validateInput(
   ) {
     return {
       outcome: "invalid_input",
-      error: "verificationTimeoutSec must be a positive integer."
+      error: "verificationTimeoutSec must be a positive integer.",
     };
   }
   if (
@@ -527,7 +563,7 @@ function validateInput(
   ) {
     return {
       outcome: "invalid_input",
-      error: "verificationLogPath is required."
+      error: "verificationLogPath is required.",
     };
   }
   return null;

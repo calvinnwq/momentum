@@ -12,7 +12,8 @@
  * calls that persistence layer. Executor records, the opt-in daemon scheduler
  * lane, and executor adapter dispatch are layered separately; this pure
  * materializer does not run the landed goal-loop / one-shot / script /
- * no-mistakes mirror adapters. The coding plan preview in this module enriches
+ * no-mistakes mirror adapters or delegate-supervisor. The coding plan preview
+ * in this module enriches
  * the projected steps with definition executor families and optional portable
  * config for operator inspection, but it still does not invoke any executor or
  * write durable state.

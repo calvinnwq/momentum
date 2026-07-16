@@ -93,6 +93,7 @@ readiness probe.
 `workflowStepsDispatched` counts workflow scheduler ticks whose top-level code
 is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
+A continuation-only registered-executor tick still counts as `dispatched`, but it also increments `idleCycles` and waits the configured poll interval before the next external-state read.
 For a valid executor identity, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
@@ -116,15 +117,20 @@ after the child reaches a terminal state. Missing child config, unsafe recursion
 unresolved child definitions, unsupported child attachments, invalid child state,
 or ambiguous child terminals park the parent run for manual recovery. When
 `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow step wrapper profile,
-the managed loop also runs genuinely dispatched live-wrapper-owned step wrappers
-in the same tick, records terminal executor evidence on the dispatch scaffold,
-and lets the reconciliation seam finalize the step or park it for manual
-recovery.
-For successful wrapper results, the daemon first captures the current repo HEAD
-as the step base, parses the normalized runner result, runs the configured
-verification commands, commits verified changes, resets failed or unverifiable
-changes when safe, and records `verification.log` as round evidence before the
-dispatch scaffold is terminalized.
+the managed loop also runs genuinely dispatched profile-backed step wrappers in
+the same tick.
+For ordinary live-wrapper executors, it records terminal executor evidence on
+the dispatch scaffold and lets the reconciliation seam finalize the step or park
+it for manual recovery.
+For successful ordinary wrapper results, the daemon first captures the current
+repo HEAD as the step base, parses the normalized runner result, runs the
+configured verification commands, commits verified changes, resets failed or
+unverifiable changes when safe, and records `verification.log` as round evidence
+before the dispatch scaffold is terminalized.
+For a delegate-supervisor handoff, the daemon runs the same safe finalization but
+stores the wrapper result as durable handoff and terminal-candidate evidence.
+For no-mistakes, a successful result that leaves a verified clean worktree with no changes to commit is valid handoff evidence; failed verification still rejects the handoff.
+The invocation and step do not terminalize or reconcile until a later external-state read receives a daemon-accepted terminal classification.
 The verification commands and timeout resolve per the repo policy precedence:
 the linked goal's stored verification when the run carries a legacy goal, then
 the repo's `MOMENTUM.md` `verification` frontmatter, then no commands, in which
@@ -175,10 +181,19 @@ operator can repair the executor entry module and clear recovery without
 restarting the daemon. If the repair changes only a transitive dependency that
 Node already attempted to load or evaluate, restart the daemon before clearing recovery;
 the in-process ESM dependency graph cannot be unloaded safely.
-Registered executors are driven one bounded tick per daemon scheduler pass, and
-a `continue` recommendation leaves the invocation resumable for the next pass.
+Registered executors are normally driven one bounded tick per daemon scheduler
+pass, and a `continue` recommendation leaves the invocation resumable for the
+next pass after the configured poll interval.
+Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
+Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
+The profile-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
+For an unresolved handoff intent, the next dispatcher may take over the matching active lock after it expires or immediately after the scheduler proves and releases the same stale dispatch owner.
+Repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks prevent a concurrent or newer owner from being displaced.
+Heartbeat and settlement then require the replacement holder and attempt, preventing the former owner from mutating the lock.
+If a crash instead leaves an invocation at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
+If the crash happens before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, stale recovery makes the unclassified round resumable so the same invocation can finish classification and gate parking.
 
 ### Workflow live-wrapper profile
 
@@ -235,9 +250,11 @@ Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
 `MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`,
 `MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
 `MOMENTUM_RESULT_PATH` for every wrapper.
-For native workflow runs, `MOMENTUM_ITERATION_DIR` is the repo-local
-`.agent-workflows/<run-id>/` directory; attempts after the first scope their
-result, executor log, and verification log paths under `attempt-<n>/`.
+For native workflow runs, ordinary live-wrapper steps use the repo-local
+`.agent-workflows/<run-id>/` directory and scope attempts after the first under
+`attempt-<n>/`.
+Delegate-supervisor steps use `.agent-workflows/<run-id>/delegate/<step-id>/`
+and scope their later attempts beneath that step directory.
 When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from persisted `route.steps` overrides when the
@@ -328,6 +345,30 @@ For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrap
 
 If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no runner evidence.
 
+For current coding definitions, the implementation and no-mistakes steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
+The implementation adapter performs the configured live-wrapper handoff once, records a normalized terminal external-state artifact, and lets a later bounded tick corroborate it.
+The no-mistakes adapter uses the configured wrapper command for the initial `axi run` handoff, then invokes that validated executable as `axi status --run <external-run-id>` with the same filtered child environment on later ticks.
+Status read-back must match the pinned run id and branch.
+The reported head is normalized to a full commit id when locally resolvable, otherwise its valid abbreviation is preserved; head changes are supervised progress only when Git proves they descend from the launch commit because no-mistakes may commit fixes during the same run.
+Only canonical current AXI sections and a validated steps table contribute status; duplicate or conflicting scalar fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside that table fail closed.
+Pending or running table rows count as an active step and block terminal monitoring success.
+Unreadable status, identity drift, pending CI behind a terminal claim, an active step, active findings, or unresolved decisions fail closed instead of settling success.
+The daemon stores step-scoped `delegate-external-state.json` plus an atomic `delegate-handoff.json` receipt so interrupted handoffs and later scheduler ticks reattach the same external run.
+For no-mistakes, the receipt records `launching` before the wrapper starts, `resetting` or `finalizing` before repository mutation, `failed` after an unsuccessful finalization, and `launched` only after successful wrapper finalization and external identity capture.
+After the wrapper returns, the receipt also records the exact bounded result digest.
+The selected reset or commit, verified no-change acceptance, and every later local-finalization retry or prepared-commit recovery revalidate that digest, so missing or changed result bytes fail closed before mutation or handoff completion.
+An interrupted `launching` receipt reads its original executor log only to corroborate exactly one canonical current run id; historical or duplicate identities provide no authority, and even with a clean unchanged repository the missing wrapper-finalization proof fails closed without reattaching or launching no-mistakes again.
+Generic live-wrapper receipts bind the wrapper outcome, result digest, worktree tree, base commit, and the exact reset or commit intent written before repository mutation.
+A retry can therefore recognize a completed reset or reconstruct an exact parent/tree/message commit without launching the tool again only when the current bounded regular result file has the receipt's exact digest; symbolic links and branch, result, worktree, receipt, or current repository `HEAD` drift fail closed and preserve the worktree for inspection.
+If interruption leaves the verified commit staged, daemon preflight accepts that otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
+The adapter rechecks repository ownership and all commit evidence immediately before completing the commit.
+When the initial no-mistakes handoff already proves checks passed, that terminal candidate is stored with a full 40-character SHA for the post-finalization repository `HEAD`.
+It settles only after a fresh status read corroborates the same run, branch, and exact head with passed or absent CI, no active findings, and no unresolved decisions; pending CI or another head fails closed.
+After reattachment, the adapter may reload that terminal candidate from the step-scoped `launched` receipt only when its schema and exact run, branch, launch-head, terminal-head, and external identity match and Git proves the terminal head descends from the launch head.
+Approval boundaries use a supervisor-owned `approve` / `reject` decision that external state cannot forge; only the latest resolved `approve` permits later completion.
+The daemon checkpoints that supervisor decision id before gate classification so recovery cannot accidentally park a different mirrored external decision.
+On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state; a legacy no-mistakes receipt must also explicitly record successful handoff finalization.
+
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 
 ```json
@@ -365,8 +406,10 @@ Missing auth, issue scope, target, source evidence, deterministic intent evidenc
 Momentum does not store these credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
-evidence is kept separate: attempt 1 uses the configured run directory paths,
-while later attempts write result and executor-log files under `attempt-<n>/`.
+evidence is kept separate.
+Ordinary live-wrapper attempt 1 uses the configured run directory paths and
+later attempts use `attempt-<n>/`; delegate-supervisor steps apply the same
+attempt layout beneath their step-scoped `delegate/<step-id>/` directory.
 If a wrapper command is `node` (or `/usr/bin/env node`) and the configured
 script entrypoint itself is missing, the failure is classified as
 `runtime_unavailable`; module failures from inside an existing wrapper script
@@ -374,6 +417,11 @@ remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
 runner state.
+Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked invocation is retryable after its blocker clears.
+The retry keeps the deterministic invocation identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
+It sends a prior handoff through adapter recovery before reuse.
+For a locally failed no-mistakes receipt, a correlated failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 An `unsupported_platform` refusal is separately retryable for every dispatched
 step after the workflow moves to Linux or macOS and recovery is cleared there.
 The coding-workflow wrapper also treats known no-mistakes runner lifecycle
@@ -384,10 +432,10 @@ concrete no-result runner lifecycle failures.
 Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
-When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence for the workflow step and leaves upstream no-mistakes to continue its own PR-lifecycle monitoring.
+When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the adapter normalizes a completed external state and the delegate supervisor records successful executor evidence while upstream no-mistakes may continue its own PR-lifecycle monitoring.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` can reconcile only that failed required `no-mistakes` step and re-derive the run for downstream work from either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
 Structured no-mistakes recovery evidence must match the current workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
-Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, skipped, running, or otherwise non-successful checks suppress that successful classification.
+Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, running, or otherwise non-successful checks suppress that successful classification; explicitly skipped checks are treated as absent checks.
 
 JSON envelope shape (managed loop):
 

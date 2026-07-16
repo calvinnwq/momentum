@@ -321,7 +321,7 @@ function noMistakesCompletedState(): NoMistakesExternalState {
     externalRunId: NO_MISTAKES_IDENTITY.externalRunId,
     branch: NO_MISTAKES_IDENTITY.branch,
     headSha: NO_MISTAKES_IDENTITY.headSha,
-    activeStep: "merge",
+    activeStep: null,
     stepStatus: "completed",
     findings: [],
     selectedFindingIds: [],

@@ -1,3 +1,3 @@
 commands:
-  test: "pnpm test && pnpm typecheck && pnpm build"
+  test: "pnpm test:full && pnpm typecheck && pnpm build"
   lint: "pnpm lint && pnpm format:check"

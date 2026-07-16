@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import {
   claimRunnableWorkflowStep,
   recoverStaleWorkflowLeases,
   runWorkflowSchedulerOnce,
+  runWorkflowSchedulerOnceAsync,
   selectRunnableWorkflowWork,
   DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
   WORKFLOW_DISPATCH_LEASE_KIND,
@@ -31,7 +32,19 @@ import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recove
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { deriveWorkflowRunState } from "../src/core/workflow/run/reducer.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import {
+  insertExecutorInvocation,
+  loadExecutorInvocation,
+  updateExecutorRound,
+} from "../src/core/executors/loop/persist.js";
+import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
+import { EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE } from "../src/core/executors/sdk/types.js";
+import {
+  DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+  DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+  DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+} from "../src/core/executors/delegate-supervisor/executor.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -46,6 +59,7 @@ const NOW = 1_730_000_000_000;
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) {
@@ -1658,7 +1672,593 @@ function recordingDispatch(
   return { dispatch, calls };
 }
 
+function seedCheckpointedDelegateHandoff(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  stage: string = DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+) {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const invocationId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorInvocation(
+    db,
+    {
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "delegate-supervisor",
+      state: "running",
+      attempt: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId,
+    now: () => NOW,
+  });
+  const roundId = `${invocationId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executorFamily: "delegate-supervisor",
+    attempt: 1,
+    roundIndex: 0,
+    state: "capturing_result",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "handoff evidence persisted",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  envelope.facade.recordCheckpoint(roundId, {
+    checkpointId: `${roundId}-${stage}`,
+    sequence: 0,
+    stage,
+    detail: JSON.stringify(
+      stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE
+        ? {
+            tool: "no-mistakes",
+            invocationId,
+            attempt: 1,
+          }
+        : {
+            externalIdentity: {
+              externalRunId: "external-run-1",
+              branch: "feature/delegate-supervisor",
+              headSha: "a".repeat(40),
+            },
+            summary: "handoff evidence persisted",
+          },
+    ),
+  });
+  return { envelope, invocationId, roundId };
+}
+
+function seedDelegateBeforeCurrentAttemptRound(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  attempt: 1 | 2,
+): void {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const invocationId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorInvocation(
+    db,
+    {
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "delegate-supervisor",
+      state: "running",
+      attempt: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  if (attempt === 1) return;
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId,
+    now: () => NOW,
+  });
+  const roundId = `${invocationId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executorFamily: "delegate-supervisor",
+    attempt: 1,
+    roundIndex: 0,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "prior attempt",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  updateExecutorRound(db, roundId, {
+    toState: "manual_recovery_required",
+    classification: "manual_recovery_required",
+    executorRecommendation: "manual_recovery_required",
+    recoveryCode: "delegate_handoff_failed",
+    humanGate: "manual_recovery_required",
+    finishedAt: NOW,
+  });
+  db.prepare(
+    `UPDATE executor_invocations
+        SET attempt = 2, state = 'running', finished_at = NULL
+      WHERE invocation_id = ?`,
+  ).run(invocationId);
+}
+
+function seedRegisteredSdkContinuation(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+) {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const invocationId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorInvocation(
+    db,
+    {
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "fixture-executor",
+      state: "running",
+      attempt: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    invocationId,
+    now: () => NOW,
+  });
+  const roundId = `${invocationId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    invocationId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executorFamily: "fixture-executor",
+    attempt: 1,
+    roundIndex: 0,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "fixture continuation",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  updateExecutorRound(db, roundId, {
+    toState: "capturing_result",
+  });
+  envelope.applyDaemonDecision(
+    {
+      roundId,
+      classification: "continue",
+      executorRecommendation: "continue",
+      roundState: "succeeded",
+      invocationState: "running",
+      recoveryCode: null,
+      humanGate: null,
+    },
+    {
+      allocateClassificationCheckpointIdentity: true,
+      classificationCheckpoint: {
+        stage: "classified",
+        detail: "classification: continue",
+      },
+    },
+  );
+  return { invocationId, roundId };
+}
+
 describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
+  it("lets runnable work proceed between persisted delegate poll deadlines", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
+      });
+      seedRun(db, { runId: "run-runnable", state: "approved" });
+      seedStep(db, {
+        runId: "run-runnable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.claim.runId).toBe("run-runnable");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("alternates overdue continuations with runnable work independently of lease duration", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + 7_235_000,
+      });
+      seedRun(db, { runId: "run-runnable", state: "approved" });
+      seedStep(db, {
+        runId: "run-runnable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      const recorder = recordingDispatch();
+
+      const runnable = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 7_235_000,
+        continuationPollIntervalMs: 15_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 20_000,
+      });
+      expect(runnable).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-runnable" },
+      });
+
+      const continuation = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 7_235_000,
+        continuationPollIntervalMs: 15_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 31_000,
+      });
+      expect(continuation).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-continuation" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("polls multiple active SDK continuations in least-recently-polled order", () => {
+    const db = openDb(makeTempDir());
+    try {
+      for (const runId of ["run-a", "run-b"]) {
+        seedRegisteredSdkContinuation(db, runId, "implementation");
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "scheduler-1",
+          acquiredAt: NOW,
+          heartbeatAt: NOW,
+          expiresAt: NOW + 60_000,
+        });
+      }
+      const recorder = recordingDispatch();
+      const first = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        continuationPollIntervalMs: 1_000,
+        leaseDurationMs: 60_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 2_000,
+      });
+      const second = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        continuationPollIntervalMs: 1_000,
+        leaseDurationMs: 60_000,
+        dispatch: recorder.dispatch,
+        now: () => NOW + 4_000,
+      });
+      expect(first).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-a" },
+      });
+      expect(second).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-b" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports a persisted continuation wait separately from true idle", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedCheckpointedDelegateHandoff(db, "run-continuation", "implementation");
+      seedLease(db, {
+        runId: "run-continuation",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW,
+        heartbeatAt: NOW,
+        expiresAt: NOW + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
+      });
+
+      expect(
+        runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recordingDispatch().dispatch,
+          now: () => NOW + 1,
+        }),
+      ).toMatchObject({ code: "idle", continuationPending: true });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("heartbeats the dispatch lease for the complete async dispatch", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async", state: "approved" });
+      seedStep(db, {
+        runId: "run-async",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () =>
+          new Promise((resolve) => {
+            finishDispatch = resolve;
+          }),
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      expect(
+        getWorkflowLease(db, "run-async", WORKFLOW_DISPATCH_LEASE_KIND)
+          ?.heartbeatAt,
+      ).toBe(NOW + 31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).resolves.toMatchObject({ code: "dispatched" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("accepts a completed async dispatch after its lease row is reused", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-reused", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-reused",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () => {
+          db.prepare(
+            "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_id = ?",
+          ).run("run-async-reused", "preflight");
+          db.prepare(
+            "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ?, released_at = NULL WHERE run_id = ? AND lease_kind = ?",
+          ).run(
+            "scheduler-2",
+            NOW + 1,
+            NOW + 1,
+            NOW + 91,
+            "run-async-reused",
+            WORKFLOW_DISPATCH_LEASE_KIND,
+          );
+          return new Promise((resolve) => {
+            finishDispatch = resolve;
+          });
+        },
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).resolves.toMatchObject({ code: "dispatched" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects a retryable async dispatch after its lease row is reused", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-retryable", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-retryable",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () => {
+          db.prepare(
+            "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
+          ).run("run-async-retryable", "preflight");
+          db.prepare(
+            "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ?, released_at = NULL WHERE run_id = ? AND lease_kind = ?",
+          ).run(
+            "scheduler-2",
+            NOW + 1,
+            NOW + 1,
+            NOW + 91,
+            "run-async-retryable",
+            WORKFLOW_DISPATCH_LEASE_KIND,
+          );
+          return new Promise((resolve) => {
+            finishDispatch = resolve;
+          });
+        },
+      });
+
+      now = NOW + 31;
+      await vi.advanceTimersByTimeAsync(31);
+      finishDispatch({ status: "dispatched" });
+      await expect(pending).rejects.toThrow(/lease.*was lost/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("revalidates an async dispatch lease before accepting its result", async () => {
+    vi.useFakeTimers();
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-async-final-check", state: "approved" });
+      seedStep(db, {
+        runId: "run-async-final-check",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0,
+      });
+      let now = NOW;
+      let finishDispatch!: (result: WorkflowStepDispatchResult) => void;
+      const pending = runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "scheduler-1",
+        leaseDurationMs: 90,
+        now: () => now,
+        dispatch: () =>
+          new Promise((resolve) => {
+            finishDispatch = resolve;
+          }),
+      });
+
+      now = NOW + 100;
+      db.prepare(
+        "UPDATE workflow_leases SET holder = ?, acquired_at = ?, heartbeat_at = ?, expires_at = ? WHERE run_id = ? AND lease_kind = ?",
+      ).run(
+        "scheduler-2",
+        now,
+        now,
+        now + 90,
+        "run-async-final-check",
+        WORKFLOW_DISPATCH_LEASE_KIND,
+      );
+      finishDispatch({ status: "dispatched" });
+
+      await expect(pending).rejects.toThrow(/lease.*was lost/);
+    } finally {
+      db.close();
+    }
+  });
+
   it("is idle and does not dispatch when no workflow work is runnable", () => {
     const db = openDb(makeTempDir());
     try {
@@ -1737,6 +2337,893 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(lease?.holder).toBe("scheduler-1");
       expect(lease?.releasedAt).toBeNull();
       expect(lease?.expiresAt).toBe(NOW + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an unclassified delegate handoff after its checkpoint is durable", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "checkpointed-delegate-handoff";
+      const stepId = "implementation";
+      seedCheckpointedDelegateHandoff(db, runId, stepId);
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([1, 2] as const)(
+    "resumes delegate attempt %s after a crash before its first round",
+    (attempt) => {
+      const db = openDb(makeTempDir());
+      try {
+        const runId = `delegate-before-round-attempt-${attempt}`;
+        const stepId = "implementation";
+        seedDelegateBeforeCurrentAttemptRound(db, runId, stepId, attempt);
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          expiresAt: NOW,
+        });
+        const recorder = recordingDispatch();
+
+        const result = runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          now: () => NOW + 1,
+        });
+
+        expect(result).toMatchObject({
+          code: "dispatched",
+          claim: { runId, stepId },
+        });
+        expect(recorder.calls).toHaveLength(1);
+        expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+          needsManualRecovery: false,
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("does not treat an empty legacy retry attempt as an SDK continuation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "legacy-delegate-before-retry-round";
+      const stepId = "implementation";
+      seedDelegateBeforeCurrentAttemptRound(db, runId, stepId, 2);
+      db.prepare(
+        "UPDATE executor_rounds SET round_index = 1 WHERE workflow_run_id = ?",
+      ).run(runId);
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("idle");
+      expect(recorder.calls).toHaveLength(0);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    {
+      label: "before its replay marker is written",
+      persistReplayMarker: false,
+    },
+    {
+      label: "after its replay marker is written",
+      persistReplayMarker: true,
+    },
+  ])(
+    "resumes an interrupted durable legacy-completion replay $label",
+    ({ persistReplayMarker }) => {
+      const db = openDb(makeTempDir());
+      try {
+        const runId = "interrupted-legacy-completion-replay";
+        const stepId = "implementation";
+        seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+        seedStep(db, {
+          runId,
+          stepId,
+          kind: "implementation",
+          state: "running",
+          order: 0,
+        });
+        const invocationId = deriveDispatchInvocationId(runId, stepId);
+        insertExecutorInvocation(
+          db,
+          {
+            invocationId,
+            workflowRunId: runId,
+            stepRunId: stepId,
+            stepKey: stepId,
+            executorFamily: "delegate-supervisor",
+            state: "running",
+            attempt: 1,
+            startedAt: NOW,
+            heartbeatAt: NOW,
+            finishedAt: null,
+          },
+          { now: NOW },
+        );
+        const envelope = createDurableExecutorEnvelope({
+          db,
+          invocationId,
+          now: () => NOW,
+        });
+        const sourceRoundId = `${invocationId}::round-1`;
+        envelope.facade.startRound({
+          roundId: sourceRoundId,
+          invocationId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executorFamily: "delegate-supervisor",
+          attempt: 1,
+          roundIndex: 0,
+          state: "running",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: "legacy completion",
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+        });
+        envelope.facade.recordCheckpoint(sourceRoundId, {
+          checkpointId: `${sourceRoundId}-mechanism-completed`,
+          sequence: 0,
+          stage: "mechanism_completed",
+          detail: JSON.stringify({
+            recommendation: "complete",
+            recommendedRoundState: "succeeded",
+            recommendedInvocationState: "succeeded",
+            recoveryCode: null,
+            humanGate: null,
+            reason: "legacy wrapper completed cleanly",
+          }),
+        });
+        updateExecutorRound(db, sourceRoundId, {
+          toState: "capturing_result",
+        });
+        updateExecutorRound(db, sourceRoundId, {
+          toState: "succeeded",
+          classification: "complete",
+          executorRecommendation: "complete",
+          recoveryCode: null,
+          humanGate: null,
+          finishedAt: NOW,
+        });
+        db.prepare(
+          `UPDATE executor_invocations
+            SET attempt = 2, state = 'running', finished_at = NULL
+          WHERE invocation_id = ?`,
+        ).run(invocationId);
+        const replayRoundId = `${invocationId}::round-2`;
+        envelope.facade.startRound({
+          roundId: replayRoundId,
+          invocationId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executorFamily: "delegate-supervisor",
+          attempt: 2,
+          roundIndex: 1,
+          state: "capturing_result",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: "replaying legacy completion",
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+        });
+        if (persistReplayMarker) {
+          envelope.facade.recordCheckpoint(replayRoundId, {
+            checkpointId: `${replayRoundId}-legacy-completion-replayed`,
+            sequence: 0,
+            stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
+            detail: JSON.stringify({ sourceRoundId }),
+          });
+        }
+        seedLease(db, {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          expiresAt: NOW,
+        });
+        const recorder = recordingDispatch();
+
+        const result = runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          now: () => NOW + 1,
+        });
+
+        expect(result).toMatchObject({
+          code: "dispatched",
+          claim: { runId, stepId },
+        });
+        expect(recorder.calls).toHaveLength(1);
+        expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+          needsManualRecovery: false,
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("does not reuse delegate handoff evidence from an earlier attempt", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "delegate-prior-attempt-handoff";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(
+          db,
+          runId,
+          stepId,
+          DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+        );
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "complete",
+        executorRecommendation: "complete",
+        recoveryCode: null,
+        humanGate: null,
+        finishedAt: NOW,
+      });
+      db.prepare(
+        `UPDATE executor_invocations
+            SET attempt = 2, state = 'running', finished_at = NULL
+          WHERE invocation_id = ?`,
+      ).run(invocationId);
+      envelope.facade.startRound({
+        roundId: `${invocationId}::round-2`,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 2,
+        roundIndex: 1,
+        state: "capturing_result",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "current attempt has no durable handoff",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("idle");
+      expect(recorder.calls).toHaveLength(0);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a stale generic registered SDK continuation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-generic-sdk-continuation";
+      const stepId = "implementation";
+      seedRegisteredSdkContinuation(db, runId, stepId);
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result).toMatchObject({
+        code: "dispatched",
+        claim: { runId, stepId },
+      });
+      expect(recorder.calls).toHaveLength(1);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an unclassified delegate gate observation", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "unclassified-delegate-gate";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      envelope.applyDaemonDecision(
+        {
+          roundId,
+          classification: "continue",
+          executorRecommendation: "continue",
+          roundState: "succeeded",
+          invocationState: "running",
+          recoveryCode: null,
+          humanGate: null,
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: "classification: continue",
+          },
+        },
+      );
+      const gateRoundId = `${invocationId}::round-2`;
+      envelope.facade.startRound({
+        roundId: gateRoundId,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 1,
+        roundIndex: 1,
+        state: "mirroring_external_state",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "Mirrored delegated gate evidence",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      envelope.facade.recordDecision(gateRoundId, {
+        decisionId: `${gateRoundId}::decision`,
+        summary: "Approve delegated completion",
+        allowedActions: ["approve", "reject"],
+        recommendedAction: "approve",
+        chosenAction: null,
+        resolution: null,
+        externalRef: null,
+      });
+      envelope.facade.recordCheckpoint(gateRoundId, {
+        checkpointId: `${gateRoundId}::mirrored`,
+        sequence: 0,
+        stage: DELEGATE_SUPERVISOR_MIRRORED_STAGE,
+        detail: "{}",
+      });
+      envelope.facade.observeRound(gateRoundId, {
+        phase: "waiting_operator",
+        summary: "Delegated completion requires approval",
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an interrupted delegate handoff after its intent is durable", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "checkpointed-delegate-intent";
+      const stepId = "implementation";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "daemon-old",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
+      });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("propagates stale takeover proof when the lease holder string is reused", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "same-holder-delegate-takeover";
+      const stepId = "implementation";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "scheduler-1",
+        acquiredAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "scheduler-1",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("propagates stale takeover proof after recovery and redispatch occur in separate scheduler ticks", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "restart-boundary-delegate-takeover";
+      seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        "implementation",
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+
+      expect(recoverStaleWorkflowLeases(db, { now: NOW + 1 })).toMatchObject({
+        recovered: [{ runId, action: "released" }],
+      });
+
+      const recorder = recordingDispatch();
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-after-restart",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 2,
+      });
+
+      expect(result).toMatchObject({ code: "dispatched", claim: { runId } });
+      expect(recorder.calls[0]?.context.staleDispatchTakeover).toEqual({
+        previousHolder: "daemon-old",
+        previousAcquiredAt: NOW - 60_000,
+        previousExpiresAt: NOW,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recreates a durable SDK gate after a stale dispatch crash", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "waiting-operator-gate-recovery";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const decisionId = `${roundId}::decision`;
+      envelope.facade.recordDecision(roundId, {
+        decisionId,
+        summary: "Approve delegated completion",
+        allowedActions: ["approve", "reject"],
+        recommendedAction: "approve",
+        chosenAction: null,
+        resolution: null,
+        externalRef: null,
+      });
+      envelope.facade.recordCheckpoint(roundId, {
+        checkpointId: `${roundId}::gate-selector`,
+        sequence: 1,
+        stage: EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
+        detail: JSON.stringify({ decisionId }),
+      });
+      envelope.applyDaemonDecision(
+        {
+          roundId,
+          classification: "approval_required",
+          executorRecommendation: "approval_required",
+          roundState: "waiting_operator",
+          invocationState: "waiting_operator",
+          recoveryCode: null,
+          humanGate: "approval_required",
+        },
+        {
+          allocateClassificationCheckpointIdentity: true,
+          classificationCheckpoint: {
+            stage: "classified",
+            detail: "classification: approval_required",
+          },
+        },
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+
+      const recovery = recoverStaleWorkflowLeases(db, { now: NOW + 1 });
+
+      expect(recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT invocation_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        invocation_id: invocationId,
+        round_id: roundId,
+        evidence: decisionId,
+        resolved_at: null,
+      });
+      expect(
+        getWorkflowLease(db, runId, WORKFLOW_DISPATCH_LEASE_KIND),
+      ).toMatchObject({ releasedAt: NOW + 1 });
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes an interrupted delegate poll from a prior durable handoff", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "interrupted-delegate-poll";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      envelope.facade.startRound({
+        roundId: `${invocationId}::round-2`,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 1,
+        roundIndex: 1,
+        state: "mirroring_external_state",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "Reading delegated external state.",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(result.claim.lease.holder).toBe("scheduler-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a completed delegate handoff", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "completed-delegate-handoff";
+      const stepId = "implementation";
+      const { roundId } = seedCheckpointedDelegateHandoff(db, runId, stepId);
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a completed delegate poll from a prior durable handoff", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "completed-delegate-poll";
+      const stepId = "implementation";
+      const { envelope, invocationId, roundId } =
+        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      updateExecutorRound(db, roundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      const pollRoundId = `${invocationId}::round-2`;
+      envelope.facade.startRound({
+        roundId: pollRoundId,
+        invocationId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executorFamily: "delegate-supervisor",
+        attempt: 1,
+        roundIndex: 1,
+        state: "mirroring_external_state",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "Reading delegated external state.",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      updateExecutorRound(db, pollRoundId, {
+        toState: "succeeded",
+        classification: "continue",
+        executorRecommendation: "continue",
+        finishedAt: NOW,
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      if (result.code !== "dispatched") throw new Error("expected dispatch");
+      expect(result.recovery.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim).toMatchObject({ runId, stepId });
+      expect(result.claim.lease.holder).toBe("scheduler-1");
     } finally {
       db.close();
     }

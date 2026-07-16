@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import { releaseRepoLock } from "../../repo/locks.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "../dispatch/retry.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
 import { loadWorkflowRunDetail } from "./status.js";
@@ -39,6 +40,10 @@ import {
   classifyNoMistakesDeterministicEvidence,
   type NoMistakesEvidenceExpectedIdentity,
 } from "../recovery/no-mistakes-evidence.js";
+import {
+  listOpenWorkflowGatesForRun,
+  resolveWorkflowGate,
+} from "../gate/persist.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -489,6 +494,30 @@ export function clearWorkflowRunManualRecoveryGuarded(
       };
     }
 
+    if (preparedRetry.prepared) {
+      const manualLocks = db
+        .prepare(
+          `SELECT id FROM repo_locks
+            WHERE goal_id = ?
+              AND job_id = ?
+              AND iteration = ?
+              AND state = 'needs_manual_recovery'
+            ORDER BY acquired_at, id`,
+        )
+        .all(
+          input.runId,
+          preparedRetry.invocationId,
+          preparedRetry.attempt,
+        ) as Array<{ id: string }>;
+      for (const lock of manualLocks) {
+        releaseRepoLock(db, {
+          lockId: lock.id,
+          now,
+          recoveryStatus: "workflow_manual_recovery_cleared",
+        });
+      }
+    }
+
     const previousReason = detail.run.manualRecoveryReason;
     const previousMarkedAt = detail.run.manualRecoveryAt;
     const cleared = clearWorkflowRunManualRecovery(db, {
@@ -502,6 +531,24 @@ export function clearWorkflowRunManualRecoveryGuarded(
         reason: "run_not_found",
         message: `Workflow run ${input.runId} disappeared during clear.`,
       };
+    }
+    for (const gate of listOpenWorkflowGatesForRun(db, input.runId)) {
+      if (
+        gate.gateType !== "manual_recovery_required" ||
+        !gate.allowedActions.includes("clear_recovery")
+      ) {
+        continue;
+      }
+      resolveWorkflowGate(
+        db,
+        gate.gateId,
+        {
+          action: "clear_recovery",
+          actor: "workflow run clear-recovery",
+          mode: "operator",
+        },
+        { now },
+      );
     }
     db.exec("COMMIT");
 
@@ -722,13 +769,42 @@ function loadCurrentNoMistakesCheckpointIdentity(
       `SELECT r.attempt AS attempt, r.round_index AS roundIndex,
               c.stage AS stage, c.detail AS detail, c.sequence AS sequence
          FROM executor_rounds AS r
+         JOIN executor_invocations AS i ON i.invocation_id = r.invocation_id
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
         WHERE r.workflow_run_id = ?
           AND r.step_run_id = ?
+          AND r.attempt = i.attempt
           AND r.executor_family IN ('no-mistakes', 'delegate-supervisor')
-          AND c.stage IN ('external_state_mirrored', 'expected_external_identity')
+          AND (
+            r.executor_family = 'no-mistakes'
+            OR EXISTS (
+              SELECT 1
+                FROM executor_rounds AS intent_round
+                JOIN executor_checkpoints AS intent
+                  ON intent.round_id = intent_round.round_id
+               WHERE intent_round.invocation_id = r.invocation_id
+                 AND intent_round.attempt = r.attempt
+                 AND intent.stage = 'delegate_handoff_intent'
+                 AND json_extract(
+                   CASE WHEN json_valid(intent.detail) THEN intent.detail ELSE '{}'
+                   END,
+                   '$.tool'
+                 ) = 'no-mistakes'
+            )
+          )
+          AND c.stage IN (
+            'delegate_external_state_mirrored',
+            'delegate_handoff_completed',
+            'external_state_mirrored',
+            'expected_external_identity'
+          )
         ORDER BY r.attempt DESC, r.round_index DESC,
-                 CASE c.stage WHEN 'external_state_mirrored' THEN 0 ELSE 1 END,
+                 CASE c.stage
+                   WHEN 'delegate_external_state_mirrored' THEN 0
+                   WHEN 'external_state_mirrored' THEN 1
+                   WHEN 'delegate_handoff_completed' THEN 2
+                   ELSE 3
+                 END,
                  c.sequence DESC`,
     )
     .all(input.runId, input.stepId) as {
@@ -768,24 +844,46 @@ function parseNoMistakesCheckpointIdentity(
     return null;
   }
   const record = parsed as Record<string, unknown>;
-  const noMistakesRunId = readNonBlankCheckpointString(record, "externalRunId");
-  const branch = readNonBlankCheckpointString(record, "branch");
-  const headSha = readCheckpointSha(record, "headSha");
+  const state = readCheckpointRecord(record, "state");
+  const terminalState = readCheckpointRecord(record, "terminalState");
+  const terminalValue =
+    terminalState === null
+      ? null
+      : readCheckpointRecord(terminalState, "value");
+  const externalIdentity = readCheckpointRecord(record, "externalIdentity");
+  const identity = state ?? terminalValue ?? externalIdentity ?? record;
+  const noMistakesRunId = readNonBlankCheckpointString(
+    identity,
+    "externalRunId",
+  );
+  const branch = readNonBlankCheckpointString(identity, "branch");
+  const headSha = readCheckpointSha(identity, "headSha");
   if (noMistakesRunId === null || branch === null || headSha === null) {
     return null;
   }
   const explicitPullRequestId = readNonBlankCheckpointString(
-    record,
+    state ?? terminalValue ?? record,
     "pullRequestId",
   );
   const pullRequestId =
-    explicitPullRequestId ?? pullRequestIdFromCheckpointUrl(record["prUrl"]);
+    explicitPullRequestId ??
+    pullRequestIdFromCheckpointUrl((state ?? terminalValue ?? record)["prUrl"]);
   return {
     noMistakesRunId,
     branch,
     headSha,
     ...(pullRequestId !== null ? { pullRequestId } : {}),
   };
+}
+
+function readCheckpointRecord(
+  record: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record[key];
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function readNonBlankCheckpointString(

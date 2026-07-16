@@ -10,6 +10,10 @@ const adaptersRoot = path.join(repoRoot, "src", "adapters");
 
 const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
   [
+    "src/adapters/no-mistakes-executor.ts -> src/core/executors/delegate-supervisor/classifier.ts",
+    "compatibility mirror delegates to the official supervision classifier",
+  ],
+  [
     "src/adapters/git-transaction.ts -> src/core/executors/runner/types.ts",
     "official SDK CommitIntent type surface",
   ],
@@ -24,6 +28,30 @@ const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
   [
     "src/adapters/no-mistakes-executor.ts -> src/core/executors/loop/persist.ts",
     "temporary until delegate-supervisor reduces this adapter to a tool adapter",
+  ],
+  [
+    "src/adapters/no-mistakes-tool-adapter.ts -> src/core/executors/delegate-supervisor/types.ts",
+    "official delegated-tool lifecycle adapter interface",
+  ],
+  [
+    "src/adapters/no-mistakes-tool-adapter.ts -> src/core/executors/no-mistakes/mechanism.ts",
+    "tool-owned external-state reader and normalizer",
+  ],
+  [
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/classifier.ts",
+    "host adapter uses the single delegated-state classification authority",
+  ],
+  [
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/types.ts",
+    "host adapter implements the official delegated-tool lifecycle interface",
+  ],
+  [
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/live-step/sdk-executor.ts",
+    "host adapter reuses built-in finalization without executor persistence",
+  ],
+  [
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/runner/result.ts",
+    "host adapter uses the official SDK RunnerResult parser surface",
   ],
   [
     "src/adapters/no-mistakes-executor.ts -> src/core/executors/loop/reducer.ts",
@@ -49,6 +77,10 @@ const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
 
 const README_MARKER_BY_EDGE = new Map<string, string>([
   [
+    "src/adapters/no-mistakes-executor.ts -> src/core/executors/delegate-supervisor/classifier.ts",
+    "`no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`",
+  ],
+  [
     "src/adapters/git-transaction.ts -> src/core/executors/runner/types.ts",
     "`git-transaction.ts` → `runner/types.ts`",
   ],
@@ -71,6 +103,28 @@ const README_MARKER_BY_EDGE = new Map<string, string>([
       [
         edge,
         "`no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`",
+      ] as const,
+  ),
+  ...[
+    "src/adapters/no-mistakes-tool-adapter.ts -> src/core/executors/delegate-supervisor/types.ts",
+    "src/adapters/no-mistakes-tool-adapter.ts -> src/core/executors/no-mistakes/mechanism.ts",
+  ].map(
+    (edge) =>
+      [
+        edge,
+        "`no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`",
+      ] as const,
+  ),
+  ...[
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/classifier.ts",
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/delegate-supervisor/types.ts",
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/live-step/sdk-executor.ts",
+    "src/adapters/profile-backed-delegate-tool-adapter.ts -> src/core/executors/runner/result.ts",
+  ].map(
+    (edge) =>
+      [
+        edge,
+        "`profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `runner/result.ts`",
       ] as const,
   ),
   [

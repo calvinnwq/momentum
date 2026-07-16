@@ -256,8 +256,17 @@ export type ExecutorTickResult = {
   readonly recommendedInvocationState: ExecutorInvocationState;
   readonly recoveryCode: string | null;
   readonly humanGate: ExecutorHumanGateType | null;
+  /**
+   * Selects the unresolved durable decision that a human gate must mirror.
+   * Omit or set null to select the last unresolved decision.
+   */
+  readonly humanGateDecisionId?: string | null;
   readonly reason: string;
 };
+
+/** Durable checkpoint stage for the decision selector applied to a human gate. */
+export const EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE =
+  "human_gate_decision_selected";
 
 /**
  * Core executor SDK interface. Registration/discovery decides the durable name;

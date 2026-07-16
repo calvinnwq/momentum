@@ -64,7 +64,7 @@ describe("CI workflow configuration", () => {
           name: "Install dependencies",
           run: "pnpm install --frozen-lockfile",
         }),
-        expect.objectContaining({ name: "Test", run: "pnpm test" }),
+        expect.objectContaining({ name: "Test", run: "pnpm test:full" }),
         expect.objectContaining({ name: "Typecheck", run: "pnpm typecheck" }),
         expect.objectContaining({ name: "Lint", run: "pnpm lint" }),
         expect.objectContaining({

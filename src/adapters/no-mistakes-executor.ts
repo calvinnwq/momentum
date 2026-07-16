@@ -1,13 +1,11 @@
 /**
- * no-mistakes executor mirror — decision brain and identity.
+ * Legacy no-mistakes executor-mirror compatibility facade.
  *
- * The executor-loop contract (SPEC.md) pins the
- * `no-mistakes` family as a *mirror*, not a runner: it "mirrors no-mistakes
- * daemon state and turns review findings into durable Momentum gates, findings,
- * and decisions." Momentum does not own or re-run the no-mistakes pipeline; it
- * mirrors enough external state to decide workflow progress. The contract's
- * "External Executor Mirroring" section lists exactly what Momentum mirrors for
- * no-mistakes:
+ * Recorded workflow definitions may still use the legacy `no-mistakes` family
+ * as an external-state mirror.
+ * Current coding definitions use `delegate-supervisor` with
+ * `tool: "no-mistakes"` instead.
+ * Both paths normalize the same no-mistakes evidence fields:
  *
  *   - External run id.
  *   - Branch and head SHA.
@@ -18,27 +16,28 @@
  *   - Decisions and delegated-policy results.
  *   - PR URL and CI state.
  *
- * This module owns the *pure* half of that mirror: the {@link NoMistakesExternalState}
- * snapshot shape, the daemon classification of a mirrored snapshot, the durable
- * finding / decision projections, and the deterministic, reattachable invocation
- * / round identity. Like `single-shot/executor.ts` and `goal-loop/executor.ts`,
- * it is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation. The mechanism / orchestrator siblings layer the
- * external-state reader and durable persistence on top, exactly as the
- * single-shot twins layer on `single-shot/executor.ts`.
+ * This module preserves the legacy `no-mistakes` family API for recorded
+ * invocations: the {@link NoMistakesExternalState} snapshot aliases, durable
+ * finding / decision projections, and deterministic invocation / round
+ * identity. Classification delegates to the shared
+ * `delegate-supervisor/classifier.ts` authority, so compatibility callers and
+ * current tool adapters cannot drift. Like `single-shot/executor.ts` and
+ * `goal-loop/executor.ts`, these compatibility helpers are pure functions of
+ * their inputs: no SQLite, file system, git, or executor invocation. The legacy
+ * mechanism / orchestrator siblings layer external-state reading and durable
+ * persistence on top; current coding definitions instead use the
+ * `delegate-supervisor` executor with `tool: "no-mistakes"`.
  *
- * The defining discipline is the ticket's "Treat external no-mistakes state as
- * evidence to classify, not blindly trusted authority" and the contract's
- * "External state strings are never enough on their own." So unlike
- * `decideSingleShotInvocation` — which classifies an outcome Momentum's *own*
- * mechanism produced and therefore *throws* on an unknown code (a programming
- * error) — {@link decideNoMistakesMirror} classifies *external* evidence and is
+ * External state is evidence to classify, not trusted authority.
+ * Unlike `decideSingleShotInvocation`, which classifies an outcome Momentum's
+ * own mechanism produced and therefore throws on an unknown code,
+ * {@link decideNoMistakesMirror} classifies external evidence and is
  * total: any malformed, contradictory, or unrecognized snapshot routes to
  * `manual_recovery_required` for operator inspection rather than being trusted or
  * crashing the daemon.
  *
- * Classification, grounded in the contract's "Completion Classification" and the
- * ticket's "Preserve no-mistakes daemon ownership and human-gate semantics":
+ * Compatibility classification preserves no-mistakes ownership and human-gate
+ * semantics:
  *
  *   - `running` is `continue`: the external pipeline is still working, so the
  *     mirror round stays in `mirroring_external_state` and the daemon polls
@@ -50,22 +49,31 @@
  *   - `awaiting_approval` is `approval_required`: an approval boundary that the
  *     mirror surfaces as a durable `waiting_operator` gate.
  *   - `completed` is `complete` *only when the corroborating evidence agrees* —
- *     CI is passing or not configured, and every surfaced decision is resolved.
+ *     the head is a full 40-character SHA, no active findings remain, CI is
+ *     passing or not configured, and every surfaced decision is resolved.
  *     A `completed` claim that contradicts its own CI / decision evidence is not
  *     trusted; it routes to `manual_recovery_required` (`external_state_inconsistent`).
  *   - `failed` is `failed` (`external_run_failed`).
+ *   - `cancelled` is `manual_recovery_required`
+ *     (`external_state_inconsistent`) because cancellation is not reliable
+ *     completion evidence.
  *   - `blocked` is `blocked` (`external_state_blocked`) with an
  *     `external_state_required` gate naming the blocker; the round ends blocked
  *     while the workflow may later start a fresh invocation once the blocker
  *     clears.
  *   - A structurally unreadable snapshot (empty run id, malformed head SHA, a
  *     selected finding id with no surfaced finding, an empty finding title, a
- *     decision with no allowed actions, duplicate ids, an unknown step status,
- *     an unknown CI state) routes to `manual_recovery_required`
+ *     decision with non-canonical, duplicate, or mismatched actions, duplicate
+ *     ids, an unknown step status, an unknown CI state) routes to
+ *     `manual_recovery_required`
  *     (`external_state_unreadable`): untrusted evidence, not authority.
  */
 
 import type { ExecutorRoundUpdate } from "../core/executors/loop/persist.js";
+import {
+  classifyDelegateSupervisorState,
+  classifyDelegateSupervisorUnreadable,
+} from "../core/executors/delegate-supervisor/classifier.js";
 import type {
   ExecutorCompletionClassification,
   ExecutorDecisionRecord,
@@ -75,7 +83,7 @@ import type {
   ExecutorInvocationState,
   ExecutorRoundRecord,
   ExecutorRoundState,
-  WorkflowExecutorFamily
+  WorkflowExecutorFamily,
 } from "../core/executors/loop/reducer.js";
 
 /**
@@ -95,21 +103,20 @@ export type NoMistakesExecutorFamily = typeof NO_MISTAKES_EXECUTOR_FAMILY;
  * hard-coding the family string at the call site.
  */
 export const NO_MISTAKES_EXECUTOR_FAMILIES = [
-  NO_MISTAKES_EXECUTOR_FAMILY
+  NO_MISTAKES_EXECUTOR_FAMILY,
 ] as const satisfies readonly WorkflowExecutorFamily[];
 
 /**
  * Whether an executor family is the one this adapter mirrors.
  */
 export function isNoMistakesExecutorFamily(
-  family: string
+  family: string,
 ): family is NoMistakesExecutorFamily {
   return family === NO_MISTAKES_EXECUTOR_FAMILY;
 }
 
 /**
- * The external no-mistakes step statuses Momentum can mirror (contract "External
- * Executor Mirroring": "Active external step" / "Step status"). These are the
+ * The external no-mistakes step statuses the compatibility mirror accepts. These are the
  * status strings the no-mistakes daemon exposes for its active step; the mirror
  * reconciles them with the rest of the snapshot rather than trusting them
  * outright.
@@ -120,14 +127,14 @@ export const NO_MISTAKES_EXTERNAL_STEP_STATUSES = [
   "awaiting_approval",
   "blocked",
   "failed",
-  "completed"
+  "cancelled",
+  "completed",
 ] as const;
 export type NoMistakesExternalStepStatus =
   (typeof NO_MISTAKES_EXTERNAL_STEP_STATUSES)[number];
 
 /**
- * The external CI states Momentum can mirror (contract "External Executor
- * Mirroring": "PR URL and CI state"). `none` means CI is not configured for the
+ * The external CI states Momentum can mirror. `none` means CI is not configured for the
  * run (no PR checks); `passed` / `failed` / `pending` mirror the PR's check
  * conclusion. A completed external run is only trusted as `complete` when CI is
  * `passed` or `none`.
@@ -136,7 +143,7 @@ export const NO_MISTAKES_CI_STATES = [
   "passed",
   "failed",
   "pending",
-  "none"
+  "none",
 ] as const;
 export type NoMistakesCiState = (typeof NO_MISTAKES_CI_STATES)[number];
 
@@ -161,14 +168,13 @@ export const NO_MISTAKES_RECOVERY_CODES = [
   "external_run_failed",
   "external_state_blocked",
   "external_state_inconsistent",
-  "external_state_unreadable"
+  "external_state_unreadable",
 ] as const;
 export type NoMistakesRecoveryCode =
   (typeof NO_MISTAKES_RECOVERY_CODES)[number];
 
 /**
- * One review finding surfaced by an external no-mistakes run (contract "External
- * Executor Mirroring": "Review findings"). `externalId` is no-mistakes' own
+ * One review finding surfaced by an external no-mistakes run. `externalId` is no-mistakes' own
  * finding id (e.g. `F-1`); the projection mints the durable Momentum finding id
  * and `externalRef` from it.
  */
@@ -180,8 +186,7 @@ export type NoMistakesExternalFinding = {
 };
 
 /**
- * One decision point surfaced by an external no-mistakes run (contract "External
- * Executor Mirroring": "Decisions and delegated-policy results"). `resolution`
+ * One decision point surfaced by an external no-mistakes run. `resolution`
  * mirrors the delegated-policy or operator outcome once the external daemon has
  * settled the decision; an absent / empty `resolution` means the decision is
  * still open.
@@ -196,8 +201,7 @@ export type NoMistakesExternalDecision = {
 };
 
 /**
- * A mirrored snapshot of external no-mistakes daemon state — exactly the fields
- * the contract's "External Executor Mirroring" section lists for no-mistakes. The
+ * A mirrored snapshot of external no-mistakes daemon state. The
  * mechanism twin reads this from the external state store; this pure module
  * classifies it and projects its findings / decisions into durable Momentum
  * records. It is evidence to reconcile, not authoritative Momentum state.
@@ -232,239 +236,21 @@ export type NoMistakesMirrorDecision = {
   reason: string;
 };
 
-const STEP_STATUS_SET: ReadonlySet<string> = new Set(
-  NO_MISTAKES_EXTERNAL_STEP_STATUSES
-);
-const CI_STATE_SET: ReadonlySet<string> = new Set(NO_MISTAKES_CI_STATES);
-const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
-
-/** A non-empty, non-whitespace string. */
-function isNonBlank(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-/**
- * The single manual-recovery decision the mirror settles into whenever it cannot
- * trust the snapshot. `recoveryCode` distinguishes an unreadable snapshot from a
- * self-contradictory one; both demand operator inspection before the workflow can
- * proceed, so both carry the `manual_recovery_required` classification, round
- * state, invocation state, and gate.
- */
-function manualRecovery(
-  recoveryCode: Extract<
-    NoMistakesRecoveryCode,
-    "external_state_unreadable" | "external_state_inconsistent"
-  >,
-  reason: string
-): NoMistakesMirrorDecision {
-  return {
-    classification: "manual_recovery_required",
-    roundState: "manual_recovery_required",
-    invocationState: "manual_recovery_required",
-    humanGate: "manual_recovery_required",
-    recoveryCode,
-    reason
-  };
-}
-
-/**
- * Find the first structural reason the snapshot cannot be trusted at all, or
- * `null` when it is well-formed. This is the "don't blindly trust" guard: it
- * rejects malformed identity, dangling selected findings, empty finding titles,
- * decisions with no allowed actions, duplicate ids, and unknown enum values
- * before any status-specific classification runs.
- */
-function findUnreadableReason(state: NoMistakesExternalState): string | null {
-  if (!isNonBlank(state.externalRunId)) {
-    return "external run id is missing";
-  }
-  if (!isNonBlank(state.branch)) {
-    return "branch is missing";
-  }
-  if (typeof state.headSha !== "string" || !COMMIT_SHA_RE.test(state.headSha)) {
-    return "head SHA is not a 40-character hex SHA";
-  }
-  if (!STEP_STATUS_SET.has(state.stepStatus)) {
-    return `unknown external step status ${String(state.stepStatus)}`;
-  }
-  if (!CI_STATE_SET.has(state.ciState)) {
-    return `unknown external CI state ${String(state.ciState)}`;
-  }
-
-  const findingIds = new Set<string>();
-  for (const finding of state.findings) {
-    if (!isNonBlank(finding.externalId)) {
-      return "a finding is missing its external id";
-    }
-    if (!isNonBlank(finding.title)) {
-      return `finding ${finding.externalId} is missing its title`;
-    }
-    if (findingIds.has(finding.externalId)) {
-      return `duplicate finding id ${finding.externalId}`;
-    }
-    findingIds.add(finding.externalId);
-  }
-
-  for (const selectedId of state.selectedFindingIds) {
-    if (!findingIds.has(selectedId)) {
-      return `selected finding id ${selectedId} references no surfaced finding`;
-    }
-  }
-
-  const decisionIds = new Set<string>();
-  for (const decision of state.decisions) {
-    if (!isNonBlank(decision.externalId)) {
-      return "a decision is missing its external id";
-    }
-    if (!isNonBlank(decision.summary)) {
-      return `decision ${decision.externalId} is missing its summary`;
-    }
-    if (decision.allowedActions.length === 0) {
-      return `decision ${decision.externalId} offers no allowed actions`;
-    }
-    if (decision.allowedActions.some((action) => !isNonBlank(action))) {
-      return `decision ${decision.externalId} offers a blank allowed action`;
-    }
-    if (decisionIds.has(decision.externalId)) {
-      return `duplicate decision id ${decision.externalId}`;
-    }
-    decisionIds.add(decision.externalId);
-  }
-
-  return null;
-}
-
-/** Whether a decision has been settled (an operator or delegated-policy outcome). */
-function isResolved(decision: NoMistakesExternalDecision): boolean {
-  return isNonBlank(decision.resolution);
-}
-
 /**
  * Classify one mirrored no-mistakes snapshot into a daemon decision. Pure and
  * total: the same snapshot always yields the same decision, and *any* input —
  * including a malformed or self-contradictory one — yields a decision rather than
- * throwing, because the snapshot is untrusted external evidence (contract
- * "External state strings are never enough on their own"; ticket "Treat external
- * no-mistakes state as evidence to classify, not blindly trusted authority").
+ * throwing, because the snapshot is untrusted external evidence.
  *
  * See the module doc for the per-status classification boundaries.
  */
 export function decideNoMistakesMirror(
-  state: NoMistakesExternalState
+  state: NoMistakesExternalState,
 ): NoMistakesMirrorDecision {
-  const unreadable = findUnreadableReason(state);
-  if (unreadable !== null) {
-    return manualRecovery(
-      "external_state_unreadable",
-      `external no-mistakes state is unreadable: ${unreadable}`
-    );
-  }
-
-  switch (state.stepStatus) {
-    case "running":
-      return {
-        classification: "continue",
-        roundState: "mirroring_external_state",
-        invocationState: "running",
-        humanGate: null,
-        recoveryCode: null,
-        reason: "external no-mistakes run is still in progress; keep mirroring"
-      };
-
-    case "awaiting_decision": {
-      if (state.decisions.length === 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          "external no-mistakes run is awaiting_decision but surfaced no decision"
-        );
-      }
-      const unresolved = state.decisions.filter(
-        (decision) => !isResolved(decision)
-      );
-      if (unresolved.length === 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          "external no-mistakes run is awaiting_decision but surfaced no unresolved decision"
-        );
-      }
-      return {
-        classification: "operator_decision_required",
-        roundState: "waiting_operator",
-        invocationState: "waiting_operator",
-        humanGate: "operator_decision_required",
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run surfaced a decision; pausing for an operator decision"
-      };
-    }
-
-    case "awaiting_approval":
-      return {
-        classification: "approval_required",
-        roundState: "waiting_operator",
-        invocationState: "waiting_operator",
-        humanGate: "approval_required",
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run reached an approval boundary; pausing for approval"
-      };
-
-    case "blocked":
-      return {
-        classification: "blocked",
-        roundState: "blocked",
-        invocationState: "blocked",
-        humanGate: "external_state_required",
-        recoveryCode: "external_state_blocked",
-        reason:
-          "external no-mistakes run is blocked on external state; resolve it and re-run"
-      };
-
-    case "failed":
-      return {
-        classification: "failed",
-        roundState: "failed",
-        invocationState: "failed",
-        humanGate: null,
-        recoveryCode: "external_run_failed",
-        reason: "external no-mistakes run failed"
-      };
-
-    case "completed": {
-      if (state.ciState === "failed" || state.ciState === "pending") {
-        return manualRecovery(
-          "external_state_inconsistent",
-          `external no-mistakes run claims completed but CI is ${state.ciState}`
-        );
-      }
-      const unresolved = state.decisions.filter(
-        (decision) => !isResolved(decision)
-      );
-      if (unresolved.length > 0) {
-        return manualRecovery(
-          "external_state_inconsistent",
-          `external no-mistakes run claims completed but ${unresolved.length} decision(s) are unresolved`
-        );
-      }
-      return {
-        classification: "complete",
-        roundState: "succeeded",
-        invocationState: "succeeded",
-        humanGate: null,
-        recoveryCode: null,
-        reason:
-          "external no-mistakes run completed with passing CI and resolved decisions"
-      };
-    }
-
-    default:
-      // Unreachable: findUnreadableReason already rejected any status outside the
-      // enum. Kept for totality so the switch never silently falls through.
-      return manualRecovery(
-        "external_state_unreadable",
-        `unknown external step status ${String(state.stepStatus)}`
-      );
-  }
+  return classifyDelegateSupervisorState(
+    state,
+    "external no-mistakes",
+  ) as NoMistakesMirrorDecision;
 }
 
 /**
@@ -484,23 +270,24 @@ export function decideNoMistakesMirror(
  * verbatim as the decision reason rather than re-prefixed.
  */
 export function decideNoMistakesUnreadable(
-  reason: string
+  reason: string,
 ): NoMistakesMirrorDecision {
-  return manualRecovery("external_state_unreadable", reason);
+  return classifyDelegateSupervisorUnreadable(
+    reason,
+  ) as NoMistakesMirrorDecision;
 }
 
 /**
  * Mint the deterministic, reattachable executor-invocation id for a no-mistakes
  * mirror under a step run. The id embeds the `(workflowRunId, stepRunId)`
  * step-run identity, the `no-mistakes` family, and the `attempt`, so it is
- * globally unique yet recomputable from durable state alone (contract "Heartbeat
- * And Reattach"). A re-run of the step is a fresh `attempt`, so it never collides
+ * globally unique yet recomputable from durable state alone. A re-run of the step is a fresh `attempt`, so it never collides
  * with the prior mirror.
  */
 export function noMistakesInvocationId(
   workflowRunId: string,
   stepRunId: string,
-  attempt: number
+  attempt: number,
 ): string {
   return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR_FAMILY}::${attempt}`;
 }
@@ -536,20 +323,19 @@ export type PlanNoMistakesInvocationInput = {
 /**
  * Project a `StepRun` identity into the durable no-mistakes
  * {@link ExecutorInvocationRecord} the orchestrator twin inserts before the mirror
- * round runs (contract "State Model": `StepRun -> ExecutorInvocation ->
- * ExecutorRound[]`). One configured mirror session for the step, materialized at
+ * round runs. One configured mirror session for the step, materialized at
  * `running` with the deterministic {@link noMistakesInvocationId} and the start
  * clock copied in. Pure: no ids or clocks are invented beyond the supplied
  * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh invocation.
  */
 export function planNoMistakesInvocation(
-  input: PlanNoMistakesInvocationInput
+  input: PlanNoMistakesInvocationInput,
 ): ExecutorInvocationRecord {
   return {
     invocationId: noMistakesInvocationId(
       input.workflowRunId,
       input.stepRunId,
-      input.attempt
+      input.attempt,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
@@ -559,14 +345,14 @@ export function planNoMistakesInvocation(
     attempt: input.attempt,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
-    finishedAt: null
+    finishedAt: null,
   };
 }
 
 /**
  * The per-round runtime inputs the daemon provides for the mirror: the round's
- * input digest, its daemon-provided artifact directory, and its bounded log paths
- * (contract "Round Lifecycle" steps 4-5). These are the filesystem / content
+ * input digest, its daemon-provided artifact directory, and its bounded log paths.
+ * These are the filesystem / content
  * concerns the pure adapter never invents — the orchestrator resolves them and
  * {@link planNoMistakesRoundStart} freezes them into the round-start record.
  */
@@ -593,7 +379,7 @@ export type PlanNoMistakesRoundStartInput = {
 /**
  * Project a materialized invocation + per-round runtime inputs into the durable
  * round-start {@link ExecutorRoundRecord} the orchestrator inserts before it begins
- * mirroring (contract Round Lifecycle step 4). The round inherits the invocation's
+ * mirroring. The round inherits the invocation's
  * `(workflowRunId, stepRunId, stepKey, attempt)` identity and its `no-mistakes`
  * family, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
  * the round's input digest / artifact root / log paths.
@@ -605,24 +391,22 @@ export type PlanNoMistakesRoundStartInput = {
  *     enters the capture/mirror phase directly; from there every decided round
  *     state ({@link decideNoMistakesMirror}) is a legal transition.
  *   - `agentProvider` / `model` / `effort` stay `null`. No-mistakes owns its own
- *     pipeline, so Momentum resolves no agent for the mirror (contract "Preserve
- *     no-mistakes daemon ownership"), exactly as the deterministic `script` family
+ *     pipeline, so Momentum resolves no agent for the mirror, exactly as the deterministic `script` family
  *     resolves no agent.
  *
- * Pure: no ids or clock are invented here — freezing the identity at start is the
- * contract's "a later config edit must not rewrite the historical record for an
- * already-started round."
+ * Pure: no ids or clock are invented here, so later config edits cannot rewrite
+ * the historical record for an already-started round.
  *
  * @throws {Error} if the invocation's family is not `no-mistakes` — the mirror
  * round must inherit the family {@link planNoMistakesInvocation} establishes.
  */
 export function planNoMistakesRoundStart(
-  input: PlanNoMistakesRoundStartInput
+  input: PlanNoMistakesRoundStartInput,
 ): ExecutorRoundRecord {
   const { invocation, runtime } = input;
   if (!isNoMistakesExecutorFamily(invocation.executorFamily)) {
     throw new Error(
-      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`
+      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`,
     );
   }
   return {
@@ -654,7 +438,7 @@ export function planNoMistakesRoundStart(
     verificationStatus: null,
     commitSha: null,
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
   };
 }
 
@@ -702,14 +486,14 @@ export type NoMistakesRoundPersistencePlan = {
  * signal it mirrored this poll. Pure: no SQLite, no file system.
  */
 export function noMistakesRoundUpdate(
-  decision: NoMistakesMirrorDecision
+  decision: NoMistakesMirrorDecision,
 ): ExecutorRoundUpdate {
   return {
     toState: decision.roundState,
     classification: decision.classification,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
-    summary: decision.reason
+    summary: decision.reason,
   };
 }
 
@@ -717,13 +501,12 @@ export function noMistakesRoundUpdate(
  * Build the durable persistence plan for one mirror poll. Composes
  * {@link decideNoMistakesMirror} into the single round patch the orchestrator
  * applies (via {@link noMistakesRoundUpdate}), so the daemon classification,
- * recovery code, and human gate all derive from the same snapshot (contract "Round
- * Lifecycle" steps 9-10 for the mirror). Pure: no SQLite, no file system; the same
+ * recovery code, and human gate all derive from the same snapshot. Pure: no SQLite, no file system; the same
  * snapshot always yields the same plan, and — like {@link decideNoMistakesMirror}
  * — it is total, never throwing on untrusted external evidence.
  */
 export function planNoMistakesRoundPersistence(
-  input: PlanNoMistakesRoundPersistenceInput
+  input: PlanNoMistakesRoundPersistenceInput,
 ): NoMistakesRoundPersistencePlan {
   const decision = decideNoMistakesMirror(input.state);
   return { decision, roundUpdate: noMistakesRoundUpdate(decision) };
@@ -743,15 +526,14 @@ export type PlanNoMistakesRoundFindingsInput = {
 /**
  * Project the external review findings into the durable {@link ExecutorFindingRecord}
  * rows the persistence layer (`insertExecutorFinding`) writes — the no-mistakes
- * mirror's "Review findings" / "Selected finding IDs" (contract "External
- * Executor Mirroring"). Each finding takes a deterministic id
+ * mirror's review findings and selected finding IDs. Each finding takes a deterministic id
  * (`<roundId>-finding-<externalId>`) and an `externalRef` of
  * `nomistakes:<externalId>`, is marked `selected` when its external id is in
  * `selectedFindingIds`, and preserves the surfaced order. Pure: no SQLite, no
  * file system.
  */
 export function planNoMistakesRoundFindings(
-  input: PlanNoMistakesRoundFindingsInput
+  input: PlanNoMistakesRoundFindingsInput,
 ): ExecutorFindingRecord[] {
   const selected = new Set(input.selectedFindingIds);
   return input.findings.map((finding) => ({
@@ -761,7 +543,7 @@ export function planNoMistakesRoundFindings(
     title: finding.title,
     detail: finding.detail ?? null,
     selected: selected.has(finding.externalId),
-    externalRef: `nomistakes:${finding.externalId}`
+    externalRef: `nomistakes:${finding.externalId}`,
   }));
 }
 
@@ -777,8 +559,7 @@ export type PlanNoMistakesRoundDecisionsInput = {
 /**
  * Project the external decision points into the durable {@link ExecutorDecisionRecord}
  * rows the persistence layer (`insertExecutorDecision`) writes — the no-mistakes
- * mirror's "Decisions and delegated-policy results" (contract "External Executor
- * Mirroring"). Each decision takes a deterministic id
+ * mirror's decisions and delegated-policy results. Each decision takes a deterministic id
  * (`<roundId>-decision-<externalId>`) and an `externalRef` of
  * `nomistakes:<externalId>`, copies its allowed actions, and mirrors its
  * recommended / chosen action and `resolution` (the delegated-policy or operator
@@ -786,7 +567,7 @@ export type PlanNoMistakesRoundDecisionsInput = {
  * drives — the external decision. Pure: no SQLite, no file system.
  */
 export function planNoMistakesRoundDecisions(
-  input: PlanNoMistakesRoundDecisionsInput
+  input: PlanNoMistakesRoundDecisionsInput,
 ): ExecutorDecisionRecord[] {
   return input.decisions.map((decision) => ({
     decisionId: `${input.roundId}-decision-${decision.externalId}`,
@@ -796,6 +577,6 @@ export function planNoMistakesRoundDecisions(
     recommendedAction: decision.recommendedAction ?? null,
     chosenAction: decision.chosenAction ?? null,
     resolution: decision.resolution ?? null,
-    externalRef: `nomistakes:${decision.externalId}`
+    externalRef: `nomistakes:${decision.externalId}`,
   }));
 }

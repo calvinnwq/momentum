@@ -116,11 +116,35 @@ registered declaration before workflow-run rows are written.
 An unregistered executor records the honest `runtime_unavailable` class in
 `manual_recovery_required`; after registration repair and guarded recovery clear,
 the same deterministic invocation reopens with an incremented attempt.
-The daemon SDK driver applies one bounded tick per scheduler pass and rechecks
-non-terminal invocations, so single-round and multi-round executors share one
-driving loop.
+The successful clear also resolves every open `manual_recovery_required` gate
+for the run that permits `clear_recovery`, in the same transaction as the flag
+clear and retry preparation.
+The daemon SDK driver normally applies one bounded tick per scheduler pass and
+rechecks non-terminal invocations, so single-round and multi-round executors
+share one driving loop.
+The first delegate-supervisor handoff completed anywhere in an invocation may use a second bounded tick in that initial pass so the first external-state read follows the durable handoff immediately.
+Later passes and every retry attempt use one tick, even when a conclusively failed or cancelled prior external run allows the retry to launch a fresh run.
+Continuation-only passes observe the daemon poll interval before the next external-state read.
+If a crash leaves an unclassified running, capturing-result, or
+`mirroring_external_state` round with durable handoff intent or completed handoff evidence, stale
+auto-release dispatch-lease recovery releases the abandoned lease and makes
+that same invocation scheduler-resumable instead of parking the run or
+repeating the handoff.
+The same recovery applies after a completed `continue` poll when its succeeded
+or failed round has a durable handoff in its history.
+If a crash occurs after an executor is classified `waiting_operator` but before
+gate parking finishes, stale dispatch recovery reuses or recreates the gate from
+the durable selected-decision checkpoint and unresolved decision, then releases
+only the same stale lease.
+If the crash happens earlier, after a delegate mirrored a gate-eligible decision
+and observed `waiting_operator` but before classification, the mirrored
+checkpoint and decision make the unclassified round resumable so the executor
+can finish classification and gate parking under the same invocation.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
+Gate eligibility requires both `chosenAction` and non-blank `resolution` to be
+absent; partially resolved decision evidence is never selected for a new gate.
+An executor may select that decision with `humanGateDecisionId`; the daemon persists the selector before classification, and an omitted or null selector retains last-unresolved-decision compatibility.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
 gate resolution records the chosen action and makes the invocation
 scheduler-resumable.
@@ -128,8 +152,18 @@ A paused round reopens in place, while a terminal gate round remains immutable
 and the executor starts its next round from the resolved decision.
 Retries preserve earlier rounds under the deterministic invocation and increment
 the attempt, while the driver rejects cross-attempt or non-current round results.
+Delegate retries retain correlated handoff and decision evidence but start a new
+semantic-stall window for the new attempt.
+A valid non-terminal handoff is reconciled through adapter recovery before reuse.
+For profile-backed no-mistakes, a conclusively failed or cancelled prior
+external run remains evidence but permits one fresh launch on the newer attempt.
+Local wrapper-finalization failure alone is not external terminal evidence: the newer attempt first reads the correlated run.
+A conclusively failed or cancelled run permits one fresh launch; every other status reruns the failed local finalization before the same run is reattached for supervision.
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
+The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
+An unresolved delegate intent can take over an active lock only for the same deterministic invocation: either after that lock expires or after the scheduler proves and releases the matching stale dispatch owner.
+Repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing prevents displacement of a concurrent or newer owner, and later lock writes require the new holder and attempt.
 
 Lifecycle classes layer narrower adapter extension points over the same core
 contract. The shipped agent-once and script lifecycle uses an asynchronous runner
@@ -153,9 +187,47 @@ Host-owned repo-local log and result paths are excluded from the ignored-path ba
 Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
 Directory-only mode or timestamp mutations therefore cannot evade the baseline.
 Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
-Agent-loop will repeat bounded runner rounds, and
-delegate-supervisor will poll a tool adapter across ticks when those lifecycle
-classes land. The single-shot lifecycle (`one-shot` and `script` in the current
+Agent-loop will repeat bounded runner rounds. `delegate-supervisor` composes one
+tool-adapter handoff for the active correlated external run with repeated bounded external-state reads across SDK
+ticks. The executor, not the adapter, owns durable rounds, semantic progress
+heartbeats, four-minute stall recovery, finding and decision projection,
+identity corroboration, and terminal classification. A tool adapter supplies
+only handoff, interrupted-handoff recovery, and canonical state normalization;
+portable step config selects it with `tool`, so adding a tool does not add an
+executor family or durable schema value. Recovery after a persisted handoff
+intent must reconcile durable tool evidence or fail closed before another
+launch.
+The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
+After the no-mistakes wrapper returns, the receipt binds the exact digest of its bounded regular result file.
+The host revalidates that digest before a selected reset or commit, before accepting a verified no-change result, and before retrying failed local finalization or recovering a prepared commit, so changed result bytes authorize no repository mutation or handoff completion.
+Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit, while failed verification still rejects the handoff.
+Correlated no-mistakes launch output identifies an interrupted external run but does not make a launch-only receipt recoverable without durable wrapper-finalization proof.
+Generic reset or commit recovery additionally requires a bounded regular result whose exact digest matches the receipt plus matching base, tree, commit-message, and clean-worktree proof; symbolic links and missing or mismatched evidence preserve the worktree and forbid a duplicate launch.
+If a crash leaves the verified commit staged but not created, daemon preflight
+accepts that dirty index only when the durable finalization receipt matches the
+current base `HEAD`, exact index tree, configured artifact paths, result digest,
+and successful result, with no unstaged or untracked changes.
+Recovery then rechecks repository ownership, result digest, expected tree, and
+commit message immediately before creating the prepared commit.
+Completed profile-backed state is accepted only while its full 40-character head
+SHA matches the repository's current `HEAD`.
+The external run id and branch are stable correlation identity; an
+observed head may advance as the delegated tool commits fixes and counts as
+semantic progress only when the adapter supplies a `verified_descendant` proof from the launch commit.
+Terminal state captured during handoff is a durable settlement candidate, not
+authority by itself: a fresh adapter read must corroborate the same run, branch,
+and exact full head SHA with passed or absent CI, no active findings, and no
+unresolved decisions.
+On reattachment, no-mistakes may reload that candidate from the step-scoped
+`launched` receipt only when its full run, branch, launch-head, and terminal-head
+identity remains valid and the terminal head descends from the launch head.
+A lagging `running` read can provide that corroboration only when it also reports no active step.
+Pending CI, another head, or unreadable corroboration fails closed rather than
+settling cached success.
+No-mistakes normalization rejects ambiguous current AXI fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside the canonical steps table.
+Pending or running table rows remain active steps and cannot support terminal monitoring success.
+The supervisor reserves its synthetic approval identity, and only the latest resolved `approve` action authorizes completion after an approval boundary.
+The single-shot lifecycle (`one-shot` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
@@ -257,10 +329,14 @@ events, recovery, and logs surfaces. Autonomy is allowed only inside the approve
 Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
-For live-wrapper-owned dispatched steps, successful wrapper evidence is not
-terminal by itself: Momentum reads the runner result, verifies, commits or resets
-against the captured base HEAD, and only then records terminal executor evidence
-for reconciliation.
+For ordinary live-wrapper-owned dispatched steps, successful wrapper evidence is
+not terminal by itself: Momentum reads the runner result, verifies, commits or
+resets against the captured base HEAD, and only then records terminal executor
+evidence for reconciliation.
+For profile-backed delegate-supervisor steps, that same finalization produces
+durable handoff and candidate evidence instead; the invocation and workflow step
+remain non-terminal until a later external-state read receives a daemon-accepted
+terminal classification.
 Repo-local run artifact directories must be ignored by git before wrapper work
 starts, and repo-scoped locks prevent concurrent live-wrapper dispatches from
 sharing a whole-worktree commit boundary.
@@ -406,13 +482,17 @@ For the `no-mistakes` step, the wrapper config must include a `runner_profile` b
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
 The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
-For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
+For the `no-mistakes` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
+That terminal handoff evidence is persisted for a full 40-character commit SHA before supervision.
+It settles only after a fresh status view corroborates the same run, branch, and exact current repository `HEAD` with passed or explicitly absent CI, no active findings, and no unresolved decisions; a compatible lagging monitoring view may corroborate the cached terminal state without replacing it.
+Current pending CI is never promoted by stored terminal proof, and proof for one commit never settles a descendant commit.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
-The no-mistakes mirror preserves the raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and preserves the last heartbeat while that semantic digest is unchanged; after four minutes without fresh progress or terminal evidence it parks the round in manual recovery so operators inspect the external run before clearing recovery.
+The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the invocation in manual recovery so operators inspect the external run before clearing recovery.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed no-mistakes row.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
 That reconciliation accepts the legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` path and a structured deterministic evidence JSON path whose schema records the workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
+Its expected identity comes only from the current invocation attempt's latest no-mistakes legacy checkpoint or a `delegate-supervisor` attempt whose durable handoff intent selects `tool: "no-mistakes"`; prior-attempt and other-tool checkpoints cannot authorize reconciliation.
 Structured evidence is refused when its schema, identity, findings, check state, outcome, or phase statuses are unknown, stale, ambiguous, partial, mismatched, unresolved, pending, failed, or otherwise non-successful.
 
 ## Runtime Consolidation
