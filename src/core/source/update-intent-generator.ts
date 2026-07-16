@@ -4,7 +4,7 @@ import { getSourceItemById, type SourceItem } from "./items.js";
 import {
   createUpdateIntent,
   type UpdateIntent,
-  type UpdateIntentClock
+  type UpdateIntentClock,
 } from "../intent/update-intents.js";
 
 /**
@@ -16,13 +16,13 @@ import {
 export const DEFAULT_VERIFICATION_EVIDENCE_TYPES: readonly string[] = [
   "no_mistakes_complete",
   "verification_passed",
-  "merge_complete"
+  "merge_complete",
 ] as const;
 
 const TERMINAL_GOAL_STATES = new Set([
   "completed",
   "failed",
-  "max_iterations_reached"
+  "max_iterations_reached",
 ]);
 const COMPLETED_GOAL_STATE = "completed";
 
@@ -37,8 +37,8 @@ const TERMINAL_SOURCE_STATUSES = new Set(
     "won't do",
     "wont do",
     "resolved",
-    "merged"
-  ].map((value) => value.toLowerCase())
+    "merged",
+  ].map((value) => value.toLowerCase()),
 );
 
 export type EvaluateGoalForSourceSatisfiedIntentInput = {
@@ -119,14 +119,16 @@ type EvidenceRow = {
 export function evaluateGoalForSourceSatisfiedIntents(
   db: MomentumDb,
   input: EvaluateGoalForSourceSatisfiedIntentInput,
-  clock: UpdateIntentClock = {}
+  clock: UpdateIntentClock = {},
 ): EvaluateGoalForSourceSatisfiedIntentResult[] {
   if (typeof input.goalId !== "string" || input.goalId.length === 0) {
-    throw new Error("evaluateGoalForSourceSatisfiedIntent goalId must be a non-empty string");
+    throw new Error(
+      "evaluateGoalForSourceSatisfiedIntent goalId must be a non-empty string",
+    );
   }
 
   const acceptedTypes = resolveAcceptedEvidenceTypes(
-    input.verificationEvidenceTypes
+    input.verificationEvidenceTypes,
   );
 
   const goal = db
@@ -136,18 +138,22 @@ export function evaluateGoalForSourceSatisfiedIntents(
     return [{ outcome: "goal_not_found", goalId: input.goalId }];
   }
   if (!TERMINAL_GOAL_STATES.has(goal.state)) {
-    return [{
-      outcome: "goal_not_terminal",
-      goalId: goal.id,
-      goalState: goal.state
-    }];
+    return [
+      {
+        outcome: "goal_not_terminal",
+        goalId: goal.id,
+        goalState: goal.state,
+      },
+    ];
   }
   if (goal.state !== COMPLETED_GOAL_STATE) {
-    return [{
-      outcome: "goal_state_not_completed",
-      goalId: goal.id,
-      goalState: goal.state
-    }];
+    return [
+      {
+        outcome: "goal_state_not_completed",
+        goalId: goal.id,
+        goalState: goal.state,
+      },
+    ];
   }
 
   const sourceItems = findLinkedSourceItems(db, goal.id);
@@ -155,10 +161,12 @@ export function evaluateGoalForSourceSatisfiedIntents(
     return [{ outcome: "no_source_link", goalId: goal.id }];
   }
   const openSourceItems = sourceItems.filter(
-    (sourceItem) => !isSourceStatusTerminal(sourceItem.status)
+    (sourceItem) => !isSourceStatusTerminal(sourceItem.status),
   );
   if (openSourceItems.length === 0) {
-    return [{ outcome: "source_already_terminal", sourceItem: sourceItems[0]! }];
+    return [
+      { outcome: "source_already_terminal", sourceItem: sourceItems[0]! },
+    ];
   }
 
   const evidenceWarnings: EvidenceInsufficientWarning[] = [];
@@ -172,7 +180,7 @@ export function evaluateGoalForSourceSatisfiedIntents(
       db,
       goal.id,
       sourceItem.id,
-      acceptedTypes
+      acceptedTypes,
     );
     if (!evidence) {
       const warning: EvidenceInsufficientWarning = {
@@ -182,7 +190,7 @@ export function evaluateGoalForSourceSatisfiedIntents(
         sourceExternalId: sourceItem.externalId,
         adapterKind: sourceItem.adapterKind,
         acceptedEvidenceTypes: acceptedTypes,
-        reason: `Goal ${goal.id} is completed but has no verification evidence for source item ${sourceItem.externalKey ?? sourceItem.externalId} (accepted types: ${acceptedTypes.join(", ")}).`
+        reason: `Goal ${goal.id} is completed but has no verification evidence for source item ${sourceItem.externalKey ?? sourceItem.externalId} (accepted types: ${acceptedTypes.join(", ")}).`,
       };
       evidenceWarnings.push(warning);
       continue;
@@ -198,7 +206,7 @@ export function evaluateGoalForSourceSatisfiedIntents(
       sourceItemId: sourceItem.id,
       sourceExternalId: sourceItem.externalId,
       sourceExternalKey: sourceItem.externalKey,
-      sourceCurrentStatus: sourceItem.status
+      sourceCurrentStatus: sourceItem.status,
     };
 
     const created = createUpdateIntent(
@@ -212,41 +220,41 @@ export function evaluateGoalForSourceSatisfiedIntents(
         goalId: goal.id,
         sourceItemId: sourceItem.id,
         evidenceRecordId: evidence.id,
-        idempotencyKey
+        idempotencyKey,
       },
-      clock
+      clock,
     );
 
     results.push({
       outcome: created.created ? "intent_created" : "intent_replayed",
       intent: created.intent,
       sourceItem,
-      verificationEvidence: evidence
+      verificationEvidence: evidence,
     });
   }
 
   const warningResults: EvaluateGoalForSourceSatisfiedIntentResult[] =
     evidenceWarnings.map((warning) => ({
       outcome: "evidence_insufficient",
-      warning
+      warning,
     }));
   if (results.length > 0) return [...results, ...warningResults];
   return warningResults;
 }
 
 function resolveAcceptedEvidenceTypes(
-  override: readonly string[] | undefined
+  override: readonly string[] | undefined,
 ): readonly string[] {
   if (override === undefined) return DEFAULT_VERIFICATION_EVIDENCE_TYPES;
   if (!Array.isArray(override) || override.length === 0) {
     throw new Error(
-      "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes must be a non-empty array of strings"
+      "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes must be a non-empty array of strings",
     );
   }
   for (const value of override) {
     if (typeof value !== "string" || value.length === 0) {
       throw new Error(
-        "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes entries must be non-empty strings"
+        "evaluateGoalForSourceSatisfiedIntent verificationEvidenceTypes entries must be non-empty strings",
       );
     }
   }
@@ -259,7 +267,7 @@ function findLinkedSourceItems(db: MomentumDb, goalId: string): SourceItem[] {
       `SELECT id
          FROM source_items
         WHERE goal_id = ?
-        ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
+        ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`,
     )
     .all(goalId) as { id: string }[];
   return rows
@@ -271,7 +279,7 @@ function findEarliestVerificationEvidence(
   db: MomentumDb,
   goalId: string,
   sourceItemId: string,
-  acceptedTypes: readonly string[]
+  acceptedTypes: readonly string[],
 ): EvidenceRecord | null {
   const placeholders = acceptedTypes.map(() => "?").join(", ");
   const row = db
@@ -281,7 +289,7 @@ function findEarliestVerificationEvidence(
         WHERE (goal_id = ? OR source_item_id = ?)
           AND type IN (${placeholders})
         ORDER BY occurred_at ASC, created_at ASC, id ASC
-        LIMIT 1`
+        LIMIT 1`,
     )
     .get(goalId, sourceItemId, ...acceptedTypes) as EvidenceRow | undefined;
   if (!row) return null;
@@ -305,7 +313,7 @@ function evidenceRecordFromRow(row: EvidenceRow): EvidenceRecord {
     stepId: row.step_id,
     ingestKey: row.ingest_key,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 

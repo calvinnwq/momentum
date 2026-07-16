@@ -11,7 +11,7 @@ import {
   defaultCodingWorkflowWrapperDeps,
   loadCodingWorkflowWrapperConfig,
   runCodingWorkflowLiveWrapper,
-  type CodingWorkflowWrapperDeps
+  type CodingWorkflowWrapperDeps,
 } from "../src/core/workflow/live-wrapper/coding-workflow.js";
 
 const tempRoots: string[] = [];
@@ -39,7 +39,8 @@ function deps(env: NodeJS.ProcessEnv): CodingWorkflowWrapperDeps {
   return {
     env,
     readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
-    writeFile: (filePath, contents) => fs.writeFileSync(filePath, contents, "utf8"),
+    writeFile: (filePath, contents) =>
+      fs.writeFileSync(filePath, contents, "utf8"),
     mkdir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
     spawn: (command, args, options) => spawnSync(command, args, options),
     stdout: () => {},
@@ -53,9 +54,9 @@ function deps(env: NodeJS.ProcessEnv): CodingWorkflowWrapperDeps {
         state: "open",
         draft: false,
         mergeable: "mergeable",
-        branchDeleted: false
-      }
-    })
+        branchDeleted: false,
+      },
+    }),
   };
 }
 
@@ -64,7 +65,7 @@ function mergeCleanupTargetConfig(overrides: Record<string, unknown> = {}) {
     pull_request_id: "42",
     expected_head_sha: MERGE_CLEANUP_HEAD,
     cleanup_branch: "feat/test-branch",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -75,14 +76,14 @@ function noMistakesRunnerProfile(overrides: Record<string, unknown> = {}) {
     agent: "codex",
     required_env: ["HOME", "CODEX_HOME", "PATH"],
     agent_path: process.execPath,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeNoMistakesHome(
   parentDir: string,
   agentPath = process.execPath,
-  agent = "codex"
+  agent = "codex",
 ): string {
   const home = path.join(parentDir, "home");
   const configPath = path.join(home, ".no-mistakes", "config.yaml");
@@ -93,9 +94,9 @@ function makeNoMistakesHome(
       `agent: ${agent}`,
       "agent_path_override:",
       `  ${agent}: ${agentPath}`,
-      ""
+      "",
     ].join("\n"),
-    "utf8"
+    "utf8",
   );
   return home;
 }
@@ -115,10 +116,10 @@ describe("coding workflow live wrapper profile", () => {
   it("ships a parseable live-wrapper profile for every live-wrapper-owned coding step", () => {
     const profilePath = path.join(
       process.cwd(),
-      "profiles/coding-workflow-live-wrapper.profile.json"
+      "profiles/coding-workflow-live-wrapper.profile.json",
     );
     const parsed = parseLiveWrapperProfile(
-      JSON.parse(fs.readFileSync(profilePath, "utf8"))
+      JSON.parse(fs.readFileSync(profilePath, "utf8")),
     );
 
     expect(parsed.ok).toBe(true);
@@ -129,23 +130,23 @@ describe("coding workflow live wrapper profile", () => {
       "merge-cleanup",
       "no-mistakes",
       "postflight",
-      "preflight"
+      "preflight",
     ]);
     expect(parsed.profile.wrappers.get("merge-cleanup")?.envAllow).toEqual(
-      expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"])
+      expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"]),
     );
     expect(parsed.profile.wrappers.get("no-mistakes")?.envAllow).toEqual(
-      expect.arrayContaining(["HOME", "CODEX_HOME", "PATH"])
+      expect.arrayContaining(["HOME", "CODEX_HOME", "PATH"]),
     );
   });
 
   it("keeps merge-cleanup executable independent of generated dist", () => {
     const profilePath = path.join(
       process.cwd(),
-      "profiles/coding-workflow-live-wrapper.profile.json"
+      "profiles/coding-workflow-live-wrapper.profile.json",
     );
     const parsed = parseLiveWrapperProfile(
-      JSON.parse(fs.readFileSync(profilePath, "utf8"))
+      JSON.parse(fs.readFileSync(profilePath, "utf8")),
     );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -168,7 +169,7 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
 fi
 exit 1
 `,
-      "utf8"
+      "utf8",
     );
     fs.chmodSync(ghPath, 0o755);
     const configPath = path.join(dir, "wrapper-config.json");
@@ -183,9 +184,9 @@ exit 1
           env_allow: ["PATH", "GH_TOKEN"],
           merge_cleanup: mergeCleanupTargetConfig(),
           success_summary: "merge-cleanup source wrapper passed",
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const spawned = spawnSync(wrapper.command, [...wrapper.args], {
@@ -198,10 +199,10 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         GH_TOKEN: "test-token",
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       },
       encoding: "utf8",
-      timeout: 30_000
+      timeout: 30_000,
     });
 
     expect(spawned.stderr).toBe("");
@@ -227,9 +228,9 @@ exit 1
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH"],
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -239,8 +240,8 @@ exit 1
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -271,9 +272,9 @@ exit 1
           timeout_sec: 30,
           env_allow: ["PATH", "HOME"],
           merge_cleanup: mergeCleanupTargetConfig(),
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper({
@@ -284,12 +285,12 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: process.env.HOME,
-        PATH: process.env.PATH
+        PATH: process.env.PATH,
       }),
       readMergeCleanupPullRequest: () => {
         stateReadCount += 1;
         return { ok: false, error: "state read should not run without auth" };
-      }
+      },
     });
 
     expect(outcome.exitCode).toBe(1);
@@ -316,9 +317,9 @@ exit 1
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", "GH_TOKEN"],
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -329,14 +330,18 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         GH_TOKEN: "test-token",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("durable pull request/head/cleanup-branch target");
-    expect(outcome.summary).toContain("pull request, expected head SHA, cleanup branch");
+    expect(outcome.summary).toContain(
+      "durable pull request/head/cleanup-branch target",
+    );
+    expect(outcome.summary).toContain(
+      "pull request, expected head SHA, cleanup branch",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -358,9 +363,9 @@ exit 1
           timeout_sec: 30,
           env_allow: ["PATH", "GH_TOKEN"],
           merge_cleanup: mergeCleanupTargetConfig(),
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const baseDeps = deps({
@@ -370,7 +375,7 @@ exit 1
       MOMENTUM_RESULT_PATH: resultPath,
       [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
       GH_TOKEN: "test-token",
-      PATH: process.env.PATH
+      PATH: process.env.PATH,
     });
     const outcome = runCodingWorkflowLiveWrapper({
       ...baseDeps,
@@ -383,9 +388,9 @@ exit 1
           state: "merged",
           draft: false,
           mergeable: "mergeable",
-          branchDeleted: true
-        }
-      })
+          branchDeleted: true,
+        },
+      }),
     });
 
     expect(outcome.exitCode).toBe(0);
@@ -422,7 +427,7 @@ if [ "$1" = "api" ]; then
 fi
 exit 1
 `,
-      "utf8"
+      "utf8",
     );
     fs.chmodSync(ghPath, 0o755);
     const configPath = path.join(dir, "wrapper-config.json");
@@ -435,9 +440,9 @@ exit 1
           timeout_sec: 30,
           env_allow: ["PATH", "GH_TOKEN"],
           merge_cleanup: mergeCleanupTargetConfig(),
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper({
@@ -449,10 +454,10 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         GH_TOKEN: "test-token",
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       },
       stdout: () => {},
-      stderr: () => {}
+      stderr: () => {},
     });
 
     expect(outcome.exitCode).toBe(0);
@@ -483,7 +488,7 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
 fi
 exit 1
 `,
-      "utf8"
+      "utf8",
     );
     fs.chmodSync(ghPath, 0o755);
     const configPath = path.join(dir, "wrapper-config.json");
@@ -496,9 +501,9 @@ exit 1
           timeout_sec: 30,
           env_allow: ["PATH", "GH_TOKEN"],
           merge_cleanup: mergeCleanupTargetConfig(),
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper({
@@ -510,10 +515,10 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         GH_TOKEN: "test-token",
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       },
       stdout: () => {},
-      stderr: () => {}
+      stderr: () => {},
     });
 
     expect(outcome.exitCode).toBe(1);
@@ -543,7 +548,7 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
 fi
 exit 1
 `,
-      "utf8"
+      "utf8",
     );
     fs.chmodSync(ghPath, 0o755);
     const configPath = path.join(dir, "wrapper-config.json");
@@ -556,9 +561,9 @@ exit 1
           timeout_sec: 30,
           env_allow: ["PATH", "GH_TOKEN"],
           merge_cleanup: mergeCleanupTargetConfig(),
-          commit: { type: "chore", subject: "complete merge-cleanup" }
-        }
-      }
+          commit: { type: "chore", subject: "complete merge-cleanup" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper({
@@ -570,15 +575,17 @@ exit 1
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         GH_TOKEN: "test-token",
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
       },
       stdout: () => {},
-      stderr: () => {}
+      stderr: () => {},
     });
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("not an open, non-draft, mergeable target");
+    expect(outcome.summary).toContain(
+      "not an open, non-draft, mergeable target",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -586,13 +593,15 @@ exit 1
   it("bounds GitHub merge-cleanup preflight subprocesses", () => {
     const sourcePath = path.join(
       process.cwd(),
-      "src/core/workflow/live-wrapper/coding-workflow.ts"
+      "src/core/workflow/live-wrapper/coding-workflow.ts",
     );
     const source = fs.readFileSync(sourcePath, "utf8");
 
     expect(source).toContain("const GITHUB_STATE_READ_TIMEOUT_MS");
     expect(source).toContain("timeout: GITHUB_STATE_READ_TIMEOUT_MS");
-    expect(source.match(/timeout: GITHUB_STATE_READ_TIMEOUT_MS/g)).toHaveLength(2);
+    expect(source.match(/timeout: GITHUB_STATE_READ_TIMEOUT_MS/g)).toHaveLength(
+      2,
+    );
   });
 });
 
@@ -609,21 +618,21 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH"],
           key_changes_made: ["checked repo"],
-          commit: { type: "test", subject: "verify preflight" }
-        }
-      }
+          commit: { type: "test", subject: "verify preflight" },
+        },
+      },
     });
 
     const loaded = loadCodingWorkflowWrapperConfig({
       env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath },
-      readFile: (filePath) => fs.readFileSync(filePath, "utf8")
+      readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
     });
 
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     expect(loaded.config.steps.preflight?.command).toBe("/bin/sh");
     expect(loaded.config.steps.preflight?.commit.subject).toBe(
-      "verify preflight"
+      "verify preflight",
     );
   });
 
@@ -634,11 +643,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         JSON.stringify({
           steps: {
             preflight: {
-              command: "/bin/sh"
-            }
+              command: "/bin/sh",
+            },
           },
-          unsupportedRootKey: {}
-        })
+          unsupportedRootKey: {},
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -653,9 +662,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "unknown-step": { command: "/bin/sh" }
-          }
-        })
+            "unknown-step": { command: "/bin/sh" },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -668,13 +677,13 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       name: "envAllow",
       field: "envAllow",
       json: { preflight: { command: "/bin/sh", envAllow: ["PATH"] } },
-      expected: "env_allow"
+      expected: "env_allow",
     },
     {
       name: "timeoutSec",
       field: "timeoutSec",
       json: { preflight: { command: "/bin/sh", timeoutSec: 30 } },
-      expected: "timeout_sec"
+      expected: "timeout_sec",
     },
     {
       name: "resultFile",
@@ -682,22 +691,25 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       json: {
         preflight: {
           command: "/bin/sh",
-          resultFile: "result.json"
-        }
+          resultFile: "result.json",
+        },
       },
-      expected: "result_file"
-    }
-  ])("suggests canonical snake_case for camelCase step keys: $name", ({ field, json, expected }) => {
-    const loaded = loadCodingWorkflowWrapperConfig({
-      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
-      readFile: () => JSON.stringify({ steps: json })
-    });
+      expected: "result_file",
+    },
+  ])(
+    "suggests canonical snake_case for camelCase step keys: $name",
+    ({ field, json, expected }) => {
+      const loaded = loadCodingWorkflowWrapperConfig({
+        env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+        readFile: () => JSON.stringify({ steps: json }),
+      });
 
-    expect(loaded.ok).toBe(false);
-    if (loaded.ok) return;
-    expect(loaded.error).toContain(`"${field}"`);
-    expect(loaded.error).toContain(expected);
-  });
+      expect(loaded.ok).toBe(false);
+      if (loaded.ok) return;
+      expect(loaded.error).toContain(`"${field}"`);
+      expect(loaded.error).toContain(expected);
+    },
+  );
 
   it.each(["implementation", "postflight", "no-mistakes", "merge-cleanup"])(
     "accepts validated step config for %s",
@@ -716,15 +728,17 @@ describe("loadCodingWorkflowWrapperConfig", () => {
                 ...(stepKind === "no-mistakes"
                   ? { runner_profile: noMistakesRunnerProfile() }
                   : {}),
-                commit: { type: "test", subject: `validate ${stepKind}` }
-              }
-            }
-          })
+                commit: { type: "test", subject: `validate ${stepKind}` },
+              },
+            },
+          }),
       });
       expect(loaded.ok, stepKind).toBe(true);
       if (!loaded.ok) return;
-      expect(loaded.config.steps[stepKind as keyof typeof loaded.config.steps]).toBeDefined();
-    }
+      expect(
+        loaded.config.steps[stepKind as keyof typeof loaded.config.steps],
+      ).toBeDefined();
+    },
   );
 
   it("requires an explicit no-mistakes runner profile", () => {
@@ -735,10 +749,10 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           steps: {
             "no-mistakes": {
               command: "/bin/sh",
-              env_allow: ["PATH", "HOME", "CODEX_HOME"]
-            }
-          }
-        })
+              env_allow: ["PATH", "HOME", "CODEX_HOME"],
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -756,11 +770,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
-                required_env: ["PATH", "HOME"]
-              })
-            }
-          }
-        })
+                required_env: ["PATH", "HOME"],
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -779,11 +793,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
                 agent: "claude",
-                required_env: ["PATH", "HOME"]
-              })
-            }
-          }
-        })
+                required_env: ["PATH", "HOME"],
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(true);
@@ -800,16 +814,16 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
                 agent: "auto",
-                required_env: ["PATH", "HOME"]
-              })
-            }
-          }
-        })
+                required_env: ["PATH", "HOME"],
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
-    expect(loaded.error).toContain("must not be \"auto\"");
+    expect(loaded.error).toContain('must not be "auto"');
   });
 
   it("rejects unsupported no-mistakes runner profile agents", () => {
@@ -823,11 +837,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
                 agent: "gemini",
-                required_env: ["PATH", "HOME"]
-              })
-            }
-          }
-        })
+                required_env: ["PATH", "HOME"],
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -845,11 +859,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME", "CODEX_HOME"],
               runner_profile: noMistakesRunnerProfile({
-                agent_path: "codex-runner"
-              })
-            }
-          }
-        })
+                agent_path: "codex-runner",
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -874,9 +888,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -887,8 +901,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir),
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -915,11 +929,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile({
-            agent_path: path.join(dir, "missing-agent-runner")
+            agent_path: path.join(dir, "missing-agent-runner"),
           }),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -931,8 +945,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -959,11 +973,11 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile({
-            agent_path: dir
+            agent_path: dir,
           }),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -975,8 +989,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir, dir),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1003,9 +1017,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1017,8 +1031,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir, process.execPath, "claude"),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1045,9 +1059,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1060,8 +1074,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1084,13 +1098,13 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     fs.writeFileSync(
       noMistakesConfigPath,
       [
-        "ci_timeout: \"1h",
+        'ci_timeout: "1h',
         "agent: codex",
         "agent_path_override:",
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1102,9 +1116,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1116,8 +1130,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1144,9 +1158,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent: codex",
         "agent_path_override:",
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1158,9 +1172,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1172,8 +1186,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1200,9 +1214,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent: codex",
         "agent_path_override:",
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1214,9 +1228,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1228,8 +1242,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1259,9 +1273,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent_path_override:",
         `  codex: ${otherWrapper}`,
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1273,9 +1287,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1287,13 +1301,15 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("duplicate agent_path_override key codex");
+    expect(outcome.summary).toContain(
+      "duplicate agent_path_override key codex",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -1318,9 +1334,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent_path_override:",
         `  "codex": ${otherWrapper}`,
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1332,9 +1348,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1346,13 +1362,15 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("duplicate agent_path_override key codex");
+    expect(outcome.summary).toContain(
+      "duplicate agent_path_override key codex",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -1377,9 +1395,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent_path_override:",
         `  codex:${otherWrapper}`,
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1391,9 +1409,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1405,8 +1423,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1432,9 +1450,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent: codex",
         "agent_path_override:",
         `\tcodex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1446,9 +1464,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1460,8 +1478,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1488,9 +1506,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent_path_override:",
         "  - bad",
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1502,9 +1520,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1516,8 +1534,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1544,9 +1562,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent: codex",
         "agent_path_override:",
         `  codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1558,9 +1576,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1572,13 +1590,15 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("entry agent is missing a YAML key separator");
+    expect(outcome.summary).toContain(
+      "entry agent is missing a YAML key separator",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -1600,9 +1620,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "  agent: codex",
         "  agent_path_override:",
         `    codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1614,9 +1634,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1628,8 +1648,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1656,9 +1676,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "nested:",
         "  agent_path_override:",
         `    codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1670,9 +1690,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1684,8 +1704,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1712,9 +1732,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         "agent_path_override:",
         "  nested:",
         `    codex: ${process.execPath}`,
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
@@ -1726,9 +1746,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1740,8 +1760,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1771,9 +1791,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1785,8 +1805,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir, otherWrapper),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1804,10 +1824,10 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           steps: {
             preflight: {
               command: "/bin/sh",
-              env_allow: ["PATH", 12]
-            }
-          }
-        })
+              env_allow: ["PATH", 12],
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -1815,28 +1835,33 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     expect(loaded.error).toContain("`env_allow` must be an array of strings.");
   });
 
-  it.each(["/tmp/result.json", "../result.json", ".", "nested/..", "C:\\temp\\result.json"])(
-    "rejects unsafe result_file values: %s",
-    (resultFile) => {
-      const loaded = loadCodingWorkflowWrapperConfig({
-        env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
-        readFile: () =>
-          JSON.stringify({
-            steps: {
-              preflight: {
-                command: "/bin/sh",
-                result_file: resultFile
-              }
-            }
-          })
-      });
+  it.each([
+    "/tmp/result.json",
+    "../result.json",
+    ".",
+    "nested/..",
+    "C:\\temp\\result.json",
+  ])("rejects unsafe result_file values: %s", (resultFile) => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            preflight: {
+              command: "/bin/sh",
+              result_file: resultFile,
+            },
+          },
+        }),
+    });
 
-      expect(loaded.ok).toBe(false);
-      if (loaded.ok) return;
-      expect(loaded.error).toContain("result_file");
-      expect(loaded.error).toContain("relative path inside the iteration artifact directory");
-    }
-  );
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("result_file");
+    expect(loaded.error).toContain(
+      "relative path inside the iteration artifact directory",
+    );
+  });
 
   it("rejects non-string result_file values", () => {
     const loaded = loadCodingWorkflowWrapperConfig({
@@ -1846,10 +1871,10 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           steps: {
             preflight: {
               command: "/bin/sh",
-              result_file: 42
-            }
-          }
-        })
+              result_file: 42,
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -1870,10 +1895,10 @@ describe("loadCodingWorkflowWrapperConfig", () => {
               timeout_sec: 30,
               env_allow: ["PATH", "GH_TOKEN"],
               merge_cleanup: mergeCleanupTargetConfig(),
-              commit: { type: "test", subject: "validate merge cleanup" }
-            }
-          }
-        })
+              commit: { type: "test", subject: "validate merge cleanup" },
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(true);
@@ -1881,7 +1906,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     expect(loaded.config.steps["merge-cleanup"]?.mergeCleanup).toEqual({
       pullRequestId: "42",
       expectedHeadSha: MERGE_CLEANUP_HEAD,
-      cleanupBranch: "feat/test-branch"
+      cleanupBranch: "feat/test-branch",
     });
   });
 
@@ -1893,10 +1918,12 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           steps: {
             "merge-cleanup": {
               command: "/bin/sh",
-              merge_cleanup: mergeCleanupTargetConfig({ expected_head_sha: "abc" })
-            }
-          }
-        })
+              merge_cleanup: mergeCleanupTargetConfig({
+                expected_head_sha: "abc",
+              }),
+            },
+          },
+        }),
     });
 
     expect(loaded.ok).toBe(false);
@@ -1921,9 +1948,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
           cwd: "repo",
           timeout_sec: 30,
           envAllow: ["PATH"],
-          commit: { type: "test", subject: "camel-case guard" }
-        }
-      }
+          commit: { type: "test", subject: "camel-case guard" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1932,8 +1959,8 @@ describe("loadCodingWorkflowWrapperConfig", () => {
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
-        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
-      })
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -1958,19 +1985,19 @@ describe("runCodingWorkflowLiveWrapper", () => {
       steps: {
         "no-mistakes": {
           command: "/bin/sh",
-          args: ["-c", "test \"$HOME\" != \"\" && test \"$PATH\" != \"\""],
+          args: ["-c", 'test "$HOME" != "" && test "$PATH" != ""'],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", "HOME"],
           runner_profile: noMistakesRunnerProfile({
             agent: "claude",
             required_env: ["HOME", "PATH"],
-            agent_path: process.execPath
+            agent_path: process.execPath,
           }),
           success_summary: "non-Codex no-mistakes profile passed",
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -1981,14 +2008,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir, process.execPath, "claude"),
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome).toMatchObject({
       exitCode: 0,
       success: true,
-      summary: "non-Codex no-mistakes profile passed"
+      summary: "non-Codex no-mistakes profile passed",
     });
     expect(readResult(resultPath).success).toBe(true);
   });
@@ -2008,24 +2035,24 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "agent_path_override:",
         `  codex: ${process.execPath}`,
         "agent: codex",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
         "no-mistakes": {
           command: "/bin/sh",
-          args: ["-c", "test \"$CODEX_HOME\" != \"\""],
+          args: ["-c", 'test "$CODEX_HOME" != ""'],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
           success_summary: "reordered no-mistakes config passed",
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2037,14 +2064,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome).toMatchObject({
       exitCode: 0,
       success: true,
-      summary: "reordered no-mistakes config passed"
+      summary: "reordered no-mistakes config passed",
     });
     expect(readResult(resultPath).success).toBe(true);
   });
@@ -2065,24 +2092,24 @@ describe("runCodingWorkflowLiveWrapper", () => {
         `codex_path: &codex_path ${process.execPath}`,
         "agent_path_override:",
         "  codex: *codex_path",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
         "no-mistakes": {
           command: "/bin/sh",
-          args: ["-c", "test \"$CODEX_HOME\" != \"\""],
+          args: ["-c", 'test "$CODEX_HOME" != ""'],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
           success_summary: "aliased no-mistakes config passed",
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2094,14 +2121,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: home,
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome).toMatchObject({
       exitCode: 0,
       success: true,
-      summary: "aliased no-mistakes config passed"
+      summary: "aliased no-mistakes config passed",
     });
     expect(readResult(resultPath).success).toBe(true);
   });
@@ -2117,15 +2144,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
       steps: {
         preflight: {
           command: "/bin/sh",
-          args: ["-c", "test -d \"$MOMENTUM_REPO_PATH\""],
+          args: ["-c", 'test -d "$MOMENTUM_REPO_PATH"'],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH"],
           success_summary: "preflight command passed",
           key_changes_made: ["Verified repo path."],
-          commit: { type: "test", subject: "verify preflight" }
-        }
-      }
+          commit: { type: "test", subject: "verify preflight" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2135,14 +2162,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome).toMatchObject({
       exitCode: 0,
       success: true,
-      summary: "preflight command passed"
+      summary: "preflight command passed",
     });
     const result = readResult(resultPath);
     expect(result.success).toBe(true);
@@ -2162,15 +2189,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
           command: "/bin/sh",
           args: [
             "-c",
-            'test "$MOMENTUM_AGENT_PROVIDER" = codex && test "$MOMENTUM_MODEL" = gpt-5.1 && test "$MOMENTUM_EFFORT" = high'
+            'test "$MOMENTUM_AGENT_PROVIDER" = codex && test "$MOMENTUM_MODEL" = gpt-5.1 && test "$MOMENTUM_EFFORT" = high',
           ],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: [],
           success_summary: "route selection reached child command",
-          commit: { type: "chore", subject: "complete implementation" }
-        }
-      }
+          commit: { type: "chore", subject: "complete implementation" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2182,14 +2209,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
-        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
-      })
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+      }),
     );
 
     expect(outcome).toMatchObject({
       exitCode: 0,
       success: true,
-      summary: "route selection reached child command"
+      summary: "route selection reached child command",
     });
     expect(readResult(resultPath).success).toBe(true);
   });
@@ -2210,9 +2237,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", 100],
-          commit: { type: "chore", subject: "invalid env allow test" }
-        }
-      }
+          commit: { type: "chore", subject: "invalid env allow test" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2221,13 +2248,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
-        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
-      })
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("`env_allow` must be an array of strings.");
+    expect(outcome.summary).toContain(
+      "`env_allow` must be an array of strings.",
+    );
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
@@ -2249,9 +2278,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
           timeout_sec: 30,
           env_allow: ["PATH"],
           result_file: "custom-result.json",
-          commit: { type: "chore", subject: "result file guard" }
-        }
-      }
+          commit: { type: "chore", subject: "result file guard" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2261,8 +2290,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
@@ -2288,9 +2317,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH"],
-          commit: { type: "test", subject: "verify postflight" }
-        }
-      }
+          commit: { type: "test", subject: "verify postflight" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -2300,8 +2329,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(0);
@@ -2310,7 +2339,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const result = readResult(resultPath);
     expect(result.success).toBe(false);
     expect(result.remaining_work).toEqual([
-      "Fix postflight command failure before advancing the workflow."
+      "Fix postflight command failure before advancing the workflow.",
     ]);
   });
 
@@ -2319,7 +2348,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       name: "missing external branch-start state",
       stdout:
         'error: "no run started for \\"feat/example\\": no previous run for branch feat/example"',
-      expected: "external gate state has no previous run"
+      expected: "external gate state has no previous run",
     },
     {
       name: "cancelled external no-mistakes run",
@@ -2328,9 +2357,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: cancelled",
         "outcome: cancelled",
-        'error: "cancelled: aborted by user"'
+        'error: "cancelled: aborted by user"',
       ].join("\n"),
-      expected: "cancelled before producing a reliable successful result"
+      expected: "cancelled before producing a reliable successful result",
     },
     {
       name: "cancelled external no-mistakes run without outcome line",
@@ -2339,25 +2368,25 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: cancelled",
         "  review: failed",
-        'error: "cancelled: aborted by user"'
+        'error: "cancelled: aborted by user"',
       ].join("\n"),
-      expected: "cancelled before producing a reliable successful result"
+      expected: "cancelled before producing a reliable successful result",
     },
     {
       name: "compact cancelled external no-mistakes run status",
       stdout: [
         "run status: cancelled",
-        'error: "cancelled: aborted by user"'
+        'error: "cancelled: aborted by user"',
       ].join("\n"),
-      expected: "cancelled before producing a reliable successful result"
+      expected: "cancelled before producing a reliable successful result",
     },
     {
       name: "JSON cancelled external no-mistakes run status",
       stdout: [
         '{"run":{"id":"01TEST","status":"cancelled"}}',
-        'error: "cancelled: aborted by user"'
+        'error: "cancelled: aborted by user"',
       ].join("\n"),
-      expected: "cancelled before producing a reliable successful result"
+      expected: "cancelled before producing a reliable successful result",
     },
     {
       name: "cancelled external no-mistakes run after nested status block",
@@ -2367,10 +2396,10 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  ci:",
         "    status: running",
         "  status: cancelled",
-        'error: "cancelled: aborted by user"'
+        'error: "cancelled: aborted by user"',
       ].join("\n"),
-      expected: "cancelled before producing a reliable successful result"
-    }
+      expected: "cancelled before producing a reliable successful result",
+    },
   ])(
     "parks no-mistakes runner lifecycle failure as process setup recovery: $name",
     ({ stdout, expected }) => {
@@ -2389,9 +2418,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
             timeout_sec: 30,
             env_allow: ["PATH", "HOME", "CODEX_HOME", "GH_TOKEN"],
             runner_profile: noMistakesRunnerProfile(),
-            commit: { type: "test", subject: "run no mistakes" }
-          }
-        }
+            commit: { type: "test", subject: "run no mistakes" },
+          },
+        },
       });
 
       const outcome = runCodingWorkflowLiveWrapper(
@@ -2404,8 +2433,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           GH_TOKEN: "test-token",
           HOME: makeNoMistakesHome(dir),
           CODEX_HOME: "/tmp/codex-home",
-          PATH: process.env.PATH
-        })
+          PATH: process.env.PATH,
+        }),
       );
 
       expect(outcome.exitCode).toBe(1);
@@ -2413,7 +2442,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       expect(outcome.summary).toContain(expected);
       expect(outcome.summary).toContain("clear recovery to retry");
       expect(fs.existsSync(resultPath)).toBe(false);
-    }
+    },
   );
 
   it.each([
@@ -2424,9 +2453,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "outcome: checks-passed",
-        "ci: running"
+        "ci: running",
       ].join("\n"),
-      expected: "reached checks-passed"
+      expected: "reached checks-passed",
     },
     {
       name: "compact JSON checks-passed outcome",
@@ -2434,9 +2463,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run:",
         '  id: "01TEST"',
         '{"outcome":"checks-passed"}',
-        "ci: running"
+        "ci: running",
       ].join("\n"),
-      expected: "reached checks-passed"
+      expected: "reached checks-passed",
     },
     {
       name: "equals checks-passed outcome",
@@ -2444,9 +2473,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run:",
         '  id: "01TEST"',
         "outcome=checks-passed",
-        "ci: running"
+        "ci: running",
       ].join("\n"),
-      expected: "reached checks-passed"
+      expected: "reached checks-passed",
     },
     {
       name: "arrow checks-passed outcome",
@@ -2454,9 +2483,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run:",
         '  id: "01TEST"',
         "outcome=>checks-passed",
-        "ci: running"
+        "ci: running",
       ].join("\n"),
-      expected: "reached checks-passed"
+      expected: "reached checks-passed",
     },
     {
       name: "running no-mistakes with a clean green PR",
@@ -2466,9 +2495,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with resolved decision evidence",
@@ -2479,9 +2508,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decisions[0]: resolved"
+        "decisions[0]: resolved",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with scoped clean PR status",
@@ -2491,9 +2520,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "PR status: clean",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with resolved JSON decision history",
@@ -2504,9 +2533,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"status":"resolved"}]}'
+        '{"decisions":[{"status":"resolved"}]}',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with approved JSON decision history",
@@ -2517,9 +2546,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"resolution":"approved"}]}'
+        '{"decisions":[{"resolution":"approved"}]}',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with no checks reported",
@@ -2529,9 +2558,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
-        "no checks reported"
+        "no checks reported",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with passed external CI state",
@@ -2541,9 +2570,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
-        "ciState: passed"
+        "ciState: passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with no-checks external CI state",
@@ -2553,9 +2582,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci_state: none"
+        "ci_state: none",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with JSON step status and no-checks external CI state",
@@ -2564,9 +2593,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         '"stepStatus": "running"',
         "PR #42 mergeStateStatus CLEAN",
-        "ciState: none"
+        "ciState: none",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with snake case clean merge state",
@@ -2576,9 +2605,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "merge_state_status: clean",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with snake case clean mergeable state",
@@ -2588,9 +2617,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "mergeable_state: clean",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with clean mergeable state",
@@ -2600,9 +2629,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci/running",
         "mergeable state: clean",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with false required approval flag",
@@ -2613,9 +2642,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approvalRequired: false"
+        "approvalRequired: false",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with false operator decision flag",
@@ -2626,9 +2655,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operatorDecisionRequired: false"
+        "operatorDecisionRequired: false",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with false decision required label",
@@ -2639,9 +2668,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decision required: false"
+        "decision required: false",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with pretty JSON false approval required flag",
@@ -2652,9 +2681,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"approvalRequired": false,'
+        '"approvalRequired": false,',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with compact JSON false required flags",
@@ -2665,19 +2694,19 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"decisionRequired":false}'
+        '{"approvalRequired":false,"decisionRequired":false}',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with object external state container",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        "externalState: {\"stepStatus\":\"running\",\"ciState\":\"none\"}",
-        "PR #42 mergeStateStatus CLEAN"
+        'externalState: {"stepStatus":"running","ciState":"none"}',
+        "PR #42 mergeStateStatus CLEAN",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with pretty external state container",
@@ -2687,9 +2716,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "externalState:",
         "  stepStatus: running",
         "  ciState: none",
-        "PR #42 mergeStateStatus CLEAN"
+        "PR #42 mergeStateStatus CLEAN",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with pretty object external state container",
@@ -2700,9 +2729,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  stepStatus: running",
         "  ciState: none",
         "}",
-        "PR #42 mergeStateStatus CLEAN"
+        "PR #42 mergeStateStatus CLEAN",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with compact object external state container",
@@ -2710,9 +2739,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run:",
         '  id: "01TEST"',
         '{"externalState":{"stepStatus":"running","ciState":"none"}}',
-        "PR #42 mergeStateStatus CLEAN"
+        "PR #42 mergeStateStatus CLEAN",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with nested identity text containing gate words",
@@ -2720,9 +2749,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run:",
         '  id: "01TEST"',
         '{"externalState":{"stepStatus":"running","ciState":"none","branch":"feat/approval-required-copy"}}',
-        "PR #42 mergeStateStatus CLEAN"
+        "PR #42 mergeStateStatus CLEAN",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with keyed no-conflict evidence",
@@ -2732,9 +2761,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "merge conflicts: none",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with keyed resolved conflict evidence",
@@ -2744,9 +2773,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "merge conflict: resolved",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with not-required approval label",
@@ -2757,9 +2786,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approval: not required"
+        "approval: not required",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with not-required operator decision label",
@@ -2770,9 +2799,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operator decision: not-required"
+        "operator decision: not-required",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with inactive JSON approval marker",
@@ -2783,9 +2812,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"no approval required"}'
+        '{"approvalRequired":false,"message":"no approval required"}',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with identity text containing gate words",
@@ -2796,9 +2825,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"branch":"feat/approval-required-copy","prUrl":"https://example.test/pulls/1"}'
+        '{"branch":"feat/approval-required-copy","prUrl":"https://example.test/pulls/1"}',
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with raw branch identity containing gate words",
@@ -2809,9 +2838,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "branch: feat/approval-required-copy"
+        "branch: feat/approval-required-copy",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with no approval required label",
@@ -2822,9 +2851,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approval: no approval required"
+        "approval: no approval required",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with no decision required label",
@@ -2835,9 +2864,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "ci/running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operator decision: no decision required"
+        "operator decision: no decision required",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with historical failed checks before current clean green evidence",
@@ -2847,9 +2876,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "previous checks failed",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with current clean PR and history note",
@@ -2858,9 +2887,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "current PR mergeStateStatus CLEAN (previously dirty)",
-        "GitHub checks passed"
+        "GitHub checks passed",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with current no-checks CI state and history note",
@@ -2869,9 +2898,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "current ciState: none (previously pending)"
+        "current ciState: none (previously pending)",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
+      expected: "pull request is clean and checks are green",
     },
     {
       name: "running no-mistakes with continue classification",
@@ -2881,10 +2910,10 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "classification: continue",
         "PR #42 mergeStateStatus CLEAN",
-        "ciState: none"
+        "ciState: none",
       ].join("\n"),
-      expected: "pull request is clean and checks are green"
-    }
+      expected: "pull request is clean and checks are green",
+    },
   ])(
     "treats no-mistakes $name as terminal success for the workflow",
     ({ stdout, expected }) => {
@@ -2905,9 +2934,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
             runner_profile: noMistakesRunnerProfile(),
             key_changes_made: ["Verified no-mistakes readiness."],
             key_learnings: ["no-mistakes keeps monitoring open PRs."],
-            commit: { type: "test", subject: "run no mistakes" }
-          }
-        }
+            commit: { type: "test", subject: "run no mistakes" },
+          },
+        },
       });
 
       const outcome = runCodingWorkflowLiveWrapper(
@@ -2920,8 +2949,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           GH_TOKEN: "test-token",
           HOME: makeNoMistakesHome(dir),
           CODEX_HOME: "/tmp/codex-home",
-          PATH: process.env.PATH
-        })
+          PATH: process.env.PATH,
+        }),
       );
 
       expect(outcome.exitCode).toBe(0);
@@ -2931,12 +2960,12 @@ describe("runCodingWorkflowLiveWrapper", () => {
       expect(result.success).toBe(true);
       expect(result.summary).toContain(expected);
       expect(result.key_changes_made).toEqual([
-        "Verified no-mistakes readiness."
+        "Verified no-mistakes readiness.",
       ]);
       expect(result.key_learnings).toEqual([
-        "no-mistakes keeps monitoring open PRs."
+        "no-mistakes keeps monitoring open PRs.",
       ]);
-    }
+    },
   );
 
   it.each([
@@ -2947,8 +2976,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "previous PR mergeStateStatus CLEAN",
-        "previous GitHub checks passed"
-      ].join("\n")
+        "previous GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "running output with only prefixed historical clean and green evidence",
@@ -2957,8 +2986,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "- previous PR mergeStateStatus CLEAN",
-        "- previous GitHub checks passed"
-      ].join("\n")
+        "- previous GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "running output with only suffixed historical clean and green evidence",
@@ -2967,8 +2996,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR mergeStateStatus CLEAN from previous run",
-        "GitHub checks passed in previous run"
-      ].join("\n")
+        "GitHub checks passed in previous run",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by failed outcome",
@@ -2978,8 +3007,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "outcome: failed"
-      ].join("\n")
+        "outcome: failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by blocked status",
@@ -2989,8 +3018,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "status: blocked"
-      ].join("\n")
+        "status: blocked",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by awaiting approval status",
@@ -3000,8 +3029,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "status: awaiting_approval"
-      ].join("\n")
+        "status: awaiting_approval",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by awaiting approval stepStatus",
@@ -3011,8 +3040,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "stepStatus: awaiting_approval"
-      ].join("\n")
+        "stepStatus: awaiting_approval",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by current failed outcome",
@@ -3022,8 +3051,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current outcome: failed"
-      ].join("\n")
+        "current outcome: failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by pending status",
@@ -3033,8 +3062,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "status: pending"
-      ].join("\n")
+        "status: pending",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by failed classification",
@@ -3044,8 +3073,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "classification: failed"
-      ].join("\n")
+        "classification: failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON blocked classification",
@@ -3055,8 +3084,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"classification":"blocked"}'
-      ].join("\n")
+        '{"classification":"blocked"}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by blocked recovery code",
@@ -3066,8 +3095,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "recoveryCode: external_state_blocked"
-      ].join("\n")
+        "recoveryCode: external_state_blocked",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by unknown recovery code",
@@ -3077,8 +3106,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "recoveryCode: runtime_unavailable"
-      ].join("\n")
+        "recoveryCode: runtime_unavailable",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by failed recovery code",
@@ -3088,8 +3117,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "recovery code: external_run_failed"
-      ].join("\n")
+        "recovery code: external_run_failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON recovery code",
@@ -3099,8 +3128,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"recoveryCode":"external_state_blocked"}'
-      ].join("\n")
+        '{"recoveryCode":"external_state_blocked"}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON unknown recovery code",
@@ -3110,8 +3139,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"recoveryCode":"runtime_unavailable"}'
-      ].join("\n")
+        '{"recoveryCode":"runtime_unavailable"}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by checks failed outcome",
@@ -3121,8 +3150,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "outcome: checks_failed"
-      ].join("\n")
+        "outcome: checks_failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON pending status",
@@ -3132,8 +3161,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"status":"pending"}'
-      ].join("\n")
+        '{"status":"pending"}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by null JSON step status",
@@ -3143,8 +3172,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"stepStatus":null}'
-      ].join("\n")
+        '{"stepStatus":null}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by array JSON status",
@@ -3154,8 +3183,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"status":[]}'
-      ].join("\n")
+        '{"status":[]}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by equals failed outcome",
@@ -3165,8 +3194,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "outcome=failed"
-      ].join("\n")
+        "outcome=failed",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by arrow awaiting approval step status",
@@ -3176,8 +3205,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "stepStatus=>awaiting_approval"
-      ].join("\n")
+        "stepStatus=>awaiting_approval",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by current blocked status",
@@ -3187,8 +3216,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current status: blocked"
-      ].join("\n")
+        "current status: blocked",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by JSON awaiting approval stepStatus",
@@ -3198,8 +3227,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"stepStatus": "awaiting_approval"'
-      ].join("\n")
+        '"stepStatus": "awaiting_approval"',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON gate state",
@@ -3209,8 +3238,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"stepStatus":"awaiting_approval","decisions":[{}]}'
-      ].join("\n")
+        '{"stepStatus":"awaiting_approval","decisions":[{}]}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by compact JSON running status before blocked step status",
@@ -3220,8 +3249,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"status":"running","stepStatus":"awaiting_approval"}'
-      ].join("\n")
+        '{"status":"running","stepStatus":"awaiting_approval"}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by nested JSON awaiting approval status",
@@ -3231,8 +3260,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"status":"running","state":{"stepStatus":"awaiting_approval"}}'
-      ].join("\n")
+        '{"status":"running","state":{"stepStatus":"awaiting_approval"}}',
+      ].join("\n"),
     },
     {
       name: "stale running output followed by comma separated blocked step status",
@@ -3242,8 +3271,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "status: running, stepStatus: awaiting_approval"
-      ].join("\n")
+        "status: running, stepStatus: awaiting_approval",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by blocked step status",
@@ -3253,8 +3282,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "step status: blocked"
-      ].join("\n")
+        "step status: blocked",
+      ].join("\n"),
     },
     {
       name: "stale running output followed by current blocked step status",
@@ -3264,8 +3293,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current step status: awaiting_approval"
-      ].join("\n")
+        "current step status: awaiting_approval",
+      ].join("\n"),
     },
     {
       name: "historical checks-passed outcome with active gate",
@@ -3276,56 +3305,56 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "previous outcome: checks-passed",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "gate: operator_decision_required"
-      ].join("\n")
+        "gate: operator_decision_required",
+      ].join("\n"),
     },
     {
       name: "historical checks-passed outcome suffix",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        "outcome: checks-passed, previous run"
-      ].join("\n")
+        "outcome: checks-passed, previous run",
+      ].join("\n"),
     },
     {
       name: "historical checks-passed outcome parenthetical",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        "outcome: checks-passed (previous run)"
-      ].join("\n")
+        "outcome: checks-passed (previous run)",
+      ].join("\n"),
     },
     {
       name: "historical nested JSON checks-passed outcome",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        '{"previous":{"outcome":"checks-passed"}}'
-      ].join("\n")
+        '{"previous":{"outcome":"checks-passed"}}',
+      ].join("\n"),
     },
     {
       name: "unscoped nested JSON checks-passed message",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        '{"message":{"outcome":"checks-passed"}}'
-      ].join("\n")
+        '{"message":{"outcome":"checks-passed"}}',
+      ].join("\n"),
     },
     {
       name: "unscoped prose checks-passed outcome message",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        "message: outcome: checks-passed"
-      ].join("\n")
+        "message: outcome: checks-passed",
+      ].join("\n"),
     },
     {
       name: "prefixed historical JSON checks-passed outcome",
       stdout: [
         "run:",
         '  id: "01TEST"',
-        'previous: {"outcome":"checks-passed"}'
-      ].join("\n")
+        'previous: {"outcome":"checks-passed"}',
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by dirty PR",
@@ -3335,8 +3364,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current PR state: dirty"
-      ].join("\n")
+        "current PR state: dirty",
+      ].join("\n"),
     },
     {
       name: "stale green evidence followed by copular false clean PR",
@@ -3345,8 +3374,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "GitHub checks passed",
-        "PR clean is false"
-      ].join("\n")
+        "PR clean is false",
+      ].join("\n"),
     },
     {
       name: "stale green evidence followed by copular no clean PR",
@@ -3355,8 +3384,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "GitHub checks passed",
-        "pull request clean was no"
-      ].join("\n")
+        "pull request clean was no",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by unstable merge state",
@@ -3366,8 +3395,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current mergeStateStatus UNSTABLE"
-      ].join("\n")
+        "current mergeStateStatus UNSTABLE",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by behind merge state",
@@ -3377,8 +3406,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current mergeStateStatus BEHIND"
-      ].join("\n")
+        "current mergeStateStatus BEHIND",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by unknown merge state",
@@ -3388,8 +3417,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current mergeStateStatus UNKNOWN"
-      ].join("\n")
+        "current mergeStateStatus UNKNOWN",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by draft merge state",
@@ -3399,8 +3428,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current mergeStateStatus DRAFT"
-      ].join("\n")
+        "current mergeStateStatus DRAFT",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by draft boolean",
@@ -3410,8 +3439,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "isDraft: true"
-      ].join("\n")
+        "isDraft: true",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by draft field",
@@ -3421,8 +3450,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "draft: true"
-      ].join("\n")
+        "draft: true",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by JSON draft field",
@@ -3432,8 +3461,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"draft":true}'
-      ].join("\n")
+        '{"draft":true}',
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by draft PR prose",
@@ -3443,8 +3472,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "PR is draft"
-      ].join("\n")
+        "PR is draft",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by false mergeable value",
@@ -3454,8 +3483,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable: false"
-      ].join("\n")
+        "mergeable: false",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by separatorless false mergeable value",
@@ -3465,8 +3494,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable false"
-      ].join("\n")
+        "mergeable false",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by separatorless no mergeable value",
@@ -3476,8 +3505,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable no"
-      ].join("\n")
+        "mergeable no",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by conflicting mergeable enum",
@@ -3487,8 +3516,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable: CONFLICTING"
-      ].join("\n")
+        "mergeable: CONFLICTING",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by non-mergeable prose",
@@ -3498,8 +3527,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "PR is not mergeable"
-      ].join("\n")
+        "PR is not mergeable",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by cannot-merge prose",
@@ -3509,8 +3538,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "pull request cannot be merged"
-      ].join("\n")
+        "pull request cannot be merged",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by snake case behind merge state",
@@ -3520,8 +3549,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "merge_state_status: behind"
-      ].join("\n")
+        "merge_state_status: behind",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by snake case dirty mergeable state",
@@ -3531,8 +3560,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable_state: dirty"
-      ].join("\n")
+        "mergeable_state: dirty",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by failed checks",
@@ -3542,8 +3571,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current checks failed"
-      ].join("\n")
+        "current checks failed",
+      ].join("\n"),
     },
     {
       name: "stale clean PR followed by copular false passed checks",
@@ -3552,8 +3581,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed is false"
-      ].join("\n")
+        "checks passed is false",
+      ].join("\n"),
     },
     {
       name: "stale clean PR followed by copular skipped passed checks",
@@ -3562,8 +3591,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci passed was skipped"
-      ].join("\n")
+        "ci passed was skipped",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by running checks",
@@ -3573,8 +3602,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current checks running"
-      ].join("\n")
+        "current checks running",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by running CI",
@@ -3584,8 +3613,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci is running"
-      ].join("\n")
+        "ci is running",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by colon running CI status",
@@ -3595,8 +3624,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci status: running"
-      ].join("\n")
+        "ci status: running",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by equals queued CI status",
@@ -3606,8 +3635,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci status=queued"
-      ].join("\n")
+        "ci status=queued",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by colon waiting CI status",
@@ -3617,8 +3646,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci status: waiting"
-      ].join("\n")
+        "ci status: waiting",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by in-progress checks",
@@ -3628,8 +3657,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "checks are in progress"
-      ].join("\n")
+        "checks are in progress",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by awaiting checks",
@@ -3639,8 +3668,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "awaiting checks"
-      ].join("\n")
+        "awaiting checks",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by checks awaiting",
@@ -3650,8 +3679,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "checks awaiting"
-      ].join("\n")
+        "checks awaiting",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by blocked checks",
@@ -3661,8 +3690,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "checks blocked"
-      ].join("\n")
+        "checks blocked",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by gated CI",
@@ -3672,8 +3701,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci gated"
-      ].join("\n")
+        "ci gated",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by negated checks",
@@ -3683,8 +3712,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "not all checks passed"
-      ].join("\n")
+        "not all checks passed",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by pending checks",
@@ -3694,8 +3723,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "pending checks"
-      ].join("\n")
+        "pending checks",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by failed checks",
@@ -3705,8 +3734,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "failed checks"
-      ].join("\n")
+        "failed checks",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by red CI",
@@ -3716,8 +3745,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "red CI"
-      ].join("\n")
+        "red CI",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by merge conflict prose",
@@ -3727,8 +3756,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "merge conflicts detected"
-      ].join("\n")
+        "merge conflicts detected",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by failed external CI state",
@@ -3738,8 +3767,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ciState: failed"
-      ].join("\n")
+        "ciState: failed",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by current failed external CI state with historical note",
@@ -3749,8 +3778,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current ciState: failed (previously passed)"
-      ].join("\n")
+        "current ciState: failed (previously passed)",
+      ].join("\n"),
     },
     {
       name: "stale historical CI state followed by current failed external CI state",
@@ -3760,8 +3789,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "previous ciState: passed; current ciState: failed"
-      ].join("\n")
+        "previous ciState: passed; current ciState: failed",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by failed check conclusion",
@@ -3771,8 +3800,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "checkConclusion: failure"
-      ].join("\n")
+        "checkConclusion: failure",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by JSON action-required check conclusion",
@@ -3782,8 +3811,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"conclusion":"action_required"}'
-      ].join("\n")
+        '{"conclusion":"action_required"}',
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by pending external CI state",
@@ -3793,8 +3822,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci_state: pending"
-      ].join("\n")
+        "ci_state: pending",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by error external CI state",
@@ -3804,8 +3833,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ciState: error"
-      ].join("\n")
+        "ciState: error",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by cancelled external CI state",
@@ -3815,8 +3844,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ciState: cancelled"
-      ].join("\n")
+        "ciState: cancelled",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by running external CI state",
@@ -3826,8 +3855,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci_state: running"
-      ].join("\n")
+        "ci_state: running",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by skipped checks",
@@ -3837,8 +3866,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "checks skipped"
-      ].join("\n")
+        "checks skipped",
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by action-required CI status",
@@ -3848,8 +3877,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci status: action_required"
-      ].join("\n")
+        "ci status: action_required",
+      ].join("\n"),
     },
     {
       name: "clean PR with unknown checks-passed value",
@@ -3858,8 +3887,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed: unknown"
-      ].join("\n")
+        "checks passed: unknown",
+      ].join("\n"),
     },
     {
       name: "clean PR with skipped CI-passed value",
@@ -3868,8 +3897,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci passed: skipped"
-      ].join("\n")
+        "ci passed: skipped",
+      ].join("\n"),
     },
     {
       name: "clean PR with false no-checks value",
@@ -3878,8 +3907,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "no checks reported: false"
-      ].join("\n")
+        "no checks reported: false",
+      ].join("\n"),
     },
     {
       name: "clean PR with transient no-checks value",
@@ -3888,8 +3917,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "no checks reported yet"
-      ].join("\n")
+        "no checks reported yet",
+      ].join("\n"),
     },
     {
       name: "clean PR with pending no-checks value",
@@ -3898,12 +3927,12 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "no checks reported: pending"
-      ].join("\n")
+        "no checks reported: pending",
+      ].join("\n"),
     },
     {
       name: "vague running output",
-      stdout: "status: running"
+      stdout: "status: running",
     },
     {
       name: "unclean PR with passed checks",
@@ -3912,8 +3941,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "pull request is not clean",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "false PR clean value with passed checks",
@@ -3922,8 +3951,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR clean: false",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "JSON false clean value with passed checks",
@@ -3934,8 +3963,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
         '"clean": false',
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "no pull request clean value with passed checks",
@@ -3944,8 +3973,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "pull request clean: no",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "trailing no pull request clean value with passed checks",
@@ -3954,8 +3983,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "pull request clean no",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "trailing false PR clean value with passed checks",
@@ -3964,8 +3993,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR clean false",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "comma trailing false PR clean value with passed checks",
@@ -3974,8 +4003,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR clean false,",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "unknown PR clean value with passed checks",
@@ -3984,8 +4013,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR clean: unknown",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "pending pull request clean value with passed checks",
@@ -3994,8 +4023,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "pull request clean: pending",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "repeated clean field with pending current value and passed checks",
@@ -4004,8 +4033,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR clean: true, current clean: pending",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with not all checks passed",
@@ -4014,8 +4043,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "not all checks passed"
-      ].join("\n")
+        "not all checks passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with false checks passed value",
@@ -4024,8 +4053,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed: false"
-      ].join("\n")
+        "checks passed: false",
+      ].join("\n"),
     },
     {
       name: "clean PR with JSON false checks passed value",
@@ -4034,8 +4063,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        '"passed": false'
-      ].join("\n")
+        '"passed": false',
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by JSON false mergeable value",
@@ -4045,8 +4074,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"mergeable": false'
-      ].join("\n")
+        '"mergeable": false',
+      ].join("\n"),
     },
     {
       name: "stale clean green evidence followed by repeated conflicting mergeable value",
@@ -4056,8 +4085,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "mergeable: true, current mergeable: conflicting"
-      ].join("\n")
+        "mergeable: true, current mergeable: conflicting",
+      ].join("\n"),
     },
     {
       name: "clean PR with no checks passed value",
@@ -4066,8 +4095,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed: no"
-      ].join("\n")
+        "checks passed: no",
+      ].join("\n"),
     },
     {
       name: "clean PR with trailing no checks passed value",
@@ -4076,8 +4105,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed no"
-      ].join("\n")
+        "checks passed no",
+      ].join("\n"),
     },
     {
       name: "clean PR with trailing false checks passed value",
@@ -4086,8 +4115,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed false"
-      ].join("\n")
+        "checks passed false",
+      ].join("\n"),
     },
     {
       name: "clean PR with comma trailing false checks passed value",
@@ -4096,8 +4125,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "checks passed false,"
-      ].join("\n")
+        "checks passed false,",
+      ].join("\n"),
     },
     {
       name: "stale green checks followed by separatorless failed external CI state",
@@ -4107,8 +4136,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ciState failed"
-      ].join("\n")
+        "ciState failed",
+      ].join("\n"),
     },
     {
       name: "stale green checks followed by separatorless running external CI state",
@@ -4118,8 +4147,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "ci state running"
-      ].join("\n")
+        "ci state running",
+      ].join("\n"),
     },
     {
       name: "stale green checks followed by repeated failed external CI state",
@@ -4128,8 +4157,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ciState: passed, current ciState: failed"
-      ].join("\n")
+        "ciState: passed, current ciState: failed",
+      ].join("\n"),
     },
     {
       name: "clean PR with CI not green",
@@ -4138,8 +4167,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci is not green"
-      ].join("\n")
+        "ci is not green",
+      ].join("\n"),
     },
     {
       name: "clean PR with CI contraction not green",
@@ -4148,8 +4177,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci isn't green"
-      ].join("\n")
+        "ci isn't green",
+      ].join("\n"),
     },
     {
       name: "clean PR with CI never passed",
@@ -4158,8 +4187,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci never passed"
-      ].join("\n")
+        "ci never passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with CI hasnt passed",
@@ -4168,8 +4197,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "ci hasn't passed"
-      ].join("\n")
+        "ci hasn't passed",
+      ].join("\n"),
     },
     {
       name: "current clean green output with only historical running marker",
@@ -4178,8 +4207,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "previous ci/running",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with GitHub checks havent passed",
@@ -4188,8 +4217,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
-        "github checks haven't passed"
-      ].join("\n")
+        "github checks haven't passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and active gate",
@@ -4199,8 +4228,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "gate: operator_decision_required"
-      ].join("\n")
+        "gate: operator_decision_required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and operator decision required prose",
@@ -4210,8 +4239,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operator decision is required"
-      ].join("\n")
+        "operator decision is required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and approval required prose",
@@ -4221,8 +4250,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approval is required"
-      ].join("\n")
+        "approval is required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and awaiting approval prose",
@@ -4232,8 +4261,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "awaiting approval"
-      ].join("\n")
+        "awaiting approval",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and waiting for approval prose",
@@ -4243,8 +4272,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "waiting for approval"
-      ].join("\n")
+        "waiting for approval",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and requires approval prose",
@@ -4254,8 +4283,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "requires approval"
-      ].join("\n")
+        "requires approval",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and manual recovery is required prose",
@@ -4265,8 +4294,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "manual recovery is required"
-      ].join("\n")
+        "manual recovery is required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and external state is required prose",
@@ -4276,8 +4305,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "external state is required"
-      ].join("\n")
+        "external state is required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and requires manual recovery prose",
@@ -4287,8 +4316,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "requires manual recovery"
-      ].join("\n")
+        "requires manual recovery",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and requires external state prose",
@@ -4298,8 +4327,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "requires external state"
-      ].join("\n")
+        "requires external state",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and awaiting operator decision prose",
@@ -4309,8 +4338,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "awaiting operator decision"
-      ].join("\n")
+        "awaiting operator decision",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and finding table",
@@ -4320,8 +4349,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "findings[0]: security review required"
-      ].join("\n")
+        "findings[0]: security review required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and decision-required marker",
@@ -4331,8 +4360,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decision required: choose a reviewer action"
-      ].join("\n")
+        "decision required: choose a reviewer action",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and camel decision required flag",
@@ -4342,8 +4371,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decisionRequired: true"
-      ].join("\n")
+        "decisionRequired: true",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and snake decision required flag",
@@ -4353,8 +4382,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decision_required: true"
-      ].join("\n")
+        "decision_required: true",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and camel human gate required flag",
@@ -4364,8 +4393,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "humanGateRequired: true"
-      ].join("\n")
+        "humanGateRequired: true",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and spaced human gate required prose",
@@ -4375,8 +4404,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "human gate required"
-      ].join("\n")
+        "human gate required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and compact JSON decision required flag",
@@ -4386,8 +4415,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisionRequired":true}'
-      ].join("\n")
+        '{"decisionRequired":true}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and prefixed compact JSON gate state",
@@ -4397,8 +4426,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        'state: {"stepStatus":"awaiting_approval","decisions":[{}]}'
-      ].join("\n")
+        'state: {"stepStatus":"awaiting_approval","decisions":[{}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and bullet-prefixed compact JSON gate state",
@@ -4408,8 +4437,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '- state: {"decisions":[{"action":"approve_or_retry"}]}'
-      ].join("\n")
+        '- state: {"decisions":[{"action":"approve_or_retry"}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and bullet-prefixed compact JSON findings",
@@ -4419,8 +4448,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '- {"findings":[{}]}'
-      ].join("\n")
+        '- {"findings":[{}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus compact JSON gate",
@@ -4430,8 +4459,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"humanGate":"operator_decision_required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"humanGate":"operator_decision_required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and human gate label",
@@ -4441,8 +4470,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "humanGate: open"
-      ].join("\n")
+        "humanGate: open",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and same-line status then human gate",
@@ -4451,8 +4480,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "status: running, humanGate: open",
         "PR #42 mergeStateStatus CLEAN",
-        "GitHub checks passed"
-      ].join("\n")
+        "GitHub checks passed",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and same-line inactive required flag before human gate",
@@ -4462,8 +4491,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approvalRequired: false, humanGate: open"
-      ].join("\n")
+        "approvalRequired: false, humanGate: open",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and same-line inactive required flag after human gate",
@@ -4473,8 +4502,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "humanGate: open, approvalRequired: false"
-      ].join("\n")
+        "humanGate: open, approvalRequired: false",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and same-line inactive required flag after operator decision prose",
@@ -4484,8 +4513,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operator decision is required; approvalRequired: false"
-      ].join("\n")
+        "operator decision is required; approvalRequired: false",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and current human gate label",
@@ -4495,8 +4524,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current human gate: open"
-      ].join("\n")
+        "current human gate: open",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and required operator decision label",
@@ -4506,8 +4535,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "operator decision: required"
-      ].join("\n")
+        "operator decision: required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and required approval label",
@@ -4517,8 +4546,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "approval: required"
-      ].join("\n")
+        "approval: required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and required manual recovery label",
@@ -4528,8 +4557,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "manual recovery: required"
-      ].join("\n")
+        "manual recovery: required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and compact JSON required operator decision label",
@@ -4539,8 +4568,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"operatorDecision":"required"}'
-      ].join("\n")
+        '{"operatorDecision":"required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and pretty JSON human gate label",
@@ -4550,8 +4579,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"humanGate": "open",'
-      ].join("\n")
+        '"humanGate": "open",',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus JSON prose gate marker",
@@ -4561,8 +4590,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"requires operator decision"}'
-      ].join("\n")
+        '{"approvalRequired":false,"message":"requires operator decision"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus JSON operator decision prose",
@@ -4572,8 +4601,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"operator decision is required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"message":"operator decision is required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus JSON approval marker",
@@ -4583,8 +4612,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"approval required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"message":"approval required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and mixed inactive and active gate prose",
@@ -4594,8 +4623,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "no approval required; operator decision required"
-      ].join("\n")
+        "no approval required; operator decision required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus mixed gate prose",
@@ -4605,8 +4634,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"no approval required; operator decision required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"message":"no approval required; operator decision required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus JSON snake decision marker",
@@ -4616,8 +4645,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"message":"decision_required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"message":"decision_required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and inactive required flag plus classification gate",
@@ -4627,8 +4656,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"approvalRequired":false,"classification":"operator_decision_required"}'
-      ].join("\n")
+        '{"approvalRequired":false,"classification":"operator_decision_required"}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and decision table",
@@ -4638,8 +4667,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decisions[0]: approve or retry"
-      ].join("\n")
+        "decisions[0]: approve or retry",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and not resolved decision",
@@ -4649,8 +4678,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decision: not resolved"
-      ].join("\n")
+        "decision: not resolved",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and missing approval gate",
@@ -4660,8 +4689,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "gate: no approval received"
-      ].join("\n")
+        "gate: no approval received",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and nonempty decisions label",
@@ -4671,8 +4700,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "decisions: approve or retry"
-      ].join("\n")
+        "decisions: approve or retry",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and scoped findings label",
@@ -4682,8 +4711,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current findings: security review required"
-      ].join("\n")
+        "current findings: security review required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and scoped decision label",
@@ -4693,8 +4722,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current decision: approve or retry"
-      ].join("\n")
+        "current decision: approve or retry",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and equals gate label",
@@ -4704,8 +4733,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "gate=open"
-      ].join("\n")
+        "gate=open",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and equals decisions label",
@@ -4715,8 +4744,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        'decisions=[{"action":"approve_or_retry"}]'
-      ].join("\n")
+        'decisions=[{"action":"approve_or_retry"}]',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and arrow decisions label",
@@ -4726,8 +4755,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        'decisions=>[{"action":"approve_or_retry"}]'
-      ].join("\n")
+        'decisions=>[{"action":"approve_or_retry"}]',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and YAML decisions section",
@@ -4738,8 +4767,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
         "decisions:",
-        "  - approve or retry"
-      ].join("\n")
+        "  - approve or retry",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and YAML decisions mapping",
@@ -4750,8 +4779,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
         "decisions:",
-        "  action: approve or retry"
-      ].join("\n")
+        "  action: approve or retry",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and YAML findings section",
@@ -4762,8 +4791,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
         "findings:",
-        "  - security review required"
-      ].join("\n")
+        "  - security review required",
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and JSON decisions array",
@@ -4773,8 +4802,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"decisions": [{"action":"approve_or_retry"}]'
-      ].join("\n")
+        '"decisions": [{"action":"approve_or_retry"}]',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and JSON findings array",
@@ -4784,8 +4813,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '"findings": [{"severity":"error"}]'
-      ].join("\n")
+        '"findings": [{"severity":"error"}]',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and compact JSON decisions array",
@@ -4795,8 +4824,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"action":"approve_or_retry"}]}'
-      ].join("\n")
+        '{"decisions":[{"action":"approve_or_retry"}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and malformed JSON decisions array",
@@ -4806,8 +4835,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[null]}'
-      ].join("\n")
+        '{"decisions":[null]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and nested compact JSON decisions array",
@@ -4817,8 +4846,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"state":{"decisions":[{"action":"approve_or_retry"}]}}'
-      ].join("\n")
+        '{"state":{"decisions":[{"action":"approve_or_retry"}]}}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and escaped JSON decision details",
@@ -4828,8 +4857,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"action":"approve_or_retry","details":"line one\\nline two"}]}'
-      ].join("\n")
+        '{"decisions":[{"action":"approve_or_retry","details":"line one\\nline two"}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and null JSON decision resolution",
@@ -4839,8 +4868,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"resolution":null}]}'
-      ].join("\n")
+        '{"decisions":[{"resolution":null}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and empty JSON decision resolution",
@@ -4850,8 +4879,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"resolution":""}]}'
-      ].join("\n")
+        '{"decisions":[{"resolution":""}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and string false resolved JSON decision",
@@ -4861,8 +4890,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"decisions":[{"resolved":"false"}]}'
-      ].join("\n")
+        '{"decisions":[{"resolved":"false"}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and compact JSON findings array",
@@ -4872,8 +4901,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"findings":[{"severity":"error"}]}'
-      ].join("\n")
+        '{"findings":[{"severity":"error"}]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and selected finding IDs",
@@ -4883,8 +4912,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"selectedFindingIds":["F-1"]}'
-      ].join("\n")
+        '{"selectedFindingIds":["F-1"]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and malformed selected finding IDs",
@@ -4894,8 +4923,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        '{"selectedFindingIds":[null]}'
-      ].join("\n")
+        '{"selectedFindingIds":[null]}',
+      ].join("\n"),
     },
     {
       name: "clean PR with green checks and current selected finding IDs",
@@ -4905,8 +4934,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
-        "current selected finding ids: [F-1]"
-      ].join("\n")
+        "current selected finding ids: [F-1]",
+      ].join("\n"),
     },
     {
       name: "cancelled CI status with aborted user text",
@@ -4915,8 +4944,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "ci status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "nested cancelled CI status with aborted user text",
@@ -4926,8 +4955,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci:",
         "  status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "historical cancelled no-mistakes status with aborted user text",
@@ -4936,8 +4965,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "previous status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "historical compact cancelled no-mistakes status with aborted user text",
@@ -4946,8 +4975,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "previous run status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "annotated historical compact cancelled no-mistakes status with aborted user text",
@@ -4956,8 +4985,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "run status: cancelled (previous run)",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "historical section compact cancelled no-mistakes status with aborted user text",
@@ -4967,8 +4996,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "history:",
         "  run status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "CI section compact cancelled no-mistakes status with aborted user text",
@@ -4978,8 +5007,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "ci:",
         "  run status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "historical section nested cancelled no-mistakes run with aborted user text",
@@ -4990,8 +5019,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "history:",
         "  run:",
         "    status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
     },
     {
       name: "previous section cancelled status with aborted user text",
@@ -5001,9 +5030,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "  status: running",
         "previous:",
         "  status: cancelled",
-        'error: "cancelled: aborted by user"'
-      ].join("\n")
-    }
+        'error: "cancelled: aborted by user"',
+      ].join("\n"),
+    },
   ])("does not treat no-mistakes $name as workflow success", ({ stdout }) => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
@@ -5017,15 +5046,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
           command: "/bin/sh",
           args: [
             "-c",
-            `cat <<'MOMENTUM_TEST_OUTPUT'\n${stdout}\nMOMENTUM_TEST_OUTPUT\nexit 1`
+            `cat <<'MOMENTUM_TEST_OUTPUT'\n${stdout}\nMOMENTUM_TEST_OUTPUT\nexit 1`,
           ],
           cwd: "repo",
           timeout_sec: 30,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "run no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "run no mistakes" },
+        },
+      },
     });
 
     const outcome = runCodingWorkflowLiveWrapper(
@@ -5037,8 +5066,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
-      })
+        PATH: process.env.PATH,
+      }),
     );
 
     expect(outcome.exitCode).toBe(0);
@@ -5046,7 +5075,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const result = readResult(resultPath);
     expect(result.success).toBe(false);
     expect(result.remaining_work).toEqual([
-      "Fix no-mistakes command failure before advancing the workflow."
+      "Fix no-mistakes command failure before advancing the workflow.",
     ]);
   });
 
@@ -5070,9 +5099,9 @@ describe("runCodingWorkflowLiveWrapper", () => {
             ...(stepKind === "merge-cleanup"
               ? { merge_cleanup: mergeCleanupTargetConfig() }
               : {}),
-            commit: { type: "chore", subject: `complete ${stepKind}` }
-          }
-        }
+            commit: { type: "chore", subject: `complete ${stepKind}` },
+          },
+        },
       });
 
       const outcome = runCodingWorkflowLiveWrapper(
@@ -5083,8 +5112,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
           GH_TOKEN: "test-token",
-          PATH: process.env.PATH
-        })
+          PATH: process.env.PATH,
+        }),
       );
 
       expect(outcome.success).toBe(false);
@@ -5094,7 +5123,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       // may have already merged a PR before failing, so the durable guidance must
       // not imply a naive re-run and must point at the safe recovery path.
       expect(result.remaining_work).not.toContain(
-        `Fix ${stepKind} command failure before advancing the workflow.`
+        `Fix ${stepKind} command failure before advancing the workflow.`,
       );
       const guidance = result.remaining_work.join("\n");
       expect(guidance).toContain(stepKind);
@@ -5102,7 +5131,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       expect(guidance).toContain("clear-recovery");
       expect(guidance).toContain("--evidence-pointer");
       expect(guidance).not.toContain("retry");
-    }
+    },
   );
 
   it("kills the full configured command tree on timeout", () => {
@@ -5117,8 +5146,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
     fs.mkdirSync(repo);
     fs.writeFileSync(
       childScriptPath,
-      "#!/bin/sh\nsleep 2\ntouch \"$1\"\n",
-      "utf8"
+      '#!/bin/sh\nsleep 2\ntouch "$1"\n',
+      "utf8",
     );
     fs.chmodSync(childScriptPath, 0o755);
     const configPath = path.join(dir, "wrapper-config.json");
@@ -5128,15 +5157,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
           command: "/bin/sh",
           args: [
             "-c",
-            `nohup /bin/sh "${childScriptPath}" "${sentinelPath}" >/dev/null 2>&1 & sleep 10`
+            `nohup /bin/sh "${childScriptPath}" "${sentinelPath}" >/dev/null 2>&1 & sleep 10`,
           ],
           cwd: "repo",
           timeout_sec: 1,
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: noMistakesRunnerProfile(),
-          commit: { type: "test", subject: "verify no mistakes" }
-        }
-      }
+          commit: { type: "test", subject: "verify no mistakes" },
+        },
+      },
     });
 
     const productionDeps = {
@@ -5149,10 +5178,10 @@ describe("runCodingWorkflowLiveWrapper", () => {
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
         HOME: makeNoMistakesHome(dir),
         CODEX_HOME: "/tmp/codex-home",
-        PATH: process.env.PATH
+        PATH: process.env.PATH,
       },
       stdout: () => {},
-      stderr: () => {}
+      stderr: () => {},
     };
 
     const outcome = runCodingWorkflowLiveWrapper(productionDeps);
@@ -5172,13 +5201,15 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_STEP_KIND: "implementation",
         MOMENTUM_REPO_PATH: dir,
         MOMENTUM_ITERATION_DIR: dir,
-        MOMENTUM_RESULT_PATH: resultPath
-      })
+        MOMENTUM_RESULT_PATH: resultPath,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    expect(outcome.summary).toContain("MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG");
+    expect(outcome.summary).toContain(
+      "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG",
+    );
     expect(fs.existsSync(resultPath)).toBe(false);
   });
 
@@ -5194,14 +5225,14 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_REPO_PATH: dir,
         MOMENTUM_ITERATION_DIR: dir,
         MOMENTUM_RESULT_PATH: resultPath,
-        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
-      })
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+      }),
     );
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
     expect(outcome.summary).toBe(
-      'No command is configured for workflow step "implementation" in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG.'
+      'No command is configured for workflow step "implementation" in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG.',
     );
     expect(fs.existsSync(resultPath)).toBe(false);
   });

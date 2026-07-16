@@ -6,11 +6,11 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
-  evaluateGoalForSourceSatisfiedIntents
+  evaluateGoalForSourceSatisfiedIntents,
 } from "../src/core/source/update-intent-generator.js";
 import {
   getUpdateIntentById,
-  listUpdateIntents
+  listUpdateIntents,
 } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
@@ -32,13 +32,13 @@ function insertGoal(
   db: MomentumDb,
   id: string,
   state: string = "completed",
-  needsManualRecovery = 0
+  needsManualRecovery = 0,
 ): void {
   db.prepare(
     `INSERT INTO goals
        (id, title, branch, artifact_dir, state, current_iteration,
         needs_manual_recovery, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     `Goal ${id}`,
@@ -48,7 +48,7 @@ function insertGoal(
     1,
     needsManualRecovery,
     1,
-    1
+    1,
   );
 }
 
@@ -66,7 +66,7 @@ function insertSourceItem(db: MomentumDb, seed: SourceItemSeed): void {
        (id, adapter_kind, external_id, external_key, url, title,
         status, metadata_json, last_observed_at, goal_id,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     seed.id,
     seed.adapterKind ?? "linear",
@@ -79,7 +79,7 @@ function insertSourceItem(db: MomentumDb, seed: SourceItemSeed): void {
     1,
     seed.goalId ?? null,
     1,
-    1
+    1,
   );
 }
 
@@ -89,14 +89,14 @@ function insertEvidenceRecord(
   type: string,
   goalId: string | null,
   occurredAt = 1000,
-  sourceItemId: string | null = null
+  sourceItemId: string | null = null,
 ): void {
   db.prepare(
     `INSERT INTO evidence_records
        (id, source, type, format_version, artifact_path, external_id,
         occurred_at, summary, metadata_json, goal_id, source_item_id,
         ingest_key, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     "agent-workflow",
@@ -111,7 +111,7 @@ function insertEvidenceRecord(
     sourceItemId,
     `ingest:${id}`,
     occurredAt,
-    occurredAt
+    occurredAt,
   );
 }
 
@@ -125,14 +125,14 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-1",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-1"
+        externalId: "NGX-1",
       });
       insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
 
       const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       )[0]!;
 
       expect(result.outcome).toBe("intent_created");
@@ -148,17 +148,17 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.intent.reason).toContain("completed");
       expect(result.intent.reason).toContain("verification evidence");
       expect(result.intent.idempotencyKey).toBe(
-        "linear:NGX-1:source_satisfied:goal-1"
+        "linear:NGX-1:source_satisfied:goal-1",
       );
       expect(result.intent.payload).toMatchObject({
         evidenceType: "no_mistakes_complete",
-        goalState: "completed"
+        goalState: "completed",
       });
       expect(result.sourceItem.id).toBe("si-1");
       expect(result.verificationEvidence.id).toBe("ev-1");
 
       expect(listUpdateIntents(db).map((i) => i.id)).toEqual([
-        result.intent.id
+        result.intent.id,
       ]);
     } finally {
       db.close();
@@ -174,14 +174,14 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-1",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-1"
+        externalId: "NGX-1",
       });
       insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
 
       const first = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
-        { now: () => 1000 }
+        { now: () => 1000 },
       )[0]!;
       expect(first.outcome).toBe("intent_created");
       if (first.outcome !== "intent_created") return;
@@ -192,7 +192,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       const replay = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-1" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       )[0]!;
       expect(replay.outcome).toBe("intent_replayed");
       if (replay.outcome !== "intent_replayed") return;
@@ -215,7 +215,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-source-evidence",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-SOURCE-EVIDENCE"
+        externalId: "NGX-SOURCE-EVIDENCE",
       });
       insertEvidenceRecord(
         db,
@@ -223,13 +223,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "verification_passed",
         null,
         1000,
-        "si-source-evidence"
+        "si-source-evidence",
       );
 
       const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-source-evidence" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       )[0]!;
 
       expect(result.outcome).toBe("intent_created");
@@ -237,7 +237,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.verificationEvidence.id).toBe("ev-source-only");
       expect(result.verificationEvidence.goalId).toBeNull();
       expect(result.verificationEvidence.sourceItemId).toBe(
-        "si-source-evidence"
+        "si-source-evidence",
       );
       expect(result.intent.evidenceRecordId).toBe("ev-source-only");
       expect(result.intent.sourceItemId).toBe("si-source-evidence");
@@ -255,50 +255,50 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-multi-source",
         status: "Done",
         adapterKind: "linear",
-        externalId: "NGX-CLOSED"
+        externalId: "NGX-CLOSED",
       });
       insertSourceItem(db, {
         id: "si-open-a",
         goalId: "goal-multi-source",
         status: "In Progress",
         adapterKind: "linear",
-        externalId: "NGX-OPEN-A"
+        externalId: "NGX-OPEN-A",
       });
       insertSourceItem(db, {
         id: "si-open-b",
         goalId: "goal-multi-source",
         status: "Todo",
         adapterKind: "linear",
-        externalId: "NGX-OPEN-B"
+        externalId: "NGX-OPEN-B",
       });
       insertEvidenceRecord(
         db,
         "ev-goal-wide",
         "no_mistakes_complete",
         "goal-multi-source",
-        1000
+        1000,
       );
 
       const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-multi-source" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       )[0]!;
 
       expect(result.outcome).toBe("intent_created");
       const intents = listUpdateIntents(db).sort((a, b) =>
-        (a.targetExternalId ?? "").localeCompare(b.targetExternalId ?? "")
+        (a.targetExternalId ?? "").localeCompare(b.targetExternalId ?? ""),
       );
       expect(intents.map((intent) => intent.targetExternalId)).toEqual([
         "NGX-OPEN-A",
-        "NGX-OPEN-B"
+        "NGX-OPEN-B",
       ]);
       expect(intents.map((intent) => intent.sourceItemId)).toEqual([
         "si-open-a",
-        "si-open-b"
+        "si-open-b",
       ]);
       expect(
-        intents.every((intent) => intent.evidenceRecordId === "ev-goal-wide")
+        intents.every((intent) => intent.evidenceRecordId === "ev-goal-wide"),
       ).toBe(true);
     } finally {
       db.close();
@@ -313,40 +313,40 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         id: "si-plural-a",
         goalId: "goal-plural",
         status: "In Progress",
-        externalId: "NGX-PLURAL-A"
+        externalId: "NGX-PLURAL-A",
       });
       insertSourceItem(db, {
         id: "si-plural-b",
         goalId: "goal-plural",
         status: "Todo",
-        externalId: "NGX-PLURAL-B"
+        externalId: "NGX-PLURAL-B",
       });
       insertEvidenceRecord(
         db,
         "ev-plural",
         "verification_passed",
         "goal-plural",
-        1000
+        1000,
       );
 
       const first = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-plural" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       );
       expect(first.map((result) => result.outcome)).toEqual([
         "intent_created",
-        "intent_created"
+        "intent_created",
       ]);
 
       const replay = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-plural" },
-        { now: () => 6000 }
+        { now: () => 6000 },
       );
       expect(replay.map((result) => result.outcome)).toEqual([
         "intent_replayed",
-        "intent_replayed"
+        "intent_replayed",
       ]);
       expect(listUpdateIntents(db)).toHaveLength(2);
     } finally {
@@ -362,13 +362,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         id: "si-covered",
         goalId: "goal-partial",
         status: "In Progress",
-        externalId: "NGX-COVERED"
+        externalId: "NGX-COVERED",
       });
       insertSourceItem(db, {
         id: "si-uncovered",
         goalId: "goal-partial",
         status: "Todo",
-        externalId: "NGX-UNCOVERED"
+        externalId: "NGX-UNCOVERED",
       });
       insertEvidenceRecord(
         db,
@@ -376,20 +376,20 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "verification_passed",
         null,
         1000,
-        "si-covered"
+        "si-covered",
       );
 
       const results = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-partial" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       );
       expect(results.map((result) => result.outcome)).toEqual([
         "intent_created",
-        "evidence_insufficient"
+        "evidence_insufficient",
       ]);
       const warning = results.find(
-        (result) => result.outcome === "evidence_insufficient"
+        (result) => result.outcome === "evidence_insufficient",
       );
       expect(warning?.warning.sourceItemId).toBe("si-uncovered");
       expect(listUpdateIntents(db)).toHaveLength(1);
@@ -406,27 +406,27 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         id: "si-uncovered-a",
         goalId: "goal-all-uncovered",
         status: "In Progress",
-        externalId: "NGX-UNCOVERED-A"
+        externalId: "NGX-UNCOVERED-A",
       });
       insertSourceItem(db, {
         id: "si-uncovered-b",
         goalId: "goal-all-uncovered",
         status: "Todo",
-        externalId: "NGX-UNCOVERED-B"
+        externalId: "NGX-UNCOVERED-B",
       });
 
       const results = evaluateGoalForSourceSatisfiedIntents(db, {
-        goalId: "goal-all-uncovered"
+        goalId: "goal-all-uncovered",
       });
 
       expect(results.map((result) => result.outcome)).toEqual([
         "evidence_insufficient",
-        "evidence_insufficient"
+        "evidence_insufficient",
       ]);
       expect(
         results
           .filter((result) => result.outcome === "evidence_insufficient")
-          .map((result) => result.warning.sourceItemId)
+          .map((result) => result.warning.sourceItemId),
       ).toEqual(["si-uncovered-a", "si-uncovered-b"]);
       expect(listUpdateIntents(db)).toHaveLength(0);
     } finally {
@@ -443,7 +443,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-2",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-2"
+        externalId: "NGX-2",
       });
       // Insert a non-verification evidence type so we know the predicate is strict.
       insertEvidenceRecord(db, "ev-noise", "plan_created", "goal-2", 500);
@@ -451,7 +451,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       const result = evaluateGoalForSourceSatisfiedIntents(
         db,
         { goalId: "goal-2" },
-        { now: () => 5000 }
+        { now: () => 5000 },
       )[0]!;
 
       expect(result.outcome).toBe("evidence_insufficient");
@@ -460,7 +460,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       expect(result.warning.sourceItemId).toBe("si-2");
       expect(result.warning.sourceExternalId).toBe("NGX-2");
       expect(result.warning.acceptedEvidenceTypes).toEqual(
-        DEFAULT_VERIFICATION_EVIDENCE_TYPES
+        DEFAULT_VERIFICATION_EVIDENCE_TYPES,
       );
       expect(result.warning.reason).toMatch(/verification evidence/i);
 
@@ -480,14 +480,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-3",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-3"
+        externalId: "NGX-3",
       });
       insertEvidenceRecord(db, "ev-3", "no_mistakes_complete", "goal-3", 1000);
 
-      const result = evaluateGoalForSourceSatisfiedIntents(
-        db,
-        { goalId: "goal-3" }
-      )[0]!;
+      const result = evaluateGoalForSourceSatisfiedIntents(db, {
+        goalId: "goal-3",
+      })[0]!;
       expect(result.outcome).toBe("goal_not_terminal");
       if (result.outcome !== "goal_not_terminal") return;
       expect(result.goalState).toBe("queued");
@@ -506,18 +505,18 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-failed",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-FAIL"
+        externalId: "NGX-FAIL",
       });
       insertEvidenceRecord(
         db,
         "ev-failed",
         "no_mistakes_complete",
         "goal-failed",
-        1000
+        1000,
       );
 
       const result = evaluateGoalForSourceSatisfiedIntents(db, {
-        goalId: "goal-failed"
+        goalId: "goal-failed",
       })[0]!;
       expect(result.outcome).toBe("goal_state_not_completed");
       if (result.outcome !== "goal_state_not_completed") return;
@@ -535,7 +534,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
       insertEvidenceRecord(db, "ev-4", "no_mistakes_complete", "goal-4", 1000);
 
       const result = evaluateGoalForSourceSatisfiedIntents(db, {
-        goalId: "goal-4"
+        goalId: "goal-4",
       })[0]!;
       expect(result.outcome).toBe("no_source_link");
       if (result.outcome !== "no_source_link") return;
@@ -555,12 +554,12 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-5",
         status: "Done",
         adapterKind: "linear",
-        externalId: "NGX-5"
+        externalId: "NGX-5",
       });
       insertEvidenceRecord(db, "ev-5", "no_mistakes_complete", "goal-5", 1000);
 
       const result = evaluateGoalForSourceSatisfiedIntents(db, {
-        goalId: "goal-5"
+        goalId: "goal-5",
       })[0]!;
       expect(result.outcome).toBe("source_already_terminal");
       if (result.outcome !== "source_already_terminal") return;
@@ -576,7 +575,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       const result = evaluateGoalForSourceSatisfiedIntents(db, {
-        goalId: "goal-missing"
+        goalId: "goal-missing",
       })[0]!;
       expect(result.outcome).toBe("goal_not_found");
       if (result.outcome !== "goal_not_found") return;
@@ -595,7 +594,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         goalId: "goal-6",
         status: "in_progress",
         adapterKind: "linear",
-        externalId: "NGX-6"
+        externalId: "NGX-6",
       });
       // The default predicate would treat plan_created as non-verification,
       // but we override the accepted set to include it.
@@ -605,9 +604,9 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         db,
         {
           goalId: "goal-6",
-          verificationEvidenceTypes: ["plan_created"]
+          verificationEvidenceTypes: ["plan_created"],
         },
-        { now: () => 1000 }
+        { now: () => 1000 },
       )[0]!;
       expect(result.outcome).toBe("intent_created");
       if (result.outcome !== "intent_created") return;
@@ -621,7 +620,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
     const db = openDb(makeTempDir());
     try {
       expect(() =>
-        evaluateGoalForSourceSatisfiedIntents(db, { goalId: "" })
+        evaluateGoalForSourceSatisfiedIntents(db, { goalId: "" }),
       ).toThrowError(/goalId/);
     } finally {
       db.close();
@@ -636,13 +635,13 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         id: "si-7",
         goalId: "goal-7",
         adapterKind: "linear",
-        externalId: "NGX-7"
+        externalId: "NGX-7",
       });
       expect(() =>
         evaluateGoalForSourceSatisfiedIntents(db, {
           goalId: "goal-7",
-          verificationEvidenceTypes: []
-        })
+          verificationEvidenceTypes: [],
+        }),
       ).toThrowError(/verificationEvidenceTypes/);
     } finally {
       db.close();

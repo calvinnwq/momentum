@@ -18,7 +18,7 @@ const DURABLE_ROOT_SRC_ALLOWLIST = [
   "src/index.ts",
   "src/cli.ts",
   "src/suppress-sqlite-experimental-warning.ts",
-  "src/node-shims.d.ts"
+  "src/node-shims.d.ts",
 ] as const;
 
 const TAXONOMY_SRC_DIR_ALLOWLIST = [
@@ -27,7 +27,7 @@ const TAXONOMY_SRC_DIR_ALLOWLIST = [
   "src/config",
   "src/core",
   "src/renderers",
-  "src/shared"
+  "src/shared",
 ] as const;
 
 type RootSrcException = {
@@ -56,7 +56,7 @@ const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set<string>();
 const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map<string, Set<string>>();
 
 const FORBIDDEN_RENDERER_RUNTIME_SHARED_MODULES = new Set<string>([
-  "src/shared/events.ts"
+  "src/shared/events.ts",
 ]);
 
 type ImportReference = {
@@ -102,7 +102,7 @@ function importEdges(): ImportEdge[] {
         to: resolveRelativeImport(file, specifier),
         specifier,
         isTypeOnly: reference.isTypeOnly,
-        runtimeBindings: reference.runtimeBindings
+        runtimeBindings: reference.runtimeBindings,
       });
     }
   }
@@ -120,19 +120,19 @@ function importReferences(file: string, source: string): ImportReference[] {
     source,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TS
+    ts.ScriptKind.TS,
   );
 
   function addModuleSpecifier(
     moduleSpecifier: ts.Expression | undefined,
     isTypeOnly = false,
-    runtimeBindings: string[] = []
+    runtimeBindings: string[] = [],
   ): void {
     if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier)) {
       references.push({
         specifier: moduleSpecifier.text,
         isTypeOnly,
-        runtimeBindings
+        runtimeBindings,
       });
     }
   }
@@ -142,13 +142,13 @@ function importReferences(file: string, source: string): ImportReference[] {
       addModuleSpecifier(
         node.moduleSpecifier,
         importDeclarationIsTypeOnly(node),
-        importDeclarationRuntimeBindings(node)
+        importDeclarationRuntimeBindings(node),
       );
     } else if (ts.isExportDeclaration(node)) {
       addModuleSpecifier(
         node.moduleSpecifier,
         exportDeclarationIsTypeOnly(node),
-        exportDeclarationIsTypeOnly(node) ? [] : ["*"]
+        exportDeclarationIsTypeOnly(node) ? [] : ["*"],
       );
     } else if (
       ts.isCallExpression(node) &&
@@ -164,7 +164,7 @@ function importReferences(file: string, source: string): ImportReference[] {
       references.push({
         specifier: node.argument.literal.text,
         isTypeOnly: true,
-        runtimeBindings: []
+        runtimeBindings: [],
       });
     }
 
@@ -189,7 +189,9 @@ function importDeclarationIsTypeOnly(node: ts.ImportDeclaration): boolean {
   );
 }
 
-function importDeclarationRuntimeBindings(node: ts.ImportDeclaration): string[] {
+function importDeclarationRuntimeBindings(
+  node: ts.ImportDeclaration,
+): string[] {
   const importClause = node.importClause;
   if (!importClause || importClause.isTypeOnly) return [];
 
@@ -208,7 +210,7 @@ function importDeclarationRuntimeBindings(node: ts.ImportDeclaration): string[] 
   bindings.push(
     ...namedBindings.elements
       .filter((element) => !element.isTypeOnly)
-      .map((element) => (element.propertyName ?? element.name).text)
+      .map((element) => (element.propertyName ?? element.name).text),
   );
   return bindings;
 }
@@ -227,7 +229,7 @@ function exportDeclarationIsTypeOnly(node: ts.ExportDeclaration): boolean {
 function resolveRelativeImport(file: string, specifier: string): string {
   const resolved = path.relative(
     repoRoot,
-    path.resolve(path.dirname(path.join(repoRoot, file)), specifier)
+    path.resolve(path.dirname(path.join(repoRoot, file)), specifier),
   );
   return resolved.replace(/\.js$/, ".ts");
 }
@@ -242,8 +244,7 @@ function commandFamily(file: string): string | null {
 
 function isCliEntrypoint(file: string): boolean {
   return (
-    file === path.join("src", "index.ts") ||
-    file === path.join("src", "cli.ts")
+    file === path.join("src", "index.ts") || file === path.join("src", "cli.ts")
   );
 }
 
@@ -268,12 +269,16 @@ function isTransitionalRootSrcException(file: string): boolean {
 }
 
 function isPersistenceOrMutationModule(file: string): boolean {
-  if (isAdapterModule(file) || isCoreModule(file) || isTransitionalRootSrcException(file)) {
+  if (
+    isAdapterModule(file) ||
+    isCoreModule(file) ||
+    isTransitionalRootSrcException(file)
+  ) {
     return true;
   }
 
   return /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|reconciliation|leases|items|intents|branch)(?:[/.-]|$)/.test(
-    file
+    file,
   );
 }
 
@@ -333,14 +338,14 @@ describe("M11 CLI import boundaries", () => {
           export { render } from "./renderers/source.js";
           const lazy = import("./commands/intent/index.js");
           type Lazy = import("./renderers/intent.js").IntentJsonShape;
-        `
-      )
+        `,
+      ),
     ).toEqual([
       "./commands/source/index.js",
       "./commands/source/index.js",
       "./renderers/source.js",
       "./commands/intent/index.js",
-      "./renderers/intent.js"
+      "./renderers/intent.js",
     ]);
   });
 
@@ -353,45 +358,61 @@ describe("M11 CLI import boundaries", () => {
           export { type WorkflowRunImport } from "../workflow-run-import.js";
           import { write, type CliIo } from "./cli-output.js";
           import DefaultExport, { type GoalSpec } from "../goal-spec.js";
-        `
-      )
+        `,
+      ),
     ).toEqual([
       {
         specifier: "../source-items.js",
         isTypeOnly: true,
-        runtimeBindings: []
+        runtimeBindings: [],
       },
       {
         specifier: "../workflow-run-import.js",
         isTypeOnly: true,
-        runtimeBindings: []
+        runtimeBindings: [],
       },
       {
         specifier: "./cli-output.js",
         isTypeOnly: false,
-        runtimeBindings: ["write"]
+        runtimeBindings: ["write"],
       },
       {
         specifier: "../goal-spec.js",
         isTypeOnly: false,
-        runtimeBindings: ["default"]
-      }
+        runtimeBindings: ["default"],
+      },
     ]);
   });
 
   it("classifies core source modules as renderer runtime boundaries", () => {
     // The runner-result shapes/parsing drained into src/core/executors (NGX-450);
     // its owned core home classifies as a renderer runtime boundary.
-    expect(isPersistenceOrMutationModule("src/core/executors/runner/types.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/executors/runner/result.ts")).toBe(true);
+    expect(
+      isPersistenceOrMutationModule("src/core/executors/runner/types.ts"),
+    ).toBe(true);
+    expect(
+      isPersistenceOrMutationModule("src/core/executors/runner/result.ts"),
+    ).toBe(true);
     // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
-    expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/goal/recovery.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(
+      true,
+    );
+    expect(isPersistenceOrMutationModule("src/core/goal/recovery.ts")).toBe(
+      true,
+    );
     expect(isPersistenceOrMutationModule("src/core/goal/types.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/source/items.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/evidence/records.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/repo/project-rollup.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/source/items.ts")).toBe(
+      true,
+    );
+    expect(isPersistenceOrMutationModule("src/core/evidence/records.ts")).toBe(
+      true,
+    );
+    expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(
+      true,
+    );
+    expect(
+      isPersistenceOrMutationModule("src/core/repo/project-rollup.ts"),
+    ).toBe(true);
   });
 
   it("classifies CLI entrypoints as forbidden renderer runtime targets", () => {
@@ -409,7 +430,7 @@ describe("M11 CLI import boundaries", () => {
       to: "src/shared/events.ts",
       specifier: "../shared/events.js",
       isTypeOnly: false,
-      runtimeBindings: ["appendQueueEvent"]
+      runtimeBindings: ["appendQueueEvent"],
     };
 
     expect(isForbiddenRendererRuntimeTarget(edge.to)).toBe(true);
@@ -422,15 +443,17 @@ describe("M11 CLI import boundaries", () => {
       to: "src/core/source/update-intent-generator.ts",
       specifier: "../core/source/update-intent-generator.js",
       isTypeOnly: true,
-      runtimeBindings: []
+      runtimeBindings: [],
     };
-    expect(rendererTransitionalImportIsAllowed(updateIntentTypeEdge)).toBe(true);
+    expect(rendererTransitionalImportIsAllowed(updateIntentTypeEdge)).toBe(
+      true,
+    );
     expect(
       rendererTransitionalImportIsAllowed({
         ...updateIntentTypeEdge,
         isTypeOnly: false,
-        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntents"]
-      })
+        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntents"],
+      }),
     ).toBe(false);
 
     const coreTypeEdge: ImportEdge = {
@@ -438,15 +461,15 @@ describe("M11 CLI import boundaries", () => {
       to: "src/core/goal/recovery.ts",
       specifier: "../core/goal/recovery.js",
       isTypeOnly: true,
-      runtimeBindings: []
+      runtimeBindings: [],
     };
     expect(rendererTransitionalImportIsAllowed(coreTypeEdge)).toBe(true);
     expect(
       rendererTransitionalImportIsAllowed({
         ...coreTypeEdge,
         isTypeOnly: false,
-        runtimeBindings: ["clearGoalManualRecoveryGuarded"]
-      })
+        runtimeBindings: ["clearGoalManualRecoveryGuarded"],
+      }),
     ).toBe(false);
   });
 
@@ -455,26 +478,28 @@ describe("M11 CLI import boundaries", () => {
       "src/index.ts",
       "src/cli.ts",
       "src/suppress-sqlite-experimental-warning.ts",
-      "src/node-shims.d.ts"
+      "src/node-shims.d.ts",
     ]);
 
     const allowed = new Set([
       ...DURABLE_ROOT_SRC_ALLOWLIST,
-      ...Object.keys(TRANSITIONAL_ROOT_SRC_EXCEPTIONS)
+      ...Object.keys(TRANSITIONAL_ROOT_SRC_EXCEPTIONS),
     ]);
-    const unexpectedRootFiles = rootSourceFiles().filter((file) => !allowed.has(file));
+    const unexpectedRootFiles = rootSourceFiles().filter(
+      (file) => !allowed.has(file),
+    );
 
     expect(
       unexpectedRootFiles,
-      "New root src/*.ts files must move into src/core/<domain>, src/config, src/shared, src/adapters, src/commands, or src/renderers; if migration debt is unavoidable, add a named transitional exception with owner issue, target home, and reason."
+      "New root src/*.ts files must move into src/core/<domain>, src/config, src/shared, src/adapters, src/commands, or src/renderers; if migration debt is unavoidable, add a named transitional exception with owner issue, target home, and reason.",
     ).toEqual([]);
 
-    const staleExceptions = Object.keys(TRANSITIONAL_ROOT_SRC_EXCEPTIONS).filter(
-      (file) => !fs.existsSync(path.join(repoRoot, file))
-    );
+    const staleExceptions = Object.keys(
+      TRANSITIONAL_ROOT_SRC_EXCEPTIONS,
+    ).filter((file) => !fs.existsSync(path.join(repoRoot, file)));
     expect(
       staleExceptions,
-      "Remove transitional root allowlist entries after their file moves."
+      "Remove transitional root allowlist entries after their file moves.",
     ).toEqual([]);
 
     const malformedExceptions = Object.entries(TRANSITIONAL_ROOT_SRC_EXCEPTIONS)
@@ -482,7 +507,7 @@ describe("M11 CLI import boundaries", () => {
         return (
           !/^NGX-(?:447|448|449|450)$/.test(exception.ownerIssue) ||
           !/^src\/(?:core\/(?:workflow|executors|goal|source|intent|daemon|repo|evidence)\/|config\/|shared\/|adapters\/)/.test(
-            exception.targetHome
+            exception.targetHome,
           ) ||
           exception.reason.trim().length < 20
         );
@@ -491,7 +516,7 @@ describe("M11 CLI import boundaries", () => {
 
     expect(
       malformedExceptions,
-      "Each transitional root src exception must name NGX-447/448/449/450, a target taxonomy home, and a practical removal reason."
+      "Each transitional root src exception must name NGX-447/448/449/450, a target taxonomy home, and a practical removal reason.",
     ).toEqual([]);
   });
 
@@ -499,7 +524,10 @@ describe("M11 CLI import boundaries", () => {
     const existingTaxonomyDirs = [commandsDir, renderersDir, adaptersDir];
     for (const dir of existingTaxonomyDirs) {
       const files = sourceFilesUnder(dir);
-      expect(files.length, `${dir} should contain real TypeScript modules`).toBeGreaterThan(0);
+      expect(
+        files.length,
+        `${dir} should contain real TypeScript modules`,
+      ).toBeGreaterThan(0);
     }
 
     for (const pendingDir of [coreDir, configDir, sharedDir]) {
@@ -509,18 +537,20 @@ describe("M11 CLI import boundaries", () => {
       const files = sourceFilesUnder(pendingDir);
       expect(
         files.length,
-        `${pendingDir} is pending taxonomy; do not create placeholder-only directories.`
+        `${pendingDir} is pending taxonomy; do not create placeholder-only directories.`,
       ).toBeGreaterThan(0);
       expect(
-        files.filter((file) => /(?:placeholder|todo|stub|junk|example)/i.test(file)),
-        `${pendingDir} should contain real ownership modules, not placeholder junk.`
+        files.filter((file) =>
+          /(?:placeholder|todo|stub|junk|example)/i.test(file),
+        ),
+        `${pendingDir} should contain real ownership modules, not placeholder junk.`,
       ).toEqual([]);
     }
 
     const documentedTargetPrefixes = new Set(
       Object.values(TRANSITIONAL_ROOT_SRC_EXCEPTIONS).map((exception) =>
-        exception.targetHome.split("/").slice(0, 3).join("/")
-      )
+        exception.targetHome.split("/").slice(0, 3).join("/"),
+      ),
     );
     // Empty now that NGX-450 drained the last transitional root module.
     expect([...documentedTargetPrefixes].sort()).toEqual([]);
@@ -533,7 +563,7 @@ describe("M11 CLI import boundaries", () => {
       "src/config",
       "src/core",
       "src/renderers",
-      "src/shared"
+      "src/shared",
     ]);
 
     const unexpectedSourceDirs = fs
@@ -543,14 +573,14 @@ describe("M11 CLI import boundaries", () => {
       .filter(
         (dir) =>
           !TAXONOMY_SRC_DIR_ALLOWLIST.includes(
-            dir as (typeof TAXONOMY_SRC_DIR_ALLOWLIST)[number]
-          )
+            dir as (typeof TAXONOMY_SRC_DIR_ALLOWLIST)[number],
+          ),
       )
       .sort();
 
     expect(
       unexpectedSourceDirs,
-      "New src/<directory> roots must use the approved taxonomy: src/core/<domain>, src/config, src/shared, src/adapters, src/commands, or src/renderers."
+      "New src/<directory> roots must use the approved taxonomy: src/core/<domain>, src/config, src/shared, src/adapters, src/commands, or src/renderers.",
     ).toEqual([]);
   });
 
@@ -569,8 +599,8 @@ describe("M11 CLI import boundaries", () => {
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; move CLI formatting behind src/commands or src/renderers instead of importing it from core/domain code.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; move CLI formatting behind src/commands or src/renderers instead of importing it from core/domain code.`,
+      ),
     ).toEqual([]);
   });
 
@@ -578,14 +608,14 @@ describe("M11 CLI import boundaries", () => {
     const violations = importEdges().filter(
       (edge) =>
         isCoreModule(edge.from) &&
-        (isCommandModule(edge.to) || isRendererModule(edge.to))
+        (isCommandModule(edge.to) || isRendererModule(edge.to)),
     );
 
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; core modules own behavior and must not import command parsing or rendering layers.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; core modules own behavior and must not import command parsing or rendering layers.`,
+      ),
     ).toEqual([]);
   });
 
@@ -593,14 +623,14 @@ describe("M11 CLI import boundaries", () => {
     const violations = importEdges().filter(
       (edge) =>
         edge.from.startsWith("src/core/intent/") &&
-        edge.to.startsWith("src/core/workflow/")
+        edge.to.startsWith("src/core/workflow/"),
     );
 
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; intent owns external-apply policy/auth checks and must not reach into workflow runtime helpers.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; intent owns external-apply policy/auth checks and must not reach into workflow runtime helpers.`,
+      ),
     ).toEqual([]);
   });
 
@@ -615,8 +645,8 @@ describe("M11 CLI import boundaries", () => {
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; renderers must accept computed results and type-only shapes instead of importing CLI entrypoints, commands, adapters, persistence, or mutation modules.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; renderers must accept computed results and type-only shapes instead of importing CLI entrypoints, commands, adapters, persistence, or mutation modules.`,
+      ),
     ).toEqual([]);
   });
 
@@ -624,14 +654,16 @@ describe("M11 CLI import boundaries", () => {
     const violations = importEdges().filter((edge) => {
       const fromFamily = commandFamily(edge.from);
       const toFamily = commandFamily(edge.to);
-      return fromFamily !== null && toFamily !== null && fromFamily !== toFamily;
+      return (
+        fromFamily !== null && toFamily !== null && fromFamily !== toFamily
+      );
     });
 
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; shared JSON/text shapes belong in src/renderers, not another command family.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; shared JSON/text shapes belong in src/renderers, not another command family.`,
+      ),
     ).toEqual([]);
   });
 
@@ -644,8 +676,8 @@ describe("M11 CLI import boundaries", () => {
     expect(
       violations.map(
         (file) =>
-          `${file} reads process stdout/stderr directly; thread output through CliIo and src/renderers instead.`
-      )
+          `${file} reads process stdout/stderr directly; thread output through CliIo and src/renderers instead.`,
+      ),
     ).toEqual([]);
   });
 
@@ -665,12 +697,14 @@ describe("M11 CLI import boundaries", () => {
       "src/adapters/trusted-shell-config.ts",
       "src/adapters/no-mistakes-executor.ts",
       "src/adapters/no-mistakes-orchestrator.ts",
-      "src/adapters/real-workflow-probe.ts"
+      "src/adapters/real-workflow-probe.ts",
     ];
 
     expect(
-      expectedAdapters.filter((file) => !fs.existsSync(path.join(repoRoot, file))),
-      "NGX-417 adapter/infrastructure modules should have clear ownership under src/adapters"
+      expectedAdapters.filter(
+        (file) => !fs.existsSync(path.join(repoRoot, file)),
+      ),
+      "NGX-417 adapter/infrastructure modules should have clear ownership under src/adapters",
     ).toEqual([]);
 
     const rootInfrastructureModules = [
@@ -688,14 +722,14 @@ describe("M11 CLI import boundaries", () => {
       "src/trusted-shell-config.ts",
       "src/no-mistakes-executor.ts",
       "src/no-mistakes-orchestrator.ts",
-      "src/real-workflow-probe.ts"
+      "src/real-workflow-probe.ts",
     ];
 
     expect(
       rootInfrastructureModules.filter((file) =>
-        fs.existsSync(path.join(repoRoot, file))
+        fs.existsSync(path.join(repoRoot, file)),
       ),
-      "NGX-417 adapter/infrastructure modules should not remain as flat src/ modules after ownership migration"
+      "NGX-417 adapter/infrastructure modules should not remain as flat src/ modules after ownership migration",
     ).toEqual([]);
   });
 
@@ -703,14 +737,14 @@ describe("M11 CLI import boundaries", () => {
     const violations = importEdges().filter(
       (edge) =>
         isAdapterModule(edge.from) &&
-        (isCommandModule(edge.to) || isRendererModule(edge.to))
+        (isCommandModule(edge.to) || isRendererModule(edge.to)),
     );
 
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; adapters must stay independent from CLI commands and renderers.`
-      )
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; adapters must stay independent from CLI commands and renderers.`,
+      ),
     ).toEqual([]);
   });
 
@@ -719,7 +753,7 @@ describe("M11 CLI import boundaries", () => {
 
     expect(
       lineCount,
-      "src/cli.ts should stay below 3000 lines after M11 extraction"
+      "src/cli.ts should stay below 3000 lines after M11 extraction",
     ).toBeLessThan(3000);
   });
 
