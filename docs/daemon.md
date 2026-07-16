@@ -160,6 +160,22 @@ the managed loop and never runs the workflow scheduler lane, reads
 `MOMENTUM_LIVE_WRAPPER_PROFILE` or `MOMENTUM_EXECUTOR_CONFIG`, attempts external
 apply, or dispatches subworkflow children.
 
+### Dogfood terminalizing dispatch
+
+`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH` swaps the managed loop's workflow lane
+from the production dispatcher to a terminalize-and-continue fixture that marks
+each successfully dispatched local step `succeeded` without running a real
+executor, so a single daemon process can exercise multi-step dispatch.
+It is off by default; an unset or non-truthy value leaves `daemon start`
+byte-for-byte on the production dispatch.
+It is a test/dogfood-only switch, never part of normal operation.
+It is safe only against isolated fixture data (for example a throwaway
+`--data-dir`); never set it against production workflow state, because it
+records success for steps no executor ran.
+It is not the production terminalization path - dispatched steps are finalized
+from terminal executor evidence by the reconciliation seam - and it is not a
+stable compatibility promise; it may change or disappear without notice.
+
 ### Registered SDK executors
 
 Third-party SDK executors are registered through the JSON file named by
