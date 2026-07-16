@@ -97,6 +97,22 @@ describe("parseLiveWrapperConfig shape", () => {
     }
   });
 
+  it("names a retired alias even when the rest of the config is malformed", () => {
+    for (const [alias, canonical, aliasValue] of [
+      ["timeoutSec", "timeout_sec", 30],
+      ["envAllow", "env_allow", ["PATH"]],
+      ["resultFile", "result_file", "result.json"],
+    ] as const) {
+      // No `command`, `args`, or `cwd`: the alias refusal must still win.
+      const result = parseLiveWrapperConfig({ [alias]: aliasValue });
+      expect(result.ok, `expected invalid for ${alias}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.error).toContain(alias);
+      expect(result.error).toContain(canonical);
+    }
+  });
+
   it("still tolerates unrelated unknown keys", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
@@ -393,6 +409,19 @@ describe("parseLiveWrapperConfig probe", () => {
     const result = parseLiveWrapperConfig({
       ...clone(validWrapper),
       probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("probe.timeoutSec");
+    expect(result.error).toContain("probe.timeout_sec");
+  });
+
+  it("names the retired probe timeoutSec alias even when the probe is otherwise malformed", () => {
+    // No probe `command`: the alias refusal must still win.
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      probe: { timeoutSec: 20 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;

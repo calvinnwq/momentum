@@ -153,6 +153,14 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
     );
   }
 
+  // Retired aliases are refused before any field validation so the
+  // whenever-present diagnostic is deterministic even for malformed input.
+  const aliasError =
+    rejectDeprecatedAlias(value, "timeoutSec", "timeout_sec") ??
+    rejectDeprecatedAlias(value, "envAllow", "env_allow") ??
+    rejectDeprecatedAlias(value, "resultFile", "result_file");
+  if (aliasError) return aliasError;
+
   const commandResult = parseAbsoluteCommand(value["command"], "command");
   if (!commandResult.ok) return commandResult;
   const command = commandResult.value;
@@ -165,12 +173,6 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (!cwdResult.ok) return cwdResult;
   const cwd = cwdResult.value;
 
-  const timeoutAliasError = rejectDeprecatedAlias(
-    value,
-    "timeoutSec",
-    "timeout_sec",
-  );
-  if (timeoutAliasError) return timeoutAliasError;
   const timeoutResult = parseRequiredTimeoutSec(
     value["timeout_sec"],
     "timeout_sec",
@@ -178,22 +180,10 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (!timeoutResult.ok) return timeoutResult;
   const timeoutSec = timeoutResult.value;
 
-  const envAllowAliasError = rejectDeprecatedAlias(
-    value,
-    "envAllow",
-    "env_allow",
-  );
-  if (envAllowAliasError) return envAllowAliasError;
   const envAllowResult = parseEnvAllow(value["env_allow"]);
   if (!envAllowResult.ok) return envAllowResult;
   const envAllow = envAllowResult.value;
 
-  const resultFileAliasError = rejectDeprecatedAlias(
-    value,
-    "resultFile",
-    "result_file",
-  );
-  if (resultFileAliasError) return resultFileAliasError;
   const resultFileResult = parseResultFile(value["result_file"]);
   if (!resultFileResult.ok) return resultFileResult;
   const resultFile = resultFileResult.value;
@@ -499,19 +489,22 @@ function parseProbe(
     );
   }
 
+  // Same whenever-present guarantee as the top-level aliases: refuse before
+  // probe field validation so a malformed probe still names the alias.
+  const aliasError = rejectDeprecatedAlias(
+    raw,
+    "timeoutSec",
+    "timeout_sec",
+    "probe.",
+  );
+  if (aliasError) return aliasError;
+
   const commandResult = parseAbsoluteCommand(raw["command"], "probe.command");
   if (!commandResult.ok) return commandResult;
 
   const argsResult = parseStringArray(raw["args"], "probe.args");
   if (!argsResult.ok) return argsResult;
 
-  const timeoutAliasError = rejectDeprecatedAlias(
-    raw,
-    "timeoutSec",
-    "timeout_sec",
-    "probe.",
-  );
-  if (timeoutAliasError) return timeoutAliasError;
   const timeoutResult = parseOptionalTimeoutSec(
     raw["timeout_sec"],
     "probe.timeout_sec",
