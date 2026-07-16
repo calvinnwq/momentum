@@ -148,7 +148,7 @@ unsafe recursion / unsupported attachment, and keeps manual-recovery behavior fo
 missing or ambiguous child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
-`profiles/ngx-499-coding-workflow-live-wrapper.profile.json`: the daemon live
+`profiles/coding-workflow-live-wrapper.profile.json`: the daemon live
 profile still owns process supervision and result-file placement, while this
 helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
 command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence

@@ -111,11 +111,11 @@ function waitMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-describe("NGX-499 coding workflow live wrapper profile", () => {
+describe("coding workflow live wrapper profile", () => {
   it("ships a parseable live-wrapper profile for every live-wrapper-owned coding step", () => {
     const profilePath = path.join(
       process.cwd(),
-      "profiles/ngx-499-coding-workflow-live-wrapper.profile.json"
+      "profiles/coding-workflow-live-wrapper.profile.json"
     );
     const parsed = parseLiveWrapperProfile(
       JSON.parse(fs.readFileSync(profilePath, "utf8"))
@@ -123,7 +123,7 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.profile.name).toBe("ngx-499-coding-workflow-live-wrapper");
+    expect(parsed.profile.name).toBe("coding-workflow-live-wrapper");
     expect(Array.from(parsed.profile.wrappers.keys()).sort()).toEqual([
       "implementation",
       "merge-cleanup",
@@ -142,7 +142,7 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
   it("keeps merge-cleanup executable independent of generated dist", () => {
     const profilePath = path.join(
       process.cwd(),
-      "profiles/ngx-499-coding-workflow-live-wrapper.profile.json"
+      "profiles/coding-workflow-live-wrapper.profile.json"
     );
     const parsed = parseLiveWrapperProfile(
       JSON.parse(fs.readFileSync(profilePath, "utf8"))
