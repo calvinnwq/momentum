@@ -166,6 +166,9 @@ apply, or dispatches subworkflow children.
 from the production dispatcher to a terminalize-and-continue fixture that marks
 each successfully dispatched local step `succeeded` without running a real
 executor, so a single daemon process can exercise multi-step dispatch.
+It applies only when `MOMENTUM_LIVE_WRAPPER_PROFILE` is not configured; when a
+live-wrapper profile is set, profile-backed executors run normally and this
+flag has no effect, so it never suppresses configured real executor work.
 It is off by default; an unset or non-truthy value leaves `daemon start`
 byte-for-byte on the production dispatch.
 It is a test/dogfood-only switch, never part of normal operation.
