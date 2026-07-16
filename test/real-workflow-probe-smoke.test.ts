@@ -8,13 +8,13 @@ import {
   REAL_SMOKE_WORKFLOW_KIND_ENV_VAR,
   REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR,
   classifyWorkflowHarnessOutcome,
-  planWorkflowHarnessSmoke
+  planWorkflowHarnessSmoke,
 } from "../src/core/executors/smoke/workflow-harness.js";
 import {
   REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR,
   buildHarnessProbeEnv,
   loadRawWorkflowProfileFromEnv,
-  runHarnessProbe
+  runHarnessProbe,
 } from "../src/adapters/real-workflow-probe.js";
 
 /**
@@ -41,7 +41,7 @@ import {
  *   MOMENTUM_REAL_SMOKE_WORKFLOW=1 \
  *   MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=no-mistakes \
  *   MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json \
- *     pnpm vitest run test/real-workflow-probe-smoke.test.ts
+ *     pnpm vitest run --config vitest.integration.config.ts test/real-workflow-probe-smoke.test.ts
  *
  * External writes stay closed: a `linear-refresh` (external-apply) probe needs
  * the separate `MOMENTUM_REAL_SMOKE_WORKFLOW_ALLOW_WRITE=1` gate (enforced by
@@ -66,7 +66,10 @@ function makeTempDir(prefix = "momentum-ngx-372-probe-smoke-"): string {
   return fs.realpathSync(dir);
 }
 
-function recordEvidence(label: string, payload: Record<string, unknown>): string {
+function recordEvidence(
+  label: string,
+  payload: Record<string, unknown>,
+): string {
   const baseDir =
     process.env[REAL_SMOKE_EVIDENCE_DIR_ENV_VAR]?.trim() ||
     path.join(process.cwd(), ".agent-runs", "real-smoke");
@@ -81,7 +84,7 @@ describe("runHarnessProbe (NGX-372)", () => {
     const raw = runHarnessProbe({
       command: NODE,
       args: ["-e", "process.exit(0)"],
-      timeoutSec: 30
+      timeoutSec: 30,
     });
     expect(raw).toEqual({ kind: "exited", exitCode: 0, signal: null });
     expect(classifyWorkflowHarnessOutcome(raw)).toEqual({ ok: true });
@@ -91,7 +94,7 @@ describe("runHarnessProbe (NGX-372)", () => {
     const raw = runHarnessProbe({
       command: NODE,
       args: ["-e", "process.exit(7)"],
-      timeoutSec: 30
+      timeoutSec: 30,
     });
     expect(raw).toEqual({ kind: "exited", exitCode: 7, signal: null });
     const outcome = classifyWorkflowHarnessOutcome(raw);
@@ -103,7 +106,7 @@ describe("runHarnessProbe (NGX-372)", () => {
     const raw = runHarnessProbe({
       command: "/momentum/ngx-372/definitely-not-a-real-binary",
       args: [],
-      timeoutSec: 30
+      timeoutSec: 30,
     });
     expect(raw.kind).toBe("spawn_error");
     if (raw.kind !== "spawn_error") throw new Error("expected spawn_error");
@@ -117,7 +120,7 @@ describe("runHarnessProbe (NGX-372)", () => {
     const raw = runHarnessProbe({
       command: NODE,
       args: ["-e", "setTimeout(() => {}, 60000)"],
-      timeoutSec: 1
+      timeoutSec: 1,
     });
     expect(raw).toEqual({ kind: "timed_out", timeoutSec: 1 });
     const outcome = classifyWorkflowHarnessOutcome(raw);
@@ -133,7 +136,7 @@ describe("runHarnessProbe (NGX-372)", () => {
       const raw = runHarnessProbe({
         command: NODE,
         args: ["-e", `process.exit(process.env.${key} ? 9 : 0)`],
-        timeoutSec: 30
+        timeoutSec: 30,
       });
       expect(raw).toEqual({ kind: "exited", exitCode: 0, signal: null });
     } finally {
@@ -152,8 +155,8 @@ describe("buildHarnessProbeEnv (NGX-372)", () => {
       buildHarnessProbeEnv(["KEEP_ME", "ALSO_KEEP"], {
         KEEP_ME: "yes",
         ALSO_KEEP: "2",
-        DROP_ME: "secret"
-      })
+        DROP_ME: "secret",
+      }),
     ).toEqual({ KEEP_ME: "yes", ALSO_KEEP: "2" });
   });
 });
@@ -166,12 +169,15 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
   it("parses the JSON profile document at the configured path", () => {
     const dir = makeTempDir();
     const file = path.join(dir, "live-wrappers.json");
-    const doc = { name: "smoke", wrappers: { "no-mistakes": { command: "/usr/bin/true" } } };
+    const doc = {
+      name: "smoke",
+      wrappers: { "no-mistakes": { command: "/usr/bin/true" } },
+    };
     fs.writeFileSync(file, JSON.stringify(doc));
     expect(
       loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file
-      })
+        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
+      }),
     ).toEqual(doc);
   });
 
@@ -179,8 +185,8 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     const dir = makeTempDir();
     expect(
       loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: path.join(dir, "missing.json")
-      })
+        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: path.join(dir, "missing.json"),
+      }),
     ).toBeUndefined();
   });
 
@@ -190,8 +196,8 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     fs.writeFileSync(file, "{ not valid json");
     expect(
       loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file
-      })
+        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
+      }),
     ).toBeUndefined();
   });
 
@@ -210,17 +216,24 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
             timeout_sec: 60,
             env_allow: ["PATH"],
             result_file: "result.json",
-            probe: { command: NODE, args: ["-e", "process.exit(0)"], timeout_sec: 5 }
-          }
-        }
-      })
+            probe: {
+              command: NODE,
+              args: ["-e", "process.exit(0)"],
+              timeout_sec: 5,
+            },
+          },
+        },
+      }),
     );
     const env = {
       [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1",
       [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
-      [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file
+      [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
     };
-    const plan = planWorkflowHarnessSmoke(env, loadRawWorkflowProfileFromEnv(env));
+    const plan = planWorkflowHarnessSmoke(
+      env,
+      loadRawWorkflowProfileFromEnv(env),
+    );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
     expect(plan.probeOnly).toBe(true);
@@ -231,7 +244,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
 
 const smokePlan = planWorkflowHarnessSmoke(
   process.env,
-  loadRawWorkflowProfileFromEnv(process.env)
+  loadRawWorkflowProfileFromEnv(process.env),
 );
 const shouldRunProbeSmoke =
   smokePlan.mode === "run" && smokePlan.probeOnly && smokePlan.probe !== null;
@@ -245,12 +258,12 @@ describe.skipIf(!shouldRunProbeSmoke)(
       }
       if (smokePlan.probe === null) {
         throw new Error(
-          "this smoke exercises the pre-flight probe; unset MOMENTUM_REAL_SMOKE_WORKFLOW_FULL or configure a `probe` for the chosen wrapper"
+          "this smoke exercises the pre-flight probe; unset MOMENTUM_REAL_SMOKE_WORKFLOW_FULL or configure a `probe` for the chosen wrapper",
         );
       }
 
       const raw = runHarnessProbe(smokePlan.probe, {
-        env: buildHarnessProbeEnv(smokePlan.envAllow)
+        env: buildHarnessProbeEnv(smokePlan.envAllow),
       });
       const outcome = classifyWorkflowHarnessOutcome(raw);
 
@@ -263,18 +276,18 @@ describe.skipIf(!shouldRunProbeSmoke)(
         probeOnly: smokePlan.probeOnly,
         probe: smokePlan.probe,
         raw,
-        outcome
+        outcome,
       });
       console.log(
-        `[NGX-372 workflow harness probe smoke] kind=${smokePlan.kind} outcome=${JSON.stringify(outcome)} evidence=${evidencePath}`
+        `[NGX-372 workflow harness probe smoke] kind=${smokePlan.kind} outcome=${JSON.stringify(outcome)} evidence=${evidencePath}`,
       );
 
       expect(
         outcome.ok,
-        `real harness probe failed: ${JSON.stringify(outcome)}`
+        `real harness probe failed: ${JSON.stringify(outcome)}`,
       ).toBe(true);
     });
-  }
+  },
 );
 
 // Always-on guard so this file is never silently a no-op: it asserts the probe
@@ -285,9 +298,12 @@ describe("NGX-372 real workflow harness probe smoke gating", () => {
     const offPlan = planWorkflowHarnessSmoke(
       {
         [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: undefined,
-        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes"
+        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
       },
-      { name: "smoke", wrappers: { "no-mistakes": { command: "/usr/bin/true" } } }
+      {
+        name: "smoke",
+        wrappers: { "no-mistakes": { command: "/usr/bin/true" } },
+      },
     );
     expect(offPlan.mode).toBe("skip");
     if (offPlan.mode !== "skip") throw new Error("expected skip");
