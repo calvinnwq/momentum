@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/calvinnwq/momentum/compare/v0.19.0...v0.20.0) (2026-07-16)
+
+
+### Features
+
+* **executors:** add durable delegated tool supervision ([#229](https://github.com/calvinnwq/momentum/issues/229)) ([405ab05](https://github.com/calvinnwq/momentum/commit/405ab056eb97839982147040c0ad5728d5ba0b8f))
+
 ## [0.19.0](https://github.com/calvinnwq/momentum/compare/v0.18.0...v0.19.0) (2026-07-13)
 
 
