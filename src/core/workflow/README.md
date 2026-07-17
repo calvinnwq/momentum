@@ -168,7 +168,8 @@ Ordinary failed no-mistakes steps remain `retry_failed_step` with `recoveryDetai
 `workflow run start-coding` is the explicit Momentum-native start door.
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, stores the selected implementation path under `route.implementationEngine`, and keeps CWFP/default switching explicit.
 The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-live-wrapper-profile).
-The current built-in definition classifies implementation and no-mistakes as `delegate-supervisor` with their tool in portable step config; version 1 remains registered unchanged for recorded runs.
+The current built-in definition classifies implementation and no-mistakes as `delegate-supervisor` with their tool in portable step config.
+Version 1 remains registered for recorded runs with its legacy executor identities and the portable merge-cleanup command required by native script dispatch.
 
 `workflow run preview-coding` is the read-only native plan-preview door.
 It shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` after those checks pass.

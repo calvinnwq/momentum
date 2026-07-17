@@ -33,8 +33,10 @@ the configured executor registry.
 The legacy values remain readable for durable compatibility. The current
 `coding-workflow` definition classifies implementation and no-mistakes as
 `delegate-supervisor`, with `{ "tool": "gnhf" }` and
-`{ "tool": "no-mistakes" }` stored as portable step config; version 1 remains
-registered unchanged for runs that recorded it.
+`{ "tool": "no-mistakes" }` stored as portable step config.
+Version 1 remains registered for runs that recorded it with its legacy
+implementation and no-mistakes identities and the portable
+`{ "command": "merge-cleanup" }` script identity required by native dispatch.
 
 The daemon owns scheduling, leases, recovery rechecks, gate enforcement, and
 bounded progress. Executors own bounded work and may recommend `continue`,
@@ -99,8 +101,8 @@ credentials, stdin policy, and other machine-local values are host bindings.
 Daemon profile resolution and native no-fallback behavior are owned by [Daemon commands](docs/daemon.md#workflow-live-wrapper-profile).
 Structural preflight validation and module registration are separate runtime
 wiring; the SDK contract does not make either a private executor hook. The
-single-shot compatibility host also enforces its declared family-specific schema
-at runtime before it creates a durable round.
+single-shot lifecycle also enforces its declared family-specific schema at
+runtime before it creates a durable round.
 
 `MOMENTUM_EXECUTOR_CONFIG` names a local JSON registry whose `executors` map
 binds permanent executor names to npm specifiers or local module paths. The

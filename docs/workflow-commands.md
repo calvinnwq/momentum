@@ -459,7 +459,9 @@ Behaviour:
 
 - **Forced definition**: the run always materializes the selected built-in `coding-workflow` recipe, using the latest known built-in version unless `--definition-version` pins one.
   The current built-in version has six ordered steps (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
-  Implementation and no-mistakes both use `delegate-supervisor`; their portable step config selects `gnhf` and `no-mistakes` respectively. Built-in version 1 remains available unchanged for recorded runs.
+  Implementation and no-mistakes both use `delegate-supervisor`; their portable step config selects `gnhf` and `no-mistakes` respectively.
+  The merge-cleanup `script` step carries `{ "command": "merge-cleanup" }` as portable command identity.
+  Built-in version 1 remains available for recorded runs with its legacy implementation and no-mistakes executor identities and the same required merge-cleanup command identity.
   Passing `--definition coding-workflow` is an accepted no-op selector; passing any other `--definition` value refuses with `definition_not_allowed`.
 - **Reserved run ids**: a `--run-id` that begins with a reserved compatibility prefix refuses with `reserved_run_id` and writes nothing, so a fresh Momentum-native run can never be confused with an imported `cwfp-*` compatibility run.
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
@@ -532,7 +534,7 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
     { "stepId": "implementation", "kind": "implementation", "executor": "delegate-supervisor", "config": { "tool": "gnhf" }, "order": 1, "required": true, "state": "pending" },
     { "stepId": "postflight", "kind": "postflight", "executor": "one-shot", "order": 2, "required": true, "state": "pending" },
     { "stepId": "no-mistakes", "kind": "no-mistakes", "executor": "delegate-supervisor", "config": { "tool": "no-mistakes" }, "order": 3, "required": true, "state": "pending" },
-    { "stepId": "merge-cleanup", "kind": "merge-cleanup", "executor": "script", "order": 4, "required": true, "state": "pending" },
+    { "stepId": "merge-cleanup", "kind": "merge-cleanup", "executor": "script", "config": { "command": "merge-cleanup" }, "order": 4, "required": true, "state": "pending" },
     { "stepId": "linear-refresh", "kind": "linear-refresh", "executor": "external-apply", "order": 5, "required": true, "state": "pending" }
   ],
   "counts": { "steps": 6 },
@@ -567,7 +569,7 @@ Steps (6):
   1. implementation (implementation) -> delegate-supervisor config={"tool":"gnhf"} [required, pending]
   2. postflight (postflight) -> one-shot [required, pending]
   3. no-mistakes (no-mistakes) -> delegate-supervisor config={"tool":"no-mistakes"} [required, pending]
-  4. merge-cleanup (merge-cleanup) -> script [required, pending]
+  4. merge-cleanup (merge-cleanup) -> script config={"command":"merge-cleanup"} [required, pending]
   5. linear-refresh (linear-refresh) -> external-apply [required, pending]
 ```
 

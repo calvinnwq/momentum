@@ -307,8 +307,8 @@ The `--profile <name>` option on `workflow run start` and `workflow run start-co
 The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
-Native dispatch keeps `gnhf` on the default `delegate-supervisor` implementation route.
-Legacy `native-goal-loop` uses the distinct native `goal-loop` SDK lifecycle, while both routes resolve their local mechanism from the step-kind live-wrapper binding.
+The version-pinned built-in definition remains authoritative for the implementation executor: current version 2 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label, while recorded version 1 runs use the native `goal-loop` SDK lifecycle.
+Both executor paths resolve their machine-local mechanism from the step-kind live-wrapper binding.
 A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.

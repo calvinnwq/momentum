@@ -363,8 +363,9 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *                                       external-apply safety-gated adapter)
  *
  * The delegated tool is portable step config, never an executor-family value.
- * Version 1 remains registered exactly as shipped so existing runs keep
- * resolving their recorded definition.
+ * Version 1 remains registered so existing runs keep resolving its legacy
+ * implementation and no-mistakes identities; its merge-cleanup step carries
+ * the portable command identity required by native script dispatch.
  */
 export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,

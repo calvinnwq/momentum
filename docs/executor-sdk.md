@@ -132,7 +132,7 @@ export const executor: Executor<Config, HostBindings> = {
 The tick may be synchronous or asynchronous.
 It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason.
 Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
-The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
+The daemon's registered-executor driver currently accepts a validated single-shot recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
 The built-in `delegate-supervisor` uses the same interface.
 Its strict portable config is `{ "tool": "<adapter-name>" }`.
@@ -383,7 +383,7 @@ The deterministic script host also requires `timeoutSec` to be a positive intege
 An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
 Daemon profile availability and native no-fallback behavior are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 
-The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
+The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the native single-shot lifecycle repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
 The lifecycle runtime-normalizes the complete runner-adapter return before writing artifacts, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized invocation, running round, and dispatch-binding checkpoint for recovery.
