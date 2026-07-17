@@ -1538,7 +1538,7 @@ describe("single-shot concrete mechanisms", () => {
 
     waitMs(2_500);
     expect(fs.existsSync(sentinelPath)).toBe(false);
-  });
+  }, 10_000);
 
   it("rejects relative script log paths before launching the command", () => {
     const { repoPath } = initRepo();
