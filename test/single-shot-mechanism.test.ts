@@ -249,6 +249,7 @@ describe("single-shot concrete mechanisms", () => {
         command: process.execPath,
         args,
         cwd: missingRepo,
+        repoPath: missingRepo,
         timeoutSec: 5,
         repoSafety: { mode: "read-only" },
       });
@@ -319,6 +320,7 @@ describe("single-shot concrete mechanisms", () => {
     const mechanism = createMockedScriptCommandRoundRunner({
       command: process.execPath,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -429,6 +431,7 @@ describe("single-shot concrete mechanisms", () => {
     const mechanism = createMockedScriptCommandRoundRunner({
       command: process.execPath,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -469,6 +472,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { CANCEL_MARKER: marker },
       repoSafety: {
@@ -571,6 +575,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { MARKER: marker },
       repoSafety: { mode: "read-only" },
@@ -609,6 +614,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
       repoSafety: {
@@ -654,6 +660,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "read-only",
@@ -697,6 +704,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "finalize",
@@ -756,6 +764,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "finalize",
@@ -805,6 +814,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: { mode: "read-only" },
     });
@@ -839,6 +849,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { MARKER: marker },
       repoSafety: {
@@ -1192,6 +1203,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'script ok'; printf 'changed\n' > script.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1269,6 +1281,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1287,6 +1300,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: `${repoPath}${path.sep}`,
+      repoPath: `${repoPath}${path.sep}`,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1308,6 +1322,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "chmod 700 ignored"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1330,6 +1345,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: MAX_BUILT_IN_PROCESS_TIMEOUT_SEC + 1,
       repoSafety: { mode: "read-only" },
     });
@@ -1361,6 +1377,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1389,6 +1406,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       policyEnvelopeIdentity: "host-restricted",
       repoSafety: { mode: "read-only" },
@@ -1422,6 +1440,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > dirty.txt; exit 7"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1460,6 +1479,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'launched\n' > launched-script.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1507,6 +1527,7 @@ describe("single-shot concrete mechanisms", () => {
         `nohup /bin/sh -c 'sleep 2; touch ${sentinelPath}' >/dev/null 2>&1 & sleep 10`,
       ],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 1,
       repoSafety: {
         mode: "finalize",
@@ -1546,6 +1567,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'should not run' > launched.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1572,6 +1594,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'should not run'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       env: { BAD_ENV: 1n } as unknown as NodeJS.ProcessEnv,
       repoSafety: { mode: "read-only" },
@@ -1604,6 +1627,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'script ok'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1648,6 +1672,7 @@ describe("single-shot concrete mechanisms", () => {
         "printf 'dirty\\n' > dirty-log.txt; printf \"$THROW_MARKER\"",
       ],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       env: { THROW_MARKER: marker },
       repoSafety: {
@@ -1724,6 +1749,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'unused'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1764,6 +1790,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'no changes'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1811,6 +1838,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > hook-failure.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1882,6 +1910,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > ignored.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1921,6 +1950,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > dirty.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1954,6 +1984,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'clean command'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1983,6 +2014,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "chmod 700 .agent-runs"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });

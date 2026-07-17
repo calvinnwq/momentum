@@ -9,19 +9,22 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
-  loadExecutorRound
+  loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
 import {
   resolveGoalLoopRoundSelection,
-  type PlanGoalLoopRoundStartInput
+  type PlanGoalLoopRoundStartInput,
 } from "../src/core/executors/goal-loop/executor.js";
 import {
   goalLoopRoundMechanismFromPromptedResultFile,
-  goalLoopRoundMechanismFromResultFile
+  goalLoopRoundMechanismFromResultFile,
 } from "../src/core/executors/goal-loop/mechanism.js";
 import { runGoalLoopRound } from "../src/core/executors/goal-loop/orchestrator.js";
-import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
+import type {
+  CommitIntent,
+  RunnerResult,
+} from "../src/core/executors/runner/types.js";
 
 // Proves the goal-loop round *mechanism* bridge reuses the shared goal /
 // iteration safety (the `finalizeWorkflowStepFromResultFile` verify -> commit /
@@ -49,7 +52,7 @@ function makeTempDir(prefix = "momentum-goal-loop-mechanism-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -75,7 +78,7 @@ function setupRepoWithRoundEdits(): { repoPath: string; baseHead: string } {
   fs.writeFileSync(
     path.join(repoPath, "round-edit.txt"),
     "from-goal-loop-round\n",
-    "utf-8"
+    "utf-8",
   );
   return { repoPath, baseHead };
 }
@@ -87,7 +90,7 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
     subject: "prove goal-loop round mechanism",
     body: "",
     breaking: false,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -100,7 +103,7 @@ function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
     remaining_work: [],
     goal_complete: false,
     commit: baseIntent(),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -132,7 +135,7 @@ function installCommitFailingHook(repoPath: string): void {
   fs.writeFileSync(
     hookPath,
     "#!/bin/sh\ntouch .git/index.lock\necho commit blocked >&2\nexit 1\n",
-    "utf-8"
+    "utf-8",
   );
   fs.chmodSync(hookPath, 0o755);
 }
@@ -141,7 +144,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("commits and returns the normalized result + result/verification artifacts on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -151,7 +154,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("committed");
@@ -161,7 +164,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // The bridge reports the result document + verification log pointers it owns.
     expect(mechanism.artifacts?.resultDocument?.path).toBe(resultFilePath);
     expect(mechanism.artifacts?.verificationOutput?.path).toBe(
-      verificationLogPath
+      verificationLogPath,
     );
     // It genuinely committed onto the base HEAD.
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).not.toBe(baseHead);
@@ -170,7 +173,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("reports the committed change set on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -180,7 +183,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("committed");
@@ -191,7 +194,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("writes commit/reset evidence with stable commit metadata for a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -201,7 +204,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("committed");
@@ -219,7 +222,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
           : null,
       changedFiles: ["round-edit.txt"],
       verificationStatus: "passed",
-      recoveryCode: null
+      recoveryCode: null,
     });
   });
 
@@ -235,7 +238,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("commit_failed");
@@ -248,16 +251,14 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     const evidence = readJsonFile(pointer!.path);
     expect(evidence.outcome).toBe("commit_failed");
     expect(evidence.error).toEqual(expect.stringContaining("git reset"));
-    expect(evidence.commitError).toEqual(
-      expect.stringContaining("git commit")
-    );
+    expect(evidence.commitError).toEqual(expect.stringContaining("git commit"));
     expect(evidence.resetError).toEqual(expect.stringContaining("git reset"));
   });
 
   it("reports an empty change set when the round resets without committing", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ success: false }))
+      JSON.stringify(baseRunnerResult({ success: false })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -267,7 +268,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("reset_step_failure");
@@ -287,7 +288,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     // The digest fingerprints the exact bytes of the result document on disk, so
@@ -296,7 +297,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // The same digest is attached to the result_document artifact pointer, so the
     // durable artifact row is self-verifying and cannot drift from the round field.
     expect(mechanism.artifacts?.resultDocument?.digest).toBe(
-      sha256Digest(content)
+      sha256Digest(content),
     );
   });
 
@@ -311,7 +312,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("result_missing");
@@ -329,7 +330,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("result_invalid");
@@ -353,7 +354,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
         resultFilePath,
         verificationCommands: ["echo verify-ok"],
         verificationTimeoutSec: 30,
-        verificationLogPath: ""
+        verificationLogPath: "",
       });
 
       expect(mechanism.finalize.outcome).toBe("invalid_input");
@@ -368,7 +369,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("resets without verification and keeps the result document pointer when the round reported failure", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ success: false }))
+      JSON.stringify(baseRunnerResult({ success: false })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -378,7 +379,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("reset_step_failure");
@@ -401,13 +402,13 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("reset_verification_failure");
     expect(mechanism.result).not.toBeNull();
     expect(mechanism.artifacts?.verificationOutput?.path).toBe(
-      verificationLogPath
+      verificationLogPath,
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
@@ -423,7 +424,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("committed");
@@ -432,7 +433,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // exactly like the result-document pointer.
     const logBytes = fs.readFileSync(verificationLogPath, "utf-8");
     expect(mechanism.artifacts?.verificationOutput?.digest).toBe(
-      sha256Digest(logBytes)
+      sha256Digest(logBytes),
     );
   });
 
@@ -447,7 +448,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("reset_verification_failure");
@@ -455,7 +456,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // did not commit, so fingerprinting it for reattach matters most here.
     const logBytes = fs.readFileSync(verificationLogPath, "utf-8");
     expect(mechanism.artifacts?.verificationOutput?.digest).toBe(
-      sha256Digest(logBytes)
+      sha256Digest(logBytes),
     );
   });
 
@@ -470,7 +471,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("result_missing");
@@ -492,7 +493,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("result_invalid");
@@ -508,7 +509,9 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // judges it `result_invalid`, so the bridge must NOT capture the parsed
     // result even though `parseRunnerResult` alone would accept it.
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ summary: "x".repeat(1024 * 1024 + 1) }))
+      JSON.stringify(
+        baseRunnerResult({ summary: "x".repeat(1024 * 1024 + 1) }),
+      ),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -518,7 +521,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("result_invalid");
@@ -543,7 +546,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath
+      verificationLogPath,
     });
 
     expect(mechanism.finalize.outcome).toBe("manual_recovery_required");
@@ -555,7 +558,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("does not duplicate a committed round when finalization is re-entered from the original base", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const firstVerificationLogPath = makeVerificationLogPath();
 
@@ -565,7 +568,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: firstVerificationLogPath
+      verificationLogPath: firstVerificationLogPath,
     });
 
     expect(first.finalize.outcome).toBe("committed");
@@ -576,7 +579,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     const commitCountAfterFirst = runGit(repoPath, [
       "rev-list",
       "--count",
-      "HEAD"
+      "HEAD",
     ]).trim();
 
     const second = goalLoopRoundMechanismFromResultFile({
@@ -585,7 +588,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: makeVerificationLogPath()
+      verificationLogPath: makeVerificationLogPath(),
     });
 
     expect(second.finalize.outcome).toBe("manual_recovery_required");
@@ -595,11 +598,9 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     expect(second.finalize.recoveryCode).toBe("head_mismatch");
     expect(second.finalize.expectedHead).toBe(baseHead);
     expect(second.finalize.currentHead).toBe(firstCommitSha);
-    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
-      firstCommitSha
-    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(firstCommitSha);
     expect(runGit(repoPath, ["rev-list", "--count", "HEAD"]).trim()).toBe(
-      commitCountAfterFirst
+      commitCountAfterFirst,
     );
   });
 });
@@ -609,7 +610,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md"
+      "prompt.md",
     );
     const resultFilePath = writeResultFile("");
     fs.rmSync(resultFilePath);
@@ -636,28 +637,28 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
         repo: {
           path: repoPath,
           baseHead,
-          branch: "feat/ngx-569-round-prompt-result"
+          branch: "feat/ngx-569-round-prompt-result",
         },
         acceptanceRequirements: [
-          "Prompt must be written before the runner result is consumed."
+          "Prompt must be written before the runner result is consumed.",
         ],
-        verificationCommands: ["echo verify-ok"]
+        verificationCommands: ["echo verify-ok"],
       },
       runPromptedRound: (runnerInput) => {
         calls.push(runnerInput);
         expect(fs.readFileSync(runnerInput.promptFilePath, "utf-8")).toBe(
-          runnerInput.prompt
+          runnerInput.prompt,
         );
         expect(runnerInput.prompt).toContain(
-          "- objective: Prove the prompted result mechanism."
+          "- objective: Prove the prompted result mechanism.",
         );
         expect(runnerInput.prompt).toContain(
-          `- result_path: ${resultFilePath}`
+          `- result_path: ${resultFilePath}`,
         );
         fs.writeFileSync(
           runnerInput.resultFilePath,
@@ -666,18 +667,18 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
             summary: "round finished",
             key_changes_made: ["wrote round-edit.txt"],
             goal_complete: true,
-            commit: baseIntent()
+            commit: baseIntent(),
           }),
-          "utf-8"
+          "utf-8",
         );
-      }
+      },
     });
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.promptFilePath).toBe(promptFilePath);
     expect(calls[0]?.resultFilePath).toBe(resultFilePath);
     expect(fs.readFileSync(promptFilePath, "utf-8")).toContain(
-      "## Output contract"
+      "## Output contract",
     );
     expect(mechanism.finalize.outcome).toBe("committed");
     expect(mechanism.result?.key_learnings).toEqual([]);
@@ -689,11 +690,11 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md"
+      "prompt.md",
     );
     const resultFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "runner-result.json"
+      "runner-result.json",
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -713,18 +714,18 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
-        repo: { path: repoPath, baseHead }
+        repo: { path: repoPath, baseHead },
       },
       runPromptedRound: (runnerInput) => {
         fs.writeFileSync(
           runnerInput.resultFilePath,
           JSON.stringify(baseRunnerResult({ goal_complete: true })),
-          "utf-8"
+          "utf-8",
         );
         throw new Error("runner crashed after writing result");
-      }
+      },
     });
 
     expect(mechanism.finalize.outcome).toBe("result_invalid");
@@ -736,10 +737,10 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md"
+      "prompt.md",
     );
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -759,13 +760,13 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
-        repo: { path: repoPath, baseHead }
+        repo: { path: repoPath, baseHead },
       },
       runPromptedRound: () => {
         throw new Error("runner crashed before writing result");
-      }
+      },
     });
 
     expect(mechanism.finalize.outcome).toBe("result_missing");
@@ -777,13 +778,13 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptParentFile = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "not-a-directory"
+      "not-a-directory",
     );
     fs.writeFileSync(promptParentFile, "not a directory\n", "utf-8");
     const promptFilePath = path.join(promptParentFile, "prompt.md");
     const resultFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "runner-result.json"
+      "runner-result.json",
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -803,13 +804,13 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
-        repo: { path: repoPath, baseHead }
+        repo: { path: repoPath, baseHead },
       },
       runPromptedRound: () => {
         throw new Error("runner should not start");
-      }
+      },
     });
 
     expect(mechanism.finalize.outcome).toBe("result_missing");
@@ -817,15 +818,63 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
 
+  it("does not follow a symlinked prompt artifact", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptDir = makeTempDir("momentum-goal-loop-mechanism-prompt-");
+    const escapedPromptPath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-escaped-"),
+      "escaped-prompt.md",
+    );
+    fs.writeFileSync(escapedPromptPath, "preserve me\n", "utf-8");
+    const promptFilePath = path.join(promptDir, "prompt.md");
+    fs.symlinkSync(escapedPromptPath, promptFilePath);
+    const resultFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-result-"),
+      "runner-result.json",
+    );
+    const verificationLogPath = makeVerificationLogPath();
+    let runnerStarted = false;
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Refuse a symlinked prompt artifact.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () => {
+        runnerStarted = true;
+      },
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(runnerStarted).toBe(false);
+    expect(fs.readFileSync(escapedPromptPath, "utf-8")).toBe("preserve me\n");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
   it("routes a prompted runner that writes no result to explicit missing-result recovery", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md"
+      "prompt.md",
     );
     const resultFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "missing-result.json"
+      "missing-result.json",
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -845,17 +894,17 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
-        repo: { path: repoPath, baseHead }
+        repo: { path: repoPath, baseHead },
       },
       runPromptedRound: () => {
         // Simulate a runner that exits without writing the configured result.
-      }
+      },
     });
 
     expect(fs.readFileSync(promptFilePath, "utf-8")).toContain(
-      "- objective: Preserve missing result evidence."
+      "- objective: Preserve missing result evidence.",
     );
     expect(mechanism.finalize.outcome).toBe("result_missing");
     expect(mechanism.result).toBeNull();
@@ -867,11 +916,11 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md"
+      "prompt.md",
     );
     const resultFilePath = path.join(
       makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "invalid-result.json"
+      "invalid-result.json",
     );
     const verificationLogPath = makeVerificationLogPath();
 
@@ -891,9 +940,9 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           invocationId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1
+          attempt: 1,
         },
-        repo: { path: repoPath, baseHead }
+        repo: { path: repoPath, baseHead },
       },
       runPromptedRound: (runnerInput) => {
         fs.writeFileSync(
@@ -902,15 +951,15 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
             success: true,
             summary: "claimed completion without the required commit intent",
             key_changes_made: ["wrote round-edit.txt"],
-            goal_complete: true
+            goal_complete: true,
           }),
-          "utf-8"
+          "utf-8",
         );
-      }
+      },
     });
 
     expect(fs.readFileSync(promptFilePath, "utf-8")).toContain(
-      "- objective: Preserve invalid result evidence."
+      "- objective: Preserve invalid result evidence.",
     );
     expect(mechanism.finalize.outcome).toBe("result_invalid");
     expect(mechanism.result).toBeNull();
@@ -927,11 +976,11 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 function openRoundDb(): MomentumDb {
   const db = openDb(makeTempDir("momentum-goal-loop-mechanism-db-"));
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
+       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
   const invocation: ExecutorInvocationRecord = {
     invocationId: "inv-1",
@@ -943,7 +992,7 @@ function openRoundDb(): MomentumDb {
     attempt: 1,
     startedAt: 1,
     heartbeatAt: 1,
-    finishedAt: null
+    finishedAt: null,
   };
   insertExecutorInvocation(db, invocation, { now: 1 });
   return db;
@@ -962,7 +1011,7 @@ function buildStart(): PlanGoalLoopRoundStartInput {
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-1",
     logPaths: ["/artifacts/round-1/stdout.log"],
-    startedAt: 1_000
+    startedAt: 1_000,
   };
 }
 
@@ -970,7 +1019,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("drives a verified, goal-complete round to a durable succeeded round with the commit SHA", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -986,8 +1035,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     expect(outcome.round.state).toBe("succeeded");
@@ -1019,8 +1068,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     expect(outcome.round.resultDigest).toBe(sha256Digest(content));
@@ -1032,7 +1081,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists the real committed change set onto the durable round", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1048,8 +1097,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     // The committed change set the real finalize produced round-trips onto the
@@ -1063,7 +1112,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists the verification log digest onto the durable verification_output artifact row", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1079,8 +1128,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     // The pointer digest round-trips into the durable executor_artifacts row, so
@@ -1088,7 +1137,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
     const logBytes = fs.readFileSync(verificationLogPath, "utf-8");
     const verificationArtifact = listExecutorArtifactsForRound(
       db,
-      "round-1"
+      "round-1",
     ).find((artifact) => artifact.artifactClass === "verification_output");
     expect(verificationArtifact?.digest).toBe(sha256Digest(logBytes));
     db.close();
@@ -1097,7 +1146,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
   it("persists per-command verification results onto the durable round", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1113,8 +1162,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     const durable = loadExecutorRound(db, "round-1");
@@ -1122,11 +1171,11 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
       expect.objectContaining({
         command: "echo verify-ok",
         exitCode: 0,
-        timedOut: false
-      })
+        timedOut: false,
+      }),
     ]);
     expect(durable?.verificationResults?.[0]?.durationMs).toEqual(
-      expect.any(Number)
+      expect.any(Number),
     );
     db.close();
   });
@@ -1148,8 +1197,8 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
-        })
+          verificationLogPath,
+        }),
     });
 
     expect(outcome.round.state).toBe("manual_recovery_required");
@@ -1166,7 +1215,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);
     const resultFilePath = writeResultFile(
-      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+      JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
     const verificationLogPath = makeVerificationLogPath();
     const db = openRoundDb();
@@ -1183,10 +1232,10 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
           resultFilePath,
           verificationCommands: ["echo verify-ok"],
           verificationTimeoutSec: 30,
-          verificationLogPath
+          verificationLogPath,
         });
         return mechanism;
-      }
+      },
     });
 
     expect(mechanism!.finalize.outcome).toBe("commit_failed");
@@ -1207,10 +1256,10 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
 
     const finalizationArtifact = listExecutorArtifactsForRound(
       db,
-      "round-1"
+      "round-1",
     ).find((artifact) => artifact.artifactClass === "commit_or_reset_evidence");
     expect(finalizationArtifact?.path).toBe(
-      `${verificationLogPath}.finalization.json`
+      `${verificationLogPath}.finalization.json`,
     );
     const evidence = readJsonFile(finalizationArtifact!.path);
     expect(evidence).toMatchObject({
@@ -1218,7 +1267,7 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
       commitSha: null,
       changedFiles: [],
       verificationStatus: "passed",
-      recoveryCode: "nothing_to_commit"
+      recoveryCode: "nothing_to_commit",
     });
     db.close();
   });

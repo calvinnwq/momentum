@@ -60,19 +60,19 @@ import { listCommittedChangedFiles } from "../../../adapters/git-transaction.js"
 import {
   goalLoopFinalizeEvidenceFromResult,
   type GoalLoopArtifactPointer,
-  type GoalLoopRoundArtifacts
+  type GoalLoopRoundArtifacts,
 } from "./executor.js";
 import type { GoalLoopRoundMechanismResult } from "./orchestrator.js";
 import {
   finalizeWorkflowStepFromResultFile,
   type FinalizeWorkflowStepFromResultFileInput,
-  type FinalizeWorkflowStepFromResultFileResult
+  type FinalizeWorkflowStepFromResultFileResult,
 } from "../shared/step-finalize.js";
 import { parseRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
 import {
   renderGoalLoopRoundPrompt,
-  type GoalLoopRoundPromptInput
+  type GoalLoopRoundPromptInput,
 } from "./prompt.js";
 
 /**
@@ -118,7 +118,7 @@ export type GoalLoopRoundMechanismFromPromptedResultFileInput =
  * the goal-loop driver consumes. See the module doc for the consistency rules.
  */
 export function goalLoopRoundMechanismFromResultFile(
-  input: GoalLoopRoundMechanismFromResultFileInput
+  input: GoalLoopRoundMechanismFromResultFileInput,
 ): GoalLoopRoundMechanismResult {
   const finalize = finalizeWorkflowStepFromResultFile(input);
   const captured = documentUnusable(finalize)
@@ -133,9 +133,9 @@ export function goalLoopRoundMechanismFromResultFile(
       input,
       finalize,
       captured.resultDigest,
-      changedFiles
+      changedFiles,
     ),
-    changedFiles
+    changedFiles,
   };
 }
 
@@ -150,14 +150,14 @@ export function goalLoopRoundMechanismFromResultFile(
  * `result_invalid` recovery evidence.
  */
 export function goalLoopRoundMechanismFromPromptedResultFile(
-  input: GoalLoopRoundMechanismFromPromptedResultFileInput
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
 ): GoalLoopRoundMechanismResult {
   const clearedResult = clearPromptedResultFile(input.resultFilePath);
   if (!clearedResult.ok) {
     return promptedRoundRecovery(
       input,
       "result_invalid",
-      `goal-loop result path could not be prepared: ${clearedResult.error}`
+      `goal-loop result path could not be prepared: ${clearedResult.error}`,
     );
   }
 
@@ -165,15 +165,15 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
   try {
     prompt = renderGoalLoopRoundPrompt({
       ...input.promptInput,
-      resultPath: input.resultFilePath
+      resultPath: input.resultFilePath,
     });
     fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
-    fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
+    writeFileNoFollow(input.promptFilePath, prompt);
   } catch (error) {
     return promptedRoundRecovery(
       input,
       promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop round prompt could not be written: ${errorMessage(error)}`
+      `goal-loop round prompt could not be written: ${errorMessage(error)}`,
     );
   }
 
@@ -181,13 +181,13 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
     input.runPromptedRound({
       promptFilePath: input.promptFilePath,
       resultFilePath: input.resultFilePath,
-      prompt
+      prompt,
     });
   } catch (error) {
     return promptedRoundRecovery(
       input,
       promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop prompted runner failed: ${errorMessage(error)}`
+      `goal-loop prompted runner failed: ${errorMessage(error)}`,
     );
   }
 
@@ -195,9 +195,12 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
 }
 
 function clearPromptedResultFile(
-  resultFilePath: string
+  resultFilePath: string,
 ): { ok: true } | { ok: false; error: string } {
-  if (typeof resultFilePath !== "string" || resultFilePath.trim().length === 0) {
+  if (
+    typeof resultFilePath !== "string" ||
+    resultFilePath.trim().length === 0
+  ) {
     return { ok: true };
   }
   try {
@@ -209,7 +212,7 @@ function clearPromptedResultFile(
 }
 
 function promptedResultRecoveryOutcome(
-  resultFilePath: string
+  resultFilePath: string,
 ): "result_missing" | "result_invalid" {
   try {
     fs.lstatSync(resultFilePath);
@@ -222,19 +225,19 @@ function promptedResultRecoveryOutcome(
 function promptedRoundRecovery(
   input: GoalLoopRoundMechanismFromResultFileInput,
   outcome: "result_missing" | "result_invalid",
-  error: string
+  error: string,
 ): GoalLoopRoundMechanismResult {
   const finalize: FinalizeWorkflowStepFromResultFileResult = {
     outcome,
     resultFilePath: input.resultFilePath,
-    error
+    error,
   };
   return {
     result: null,
     resultDigest: null,
     finalize,
     artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
-    changedFiles: []
+    changedFiles: [],
   };
 }
 
@@ -257,14 +260,14 @@ function errnoCode(error: unknown): string | undefined {
  */
 function committedChangedFiles(
   input: GoalLoopRoundMechanismFromResultFileInput,
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string[] {
   if (finalize.outcome !== "committed") return [];
   try {
     return listCommittedChangedFiles(
       input.repoPath,
       finalize.commit.parentSha,
-      finalize.commit.commitSha
+      finalize.commit.commitSha,
     );
   } catch {
     return [];
@@ -278,7 +281,7 @@ function committedChangedFiles(
  * instead of capturing from a document the finalize seam refused to trust.
  */
 function documentUnusable(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): boolean {
   return (
     finalize.outcome === "result_missing" ||
@@ -367,34 +370,34 @@ function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
   resultDigest: string | null,
-  changedFiles: readonly string[]
+  changedFiles: readonly string[],
 ): GoalLoopRoundArtifacts {
   const evidence = goalLoopFinalizeEvidenceFromResult(finalize);
   const finalizationEvidence = writeFinalizationEvidence(
     input,
     finalize,
     evidence.verificationStatus,
-    changedFiles
+    changedFiles,
   );
   return {
     ...(finalize.outcome !== "result_missing"
       ? {
           resultDocument: {
             path: input.resultFilePath,
-            ...(resultDigest !== null ? { digest: resultDigest } : {})
-          }
+            ...(resultDigest !== null ? { digest: resultDigest } : {}),
+          },
         }
       : {}),
     ...(evidence.verificationStatus !== null
       ? {
           verificationOutput: verificationOutputPointer(
-            input.verificationLogPath
-          )
+            input.verificationLogPath,
+          ),
         }
       : {}),
     ...(finalizationEvidence !== null
       ? { commitOrResetEvidence: finalizationEvidence }
-      : {})
+      : {}),
   };
 }
 
@@ -405,12 +408,12 @@ function goalLoopMechanismArtifacts(
  * and cannot drift from the file it points at.
  */
 function verificationOutputPointer(
-  verificationLogPath: string
+  verificationLogPath: string,
 ): GoalLoopArtifactPointer {
   const digest = verificationLogDigest(verificationLogPath);
   return {
     path: verificationLogPath,
-    ...(digest !== null ? { digest } : {})
+    ...(digest !== null ? { digest } : {}),
   };
 }
 
@@ -426,7 +429,7 @@ function writeFinalizationEvidence(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
   verificationStatus: string | null,
-  changedFiles: readonly string[]
+  changedFiles: readonly string[],
 ): GoalLoopArtifactPointer | null {
   const evidencePath = finalizationEvidencePath(input.verificationLogPath);
   if (evidencePath === null) return null;
@@ -447,14 +450,14 @@ function writeFinalizationEvidence(
       verificationLogPath: input.verificationLogPath,
       error: finalizationError(finalize),
       commitError: finalizationCommitError(finalize),
-      resetError: finalizationResetError(finalize)
+      resetError: finalizationResetError(finalize),
     },
     null,
-    2
+    2,
   )}\n`;
   try {
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    fs.writeFileSync(evidencePath, body, "utf-8");
+    writeFileNoFollow(evidencePath, body);
   } catch {
     return null;
   }
@@ -474,8 +477,24 @@ function finalizationEvidencePath(verificationLogPath: string): string | null {
   return `${verificationLogPath}.finalization.json`;
 }
 
+function writeFileNoFollow(filePath: string, body: string): void {
+  const handle = fs.openSync(
+    filePath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_TRUNC |
+      fs.constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    fs.writeFileSync(handle, body, "utf-8");
+  } finally {
+    fs.closeSync(handle);
+  }
+}
+
 function finalizationRecoveryCode(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "committed":
@@ -498,7 +517,7 @@ function finalizationRecoveryCode(
 }
 
 function finalizationError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "committed":
@@ -510,7 +529,9 @@ function finalizationError(
     case "reset_failed":
       return finalize.reset.error;
     case "commit_failed":
-      return commitFailureResetFailure(finalize)?.error ?? finalize.commit.error;
+      return (
+        commitFailureResetFailure(finalize)?.error ?? finalize.commit.error
+      );
     case "git_failed":
     case "repo_lock_lost":
     case "invalid_input":
@@ -521,13 +542,13 @@ function finalizationError(
 }
 
 function finalizationCommitError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   return finalize.outcome === "commit_failed" ? finalize.commit.error : null;
 }
 
 function finalizationResetError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "reset_failed":
@@ -543,7 +564,7 @@ function commitFailureResetFailure(
   finalize: Extract<
     FinalizeWorkflowStepFromResultFileResult,
     { outcome: "commit_failed" }
-  >
+  >,
 ): Extract<NonNullable<typeof finalize.reset>, { ok: false }> | null {
   if (finalize.reset !== undefined && !finalize.reset.ok) {
     return finalize.reset;

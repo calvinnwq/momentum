@@ -741,16 +741,15 @@ function createLiveStepHostBindingsResolver(
         context.db,
         invocation.invocationId,
       ).length;
-      const roundRoot = path.join(runDir, `round-${roundIndex + 1}`);
-      try {
-        fs.mkdirSync(roundRoot, { recursive: true });
-      } catch (error) {
+      const preparedRound = prepareGoalLoopRoundRoot(runDir, roundIndex + 1);
+      if (!preparedRound.ok) {
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "runtime_unavailable",
-          `goal-loop round directory unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          `goal-loop round directory unavailable: ${preparedRound.error}`,
         );
       }
+      const roundRoot = preparedRound.roundRoot;
       const roundResultPath = path.join(
         roundRoot,
         path.basename(resolved.exec.resultJsonPath),
@@ -924,6 +923,7 @@ function createLiveStepHostBindingsResolver(
               command: wrapper.command,
               args: [...wrapper.args],
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
+              repoPath: safety.repoPath,
               timeoutSec: wrapper.timeoutSec,
               policyEnvelopeIdentity: profile.name,
               env: buildLiveStepRuntimeEnvironment(
@@ -1667,6 +1667,47 @@ function canonicalizeRunDir(
     return path.join(canonicalRepoPath, relativeToRequestedRepo);
   }
   return resolvedRunDir;
+}
+
+function prepareGoalLoopRoundRoot(
+  runDir: string,
+  roundNumber: number,
+): { ok: true; roundRoot: string } | { ok: false; error: string } {
+  try {
+    const runDirStat = fs.lstatSync(runDir);
+    if (runDirStat.isSymbolicLink() || !runDirStat.isDirectory()) {
+      return { ok: false, error: "run directory is not a regular directory" };
+    }
+    const canonicalRunDir = fs.realpathSync(runDir);
+    const requestedRoundRoot = path.join(runDir, `round-${roundNumber}`);
+    try {
+      fs.mkdirSync(requestedRoundRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const roundStat = fs.lstatSync(requestedRoundRoot);
+    if (roundStat.isSymbolicLink() || !roundStat.isDirectory()) {
+      return { ok: false, error: "round path is not a regular directory" };
+    }
+    const roundRoot = fs.realpathSync(requestedRoundRoot);
+    const relativeRoundRoot = path.relative(canonicalRunDir, roundRoot);
+    if (
+      relativeRoundRoot.length === 0 ||
+      relativeRoundRoot.startsWith("..") ||
+      path.isAbsolute(relativeRoundRoot)
+    ) {
+      return {
+        ok: false,
+        error: "round directory resolves outside the run directory",
+      };
+    }
+    return { ok: true, roundRoot };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function verifyRepoLocalRunDirIgnored(

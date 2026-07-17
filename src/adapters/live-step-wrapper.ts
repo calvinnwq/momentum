@@ -207,7 +207,14 @@ export function runLiveStepWrapper(
   const executorLogPath = input.executorLogPath;
 
   fs.mkdirSync(path.dirname(executorLogPath), { recursive: true });
-  const logHandle = fs.openSync(executorLogPath, "w");
+  const logHandle = fs.openSync(
+    executorLogPath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_TRUNC |
+      fs.constants.O_NOFOLLOW,
+    0o600,
+  );
 
   try {
     writeLine(logHandle, "[live-step] start");
@@ -400,7 +407,14 @@ export async function runLiveStepWrapperAsync(
   );
   const executorLogPath = input.executorLogPath;
   fs.mkdirSync(path.dirname(executorLogPath), { recursive: true });
-  const logHandle = fs.openSync(executorLogPath, "w");
+  const logHandle = fs.openSync(
+    executorLogPath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_TRUNC |
+      fs.constants.O_NOFOLLOW,
+    0o600,
+  );
 
   try {
     writeLine(logHandle, "[live-step] start");

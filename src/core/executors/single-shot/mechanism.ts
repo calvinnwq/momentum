@@ -130,8 +130,10 @@ export type ScriptCommandRoundRunnerConfig = {
   command: string;
   /** Explicit argv passed to the executable. */
   args?: readonly string[];
-  /** Absolute working directory and repo root for safety/finalization checks. */
+  /** Absolute child-process working directory. */
   cwd: string;
+  /** Absolute repository root for safety and finalization checks. */
+  repoPath: string;
   /** Positive command timeout in seconds within the built-in supervisor limit. */
   timeoutSec: number;
   /** Host-resolved policy identity checked against portable policy intent. */
@@ -439,12 +441,12 @@ export function createScriptCommandRoundRunner(
     }
     if (config.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
-        config.cwd,
+        config.repoPath,
         config.repoSafety.baseHead,
       );
       if (recoveryCode !== null) return readOnlyRecovery(recoveryCode);
     }
-    const readOnlySnapshot = captureReadOnlyRepoSnapshot(config.cwd, [
+    const readOnlySnapshot = captureReadOnlyRepoSnapshot(config.repoPath, [
       round.artifactRoot,
       logPath,
       ...(config.repoSafety.mode === "finalize"
@@ -827,7 +829,10 @@ function finalizeScriptResult(
   readOnlySnapshot?: ReadOnlyRepoSnapshot,
 ): SingleShotRoundMechanismResult {
   if (config.repoSafety.mode === "read-only") {
-    const recoveryCode = readOnlyRepoRecoveryCode(config.cwd, readOnlySnapshot);
+    const recoveryCode = readOnlyRepoRecoveryCode(
+      config.repoPath,
+      readOnlySnapshot,
+    );
     if (recoveryCode !== null) {
       return { outcome: { ok: false, recoveryCode } };
     }
@@ -836,9 +841,9 @@ function finalizeScriptResult(
       : { outcome: { ok: false, recoveryCode: failureCode } };
   }
   return projectFinalizeResult({
-    repoPath: config.cwd,
+    repoPath: config.repoPath,
     finalize: finalizeWorkflowStep({
-      repoPath: config.cwd,
+      repoPath: config.repoPath,
       baseHead: config.repoSafety.baseHead,
       stepSuccess,
       commitIntent: config.repoSafety.commitIntent,
@@ -1336,6 +1341,12 @@ function validateScriptCommandConfig(
   if (typeof config.cwd !== "string" || !path.isAbsolute(config.cwd)) {
     return { ok: false, error: "script cwd must be an absolute path" };
   }
+  if (
+    typeof config.repoPath !== "string" ||
+    !path.isAbsolute(config.repoPath)
+  ) {
+    return { ok: false, error: "script repoPath must be an absolute path" };
+  }
   if (!Number.isInteger(config.timeoutSec) || config.timeoutSec <= 0) {
     return { ok: false, error: "script timeoutSec must be a positive integer" };
   }
@@ -1523,14 +1534,14 @@ function cleanupScriptRepoAfterCancellation(
 ): void {
   if (config.repoSafety.mode === "read-only") {
     cleanupReadOnlyRepoAfterCancellation(
-      config.cwd,
+      config.repoPath,
       readOnlySnapshot,
       config.repoSafety.beforeGitMutation,
     );
     return;
   }
   cleanupFinalizingRepoAfterCancellation(
-    config.cwd,
+    config.repoPath,
     config.repoSafety,
     config.repoSafety.commitIntent,
     readOnlySnapshot,

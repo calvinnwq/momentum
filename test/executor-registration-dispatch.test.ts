@@ -62,6 +62,13 @@ test "$MOMENTUM_ATTEMPT" = "1" || exit 11
 test "$MOMENTUM_REPO_PATH" = "$PWD" || exit 12
 test -n "$MOMENTUM_ITERATION_DIR" || exit 13
 printf 'native script\\n' > native-script.txt`;
+const NATIVE_ITERATION_SCRIPT_COMMAND = `test "$MOMENTUM_RUN_ID" = "native-script-run" || exit 8
+test "$MOMENTUM_STEP_ID" = "preflight" || exit 9
+test "$MOMENTUM_STEP_KIND" = "preflight" || exit 10
+test "$MOMENTUM_ATTEMPT" = "1" || exit 11
+test "$MOMENTUM_ITERATION_DIR" = "$PWD" || exit 12
+test "$MOMENTUM_REPO_PATH" != "$PWD" || exit 13
+printf 'native script\\n' > "$MOMENTUM_REPO_PATH/native-script.txt"`;
 const NATIVE_GOAL_LOOP_SCRIPT = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/goal-loop-count"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
@@ -418,7 +425,8 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeNativeDispatchProfile(
       tempDir(),
-      NATIVE_SCRIPT_COMMAND,
+      NATIVE_ITERATION_SCRIPT_COMMAND,
+      "iteration",
     );
     const definition: WorkflowDefinition = {
       key: "native-script-workflow",
@@ -431,7 +439,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           executor: "script",
           config: {
             command: "preflight",
-            args: ["-c", NATIVE_SCRIPT_COMMAND],
+            args: ["-c", NATIVE_ITERATION_SCRIPT_COMMAND],
             timeoutMs: 5_000,
           },
           order: 0,
@@ -716,6 +724,76 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     ).toBe("2\n");
     db.close();
   }, 15_000);
+
+  it("refuses a symlinked native goal-loop round directory", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const runId = "symlinked-native-goal-loop-run";
+    const definition: WorkflowDefinition = {
+      key: "symlinked-native-goal-loop-workflow",
+      title: "Symlinked Native Goal-loop Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Refuse escaped native round artifacts",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const runDir = path.join(repoPath, ".agent-workflows", runId);
+    const escapedDir = tempDir();
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.symlinkSync(escapedDir, path.join(runDir, "round-1"), "dir");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "implementation",
+      holder: "symlinked-native-goal-loop-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "symlinked-native-goal-loop-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "runtime_unavailable",
+      summary: expect.stringContaining("round path is not a regular directory"),
+    });
+    expect(fs.readdirSync(escapedDir)).toEqual([]);
+    db.close();
+  });
 
   it.each([
     {
@@ -1327,6 +1405,7 @@ function initNativeDispatchRepo(): string {
 function writeNativeDispatchProfile(
   profileDir: string,
   script = NATIVE_ONE_SHOT_SCRIPT,
+  cwd: "repo" | "iteration" = "repo",
 ): string {
   const profilePath = path.join(profileDir, "profile.json");
   fs.writeFileSync(
@@ -1337,7 +1416,7 @@ function writeNativeDispatchProfile(
         preflight: {
           command: "/bin/sh",
           args: ["-c", script],
-          cwd: "repo",
+          cwd,
           timeout_sec: 5,
           env_allow: [],
           result_file: "result.json",
