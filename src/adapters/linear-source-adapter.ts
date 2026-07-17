@@ -28,7 +28,7 @@ import type {
   SourceAdapterListInput,
   SourceAdapterListResult,
   SourceAdapterNormalizeInput,
-  SourceAdapterNormalizeResult
+  SourceAdapterNormalizeResult,
 } from "./source-adapter.js";
 
 export const LINEAR_SOURCE_ADAPTER_KIND = "linear" as const;
@@ -50,11 +50,13 @@ export function buildLinearSourceAdapter(): SourceAdapter {
     kind: LINEAR_SOURCE_ADAPTER_KIND,
     list: linearAdapterList,
     get: linearAdapterGet,
-    normalize: linearAdapterNormalize
+    normalize: linearAdapterNormalize,
   };
 }
 
-export function normalizeLinearIssue(raw: unknown): SourceAdapterNormalizeResult {
+export function normalizeLinearIssue(
+  raw: unknown,
+): SourceAdapterNormalizeResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return invalid("raw Linear issue must be an object");
   }
@@ -100,24 +102,23 @@ export function normalizeLinearIssue(raw: unknown): SourceAdapterNormalizeResult
     title,
     status: stateName,
     metadata,
-    observedAt: updatedAt
+    observedAt: updatedAt,
   };
 
   return { ok: true, item };
 }
 
 function linearAdapterNormalize(
-  input: SourceAdapterNormalizeInput
+  input: SourceAdapterNormalizeInput,
 ): SourceAdapterNormalizeResult {
   return normalizeLinearIssue(input.raw);
 }
 
 function linearAdapterList(
-  input: SourceAdapterListInput
+  input: SourceAdapterListInput,
 ): SourceAdapterListResult {
   const client = (input.client?.["linear"] ?? undefined) as
-    | LinearSourceAdapterClient
-    | undefined;
+    LinearSourceAdapterClient | undefined;
   const issues = client?.issues ?? [];
   const filters = client?.filters ?? {};
 
@@ -132,11 +133,10 @@ function linearAdapterList(
 }
 
 function linearAdapterGet(
-  input: SourceAdapterGetInput
+  input: SourceAdapterGetInput,
 ): SourceAdapterGetResult {
   const client = (input.client?.["linear"] ?? undefined) as
-    | LinearSourceAdapterClient
-    | undefined;
+    LinearSourceAdapterClient | undefined;
   const issues = client?.issues ?? [];
 
   for (const raw of issues) {
@@ -153,13 +153,13 @@ function linearAdapterGet(
   return {
     ok: false,
     code: "source_item_not_found",
-    error: `Source item "${input.externalId}" was not found by adapter "${LINEAR_SOURCE_ADAPTER_KIND}".`
+    error: `Source item "${input.externalId}" was not found by adapter "${LINEAR_SOURCE_ADAPTER_KIND}".`,
   };
 }
 
 function matchesLinearFilters(
   raw: unknown,
-  filters: LinearSourceAdapterFilters
+  filters: LinearSourceAdapterFilters,
 ): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const record = raw as Record<string, unknown>;
@@ -223,9 +223,14 @@ function optionalProjectInfo(value: unknown): LinearProjectInfo | null {
     id: readNestedField(value, "id"),
     key: readNestedField(value, "key"),
     name: readNestedField(value, "name"),
-    url: readNestedField(value, "url")
+    url: readNestedField(value, "url"),
   };
-  if (info.id === null && info.key === null && info.name === null && info.url === null) {
+  if (
+    info.id === null &&
+    info.key === null &&
+    info.name === null &&
+    info.url === null
+  ) {
     return null;
   }
   return info;
@@ -240,14 +245,15 @@ function optionalMilestoneInfo(value: unknown): LinearMilestoneInfo | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const info: LinearMilestoneInfo = {
     id: readNestedField(value, "id"),
-    name: readNestedField(value, "name")
+    name: readNestedField(value, "name"),
   };
   if (info.id === null && info.name === null) return null;
   return info;
 }
 
 function optionalLabelNames(value: unknown): string[] | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const nodes = (value as Record<string, unknown>)["nodes"];
   if (!Array.isArray(nodes)) return undefined;
   const names: string[] = [];
@@ -264,14 +270,16 @@ type LinearAssigneeInfo = {
   email: string | null;
 };
 
-function optionalAssigneeInfo(value: unknown): LinearAssigneeInfo | null | undefined {
+function optionalAssigneeInfo(
+  value: unknown,
+): LinearAssigneeInfo | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) return undefined;
   const info: LinearAssigneeInfo = {
     id: readNestedField(value, "id"),
     name: readNestedField(value, "name"),
-    email: readNestedField(value, "email")
+    email: readNestedField(value, "email"),
   };
   if (info.id === null && info.name === null && info.email === null) {
     return null;
@@ -280,13 +288,15 @@ function optionalAssigneeInfo(value: unknown): LinearAssigneeInfo | null | undef
 }
 
 function optionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function invalid(reason: string): SourceAdapterError {
   return {
     ok: false,
     code: "source_item_invalid",
-    error: `Source adapter "${LINEAR_SOURCE_ADAPTER_KIND}" could not normalize source item: ${reason}.`
+    error: `Source adapter "${LINEAR_SOURCE_ADAPTER_KIND}" could not normalize source item: ${reason}.`,
   };
 }
