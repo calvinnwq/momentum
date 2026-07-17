@@ -30,7 +30,8 @@ start, top-level status / logs / handoff, worker run) is retired.
 Infrastructure-facing clients and runtime adapters that used to sit as flat
 `src/` modules now have explicit ownership under `src/adapters/`: database
 opening helpers, git transactions, Linear HTTP / source / external-update
-adapters and refresh clients, trusted-shell / ACP runner-config parsers kept
+adapters, refresh clients, and shared GraphQL transport, trusted-shell / ACP
+runner-config parsers kept
 for stored-goal recovery rendering, live wrapper / harness-probe adapters for
 OpenClaw-facing execution, the opt-in coding-workflow live-wrapper CLI adapter,
 OpenClaw watch-process adapter, and delegated-tool adapters such as the

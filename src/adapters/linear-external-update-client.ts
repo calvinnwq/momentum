@@ -25,24 +25,16 @@
  */
 
 import type { ExternalUpdateAdapterPreview } from "./external-update-adapter.js";
+import {
+  postLinearGraphql,
+  type LinearGraphqlFetchLike,
+} from "./linear-graphql-transport.js";
 
 export const DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT =
   "https://api.linear.app/graphql";
 export const DEFAULT_LINEAR_EXTERNAL_UPDATE_REQUEST_TIMEOUT_MS = 30_000;
 
-export type FetchLike = (
-  input: string,
-  init: {
-    method: string;
-    headers: Record<string, string>;
-    body: string;
-    signal?: AbortSignal;
-  }
-) => Promise<{
-  ok: boolean;
-  status: number;
-  text: () => Promise<string>;
-}>;
+export type FetchLike = LinearGraphqlFetchLike;
 
 export type LinearExternalUpdateClientOptions = {
   apiKey?: string | null;
@@ -52,8 +44,7 @@ export type LinearExternalUpdateClientOptions = {
 };
 
 export type LinearStatusMutationConfig =
-  | { kind: "by_id"; stateId: string }
-  | { kind: "by_name"; stateName: string };
+  { kind: "by_id"; stateId: string } | { kind: "by_name"; stateName: string };
 
 export type LinearExternalUpdateInput = {
   preview: ExternalUpdateAdapterPreview;
@@ -69,7 +60,7 @@ export const LINEAR_EXTERNAL_UPDATE_RESULT_CODES = Object.freeze([
   "write_timeout",
   "malformed_response",
   "validation_failed",
-  "adapter_threw"
+  "adapter_threw",
 ] as const);
 
 export type LinearExternalUpdateResultCode =
@@ -116,12 +107,11 @@ export type LinearExternalUpdateError = {
 };
 
 export type LinearExternalUpdateResult =
-  | LinearExternalUpdateSuccess
-  | LinearExternalUpdateError;
+  LinearExternalUpdateSuccess | LinearExternalUpdateError;
 
 export type LinearExternalUpdateClient = {
   apply: (
-    input: LinearExternalUpdateInput
+    input: LinearExternalUpdateInput,
   ) => Promise<LinearExternalUpdateResult>;
 };
 
@@ -173,13 +163,6 @@ mutation MomentumExternalUpdateIssueStateUpdate($id: String!, $input: IssueUpdat
   }
 }`.trim();
 
-class LinearExternalUpdateTimeoutError extends Error {
-  constructor(readonly timeoutMs: number) {
-    super(`linear external update request timed out after ${timeoutMs}ms`);
-    this.name = "LinearExternalUpdateTimeoutError";
-  }
-}
-
 type GraphqlResponse = {
   status: number;
   body: unknown;
@@ -200,24 +183,24 @@ type GraphqlTransportResult =
   | { ok: false; failure: GraphqlTransportFailure };
 
 export function buildLinearExternalUpdateClient(
-  options: LinearExternalUpdateClientOptions
+  options: LinearExternalUpdateClientOptions,
 ): LinearExternalUpdateClient {
   const apiKey = (options.apiKey ?? "").trim();
-  const endpoint =
-    options.endpoint ?? DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT;
+  const endpoint = options.endpoint ?? DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT;
   const requestTimeoutMs = resolveRequestTimeoutMs(options.requestTimeoutMs);
-  const fetchImpl = options.fetch ?? (globalThis.fetch as FetchLike | undefined);
+  const fetchImpl =
+    options.fetch ?? (globalThis.fetch as FetchLike | undefined);
 
   return {
     async apply(
-      input: LinearExternalUpdateInput
+      input: LinearExternalUpdateInput,
     ): Promise<LinearExternalUpdateResult> {
       const validation = validateApplyInput(input);
       if (validation) return validation;
 
       if (apiKey.length === 0) {
         return authUnavailable(
-          "LINEAR_API_KEY is unset; linear external update needs a credential."
+          "LINEAR_API_KEY is unset; linear external update needs a credential.",
         );
       }
       if (!fetchImpl) {
@@ -225,7 +208,7 @@ export function buildLinearExternalUpdateClient(
           ok: false,
           code: "validation_failed",
           error:
-            "global fetch is unavailable; pass options.fetch to buildLinearExternalUpdateClient."
+            "global fetch is unavailable; pass options.fetch to buildLinearExternalUpdateClient.",
         };
       }
 
@@ -238,7 +221,7 @@ export function buildLinearExternalUpdateClient(
         apiKey,
         requestTimeoutMs,
         ISSUE_LOOKUP_QUERY,
-        { id: issueId }
+        { id: issueId },
       );
       if (!issueLookup.ok) {
         return mapTransportFailure(issueLookup.failure);
@@ -259,7 +242,7 @@ export function buildLinearExternalUpdateClient(
           apiKey,
           requestTimeoutMs,
           teamId,
-          input.statusMutation
+          input.statusMutation,
         );
         if (!resolution.ok) {
           return { ...resolution.error, partial: { issue } };
@@ -275,7 +258,7 @@ export function buildLinearExternalUpdateClient(
         requestTimeoutMs,
         issueId,
         commentsPage,
-        preview.idempotencyMarker
+        preview.idempotencyMarker,
       );
       if (!existingResult.ok) {
         return { ...existingResult.error, partial: { issue } };
@@ -290,12 +273,12 @@ export function buildLinearExternalUpdateClient(
             apiKey,
             requestTimeoutMs,
             issueId,
-            resolvedStateId
+            resolvedStateId,
           );
           if (!updateResult.ok) {
             return {
               ...updateResult.error,
-              partial: { issue, comment: existing }
+              partial: { issue, comment: existing },
             };
           }
           statusOutcome = {
@@ -303,7 +286,7 @@ export function buildLinearExternalUpdateClient(
             previousStateId: interpretedIssue.state.id,
             previousStateName: interpretedIssue.state.name,
             nextStateId: updateResult.state.id ?? resolvedStateId,
-            nextStateName: updateResult.state.name ?? resolvedStateName
+            nextStateName: updateResult.state.name ?? resolvedStateName,
           };
         }
         return {
@@ -312,7 +295,7 @@ export function buildLinearExternalUpdateClient(
           issue,
           comment: existing,
           status: statusOutcome,
-          idempotencyMarker: preview.idempotencyMarker
+          idempotencyMarker: preview.idempotencyMarker,
         };
       }
 
@@ -322,7 +305,7 @@ export function buildLinearExternalUpdateClient(
         apiKey,
         requestTimeoutMs,
         issueId,
-        preview.commentBody
+        preview.commentBody,
       );
       if (!commentResult.ok) {
         return { ...commentResult.error, partial: { issue } };
@@ -338,12 +321,12 @@ export function buildLinearExternalUpdateClient(
           apiKey,
           requestTimeoutMs,
           issueId,
-          resolvedStateId
+          resolvedStateId,
         );
         if (!updateResult.ok) {
           return {
             ...updateResult.error,
-            partial: { issue, comment }
+            partial: { issue, comment },
           };
         }
         statusOutcome = {
@@ -351,7 +334,7 @@ export function buildLinearExternalUpdateClient(
           previousStateId: interpretedIssue.state.id,
           previousStateName: interpretedIssue.state.name,
           nextStateId: updateResult.state.id ?? resolvedStateId,
-          nextStateName: updateResult.state.name ?? resolvedStateName
+          nextStateName: updateResult.state.name ?? resolvedStateName,
         };
       }
 
@@ -361,21 +344,21 @@ export function buildLinearExternalUpdateClient(
         issue,
         comment,
         status: statusOutcome,
-        idempotencyMarker: preview.idempotencyMarker
+        idempotencyMarker: preview.idempotencyMarker,
       };
-    }
+    },
   };
 }
 
 function validateApplyInput(
-  input: LinearExternalUpdateInput
+  input: LinearExternalUpdateInput,
 ): LinearExternalUpdateError | null {
   const { preview } = input;
   if (preview.adapterKind !== "linear") {
     return {
       ok: false,
       code: "validation_failed",
-      error: `linear external update client requires preview.adapterKind="linear" (got "${preview.adapterKind}").`
+      error: `linear external update client requires preview.adapterKind="linear" (got "${preview.adapterKind}").`,
     };
   }
   if (
@@ -385,7 +368,8 @@ function validateApplyInput(
     return {
       ok: false,
       code: "target_missing",
-      error: "linear external update client requires preview.target.externalId."
+      error:
+        "linear external update client requires preview.target.externalId.",
     };
   }
   if (
@@ -395,7 +379,8 @@ function validateApplyInput(
     return {
       ok: false,
       code: "validation_failed",
-      error: "linear external update client requires a non-empty preview.commentBody."
+      error:
+        "linear external update client requires a non-empty preview.commentBody.",
     };
   }
   if (
@@ -406,7 +391,7 @@ function validateApplyInput(
       ok: false,
       code: "validation_failed",
       error:
-        "linear external update client requires a non-empty preview.idempotencyMarker."
+        "linear external update client requires a non-empty preview.idempotencyMarker.",
     };
   }
   if (!preview.commentBody.includes(preview.idempotencyMarker)) {
@@ -414,7 +399,7 @@ function validateApplyInput(
       ok: false,
       code: "validation_failed",
       error:
-        "linear external update client requires preview.commentBody to embed preview.idempotencyMarker."
+        "linear external update client requires preview.commentBody to embed preview.idempotencyMarker.",
     };
   }
   if (input.statusMutation) {
@@ -424,7 +409,7 @@ function validateApplyInput(
         return {
           ok: false,
           code: "validation_failed",
-          error: "statusMutation.stateId must be a non-empty string."
+          error: "statusMutation.stateId must be a non-empty string.",
         };
       }
     } else if (mut.kind === "by_name") {
@@ -432,14 +417,14 @@ function validateApplyInput(
         return {
           ok: false,
           code: "validation_failed",
-          error: "statusMutation.stateName must be a non-empty string."
+          error: "statusMutation.stateName must be a non-empty string.",
         };
       }
     } else {
       return {
         ok: false,
         code: "validation_failed",
-        error: `statusMutation.kind must be "by_id" or "by_name" (got "${(mut as { kind: string }).kind}").`
+        error: `statusMutation.kind must be "by_id" or "by_name" (got "${(mut as { kind: string }).kind}").`,
       };
     }
   }
@@ -469,8 +454,8 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
       error: {
         ok: false,
         code: "target_missing",
-        error: "Linear issue lookup returned no issue."
-      }
+        error: "Linear issue lookup returned no issue.",
+      },
     };
   }
   if (typeof dataIssue !== "object" || Array.isArray(dataIssue)) {
@@ -479,8 +464,8 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear issue lookup returned a non-object issue payload."
-      }
+        error: "Linear issue lookup returned a non-object issue payload.",
+      },
     };
   }
   const record = dataIssue as Record<string, unknown>;
@@ -491,15 +476,18 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear issue lookup is missing issue.id."
-      }
+        error: "Linear issue lookup is missing issue.id.",
+      },
     };
   }
   const identifier = optionalString(record["identifier"]);
   const url = optionalString(record["url"]);
   const state = readState(record["state"]);
   const team = readTeam(record["team"]);
-  const commentsPageResult = readCommentsPage(record["comments"], "Linear issue lookup");
+  const commentsPageResult = readCommentsPage(
+    record["comments"],
+    "Linear issue lookup",
+  );
   if (!commentsPageResult.ok) {
     return { ok: false, error: commentsPageResult.error };
   }
@@ -508,7 +496,7 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
     issue: { id, key: identifier ?? null, url: url ?? null },
     state,
     teamId: team,
-    commentsPage: commentsPageResult.page
+    commentsPage: commentsPageResult.page,
   };
 }
 
@@ -531,7 +519,7 @@ async function findExistingMarkerComment(
   requestTimeoutMs: number,
   issueId: string,
   firstPage: CommentsPage,
-  marker: string
+  marker: string,
 ): Promise<FindExistingMarkerCommentResult> {
   let page = firstPage;
   for (;;) {
@@ -545,8 +533,8 @@ async function findExistingMarkerComment(
           ok: false,
           code: "malformed_response",
           error:
-            "Linear comments pageInfo indicated another page without endCursor."
-        }
+            "Linear comments pageInfo indicated another page without endCursor.",
+        },
       };
     }
     const nextPage = await fetchIssueCommentsPage(
@@ -555,7 +543,7 @@ async function findExistingMarkerComment(
       apiKey,
       requestTimeoutMs,
       issueId,
-      page.endCursor
+      page.endCursor,
     );
     if (!nextPage.ok) return nextPage;
     page = nextPage.page;
@@ -564,7 +552,7 @@ async function findExistingMarkerComment(
 
 function findMarkerInComments(
   comments: ReadonlyArray<CommentRecord>,
-  marker: string
+  marker: string,
 ): LinearExternalUpdateCommentRef | null {
   for (const comment of comments) {
     if (comment.body.includes(marker)) {
@@ -584,7 +572,7 @@ async function fetchIssueCommentsPage(
   apiKey: string,
   requestTimeoutMs: number,
   issueId: string,
-  after: string
+  after: string,
 ): Promise<FetchIssueCommentsPageResult> {
   const transport = await sendGraphql(
     fetchImpl,
@@ -592,7 +580,7 @@ async function fetchIssueCommentsPage(
     apiKey,
     requestTimeoutMs,
     ISSUE_COMMENTS_PAGE_QUERY,
-    { id: issueId, after }
+    { id: issueId, after },
   );
   if (!transport.ok) {
     return { ok: false, error: mapTransportFailure(transport.failure) };
@@ -604,8 +592,8 @@ async function fetchIssueCommentsPage(
       error: {
         ok: false,
         code: "target_missing",
-        error: "Linear issue comments page lookup returned no issue."
-      }
+        error: "Linear issue comments page lookup returned no issue.",
+      },
     };
   }
   if (!rawIssue || typeof rawIssue !== "object" || Array.isArray(rawIssue)) {
@@ -615,13 +603,13 @@ async function fetchIssueCommentsPage(
         ok: false,
         code: "malformed_response",
         error:
-          "Linear issue comments page lookup returned a non-object issue payload."
-      }
+          "Linear issue comments page lookup returned a non-object issue payload.",
+      },
     };
   }
   const commentsPageResult = readCommentsPage(
     (rawIssue as Record<string, unknown>)["comments"],
-    "Linear issue comments page lookup"
+    "Linear issue comments page lookup",
   );
   if (!commentsPageResult.ok) {
     return { ok: false, error: commentsPageResult.error };
@@ -629,13 +617,15 @@ async function fetchIssueCommentsPage(
   return { ok: true, page: commentsPageResult.page };
 }
 
-function buildUnchangedStatus(state: IssueState): LinearExternalUpdateStatusOutcome {
+function buildUnchangedStatus(
+  state: IssueState,
+): LinearExternalUpdateStatusOutcome {
   return {
     transitioned: false,
     previousStateId: state.id,
     previousStateName: state.name,
     nextStateId: null,
-    nextStateName: null
+    nextStateName: null,
   };
 }
 
@@ -649,7 +639,7 @@ async function resolveTargetState(
   apiKey: string,
   requestTimeoutMs: number,
   teamId: string | null,
-  config: LinearStatusMutationConfig
+  config: LinearStatusMutationConfig,
 ): Promise<ResolveTargetStateResult> {
   if (config.kind === "by_id") {
     return { ok: true, stateId: config.stateId, stateName: null };
@@ -661,8 +651,8 @@ async function resolveTargetState(
       error: {
         ok: false,
         code: "target_state_ambiguous",
-        error: `Cannot resolve Linear workflow state "${config.stateName}" without a team id on the target issue.`
-      }
+        error: `Cannot resolve Linear workflow state "${config.stateName}" without a team id on the target issue.`,
+      },
     };
   }
 
@@ -672,7 +662,7 @@ async function resolveTargetState(
     apiKey,
     requestTimeoutMs,
     WORKFLOW_STATE_LOOKUP_QUERY,
-    { teamId, name: config.stateName }
+    { teamId, name: config.stateName },
   );
   if (!transport.ok) {
     return { ok: false, error: mapTransportFailure(transport.failure) };
@@ -680,7 +670,7 @@ async function resolveTargetState(
 
   const nodes = readGraphqlData(transport.response.body, [
     "workflowStates",
-    "nodes"
+    "nodes",
   ]);
   if (!Array.isArray(nodes)) {
     return {
@@ -688,8 +678,8 @@ async function resolveTargetState(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear workflow state lookup is missing workflowStates.nodes."
-      }
+        error: "Linear workflow state lookup is missing workflowStates.nodes.",
+      },
     };
   }
   const matches: Array<{ id: string; name: string | null }> = [];
@@ -706,8 +696,8 @@ async function resolveTargetState(
       error: {
         ok: false,
         code: "target_state_ambiguous",
-        error: `No Linear workflow state matched name "${config.stateName}" for team ${teamId}.`
-      }
+        error: `No Linear workflow state matched name "${config.stateName}" for team ${teamId}.`,
+      },
     };
   }
   if (matches.length > 1) {
@@ -716,8 +706,8 @@ async function resolveTargetState(
       error: {
         ok: false,
         code: "target_state_ambiguous",
-        error: `Multiple (${matches.length}) Linear workflow states matched name "${config.stateName}" for team ${teamId}; refusing to guess.`
-      }
+        error: `Multiple (${matches.length}) Linear workflow states matched name "${config.stateName}" for team ${teamId}; refusing to guess.`,
+      },
     };
   }
   const match = matches[0]!;
@@ -740,7 +730,7 @@ async function postComment(
   apiKey: string,
   requestTimeoutMs: number,
   issueId: string,
-  body: string
+  body: string,
 ): Promise<PostCommentResult> {
   const transport = await sendGraphql(
     fetchImpl,
@@ -748,7 +738,7 @@ async function postComment(
     apiKey,
     requestTimeoutMs,
     COMMENT_CREATE_MUTATION,
-    { input: { issueId, body } }
+    { input: { issueId, body } },
   );
   if (!transport.ok) {
     return { ok: false, error: mapTransportFailure(transport.failure) };
@@ -760,8 +750,8 @@ async function postComment(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "commentCreate response was not a JSON object."
-      }
+        error: "commentCreate response was not a JSON object.",
+      },
     };
   }
   const record = payload as Record<string, unknown>;
@@ -771,8 +761,8 @@ async function postComment(
       error: {
         ok: false,
         code: "write_rejected",
-        error: "commentCreate.success was not true."
-      }
+        error: "commentCreate.success was not true.",
+      },
     };
   }
   const commentRecord = record["comment"];
@@ -786,8 +776,8 @@ async function postComment(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "commentCreate response was missing comment payload."
-      }
+        error: "commentCreate response was missing comment payload.",
+      },
     };
   }
   const commentObject = commentRecord as Record<string, unknown>;
@@ -798,13 +788,13 @@ async function postComment(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "commentCreate response was missing comment.id."
-      }
+        error: "commentCreate response was missing comment.id.",
+      },
     };
   }
   return {
     ok: true,
-    comment: { id, url: optionalString(commentObject["url"]) ?? null }
+    comment: { id, url: optionalString(commentObject["url"]) ?? null },
   };
 }
 
@@ -824,7 +814,7 @@ async function postIssueStateUpdate(
   apiKey: string,
   requestTimeoutMs: number,
   issueId: string,
-  stateId: string
+  stateId: string,
 ): Promise<PostIssueStateUpdateResult> {
   const transport = await sendGraphql(
     fetchImpl,
@@ -832,7 +822,7 @@ async function postIssueStateUpdate(
     apiKey,
     requestTimeoutMs,
     ISSUE_STATE_UPDATE_MUTATION,
-    { id: issueId, input: { stateId } }
+    { id: issueId, input: { stateId } },
   );
   if (!transport.ok) {
     return { ok: false, error: mapTransportFailure(transport.failure) };
@@ -844,8 +834,8 @@ async function postIssueStateUpdate(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "issueUpdate response was not a JSON object."
-      }
+        error: "issueUpdate response was not a JSON object.",
+      },
     };
   }
   const record = payload as Record<string, unknown>;
@@ -855,19 +845,23 @@ async function postIssueStateUpdate(
       error: {
         ok: false,
         code: "write_rejected",
-        error: "issueUpdate.success was not true."
-      }
+        error: "issueUpdate.success was not true.",
+      },
     };
   }
   const issueRecord = record["issue"];
-  if (!issueRecord || typeof issueRecord !== "object" || Array.isArray(issueRecord)) {
+  if (
+    !issueRecord ||
+    typeof issueRecord !== "object" ||
+    Array.isArray(issueRecord)
+  ) {
     return {
       ok: false,
       error: {
         ok: false,
         code: "malformed_response",
-        error: "issueUpdate response was missing issue payload."
-      }
+        error: "issueUpdate response was missing issue payload.",
+      },
     };
   }
   const stateRecord = (issueRecord as Record<string, unknown>)["state"];
@@ -878,8 +872,8 @@ async function postIssueStateUpdate(
       error: {
         ok: false,
         code: "malformed_response",
-        error: "issueUpdate response was missing issue.state.id."
-      }
+        error: "issueUpdate response was missing issue.state.id.",
+      },
     };
   }
   if (state.id !== stateId) {
@@ -888,8 +882,8 @@ async function postIssueStateUpdate(
       error: {
         ok: false,
         code: "write_rejected",
-        error: `issueUpdate returned state "${state.id}" instead of requested state "${stateId}".`
-      }
+        error: `issueUpdate returned state "${state.id}" instead of requested state "${stateId}".`,
+      },
     };
   }
   return { ok: true, state };
@@ -901,158 +895,113 @@ async function sendGraphql(
   apiKey: string,
   requestTimeoutMs: number,
   query: string,
-  variables: Record<string, unknown>
+  variables: Record<string, unknown>,
 ): Promise<GraphqlTransportResult> {
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-  const controller = new AbortController();
-  const requestState: { phase: "request" | "response_body" } = {
-    phase: "request"
-  };
+  const transport = await postLinearGraphql({
+    fetch: fetchImpl,
+    endpoint,
+    apiKey,
+    requestTimeoutMs,
+    query,
+    variables,
+  });
 
-  try {
-    const requestPromise = (async () => {
-      const fetched = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: apiKey
+  switch (transport.kind) {
+    case "timeout":
+      return {
+        ok: false,
+        failure: {
+          code: "write_timeout",
+          error: `linear external update request timed out after ${transport.timeoutMs}ms`,
         },
-        body: JSON.stringify({ query, variables }),
-        signal: controller.signal
-      });
-      if (fetched.status === 401 || fetched.status === 403 || !fetched.ok) {
-        return { response: fetched, bodyText: null as string | null };
-      }
-      requestState.phase = "response_body";
-      return { response: fetched, bodyText: await fetched.text() };
-    })();
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-        reject(new LinearExternalUpdateTimeoutError(requestTimeoutMs));
-      }, requestTimeoutMs);
-    });
-
-    const settled = await Promise.race([requestPromise, timeoutPromise]);
-    const response = settled.response;
-    const bodyText = settled.bodyText;
-
-    if (response.status === 401 || response.status === 403) {
-      return {
-        ok: false,
-        failure: {
-          code: "auth_unavailable",
-          error: `Linear API rejected credentials (HTTP ${response.status}).`
-        }
       };
-    }
-    if (!response.ok) {
-      return {
-        ok: false,
-        failure: {
-          code: "write_rejected",
-          error: `Linear API returned HTTP ${response.status}.`
-        }
-      };
-    }
-    if (bodyText === null) {
+    case "body_read_failed":
       return {
         ok: false,
         failure: {
           code: "adapter_threw",
-          error: "linear external update response body was not read"
-        }
+          error: `linear external update response body read failed: ${describeError(transport.error)}`,
+        },
       };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(bodyText);
-    } catch (error) {
+    case "request_failed":
       return {
         ok: false,
         failure: {
-          code: "malformed_response",
-          error: `linear external update response was not JSON: ${describeError(error)}`
-        }
+          code: "adapter_threw",
+          error: `linear external update transport failed: ${describeError(transport.error)}`,
+        },
       };
-    }
-    const graphqlErrors = readGraphqlErrors(parsed);
-    if (graphqlErrors) {
-      const authCode = detectGraphqlAuthCode(graphqlErrors);
-      if (authCode) {
+    case "http_error":
+      if (transport.status === 401 || transport.status === 403) {
         return {
           ok: false,
           failure: {
             code: "auth_unavailable",
-            error: `Linear GraphQL auth rejected: ${describeGraphqlErrors(graphqlErrors)}`
-          }
+            error: `Linear API rejected credentials (HTTP ${transport.status}).`,
+          },
         };
       }
       return {
         ok: false,
         failure: {
           code: "write_rejected",
-          error: `Linear GraphQL errors: ${describeGraphqlErrors(graphqlErrors)}`
-        }
+          error: `Linear API returned HTTP ${transport.status}.`,
+        },
       };
-    }
-    return {
-      ok: true,
-      response: { status: response.status, body: parsed }
-    };
-  } catch (error) {
-    if (
-      error instanceof LinearExternalUpdateTimeoutError ||
-      (timedOut &&
-        error instanceof Error &&
-        (error.name === "AbortError" || error.name === "TimeoutError"))
-    ) {
+    case "invalid_json":
       return {
         ok: false,
         failure: {
-          code: "write_timeout",
-          error: `linear external update request timed out after ${requestTimeoutMs}ms`
-        }
+          code: "malformed_response",
+          error: `linear external update response was not JSON: ${describeError(transport.error)}`,
+        },
       };
-    }
-    if (requestState.phase === "response_body") {
+    case "success":
+      break;
+  }
+
+  const graphqlErrors = readGraphqlErrors(transport.body);
+  if (graphqlErrors) {
+    const authCode = detectGraphqlAuthCode(graphqlErrors);
+    if (authCode) {
       return {
         ok: false,
         failure: {
-          code: "adapter_threw",
-          error: `linear external update response body read failed: ${describeError(error)}`
-        }
+          code: "auth_unavailable",
+          error: `Linear GraphQL auth rejected: ${describeGraphqlErrors(graphqlErrors)}`,
+        },
       };
     }
     return {
       ok: false,
       failure: {
-        code: "adapter_threw",
-        error: `linear external update transport failed: ${describeError(error)}`
-      }
+        code: "write_rejected",
+        error: `Linear GraphQL errors: ${describeGraphqlErrors(graphqlErrors)}`,
+      },
     };
-  } finally {
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
+  return {
+    ok: true,
+    response: { status: transport.status, body: transport.body },
+  };
 }
 
 function mapTransportFailure(
-  failure: GraphqlTransportFailure
+  failure: GraphqlTransportFailure,
 ): LinearExternalUpdateError {
   return {
     ok: false,
     code: failure.code,
-    error: failure.error
+    error: failure.error,
   };
 }
 
 function readGraphqlData(body: unknown, path: readonly string[]): unknown {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    return undefined;
   const data = (body as Record<string, unknown>)["data"];
-  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    return undefined;
   let cursor: unknown = data;
   for (const segment of path) {
     if (!cursor || typeof cursor !== "object" || Array.isArray(cursor)) {
@@ -1098,7 +1047,8 @@ function describeGraphqlErrors(errors: unknown[]): string {
   for (const entry of errors) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const message = (entry as Record<string, unknown>)["message"];
-    if (typeof message === "string" && message.length > 0) messages.push(message);
+    if (typeof message === "string" && message.length > 0)
+      messages.push(message);
   }
   return messages.length > 0 ? messages.join("; ") : "<no message>";
 }
@@ -1110,7 +1060,7 @@ function readState(raw: unknown): IssueState {
   const record = raw as Record<string, unknown>;
   return {
     id: optionalString(record["id"]) ?? null,
-    name: optionalString(record["name"]) ?? null
+    name: optionalString(record["name"]) ?? null,
   };
 }
 
@@ -1123,7 +1073,10 @@ type CommentsPageReadResult =
   | { ok: true; page: CommentsPage }
   | { ok: false; error: LinearExternalUpdateError };
 
-function readCommentsPage(raw: unknown, context: string): CommentsPageReadResult {
+function readCommentsPage(
+  raw: unknown,
+  context: string,
+): CommentsPageReadResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return malformedCommentsPage(context, "is missing a comments connection");
   }
@@ -1136,7 +1089,10 @@ function readCommentsPage(raw: unknown, context: string): CommentsPageReadResult
   const out: CommentRecord[] = [];
   for (const entry of nodes) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      return malformedCommentsPage(context, "comments.nodes contains a non-object node");
+      return malformedCommentsPage(
+        context,
+        "comments.nodes contains a non-object node",
+      );
     }
     const commentRecord = entry as Record<string, unknown>;
     const id = optionalString(commentRecord["id"]);
@@ -1144,28 +1100,41 @@ function readCommentsPage(raw: unknown, context: string): CommentsPageReadResult
     if (!id || typeof body !== "string") {
       return malformedCommentsPage(
         context,
-        "comments.nodes contains a node without a string id and body"
+        "comments.nodes contains a node without a string id and body",
       );
     }
     out.push({
       id,
       body,
-      url: optionalString(commentRecord["url"]) ?? null
+      url: optionalString(commentRecord["url"]) ?? null,
     });
   }
 
   const pageInfo = record["pageInfo"];
   if (!pageInfo || typeof pageInfo !== "object" || Array.isArray(pageInfo)) {
-    return malformedCommentsPage(context, "comments.pageInfo is missing or invalid");
+    return malformedCommentsPage(
+      context,
+      "comments.pageInfo is missing or invalid",
+    );
   }
   const pageInfoRecord = pageInfo as Record<string, unknown>;
   const hasNextPage = pageInfoRecord["hasNextPage"];
   if (typeof hasNextPage !== "boolean") {
-    return malformedCommentsPage(context, "comments.pageInfo.hasNextPage is not a boolean");
+    return malformedCommentsPage(
+      context,
+      "comments.pageInfo.hasNextPage is not a boolean",
+    );
   }
   const rawEndCursor = pageInfoRecord["endCursor"];
-  if (rawEndCursor !== null && rawEndCursor !== undefined && typeof rawEndCursor !== "string") {
-    return malformedCommentsPage(context, "comments.pageInfo.endCursor is not a string or null");
+  if (
+    rawEndCursor !== null &&
+    rawEndCursor !== undefined &&
+    typeof rawEndCursor !== "string"
+  ) {
+    return malformedCommentsPage(
+      context,
+      "comments.pageInfo.endCursor is not a string or null",
+    );
   }
 
   return {
@@ -1173,22 +1142,25 @@ function readCommentsPage(raw: unknown, context: string): CommentsPageReadResult
     page: {
       comments: out,
       hasNextPage,
-      endCursor: typeof rawEndCursor === "string" && rawEndCursor.length > 0 ? rawEndCursor : null
-    }
+      endCursor:
+        typeof rawEndCursor === "string" && rawEndCursor.length > 0
+          ? rawEndCursor
+          : null,
+    },
   };
 }
 
 function malformedCommentsPage(
   context: string,
-  detail: string
+  detail: string,
 ): CommentsPageReadResult {
   return {
     ok: false,
     error: {
       ok: false,
       code: "malformed_response",
-      error: `${context} returned a malformed comments page: ${detail}.`
-    }
+      error: `${context} returned a malformed comments page: ${detail}.`,
+    },
   };
 }
 
@@ -1211,7 +1183,7 @@ function resolveRequestTimeoutMs(timeoutMs: number | undefined): number {
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error(
-      `linear external update request timeout must be a positive integer in milliseconds, got ${timeoutMs}`
+      `linear external update request timeout must be a positive integer in milliseconds, got ${timeoutMs}`,
     );
   }
   return timeoutMs;

@@ -22,23 +22,16 @@
  * adapter tests forbid real `api.linear.app` calls from this boundary.
  */
 
+import {
+  postLinearGraphql,
+  type LinearGraphqlFetchLike,
+} from "./linear-graphql-transport.js";
+
 export const DEFAULT_LINEAR_ISSUE_REFRESH_ENDPOINT =
   "https://api.linear.app/graphql";
 export const DEFAULT_LINEAR_ISSUE_REFRESH_REQUEST_TIMEOUT_MS = 30_000;
 
-export type FetchLike = (
-  input: string,
-  init: {
-    method: string;
-    headers: Record<string, string>;
-    body: string;
-    signal?: AbortSignal;
-  }
-) => Promise<{
-  ok: boolean;
-  status: number;
-  text: () => Promise<string>;
-}>;
+export type FetchLike = LinearGraphqlFetchLike;
 
 export type LinearIssueRefreshClientOptions = {
   apiKey?: string | null;
@@ -57,7 +50,7 @@ export const LINEAR_ISSUE_REFRESH_RESULT_CODES = Object.freeze([
   "target_missing",
   "refresh_timeout",
   "malformed_response",
-  "adapter_threw"
+  "adapter_threw",
 ] as const);
 
 export type LinearIssueRefreshResultCode =
@@ -87,8 +80,7 @@ export type LinearIssueRefreshError = {
 };
 
 export type LinearIssueRefreshResult =
-  | LinearIssueRefreshSuccess
-  | LinearIssueRefreshError;
+  LinearIssueRefreshSuccess | LinearIssueRefreshError;
 
 export type LinearIssueRefreshClient = {
   refresh: (input: {
@@ -128,13 +120,6 @@ query MomentumIssueRefreshCommentsPage($id: String!, $after: String!) {
   }
 }`.trim();
 
-class LinearIssueRefreshTimeoutError extends Error {
-  constructor(readonly timeoutMs: number) {
-    super(`linear issue refresh request timed out after ${timeoutMs}ms`);
-    this.name = "LinearIssueRefreshTimeoutError";
-  }
-}
-
 type GraphqlResponse = {
   status: number;
   body: unknown;
@@ -145,7 +130,7 @@ type GraphqlTransportResult =
   | { ok: false; failure: LinearIssueRefreshError };
 
 export function buildLinearIssueRefreshClient(
-  options: LinearIssueRefreshClientOptions
+  options: LinearIssueRefreshClientOptions,
 ): LinearIssueRefreshClient {
   const apiKey = (options.apiKey ?? "").trim();
   const endpoint = options.endpoint ?? DEFAULT_LINEAR_ISSUE_REFRESH_ENDPOINT;
@@ -157,7 +142,7 @@ export function buildLinearIssueRefreshClient(
     async refresh({ target }) {
       if (apiKey.length === 0) {
         return authUnavailable(
-          "LINEAR_API_KEY is unset; linear issue refresh needs a credential."
+          "LINEAR_API_KEY is unset; linear issue refresh needs a credential.",
         );
       }
       if (!fetchImpl) {
@@ -165,7 +150,7 @@ export function buildLinearIssueRefreshClient(
           ok: false,
           code: "adapter_threw",
           error:
-            "global fetch is unavailable; pass options.fetch to buildLinearIssueRefreshClient."
+            "global fetch is unavailable; pass options.fetch to buildLinearIssueRefreshClient.",
         };
       }
       const id = target.value;
@@ -173,7 +158,7 @@ export function buildLinearIssueRefreshClient(
         return {
           ok: false,
           code: "target_missing",
-          error: "linear issue refresh requires a non-empty target value."
+          error: "linear issue refresh requires a non-empty target value.",
         };
       }
 
@@ -183,7 +168,7 @@ export function buildLinearIssueRefreshClient(
         apiKey,
         requestTimeoutMs,
         ISSUE_QUERY,
-        { id }
+        { id },
       );
       if (!transport.ok) {
         return transport.failure;
@@ -203,7 +188,7 @@ export function buildLinearIssueRefreshClient(
             ok: false,
             code: "malformed_response",
             error:
-              "Linear comments pageInfo indicated another page without endCursor."
+              "Linear comments pageInfo indicated another page without endCursor.",
           };
         }
         const nextTransport = await sendGraphql(
@@ -212,14 +197,14 @@ export function buildLinearIssueRefreshClient(
           apiKey,
           requestTimeoutMs,
           ISSUE_COMMENTS_PAGE_QUERY,
-          { id, after: page.endCursor }
+          { id, after: page.endCursor },
         );
         if (!nextTransport.ok) {
           return nextTransport.failure;
         }
         const nextPage = readCommentsPage(
           extractIssueField(nextTransport.response.body, "comments"),
-          "Linear issue comments page lookup"
+          "Linear issue comments page lookup",
         );
         if (!nextPage.ok) return nextPage.error;
         collected.push(...nextPage.page.comments);
@@ -229,9 +214,9 @@ export function buildLinearIssueRefreshClient(
       return {
         ok: true,
         issue: issueResult.issue,
-        comments: collected
+        comments: collected,
       };
-    }
+    },
   };
 }
 
@@ -253,8 +238,8 @@ function readIssue(body: unknown): ReadIssueResult {
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear issue refresh response body was not a JSON object."
-      }
+        error: "Linear issue refresh response body was not a JSON object.",
+      },
     };
   }
   const errors = (body as Record<string, unknown>)["errors"];
@@ -265,8 +250,8 @@ function readIssue(body: unknown): ReadIssueResult {
         error: {
           ok: false,
           code: "auth_unavailable",
-          error: `Linear GraphQL auth rejected: ${describeGraphqlErrors(errors)}`
-        }
+          error: `Linear GraphQL auth rejected: ${describeGraphqlErrors(errors)}`,
+        },
       };
     }
     return {
@@ -274,8 +259,8 @@ function readIssue(body: unknown): ReadIssueResult {
       error: {
         ok: false,
         code: "malformed_response",
-        error: `Linear GraphQL errors: ${describeGraphqlErrors(errors)}`
-      }
+        error: `Linear GraphQL errors: ${describeGraphqlErrors(errors)}`,
+      },
     };
   }
 
@@ -286,8 +271,8 @@ function readIssue(body: unknown): ReadIssueResult {
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear issue refresh response missing data.issue."
-      }
+        error: "Linear issue refresh response missing data.issue.",
+      },
     };
   }
   const issue = (data as Record<string, unknown>)["issue"];
@@ -297,8 +282,8 @@ function readIssue(body: unknown): ReadIssueResult {
       error: {
         ok: false,
         code: "target_missing",
-        error: "Linear issue refresh returned no issue."
-      }
+        error: "Linear issue refresh returned no issue.",
+      },
     };
   }
   if (typeof issue !== "object" || Array.isArray(issue)) {
@@ -307,8 +292,8 @@ function readIssue(body: unknown): ReadIssueResult {
       error: {
         ok: false,
         code: "malformed_response",
-        error: "Linear issue refresh returned a non-object issue payload."
-      }
+        error: "Linear issue refresh returned a non-object issue payload.",
+      },
     };
   }
 
@@ -320,11 +305,14 @@ function readIssue(body: unknown): ReadIssueResult {
 }
 
 function extractIssueField(body: unknown, field: string): unknown {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    return undefined;
   const data = (body as Record<string, unknown>)["data"];
-  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    return undefined;
   const issue = (data as Record<string, unknown>)["issue"];
-  if (!issue || typeof issue !== "object" || Array.isArray(issue)) return undefined;
+  if (!issue || typeof issue !== "object" || Array.isArray(issue))
+    return undefined;
   return (issue as Record<string, unknown>)[field];
 }
 
@@ -340,7 +328,7 @@ type CommentsPageReadResult =
 
 function readCommentsPage(
   raw: unknown,
-  context: string
+  context: string,
 ): CommentsPageReadResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return malformed(context, "is missing a comments connection");
@@ -361,13 +349,13 @@ function readCommentsPage(
     if (!id || typeof body !== "string") {
       return malformed(
         context,
-        "comments.nodes contains a node without a string id and body"
+        "comments.nodes contains a node without a string id and body",
       );
     }
     out.push({
       id,
       body,
-      url: optionalString(commentRecord["url"]) ?? null
+      url: optionalString(commentRecord["url"]) ?? null,
     });
   }
   const pageInfo = record["pageInfo"];
@@ -387,7 +375,7 @@ function readCommentsPage(
   ) {
     return malformed(
       context,
-      "comments.pageInfo.endCursor is not a string or null"
+      "comments.pageInfo.endCursor is not a string or null",
     );
   }
   return {
@@ -398,8 +386,8 @@ function readCommentsPage(
       endCursor:
         typeof rawEndCursor === "string" && rawEndCursor.length > 0
           ? rawEndCursor
-          : null
-    }
+          : null,
+    },
   };
 }
 
@@ -409,8 +397,8 @@ function malformed(context: string, detail: string): CommentsPageReadResult {
     error: {
       ok: false,
       code: "malformed_response",
-      error: `${context} returned a malformed comments page: ${detail}.`
-    }
+      error: `${context} returned a malformed comments page: ${detail}.`,
+    },
   };
 }
 
@@ -420,127 +408,78 @@ async function sendGraphql(
   apiKey: string,
   requestTimeoutMs: number,
   query: string,
-  variables: Record<string, unknown>
+  variables: Record<string, unknown>,
 ): Promise<GraphqlTransportResult> {
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-  const controller = new AbortController();
-  const requestState: { phase: "request" | "response_body" } = {
-    phase: "request"
-  };
+  const transport = await postLinearGraphql({
+    fetch: fetchImpl,
+    endpoint,
+    apiKey,
+    requestTimeoutMs,
+    query,
+    variables,
+  });
 
-  try {
-    const requestPromise = (async () => {
-      const fetched = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: apiKey
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: controller.signal
-      });
-      if (fetched.status === 401 || fetched.status === 403 || !fetched.ok) {
-        return { response: fetched, bodyText: null as string | null };
-      }
-      requestState.phase = "response_body";
-      return { response: fetched, bodyText: await fetched.text() };
-    })();
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-        reject(new LinearIssueRefreshTimeoutError(requestTimeoutMs));
-      }, requestTimeoutMs);
-    });
-
-    const settled = await Promise.race([requestPromise, timeoutPromise]);
-    const response = settled.response;
-    const bodyText = settled.bodyText;
-
-    if (response.status === 401 || response.status === 403) {
-      return {
-        ok: false,
-        failure: {
-          ok: false,
-          code: "auth_unavailable",
-          error: `Linear API rejected credentials (HTTP ${response.status}).`
-        }
-      };
-    }
-    if (!response.ok) {
-      return {
-        ok: false,
-        failure: {
-          ok: false,
-          code: "adapter_threw",
-          error: `Linear API returned HTTP ${response.status}.`
-        }
-      };
-    }
-    if (bodyText === null) {
-      return {
-        ok: false,
-        failure: {
-          ok: false,
-          code: "adapter_threw",
-          error: "linear issue refresh response body was not read"
-        }
-      };
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(bodyText);
-    } catch (error) {
-      return {
-        ok: false,
-        failure: {
-          ok: false,
-          code: "malformed_response",
-          error: `linear issue refresh response was not JSON: ${describeError(error)}`
-        }
-      };
-    }
-
-    return { ok: true, response: { status: response.status, body: parsed } };
-  } catch (error) {
-    if (
-      error instanceof LinearIssueRefreshTimeoutError ||
-      (timedOut &&
-        error instanceof Error &&
-        (error.name === "AbortError" || error.name === "TimeoutError"))
-    ) {
+  switch (transport.kind) {
+    case "timeout":
       return {
         ok: false,
         failure: {
           ok: false,
           code: "refresh_timeout",
-          error: `linear issue refresh request timed out after ${requestTimeoutMs}ms`
-        }
+          error: `linear issue refresh request timed out after ${transport.timeoutMs}ms`,
+        },
       };
-    }
-    if (requestState.phase === "response_body") {
+    case "body_read_failed":
       return {
         ok: false,
         failure: {
           ok: false,
           code: "adapter_threw",
-          error: `linear issue refresh response body read failed: ${describeError(error)}`
-        }
+          error: `linear issue refresh response body read failed: ${describeError(transport.error)}`,
+        },
       };
-    }
-    return {
-      ok: false,
-      failure: {
+    case "request_failed":
+      return {
         ok: false,
-        code: "adapter_threw",
-        error: `linear issue refresh transport failed: ${describeError(error)}`
+        failure: {
+          ok: false,
+          code: "adapter_threw",
+          error: `linear issue refresh transport failed: ${describeError(transport.error)}`,
+        },
+      };
+    case "http_error":
+      if (transport.status === 401 || transport.status === 403) {
+        return {
+          ok: false,
+          failure: {
+            ok: false,
+            code: "auth_unavailable",
+            error: `Linear API rejected credentials (HTTP ${transport.status}).`,
+          },
+        };
       }
-    };
-  } finally {
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      return {
+        ok: false,
+        failure: {
+          ok: false,
+          code: "adapter_threw",
+          error: `Linear API returned HTTP ${transport.status}.`,
+        },
+      };
+    case "invalid_json":
+      return {
+        ok: false,
+        failure: {
+          ok: false,
+          code: "malformed_response",
+          error: `linear issue refresh response was not JSON: ${describeError(transport.error)}`,
+        },
+      };
+    case "success":
+      return {
+        ok: true,
+        response: { status: transport.status, body: transport.body },
+      };
   }
 }
 
@@ -572,7 +511,8 @@ function describeGraphqlErrors(errors: unknown[]): string {
   for (const entry of errors) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
     const message = (entry as Record<string, unknown>)["message"];
-    if (typeof message === "string" && message.length > 0) messages.push(message);
+    if (typeof message === "string" && message.length > 0)
+      messages.push(message);
   }
   return messages.length > 0 ? messages.join("; ") : "<no message>";
 }
@@ -596,7 +536,7 @@ function resolveRequestTimeoutMs(timeoutMs: number | undefined): number {
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
     throw new Error(
-      `linear issue refresh request timeout must be a positive integer in milliseconds, got ${timeoutMs}`
+      `linear issue refresh request timeout must be a positive integer in milliseconds, got ${timeoutMs}`,
     );
   }
   return timeoutMs;
