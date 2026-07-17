@@ -723,7 +723,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       ),
     ).toBe("2\n");
     db.close();
-  }, 15_000);
+  });
 
   it("refuses a symlinked native goal-loop round directory", async () => {
     const repoPath = initNativeDispatchRepo();

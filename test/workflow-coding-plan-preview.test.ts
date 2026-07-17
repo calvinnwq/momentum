@@ -68,6 +68,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         stepId: "merge-cleanup",
         kind: "merge-cleanup",
         executor: "script",
+        config: { command: "merge-cleanup" },
         order: 4,
         required: true,
         state: "pending",
