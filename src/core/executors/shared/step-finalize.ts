@@ -407,9 +407,12 @@ type ReadNormalizedResultFile =
 function readNormalizedResultFile(
   resultFilePath: string,
 ): ReadNormalizedResultFile {
-  let stat: fs.Stats;
+  let handle: number;
   try {
-    stat = fs.lstatSync(resultFilePath);
+    handle = fs.openSync(
+      resultFilePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
   } catch (error) {
     if (errnoCode(error) === "ENOENT") {
       return {
@@ -426,25 +429,35 @@ function readNormalizedResultFile(
     };
   }
 
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    return {
-      ok: false,
-      code: "result_invalid",
-      error: `live step result file at ${resultFilePath} is not a regular file.`,
-    };
-  }
-
-  if (stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
-    return {
-      ok: false,
-      code: "result_invalid",
-      error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
-    };
-  }
-
-  let raw: string;
   try {
-    raw = fs.readFileSync(resultFilePath, "utf-8");
+    const stat = fs.fstatSync(handle);
+    if (!stat.isFile()) {
+      return {
+        ok: false,
+        code: "result_invalid",
+        error: `live step result file at ${resultFilePath} is not a regular file.`,
+      };
+    }
+
+    if (stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
+      return {
+        ok: false,
+        code: "result_invalid",
+        error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
+      };
+    }
+
+    const raw = fs.readFileSync(handle, "utf-8");
+    const parsed = parseRunnerResult(raw);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        code: "result_invalid",
+        error: `live step result JSON is invalid: ${parsed.error}`,
+      };
+    }
+
+    return { ok: true, result: parsed.value };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -452,18 +465,9 @@ function readNormalizedResultFile(
       code: "result_invalid",
       error: `live step result file at ${resultFilePath} is unreadable: ${detail}`,
     };
+  } finally {
+    fs.closeSync(handle);
   }
-
-  const parsed = parseRunnerResult(raw);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      code: "result_invalid",
-      error: `live step result JSON is invalid: ${parsed.error}`,
-    };
-  }
-
-  return { ok: true, result: parsed.value };
 }
 
 function errnoCode(error: unknown): string | undefined {

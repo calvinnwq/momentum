@@ -866,6 +866,53 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
 
+  it("rejects a replaced artifact directory after the prompted runner returns", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const artifactRoot = makeTempDir("momentum-goal-loop-mechanism-round-");
+    const escapedRoot = makeTempDir("momentum-goal-loop-mechanism-escaped-");
+    const promptFilePath = path.join(artifactRoot, "prompt.md");
+    const resultFilePath = path.join(artifactRoot, "result.json");
+    const verificationLogPath = path.join(artifactRoot, "verification.log");
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      artifactRoot,
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a replaced round artifact directory.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: (runnerInput) => {
+        fs.rmSync(artifactRoot, { recursive: true });
+        fs.symlinkSync(escapedRoot, artifactRoot, "dir");
+        fs.writeFileSync(
+          runnerInput.resultFilePath,
+          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          "utf-8",
+        );
+      },
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
+    expect(mechanism.result).toBeNull();
+    expect(mechanism.artifacts).toEqual({});
+    expect(fs.readdirSync(escapedRoot)).toEqual(["result.json"]);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
   it("routes a prompted runner that writes no result to explicit missing-result recovery", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(

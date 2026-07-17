@@ -832,6 +832,7 @@ function createLiveStepHostBindingsResolver(
         }),
         runRound: (round) =>
           goalLoopRoundMechanismFromPromptedResultFile({
+            artifactRoot: roundRoot,
             repoPath: safety.repoPath,
             baseHead: repoSafety.baseHead,
             resultFilePath: roundResultPath,

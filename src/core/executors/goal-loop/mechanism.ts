@@ -107,10 +107,19 @@ export type GoalLoopPromptedRoundRunnerInput = {
  */
 export type GoalLoopRoundMechanismFromPromptedResultFileInput =
   GoalLoopRoundMechanismFromResultFileInput & {
+    artifactRoot?: string;
     promptFilePath: string;
     promptInput: Omit<GoalLoopRoundPromptInput, "resultPath">;
     runPromptedRound: (input: GoalLoopPromptedRoundRunnerInput) => void;
   };
+
+type GoalLoopArtifactDirectory = {
+  root: string;
+  canonicalRoot: string;
+  handle: number;
+  device: number;
+  inode: number;
+};
 
 /**
  * Run the existing shared goal / iteration finalize safety over a finished round's
@@ -120,21 +129,48 @@ export type GoalLoopRoundMechanismFromPromptedResultFileInput =
 export function goalLoopRoundMechanismFromResultFile(
   input: GoalLoopRoundMechanismFromResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  const finalize = finalizeWorkflowStepFromResultFile(input);
+  return goalLoopRoundMechanismFromResultFileWithDirectory(input, null);
+}
+
+function goalLoopRoundMechanismFromResultFileWithDirectory(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  artifactDirectory: GoalLoopArtifactDirectory | null,
+): GoalLoopRoundMechanismResult {
+  const capturedBeforeFinalize = readResultForCapture(input.resultFilePath);
+  const guardedInput =
+    artifactDirectory === null
+      ? input
+      : {
+          ...input,
+          beforeGitMutation: (mutation: "commit" | "reset") => {
+            if (!artifactDirectoryIsCurrent(artifactDirectory)) {
+              return {
+                ok: false as const,
+                error: "goal-loop artifact directory identity changed",
+              };
+            }
+            return input.beforeGitMutation?.(mutation) ?? { ok: true as const };
+          },
+        };
+  const finalize = finalizeWorkflowStepFromResultFile(guardedInput);
   const captured = documentUnusable(finalize)
     ? { result: null, resultDigest: null }
-    : readResultForCapture(input.resultFilePath);
+    : capturedBeforeFinalize;
   const changedFiles = committedChangedFiles(input, finalize);
+  const artifactsSafe =
+    artifactDirectory === null || artifactDirectoryIsCurrent(artifactDirectory);
   return {
     result: captured.result,
     resultDigest: captured.resultDigest,
     finalize,
-    artifacts: goalLoopMechanismArtifacts(
-      input,
-      finalize,
-      captured.resultDigest,
-      changedFiles,
-    ),
+    artifacts: artifactsSafe
+      ? goalLoopMechanismArtifacts(
+          input,
+          finalize,
+          captured.resultDigest,
+          changedFiles,
+        )
+      : {},
     changedFiles,
   };
 }
@@ -151,6 +187,22 @@ export function goalLoopRoundMechanismFromResultFile(
  */
 export function goalLoopRoundMechanismFromPromptedResultFile(
   input: GoalLoopRoundMechanismFromPromptedResultFileInput,
+): GoalLoopRoundMechanismResult {
+  const openedDirectory = openGoalLoopArtifactDirectory(input);
+  if (!openedDirectory.ok) {
+    return promptedRoundUnsafeArtifactRecovery(input, openedDirectory.error);
+  }
+  const artifactDirectory = openedDirectory.directory;
+  try {
+    return runPromptedResultFileMechanism(input, artifactDirectory);
+  } finally {
+    if (artifactDirectory !== null) fs.closeSync(artifactDirectory.handle);
+  }
+}
+
+function runPromptedResultFileMechanism(
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
+  artifactDirectory: GoalLoopArtifactDirectory | null,
 ): GoalLoopRoundMechanismResult {
   const clearedResult = clearPromptedResultFile(input.resultFilePath);
   if (!clearedResult.ok) {
@@ -169,7 +221,25 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
     });
     fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
     writeFileNoFollow(input.promptFilePath, prompt);
+    if (
+      artifactDirectory !== null &&
+      !artifactDirectoryIsCurrent(artifactDirectory)
+    ) {
+      return promptedRoundUnsafeArtifactRecovery(
+        input,
+        "goal-loop artifact directory identity changed before execution",
+      );
+    }
   } catch (error) {
+    if (
+      artifactDirectory !== null &&
+      !artifactDirectoryIsCurrent(artifactDirectory)
+    ) {
+      return promptedRoundUnsafeArtifactRecovery(
+        input,
+        "goal-loop artifact directory identity changed before execution",
+      );
+    }
     return promptedRoundRecovery(
       input,
       promptedResultRecoveryOutcome(input.resultFilePath),
@@ -184,6 +254,15 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
       prompt,
     });
   } catch (error) {
+    if (
+      artifactDirectory !== null &&
+      !artifactDirectoryIsCurrent(artifactDirectory)
+    ) {
+      return promptedRoundUnsafeArtifactRecovery(
+        input,
+        "goal-loop artifact directory identity changed during execution",
+      );
+    }
     return promptedRoundRecovery(
       input,
       promptedResultRecoveryOutcome(input.resultFilePath),
@@ -191,7 +270,102 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
     );
   }
 
-  return goalLoopRoundMechanismFromResultFile(input);
+  if (
+    artifactDirectory !== null &&
+    !artifactDirectoryIsCurrent(artifactDirectory)
+  ) {
+    return promptedRoundUnsafeArtifactRecovery(
+      input,
+      "goal-loop artifact directory identity changed during execution",
+    );
+  }
+
+  return goalLoopRoundMechanismFromResultFileWithDirectory(
+    input,
+    artifactDirectory,
+  );
+}
+
+function openGoalLoopArtifactDirectory(
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
+):
+  | { ok: true; directory: GoalLoopArtifactDirectory | null }
+  | { ok: false; error: string } {
+  if (input.artifactRoot === undefined) {
+    return { ok: true, directory: null };
+  }
+  const root = path.resolve(input.artifactRoot);
+  for (const artifactPath of [
+    input.promptFilePath,
+    input.resultFilePath,
+    input.verificationLogPath,
+    `${input.verificationLogPath}.finalization.json`,
+  ]) {
+    if (path.dirname(path.resolve(artifactPath)) !== root) {
+      return {
+        ok: false,
+        error: "goal-loop artifact path is outside the round directory",
+      };
+    }
+  }
+  let handle: number;
+  try {
+    handle = fs.openSync(
+      root,
+      fs.constants.O_RDONLY |
+        fs.constants.O_DIRECTORY |
+        fs.constants.O_NOFOLLOW,
+    );
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+  let retained = false;
+  try {
+    const stat = fs.fstatSync(handle);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: "goal-loop artifact root is not a directory" };
+    }
+    const directory: GoalLoopArtifactDirectory = {
+      root,
+      canonicalRoot: fs.realpathSync(root),
+      handle,
+      device: stat.dev,
+      inode: stat.ino,
+    };
+    if (!artifactDirectoryIsCurrent(directory)) {
+      return {
+        ok: false,
+        error: "goal-loop artifact directory identity changed",
+      };
+    }
+    retained = true;
+    return { ok: true, directory };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  } finally {
+    if (!retained) fs.closeSync(handle);
+  }
+}
+
+function artifactDirectoryIsCurrent(
+  directory: GoalLoopArtifactDirectory,
+): boolean {
+  try {
+    const openStat = fs.fstatSync(directory.handle);
+    const pathStat = fs.lstatSync(directory.root);
+    return (
+      openStat.isDirectory() &&
+      !pathStat.isSymbolicLink() &&
+      pathStat.isDirectory() &&
+      openStat.dev === directory.device &&
+      openStat.ino === directory.inode &&
+      pathStat.dev === directory.device &&
+      pathStat.ino === directory.inode &&
+      fs.realpathSync(directory.root) === directory.canonicalRoot
+    );
+  } catch {
+    return false;
+  }
 }
 
 function clearPromptedResultFile(
@@ -237,6 +411,23 @@ function promptedRoundRecovery(
     resultDigest: null,
     finalize,
     artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
+    changedFiles: [],
+  };
+}
+
+function promptedRoundUnsafeArtifactRecovery(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  error: string,
+): GoalLoopRoundMechanismResult {
+  return {
+    result: null,
+    resultDigest: null,
+    finalize: {
+      outcome: "result_invalid",
+      resultFilePath: input.resultFilePath,
+      error,
+    },
+    artifacts: {},
     changedFiles: [],
   };
 }
@@ -309,17 +500,31 @@ type CapturedResultDocument = {
  * so the mechanism never throws.
  */
 function readResultForCapture(resultFilePath: string): CapturedResultDocument {
-  let raw: string;
+  let handle: number;
   try {
-    raw = fs.readFileSync(resultFilePath, "utf-8");
+    handle = fs.openSync(
+      resultFilePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
   } catch {
     return { result: null, resultDigest: null };
   }
-  const parsed = parseRunnerResult(raw);
-  if (!parsed.ok) {
+  try {
+    const stat = fs.fstatSync(handle);
+    if (!stat.isFile()) {
+      return { result: null, resultDigest: null };
+    }
+    const raw = fs.readFileSync(handle, "utf-8");
+    const parsed = parseRunnerResult(raw);
+    if (!parsed.ok) {
+      return { result: null, resultDigest: null };
+    }
+    return { result: parsed.value, resultDigest: sha256ContentDigest(raw) };
+  } catch {
     return { result: null, resultDigest: null };
+  } finally {
+    fs.closeSync(handle);
   }
-  return { result: parsed.value, resultDigest: sha256ContentDigest(raw) };
 }
 
 /**
@@ -344,13 +549,24 @@ function sha256ContentDigest(raw: string): string {
  * mechanism never throws.
  */
 function verificationLogDigest(verificationLogPath: string): string | null {
-  let raw: string;
+  let handle: number;
   try {
-    raw = fs.readFileSync(verificationLogPath, "utf-8");
+    handle = fs.openSync(
+      verificationLogPath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
   } catch {
     return null;
   }
-  return sha256ContentDigest(raw);
+  try {
+    const stat = fs.fstatSync(handle);
+    if (!stat.isFile()) return null;
+    return sha256ContentDigest(fs.readFileSync(handle, "utf-8"));
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
 /**
