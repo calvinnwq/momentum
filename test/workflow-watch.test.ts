@@ -481,13 +481,17 @@ describe("momentum workflow run watch", () => {
 
   it("dispatches at most one approved step before returning the supervisor envelope", async () => {
     const dataDir = makeTempDir();
+    const repoPath = path.join(dataDir, "repo");
+    fs.mkdirSync(repoPath, { recursive: true });
+    initRepo(repoPath);
+    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
     const runId = "mwf-watch-dispatch-approved";
     const db = openDb(dataDir);
     try {
       persistWorkflowRunStart(db, {
         definition: CODING_WORKFLOW_DEFINITION_V1,
         runId,
-        repoPath: "/repos/momentum",
+        repoPath,
         objective: "Exercise one watch dispatcher tick",
         now: SEED_NOW,
         source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
@@ -502,16 +506,19 @@ describe("momentum workflow run watch", () => {
       db.close();
     }
 
-    const result = await run([
-      "workflow",
-      "run",
-      "watch",
-      runId,
-      "--once",
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath },
+    );
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1128,10 +1135,10 @@ describe("momentum workflow run watch", () => {
         "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'",
       ).run(runId);
       db.exec(
-        `CREATE TRIGGER fail_watch_round_insert
-           BEFORE INSERT ON executor_rounds
+        `CREATE TRIGGER fail_watch_invocation_insert
+           BEFORE INSERT ON executor_invocations
            BEGIN
-             SELECT RAISE(ABORT, 'watch round insert failed');
+             SELECT RAISE(ABORT, 'watch invocation insert failed');
            END`,
       );
     } finally {
@@ -1156,7 +1163,7 @@ describe("momentum workflow run watch", () => {
     };
     expect(payload).toMatchObject({
       code: "data_dir_failed",
-      message: "watch round insert failed",
+      message: "watch invocation insert failed",
     });
 
     const after = openDb(dataDir);
