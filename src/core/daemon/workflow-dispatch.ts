@@ -66,6 +66,11 @@ import {
   createScriptCommandRoundRunner,
 } from "../executors/single-shot/mechanism.js";
 import {
+  GoalLoopSdkExecutor,
+  type GoalLoopExecutorHostBindings,
+} from "../executors/goal-loop/sdk.js";
+import { goalLoopRoundMechanismFromPromptedResultFile } from "../executors/goal-loop/mechanism.js";
+import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_EXECUTOR_NAME,
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
@@ -117,7 +122,10 @@ import {
   deriveDispatchInvocationId,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
-import { loadExecutorInvocation } from "../executors/loop/persist.js";
+import {
+  listExecutorRoundsForInvocation,
+  loadExecutorInvocation,
+} from "../executors/loop/persist.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
 import {
@@ -310,19 +318,21 @@ export function buildProfileBackedSdkExecutors(): Executor[] {
   ).map((name) =>
     name === "delegate-supervisor"
       ? new DelegateSupervisorExecutor()
-      : name === "one-shot" || name === "script"
-        ? new SingleShotExecutor(name, (round, context) => {
-            const runner = context.hostBindings.runRound;
-            return runner === undefined
-              ? {
-                  outcome: {
-                    ok: false,
-                    recoveryCode: "runtime_unavailable",
-                  },
-                }
-              : runner(round, context);
-          })
-        : new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
+      : name === "goal-loop"
+        ? new GoalLoopSdkExecutor()
+        : name === "one-shot" || name === "script"
+          ? new SingleShotExecutor(name, (round, context) => {
+              const runner = context.hostBindings.runRound;
+              return runner === undefined
+                ? {
+                    outcome: {
+                      ok: false,
+                      recoveryCode: "runtime_unavailable",
+                    },
+                  }
+                : runner(round, context);
+            })
+          : new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
   );
 }
 
@@ -340,12 +350,14 @@ function createLiveStepHostBindingsResolver(
   }):
     | LiveStepSdkHostBindings
     | SingleShotExecutorHostBindings
+    | GoalLoopExecutorHostBindings
     | DelegateSupervisorHostBindings
     | Record<string, never> => {
     const isLiveStep = input.executor instanceof LiveStepSdkExecutor;
     const isSingleShot = input.executor instanceof SingleShotExecutor;
+    const isGoalLoop = input.executor instanceof GoalLoopSdkExecutor;
     const isDelegate = input.executor instanceof DelegateSupervisorExecutor;
-    if (!isLiveStep && !isSingleShot && !isDelegate) return {};
+    if (!isLiveStep && !isSingleShot && !isGoalLoop && !isDelegate) return {};
     const { claim, context } = input;
     const provenance = loadDispatchedStepRunProvenance(context.db, claim.runId);
     if (provenance === undefined) {
@@ -546,13 +558,22 @@ function createLiveStepHostBindingsResolver(
       claim,
     );
     if (!selection.ok) throw new Error(selection.reason);
-    const singleShotWrapper = isSingleShot
-      ? profile.wrappers.get(step.kind)
-      : undefined;
-    if (isSingleShot && singleShotWrapper === undefined) {
+    const nativeWrapper =
+      isSingleShot || isGoalLoop ? profile.wrappers.get(step.kind) : undefined;
+    if ((isSingleShot || isGoalLoop) && nativeWrapper === undefined) {
       throw new RegisteredExecutorHostBindingsError(
         "runtime_unavailable",
-        `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${(input.executor as SingleShotExecutor).name}`,
+        `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${input.executor.name}`,
+      );
+    }
+    if (
+      isGoalLoop &&
+      typeof input.config.timeoutMs === "number" &&
+      input.config.timeoutMs !== nativeWrapper!.timeoutSec * 1_000
+    ) {
+      throw new RegisteredExecutorHostBindingsError(
+        "invalid_input",
+        "portable goal-loop timeoutMs does not match resolved host timeout",
       );
     }
     const repoOwnership = acquireLiveStepRepoOwnership({
@@ -585,9 +606,148 @@ function createLiveStepHostBindingsResolver(
       beforeGitMutation: repoOwnership.authorizeMutation,
       beginGitMutation: repoOwnership.beginMutation,
     };
+    if (isGoalLoop) {
+      const roundIndex = listExecutorRoundsForInvocation(
+        context.db,
+        invocation.invocationId,
+      ).length;
+      const roundRoot = path.join(runDir, `round-${roundIndex + 1}`);
+      try {
+        fs.mkdirSync(roundRoot, { recursive: true });
+      } catch (error) {
+        repoOwnership.settle(false);
+        throw new RegisteredExecutorHostBindingsError(
+          "runtime_unavailable",
+          `goal-loop round directory unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const roundResultPath = path.join(
+        roundRoot,
+        path.basename(resolved.exec.resultJsonPath),
+      );
+      const roundLogPath = path.join(
+        roundRoot,
+        path.basename(resolved.exec.executorLogPath),
+      );
+      const roundVerificationPath = path.join(
+        roundRoot,
+        path.basename(safety.repoSafety.verificationLogPath),
+      );
+      const promptPath = path.join(roundRoot, "prompt.md");
+      const objective = loadWorkflowRunObjective(context.db, claim.runId);
+      if (objective === null) {
+        repoOwnership.settle(false);
+        throw new RegisteredExecutorHostBindingsError(
+          "invalid_input",
+          "goal-loop objective is unavailable",
+        );
+      }
+      const priorRounds = listExecutorRoundsForInvocation(
+        context.db,
+        invocation.invocationId,
+      );
+      const executorInput = buildDispatchedStepExecutorInput(
+        step.kind,
+        claim.runId,
+        claim.stepId,
+        {
+          repoPath: safety.repoPath,
+          runDir: roundRoot,
+          resultJsonPath: roundResultPath,
+          executorLogPath: roundLogPath,
+          promptPath,
+          attempt,
+          env,
+          config: { ...input.config },
+        },
+        selection.selection,
+      );
+      const bindings: GoalLoopExecutorHostBindings = {
+        start: {
+          roundId: `${invocation.invocationId}::round::${roundIndex}`,
+          invocationId: invocation.invocationId,
+          workflowRunId: invocation.workflowRunId,
+          stepRunId: invocation.stepRunId,
+          stepKey: invocation.stepKey,
+          attempt: invocation.attempt,
+          roundIndex,
+          inputDigest: `sha256:${crypto
+            .createHash("sha256")
+            .update(
+              JSON.stringify({
+                config: input.config,
+                priorRounds: priorRounds.map((round) => ({
+                  roundIndex: round.roundIndex,
+                  resultDigest: round.resultDigest,
+                  commitSha: round.commitSha,
+                  recoveryCode: round.recoveryCode,
+                })),
+              }),
+            )
+            .digest("hex")}`,
+          artifactRoot: roundRoot,
+          logPaths: [roundLogPath],
+          startedAt: context.now,
+        },
+        runRound: (round) =>
+          goalLoopRoundMechanismFromPromptedResultFile({
+            repoPath: safety.repoPath,
+            baseHead: repoSafety.baseHead,
+            resultFilePath: roundResultPath,
+            verificationCommands: [...repoSafety.verificationCommands],
+            verificationTimeoutSec: repoSafety.verificationTimeoutSec,
+            verificationLogPath: roundVerificationPath,
+            beforeGitMutation: repoSafety.beforeGitMutation,
+            promptFilePath: promptPath,
+            promptInput: {
+              objective,
+              round: {
+                workflowRunId: round.workflowRunId,
+                stepRunId: round.stepRunId,
+                invocationId: round.invocationId,
+                roundId: round.roundId,
+                roundIndex: round.roundIndex,
+                attempt: round.attempt,
+              },
+              repo: {
+                path: safety.repoPath,
+                baseHead: repoSafety.baseHead,
+                branch: resolveDelegateBranch(safety.repoPath),
+              },
+              issueScope: [
+                loadWorkflowRunIssueScopeIdentifier(context.db, claim.runId),
+              ].filter((value): value is string => value !== null),
+              verificationCommands: [...repoSafety.verificationCommands],
+              priorRounds: priorRounds.map((prior) => ({
+                roundIndex: prior.roundIndex,
+                summary: prior.summary,
+                keyLearnings: [...prior.keyLearnings],
+                remainingWork: [...prior.remainingWork],
+                recoveryCode: prior.recoveryCode,
+                commitSha: prior.commitSha,
+              })),
+            },
+            runPromptedRound: () => {
+              const dispatched = dispatchWorkflowStepExecutor(
+                step.kind,
+                executorInput,
+                liveRegistry,
+              );
+              if (!dispatched.ok) {
+                throw new Error(`${dispatched.code}: ${dispatched.error}`);
+              }
+            },
+          }),
+        settleRepoOwnership: (completionDurable) => {
+          const repo = inspectRepo(safety.repoPath);
+          repoOwnership.settle(completionDurable && repo.ok);
+        },
+      };
+      return bindings;
+    }
     if (isSingleShot) {
       const singleShot = input.executor as SingleShotExecutor;
-      const wrapper = singleShotWrapper!;
+      const wrapper = nativeWrapper!;
       const runRound =
         singleShot.name === "one-shot"
           ? createOneShotLiveWrapperRoundRunner(wrapper, {
@@ -1922,6 +2082,17 @@ function loadWorkflowRunIssueScopeIdentifier(
     return null;
   }
   return null;
+}
+
+function loadWorkflowRunObjective(
+  db: MomentumDb,
+  runId: string,
+): string | null {
+  const row = db
+    .prepare("SELECT objective FROM workflow_runs WHERE id = ?")
+    .get(runId) as { objective: string | null } | undefined;
+  const objective = row?.objective?.trim();
+  return objective === undefined || objective.length === 0 ? null : objective;
 }
 
 function maxDaemonLiveWrapperProfileTimeoutMs(

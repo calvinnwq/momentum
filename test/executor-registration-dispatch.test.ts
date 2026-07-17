@@ -14,6 +14,8 @@ import {
 } from "../src/core/daemon/workflow-dispatch.js";
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
+import { GoalLoopSdkExecutor } from "../src/core/executors/goal-loop/sdk.js";
+import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
 import {
   LiveStepSdkExecutor,
   liveStepBuiltInConfigSchema,
@@ -48,6 +50,17 @@ cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
 {"success":true,"summary":"native one-shot completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
 JSON`;
 const NATIVE_SCRIPT_COMMAND = "printf 'native script\\n' > native-script.txt";
+const NATIVE_GOAL_LOOP_SCRIPT = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/goal-loop-count"
+count=0
+test ! -f "$count_file" || count=$(cat "$count_file")
+count=$((count + 1))
+printf '%s\\n' "$count" > "$count_file"
+printf 'round %s\\n' "$count" > "$MOMENTUM_REPO_PATH/goal-round-$count.txt"
+goal_complete=false
+test "$count" -lt 2 || goal_complete=true
+cat > "$MOMENTUM_RESULT_PATH" <<JSON
+{"success":true,"summary":"goal-loop round $count","key_changes_made":["goal-round-$count.txt"],"key_learnings":["round $count"],"remaining_work":[],"goal_complete":$goal_complete,"commit":{"type":"test","subject":"complete goal-loop round $count","body":"","breaking":false}}
+JSON`;
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -77,7 +90,7 @@ describe("profile-backed built-in registration", () => {
     );
 
     expect(executors.get("one-shot")).toBeInstanceOf(SingleShotExecutor);
-    expect(executors.get("goal-loop")).toBeInstanceOf(LiveStepSdkExecutor);
+    expect(executors.get("goal-loop")).toBeInstanceOf(GoalLoopSdkExecutor);
     expect(executors.get("script")).toBeInstanceOf(SingleShotExecutor);
   });
 
@@ -343,6 +356,358 @@ describe("profile-backed built-in registration", () => {
       db.close();
     },
   );
+
+  it("persists continue then complete across two native goal-loop dispatch turns", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "native-goal-loop-workflow",
+      title: "Native Goal-loop Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          config: { maxRounds: 3 },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "native-goal-loop-run",
+      repoPath,
+      objective: "Complete two durable native rounds",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("native-goal-loop-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "native-goal-loop-run",
+      stepId: "implementation",
+      holder: "native-goal-loop-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "native-goal-loop-worker",
+      now: NOW + 1,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get("native-goal-loop-run", "implementation"),
+    ).toEqual({ state: "running" });
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get("native-goal-loop-run"),
+    ).toEqual({ state: "running" });
+    expect(
+      db
+        .prepare(
+          "SELECT classification, state, commit_sha FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all("native-goal-loop-run"),
+    ).toEqual([
+      {
+        classification: "continue",
+        state: "succeeded",
+        commit_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+      },
+    ]);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "native-goal-loop-worker",
+      now: NOW + 2,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get("native-goal-loop-run", "implementation"),
+    ).toEqual({ state: "succeeded" });
+    expect(
+      db
+        .prepare(
+          "SELECT round_index, classification, state, commit_sha FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all("native-goal-loop-run"),
+    ).toEqual([
+      {
+        round_index: 0,
+        classification: "continue",
+        state: "succeeded",
+        commit_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+      },
+      {
+        round_index: 1,
+        classification: "complete",
+        state: "succeeded",
+        commit_sha: expect.stringMatching(/^[0-9a-f]{40}$/),
+      },
+    ]);
+    expect(
+      fs.readFileSync(
+        path.join(
+          repoPath,
+          ".agent-workflows/native-goal-loop-run/goal-loop-count",
+        ),
+        "utf8",
+      ),
+    ).toBe("2\n");
+    db.close();
+  }, 15_000);
+
+  it("fails closed before goal-loop execution on a mismatched host timeout", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "refused-native-goal-loop-workflow",
+      title: "Refused Native Goal-loop Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          config: { timeoutMs: 4_000 },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "refused-native-goal-loop-run",
+      repoPath,
+      objective: "Refuse mismatched native goal-loop bindings",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("refused-native-goal-loop-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "refused-native-goal-loop-run",
+      stepId: "implementation",
+      holder: "refused-native-goal-loop-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "refused-native-goal-loop-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("refused-native-goal-loop-run"),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "invalid_input",
+    });
+    expect(
+      fs.existsSync(
+        path.join(
+          repoPath,
+          ".agent-workflows/refused-native-goal-loop-run/goal-loop-count",
+        ),
+      ),
+    ).toBe(false);
+    db.close();
+  });
+
+  it("reattaches a checkpointed goal-loop mechanism without rerunning or recommitting", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const definition: WorkflowDefinition = {
+      key: "reattach-goal-loop-workflow",
+      title: "Reattach Goal-loop Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "reattach-goal-loop-run",
+      repoPath,
+      objective: "Reattach completed native work",
+      now: NOW,
+    });
+    const invocationId = "reattach-goal-loop-run::implementation::dispatch";
+    insertExecutorInvocation(
+      db,
+      {
+        invocationId,
+        workflowRunId: "reattach-goal-loop-run",
+        stepRunId: "implementation",
+        stepKey: "implementation",
+        executorFamily: "goal-loop",
+        state: "running",
+        attempt: 1,
+        startedAt: NOW,
+        heartbeatAt: NOW,
+        finishedAt: null,
+      },
+      { now: NOW },
+    );
+    const artifactRoot = path.join(
+      repoPath,
+      ".agent-workflows/reattach-goal-loop-run/round-1",
+    );
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const resultFilePath = path.join(artifactRoot, "result.json");
+    const verificationLogPath = path.join(artifactRoot, "verification.log");
+    const baseHead = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "HEAD"],
+      {
+        encoding: "utf8",
+      },
+    ).trim();
+    let mechanisms = 0;
+    const runRound = () => {
+      mechanisms += 1;
+      fs.writeFileSync(
+        path.join(repoPath, "reattached.txt"),
+        "committed once\n",
+      );
+      fs.writeFileSync(
+        resultFilePath,
+        JSON.stringify({
+          success: true,
+          summary: "checkpointed native goal-loop work",
+          key_changes_made: ["reattached.txt"],
+          key_learnings: [],
+          remaining_work: [],
+          goal_complete: true,
+          commit: {
+            type: "test",
+            subject: "checkpoint native goal-loop work",
+            body: "",
+            breaking: false,
+          },
+        }),
+      );
+      return goalLoopRoundMechanismFromResultFile({
+        repoPath,
+        baseHead,
+        resultFilePath,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath,
+      });
+    };
+    const hostBindings = {
+      start: {
+        roundId: `${invocationId}::round::0`,
+        invocationId,
+        workflowRunId: "reattach-goal-loop-run",
+        stepRunId: "implementation",
+        stepKey: "implementation",
+        attempt: 1,
+        roundIndex: 0,
+        inputDigest: "sha256:reattach",
+        artifactRoot,
+        logPaths: [path.join(artifactRoot, "executor.log")],
+        startedAt: NOW + 1,
+      },
+      runRound,
+    };
+    const executor = new GoalLoopSdkExecutor();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId,
+      now: () => NOW + 1,
+    });
+
+    await executor.tick({
+      state: envelope.snapshot(),
+      config: {},
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+    expect(mechanisms).toBe(1);
+    expect(
+      execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("2");
+
+    await driveExecutorTicks({
+      db,
+      invocationId,
+      executor,
+      config: {},
+      hostBindings: {
+        ...hostBindings,
+        runRound: () => {
+          mechanisms += 1;
+          throw new Error("checkpointed mechanism reran");
+        },
+      },
+      now: () => NOW + 2,
+    });
+
+    expect(mechanisms).toBe(1);
+    expect(
+      execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("2");
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE invocation_id = ?",
+        )
+        .get(invocationId),
+    ).toEqual({ state: "succeeded" });
+    db.close();
+  });
 });
 
 function tempDir(): string {
@@ -391,6 +756,27 @@ function writeNativeDispatchProfile(
         preflight: {
           command: "/bin/sh",
           args: ["-c", script],
+          cwd: "repo",
+          timeout_sec: 5,
+          env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    }),
+  );
+  return profilePath;
+}
+
+function writeGoalLoopDispatchProfile(profileDir: string): string {
+  const profilePath = path.join(profileDir, "goal-loop-profile.json");
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "native-goal-loop-test",
+      wrappers: {
+        implementation: {
+          command: "/bin/sh",
+          args: ["-c", NATIVE_GOAL_LOOP_SCRIPT],
           cwd: "repo",
           timeout_sec: 5,
           env_allow: [],
