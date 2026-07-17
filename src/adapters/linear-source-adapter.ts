@@ -12,9 +12,10 @@
  * The adapter never performs HTTP itself, never reads credentials, and never
  * writes back to Linear. The paginated reconciliation orchestrator lives in
  * `source-reconciliation.ts` and normalizes each fetched issue through
- * `normalizeLinearIssue`; the HTTP-backed Linear client lives in
- * `linear-http-client.ts` and handles GraphQL transport, pagination input,
- * and auth/transport error mapping before the orchestrator persists local
+ * `normalizeLinearIssue`; the HTTP-backed pagination client lives in
+ * `linear-http-client.ts`, owns pagination input and auth/transport error
+ * mapping, and delegates policy-neutral network I/O to
+ * `linear-graphql-transport.ts` before the orchestrator persists local
  * SourceItem rows and snapshots.
  */
 
