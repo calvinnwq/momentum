@@ -27,6 +27,9 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 Built-in executor identities currently include `goal-loop`, `one-shot`,
 `script`, `no-mistakes`, `delegate-supervisor`, `external-apply`, and
 `subworkflow`.
+Production profile-backed registration uses the native `GoalLoopSdkExecutor`
+for `goal-loop`, the native `SingleShotExecutor` lifecycle for `one-shot` and
+`script`, and `DelegateSupervisorExecutor` for delegated tools.
 Step definitions may also name arbitrary valid permanent identities supplied by
 the configured executor registry.
 The legacy values remain readable for durable compatibility. The current
@@ -86,9 +89,10 @@ Executor facade writes are allowed only while the invocation is `running`;
 executor writes, including heartbeat.
 Result-capture observations and their completion checkpoints commit atomically.
 When `mechanism_completed` is durable but daemon classification is not, the
-single-shot daemon entrypoint reattaches the matching non-terminal invocation,
-reconstructs the outcome from that checkpoint, and resumes only classification;
-it never reruns the completed mechanism.
+profile-backed native `goal-loop`, `one-shot`, and `script` entrypoints reattach
+the matching non-terminal invocation, reconstruct the outcome from that
+checkpoint, and resume only classification; they never rerun the completed
+mechanism or repeat its commit.
 New single-shot dispatches materialize the invocation, initial running round,
 and hashed `round_started` dispatch-binding checkpoint in one transaction after
 resolving runtime inputs, so the first durable owner always has its complete
@@ -98,6 +102,12 @@ Every executor declares a strict object config schema. The schema describes only
 portable workflow intent: agent harness/model/effort, tool or command identity,
 timeouts, opt-in `maxRounds`, and policy. Executable paths, cwd, environment,
 credentials, stdin policy, and other machine-local values are host bindings.
+Profile-backed `goal-loop`, `one-shot`, and `script` dispatch resolves its
+runner only through those host bindings.
+A missing live-wrapper profile or kind binding fails closed with
+`runtime_unavailable`; a portable timeout, policy, agent, command, or argv that
+does not match the resolved host binding fails closed with `invalid_input`.
+Neither case falls back to the generic live-step or dogfood mechanism.
 Structural preflight validation and module registration are separate runtime
 wiring; the SDK contract does not make either a private executor hook. The
 single-shot compatibility host also enforces its declared family-specific schema
@@ -187,7 +197,12 @@ Host-owned repo-local log and result paths are excluded from the ignored-path ba
 Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
 Directory-only mode or timestamp mutations therefore cannot evade the baseline.
 Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
-Agent-loop will repeat bounded runner rounds. `delegate-supervisor` composes one
+The native `goal-loop` repeats bounded runner rounds through
+`GoalLoopSdkExecutor` and its narrow prompted-result runner adapter.
+It records one completed round per tick, uses `goal_complete` to recommend
+completion or continuation, and applies an explicit `maxRounds` cap without an
+implicit default cap.
+`delegate-supervisor` composes one
 tool-adapter handoff for the active correlated external run with repeated bounded external-state reads across SDK
 ticks. The executor, not the adapter, owns durable rounds, semantic progress
 heartbeats, four-minute stall recovery, finding and decision projection,
@@ -431,7 +446,13 @@ Configured modules are trusted in-process code, so the no-write guarantee does n
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
 `--implementation-engine` accepts `gnhf`, the persisted compatibility label `native-goal-loop`, or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
-The native dispatch lane executes `gnhf` and legacy `native-goal-loop` through today's same kind-keyed live-wrapper path; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts rather than silently selecting another route.
+The native dispatch lane keeps `gnhf` on the default `delegate-supervisor`
+implementation route.
+Legacy `native-goal-loop` runs use the distinct native `goal-loop` SDK lifecycle;
+both routes resolve their machine-local mechanism from the step-kind binding in
+`MOMENTUM_LIVE_WRAPPER_PROFILE`.
+A persisted `current-gnhf-cwfp` selection fails closed before the implementation
+executor starts rather than silently selecting another route.
 The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.

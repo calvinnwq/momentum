@@ -296,7 +296,7 @@ Behaviour:
   The delegate invocation and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
-  With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
+  Runtime profile requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
 ### JSON envelope (success)
@@ -442,7 +442,8 @@ Optional arguments:
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 - `--implementation-engine <engine>` - select the coding implementation engine recorded on the run's durable `route.implementationEngine`.
   Valid values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`; when omitted, the coding doors select and persist the honest `gnhf` label.
-  `gnhf` and persisted `native-goal-loop` select today's same kind-keyed live-wrapper path. Until the separate compatibility implementation is wired into native dispatch, a run that selects `current-gnhf-cwfp` is parked at the implementation step with `route_config_invalid` rather than silently selecting another implementation.
+  `gnhf` keeps the default `delegate-supervisor` implementation route, while persisted `native-goal-loop` uses the distinct native `goal-loop` SDK lifecycle; both resolve their local mechanism from the step-kind live-wrapper binding.
+  A run that selects `current-gnhf-cwfp` is parked at the implementation step with `route_config_invalid` rather than silently selecting another implementation.
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
@@ -1269,7 +1270,8 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `run.route.implementationEngine` records the selected coding implementation path: `gnhf`, legacy `native-goal-loop`, or `current-gnhf-cwfp`.
-Native dispatch executes `gnhf` and legacy `native-goal-loop` through the same kind-keyed live-wrapper path; `current-gnhf-cwfp` is treated as an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
+The implementation-route execution contract is owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
+`current-gnhf-cwfp` remains an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
 `run.route.steps` is present when a coding run was started with `--steps-json`; it records the per-step harness/model/effort selections the run was started with (only the steps and fields the operator overrode), so the selected route can be audited from durable state.
 Provider-specific model aliases have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
 Malformed route JSON is fail-closed.
@@ -1783,8 +1785,9 @@ OpenClaw hosts that need chat-delivery suppression, path-sanitized inspection co
 That wrapper also config-gates and audits its own local auto-actions before any local state write, records the intended saved status before that write, and appends a matching failed status row if the write fails; the raw watch command only reports `recommendedActionPolicy` and does not write OpenClaw auto-action audit files.
 When the wrapper's local auto-action audit fails closed, it suppresses its own monitor-removal cleanup hint and surfaces a human-required OpenClaw escalation instead of changing the raw watch contract.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
-When `--once` is eligible to dispatch a live-wrapper-owned setup step such as
-`preflight` or `postflight`, `MOMENTUM_LIVE_WRAPPER_PROFILE` must be configured.
+When `--once` is eligible to dispatch a profile-backed step, including native
+`goal-loop`, `one-shot`, `script`, or `delegate-supervisor`,
+`MOMENTUM_LIVE_WRAPPER_PROFILE` must be configured.
 Without that profile, watch refuses before moving the step to `running` so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
 evidence.

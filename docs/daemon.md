@@ -148,11 +148,15 @@ committed as work.
 Process-backed live-wrapper dispatch is supported on Linux and macOS.
 On native Windows, the wrapper launches no supervised command, parks the run
 with `unsupported_platform`, and preserves the refused round for recovery.
-When the variable is unset or blank, supported live-wrapper-owned steps
-get the durable start scaffold only, while unconfigured wrapper kinds fail
-honestly with `runtime_unavailable` if a profile is configured but omits that
-step kind. If a claimed step cannot be resolved or carries an invalid executor
-identity, the dispatcher parks the run behind a
+When the variable is unset or blank, native `goal-loop`, `one-shot`, and
+`script` dispatches fail honestly with `runtime_unavailable` instead of using
+another execution mechanism.
+Other supported live-wrapper-owned steps keep the durable start scaffold for a
+later executor path.
+A configured profile that omits the dispatched step-kind binding also fails
+with `runtime_unavailable`.
+If a claimed step cannot be resolved or carries an invalid executor identity,
+the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
 if the run row vanished before that gate can be written, it still releases the
 dispatch lease so no claim is stranded. Register-only `daemon start` exits before
@@ -206,6 +210,14 @@ the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are normally driven one bounded tick per daemon scheduler
 pass, and a `continue` recommendation leaves the invocation resumable for the
 next pass after the configured poll interval.
+The production profile-backed registry uses the native goal-loop lifecycle for
+`goal-loop`, the native single-shot lifecycle for `one-shot` and `script`, and
+the delegate-supervisor lifecycle for delegated tools.
+Those native lifecycles resolve machine-local commands, environment, policy,
+and repository ownership only through daemon host bindings.
+Missing native bindings fail with `runtime_unavailable`, and a mismatch between
+portable config and the resolved host identity fails with `invalid_input`.
+The daemon does not fall back to the generic live-step or dogfood mechanism.
 Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
 Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
@@ -301,7 +313,9 @@ The `--profile <name>` option on `workflow run start` and `workflow run start-co
 The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
-Native dispatch executes `gnhf` and legacy `native-goal-loop` through the same kind-keyed live-wrapper path; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
+Native dispatch keeps `gnhf` on the default `delegate-supervisor` implementation route.
+Legacy `native-goal-loop` uses the distinct native `goal-loop` SDK lifecycle, while both routes resolve their local mechanism from the step-kind live-wrapper binding.
+A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.
