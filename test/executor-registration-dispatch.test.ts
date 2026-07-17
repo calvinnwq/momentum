@@ -43,6 +43,11 @@ import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-w
 
 const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
+const NATIVE_ONE_SHOT_SCRIPT = `printf 'native dispatch\\n' > "$MOMENTUM_REPO_PATH/native-dispatch.txt"
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"native one-shot completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
+JSON`;
+const NATIVE_SCRIPT_COMMAND = "printf 'native script\\n' > native-script.txt";
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -63,7 +68,7 @@ describe("profile-backed delegated tool dispatch", () => {
 });
 
 describe("profile-backed built-in registration", () => {
-  it("selects the native single-shot lifecycle for one-shot only", () => {
+  it("selects the native single-shot lifecycle for one-shot and script", () => {
     const executors = new Map(
       buildProfileBackedSdkExecutors().map((executor) => [
         executor.name,
@@ -73,7 +78,7 @@ describe("profile-backed built-in registration", () => {
 
     expect(executors.get("one-shot")).toBeInstanceOf(SingleShotExecutor);
     expect(executors.get("goal-loop")).toBeInstanceOf(LiveStepSdkExecutor);
-    expect(executors.get("script")).toBeInstanceOf(LiveStepSdkExecutor);
+    expect(executors.get("script")).toBeInstanceOf(SingleShotExecutor);
   });
 
   it("runs one native one-shot round through production registered dispatch", async () => {
@@ -158,6 +163,186 @@ describe("profile-backed built-in registration", () => {
     ]);
     db.close();
   });
+
+  it("resolves a portable script identity through production host bindings", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeNativeDispatchProfile(
+      tempDir(),
+      NATIVE_SCRIPT_COMMAND,
+    );
+    const definition: WorkflowDefinition = {
+      key: "native-script-workflow",
+      title: "Native Script Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "script",
+          config: {
+            command: "sh",
+            args: ["-c", NATIVE_SCRIPT_COMMAND],
+            timeoutMs: 5_000,
+          },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "native-script-run",
+      repoPath,
+      objective: "Run one bounded native script",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("native-script-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "native-script-run",
+      stepId: "preflight",
+      holder: "native-script-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "native-script-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          `SELECT workflow_steps.state,
+                  executor_rounds.recovery_code,
+                  executor_rounds.summary
+             FROM workflow_steps
+             LEFT JOIN executor_rounds
+               ON executor_rounds.workflow_run_id = workflow_steps.run_id
+              AND executor_rounds.step_run_id = workflow_steps.step_id
+            WHERE workflow_steps.run_id = ? AND workflow_steps.step_id = ?`,
+        )
+        .get("native-script-run", "preflight"),
+    ).toEqual({ state: "succeeded", recovery_code: null, summary: null });
+    expect(
+      db
+        .prepare(
+          "SELECT round_id, state, result_digest FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("native-script-run"),
+    ).toEqual({
+      round_id: "native-script-run::preflight::dispatch::round::0",
+      state: "succeeded",
+      result_digest: null,
+    });
+    expect(
+      fs.readFileSync(path.join(repoPath, "native-script.txt"), "utf8"),
+    ).toBe("native script\n");
+    db.close();
+  });
+
+  it.each([
+    {
+      label: "command identity",
+      config: {
+        command: "bash",
+        args: ["-c", NATIVE_SCRIPT_COMMAND],
+        timeoutMs: 5_000,
+      },
+    },
+    {
+      label: "timeout",
+      config: {
+        command: "sh",
+        args: ["-c", NATIVE_SCRIPT_COMMAND],
+        timeoutMs: 4_000,
+      },
+    },
+  ])(
+    "fails closed before process execution on mismatched script $label",
+    async ({ config }) => {
+      const repoPath = initNativeDispatchRepo();
+      const profilePath = writeNativeDispatchProfile(
+        tempDir(),
+        NATIVE_SCRIPT_COMMAND,
+      );
+      const definition: WorkflowDefinition = {
+        key: "refused-native-script-workflow",
+        title: "Refused Native Script Workflow",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "script",
+            config,
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+      const runId = `refused-native-script-${config.command}-${config.timeoutMs}`;
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath,
+        objective: "Refuse mismatched native script bindings",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run(runId);
+      const claim = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "preflight",
+        holder: "refused-native-script-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+      const production = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!production.ok) throw new Error(production.message);
+
+      await production.dispatch(claim.claim, {
+        db,
+        workerId: "refused-native-script-worker",
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recovery_code: "invalid_input",
+      });
+      expect(fs.existsSync(path.join(repoPath, "native-script.txt"))).toBe(
+        false,
+      );
+      db.close();
+    },
+  );
 });
 
 function tempDir(): string {
@@ -193,7 +378,10 @@ function initNativeDispatchRepo(): string {
   return repoPath;
 }
 
-function writeNativeDispatchProfile(profileDir: string): string {
+function writeNativeDispatchProfile(
+  profileDir: string,
+  script = NATIVE_ONE_SHOT_SCRIPT,
+): string {
   const profilePath = path.join(profileDir, "profile.json");
   fs.writeFileSync(
     profilePath,
@@ -202,14 +390,8 @@ function writeNativeDispatchProfile(profileDir: string): string {
       wrappers: {
         preflight: {
           command: "/bin/sh",
-          args: [
-            "-c",
-            `printf 'native one shot\\n' > "$MOMENTUM_REPO_PATH/one-shot.txt"
-cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"native one-shot completed","key_changes_made":["one-shot.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
-JSON`,
-          ],
-          cwd: "iteration",
+          args: ["-c", script],
+          cwd: "repo",
           timeout_sec: 5,
           env_allow: [],
           result_file: "result.json",

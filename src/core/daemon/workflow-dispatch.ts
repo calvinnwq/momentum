@@ -61,7 +61,10 @@ import {
   SingleShotExecutor,
   type SingleShotExecutorHostBindings,
 } from "../executors/single-shot/sdk.js";
-import { createOneShotLiveWrapperRoundRunner } from "../executors/single-shot/mechanism.js";
+import {
+  createOneShotLiveWrapperRoundRunner,
+  createScriptCommandRoundRunner,
+} from "../executors/single-shot/mechanism.js";
 import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_EXECUTOR_NAME,
@@ -307,8 +310,8 @@ export function buildProfileBackedSdkExecutors(): Executor[] {
   ).map((name) =>
     name === "delegate-supervisor"
       ? new DelegateSupervisorExecutor()
-      : name === "one-shot"
-        ? new SingleShotExecutor("one-shot", (round, context) => {
+      : name === "one-shot" || name === "script"
+        ? new SingleShotExecutor(name, (round, context) => {
             const runner = context.hostBindings.runRound;
             return runner === undefined
               ? {
@@ -543,6 +546,15 @@ function createLiveStepHostBindingsResolver(
       claim,
     );
     if (!selection.ok) throw new Error(selection.reason);
+    const singleShotWrapper = isSingleShot
+      ? profile.wrappers.get(step.kind)
+      : undefined;
+    if (isSingleShot && singleShotWrapper === undefined) {
+      throw new RegisteredExecutorHostBindingsError(
+        "runtime_unavailable",
+        `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${(input.executor as SingleShotExecutor).name}`,
+      );
+    }
     const repoOwnership = acquireLiveStepRepoOwnership({
       claim,
       context,
@@ -574,53 +586,72 @@ function createLiveStepHostBindingsResolver(
       beginGitMutation: repoOwnership.beginMutation,
     };
     if (isSingleShot) {
-      if (input.executor.name !== "one-shot") {
-        throw new RegisteredExecutorHostBindingsError(
-          "runtime_unavailable",
-          `native ${input.executor.name} host bindings are not configured`,
-        );
-      }
-      const wrapper = profile.wrappers.get(step.kind);
-      if (wrapper === undefined) {
-        throw new RegisteredExecutorHostBindingsError(
-          "runtime_unavailable",
-          `live-wrapper profile ${profile.name} has no ${step.kind} binding for native one-shot`,
-        );
-      }
-      const runRound = createOneShotLiveWrapperRoundRunner(wrapper, {
-        repoPath: safety.repoPath,
-        kind: step.kind,
-        env,
-        hostIdentity: {
-          agent: {
-            ...(selection.selection.agentProvider !== null
-              ? { harness: selection.selection.agentProvider }
-              : {}),
-            ...(selection.selection.model !== null
-              ? { model: selection.selection.model }
-              : {}),
-            ...(selection.selection.effort !== null
-              ? { effort: selection.selection.effort }
-              : {}),
-          },
-        },
-        repoSafety: {
-          mode: "finalize",
-          baseHead: repoSafety.baseHead,
-          verificationCommands: [...repoSafety.verificationCommands],
-          verificationTimeoutSec: repoSafety.verificationTimeoutSec,
-          verificationLogPath: repoSafety.verificationLogPath,
-          beforeGitMutation: repoSafety.beforeGitMutation,
-        },
-      });
-      return {
+      const singleShot = input.executor as SingleShotExecutor;
+      const wrapper = singleShotWrapper!;
+      const runRound =
+        singleShot.name === "one-shot"
+          ? createOneShotLiveWrapperRoundRunner(wrapper, {
+              repoPath: safety.repoPath,
+              kind: step.kind,
+              env,
+              hostIdentity: {
+                agent: {
+                  ...(selection.selection.agentProvider !== null
+                    ? { harness: selection.selection.agentProvider }
+                    : {}),
+                  ...(selection.selection.model !== null
+                    ? { model: selection.selection.model }
+                    : {}),
+                  ...(selection.selection.effort !== null
+                    ? { effort: selection.selection.effort }
+                    : {}),
+                },
+              },
+              repoSafety: {
+                mode: "finalize",
+                baseHead: repoSafety.baseHead,
+                verificationCommands: [...repoSafety.verificationCommands],
+                verificationTimeoutSec: repoSafety.verificationTimeoutSec,
+                verificationLogPath: repoSafety.verificationLogPath,
+                beforeGitMutation: repoSafety.beforeGitMutation,
+              },
+            })
+          : createScriptCommandRoundRunner({
+              commandIdentity: path.basename(wrapper.command),
+              command: wrapper.command,
+              args: [...wrapper.args],
+              cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
+              timeoutSec: wrapper.timeoutSec,
+              policyEnvelopeIdentity: profile.name,
+              env: Object.fromEntries(
+                wrapper.envAllow.flatMap((key) =>
+                  env[key] === undefined ? [] : [[key, env[key]]],
+                ),
+              ),
+              repoSafety: {
+                mode: "finalize",
+                baseHead: repoSafety.baseHead,
+                verificationCommands: [...repoSafety.verificationCommands],
+                verificationTimeoutSec: repoSafety.verificationTimeoutSec,
+                verificationLogPath: repoSafety.verificationLogPath,
+                beforeGitMutation: repoSafety.beforeGitMutation,
+                commitIntent: {
+                  type: "chore",
+                  scope: "script",
+                  subject: `run ${path.basename(wrapper.command)}`,
+                  body: "",
+                  breaking: false,
+                },
+              },
+            });
+      const bindings: SingleShotExecutorHostBindings = {
         start: {
           roundId: `${invocation.invocationId}::round::0`,
           invocationId: invocation.invocationId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
           stepKey: invocation.stepKey,
-          family: "one-shot",
+          family: singleShot.name,
           attempt: invocation.attempt,
           inputDigest: `sha256:${crypto
             .createHash("sha256")
@@ -636,6 +667,7 @@ function createLiveStepHostBindingsResolver(
           repoOwnership.settle(completionDurable && repo.ok);
         },
       };
+      return bindings;
     }
     const dispatchKind = isDelegate ? delegateStepKind! : step.kind;
     const executorInput = buildDispatchedStepExecutorInput(
