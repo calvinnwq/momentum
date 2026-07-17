@@ -576,6 +576,16 @@ function createLiveStepHostBindingsResolver(
         "portable goal-loop timeoutMs does not match resolved host timeout",
       );
     }
+    if (
+      isGoalLoop &&
+      typeof input.config.policyEnvelope === "string" &&
+      input.config.policyEnvelope !== profile.name
+    ) {
+      throw new RegisteredExecutorHostBindingsError(
+        "invalid_input",
+        "portable goal-loop policyEnvelope does not match resolved host policy",
+      );
+    }
     const repoOwnership = acquireLiveStepRepoOwnership({
       claim,
       context,
@@ -755,6 +765,7 @@ function createLiveStepHostBindingsResolver(
               kind: step.kind,
               env,
               hostIdentity: {
+                policyEnvelope: profile.name,
                 agent: {
                   ...(selection.selection.agentProvider !== null
                     ? { harness: selection.selection.agentProvider }

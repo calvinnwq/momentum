@@ -106,6 +106,7 @@ describe("profile-backed built-in registration", () => {
           key: "preflight",
           kind: "preflight",
           executor: "one-shot",
+          config: { policyEnvelope: "native-dispatch-test" },
           order: 0,
           required: true,
         },
@@ -480,77 +481,89 @@ describe("profile-backed built-in registration", () => {
     db.close();
   }, 15_000);
 
-  it("fails closed before goal-loop execution on a mismatched host timeout", async () => {
-    const repoPath = initNativeDispatchRepo();
-    const profilePath = writeGoalLoopDispatchProfile(tempDir());
-    const definition: WorkflowDefinition = {
-      key: "refused-native-goal-loop-workflow",
-      title: "Refused Native Goal-loop Workflow",
-      version: 1,
-      steps: [
-        {
-          key: "implementation",
-          kind: "implementation",
-          executor: "goal-loop",
-          config: { timeoutMs: 4_000 },
-          order: 0,
-          required: true,
-        },
-      ],
-    };
-    const db = openDb(tempDir());
-    persistWorkflowDefinition(db, definition, { now: NOW });
-    persistWorkflowRunStart(db, {
-      definition,
-      runId: "refused-native-goal-loop-run",
-      repoPath,
-      objective: "Refuse mismatched native goal-loop bindings",
-      now: NOW,
-    });
-    db.prepare(
-      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-    ).run("refused-native-goal-loop-run");
-    const claim = claimRunnableWorkflowStep(db, {
-      runId: "refused-native-goal-loop-run",
-      stepId: "implementation",
-      holder: "refused-native-goal-loop-worker",
-      leaseExpiresAt: NOW + 30_000,
-      now: NOW,
-    });
-    if (!claim.ok) throw new Error(claim.reason);
-    const production = resolveDaemonWorkflowStepDispatch(
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
-      executeWorkflowStepDispatch,
-      {},
-    );
-    if (!production.ok) throw new Error(production.message);
+  it.each([
+    {
+      binding: "host timeout",
+      config: { timeoutMs: 4_000 },
+    },
+    {
+      binding: "policy envelope",
+      config: { policyEnvelope: "different-policy" },
+    },
+  ])(
+    "fails closed before goal-loop execution on a mismatched $binding",
+    async ({ config }) => {
+      const repoPath = initNativeDispatchRepo();
+      const profilePath = writeGoalLoopDispatchProfile(tempDir());
+      const definition: WorkflowDefinition = {
+        key: "refused-native-goal-loop-workflow",
+        title: "Refused Native Goal-loop Workflow",
+        version: 1,
+        steps: [
+          {
+            key: "implementation",
+            kind: "implementation",
+            executor: "goal-loop",
+            config,
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId: "refused-native-goal-loop-run",
+        repoPath,
+        objective: "Refuse mismatched native goal-loop bindings",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run("refused-native-goal-loop-run");
+      const claim = claimRunnableWorkflowStep(db, {
+        runId: "refused-native-goal-loop-run",
+        stepId: "implementation",
+        holder: "refused-native-goal-loop-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+      const production = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!production.ok) throw new Error(production.message);
 
-    await production.dispatch(claim.claim, {
-      db,
-      workerId: "refused-native-goal-loop-worker",
-      now: NOW + 1,
-    });
+      await production.dispatch(claim.claim, {
+        db,
+        workerId: "refused-native-goal-loop-worker",
+        now: NOW + 1,
+      });
 
-    expect(
-      db
-        .prepare(
-          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
-        )
-        .get("refused-native-goal-loop-run"),
-    ).toEqual({
-      state: "manual_recovery_required",
-      recovery_code: "invalid_input",
-    });
-    expect(
-      fs.existsSync(
-        path.join(
-          repoPath,
-          ".agent-workflows/refused-native-goal-loop-run/goal-loop-count",
+      expect(
+        db
+          .prepare(
+            "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get("refused-native-goal-loop-run"),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recovery_code: "invalid_input",
+      });
+      expect(
+        fs.existsSync(
+          path.join(
+            repoPath,
+            ".agent-workflows/refused-native-goal-loop-run/goal-loop-count",
+          ),
         ),
-      ),
-    ).toBe(false);
-    db.close();
-  });
+      ).toBe(false);
+      db.close();
+    },
+  );
 
   it("reattaches a checkpointed goal-loop mechanism without rerunning or recommitting", async () => {
     const repoPath = initNativeDispatchRepo();
