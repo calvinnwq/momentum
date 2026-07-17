@@ -167,6 +167,8 @@ export function singleShotExecutorConfigError(
 /** Host-owned round identity/runtime context. No database handle crosses here. */
 export type SingleShotExecutorHostBindings = {
   start: Omit<PlanSingleShotRoundStartInput, "selection">;
+  /** Host-resolved identity actually used for execution and durable reattachment. */
+  selection?: SingleShotRoundSelection;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
   /** Host-resolved native runner for production registered dispatch. */
@@ -339,7 +341,8 @@ export class SingleShotExecutor implements Executor<
       }
     }
 
-    const selection = singleShotSelectionFromSdkConfig(config);
+    const selection =
+      hostBindings.selection ?? singleShotSelectionFromSdkConfig(config);
     const start = planSingleShotRoundStart({
       ...hostBindings.start,
       family: this.name,
@@ -350,6 +353,7 @@ export class SingleShotExecutor implements Executor<
       this.name,
       config,
       hostBindings.start,
+      selection,
     );
     const materialized =
       hostBindings.roundAlreadyMaterialized === true
@@ -619,7 +623,9 @@ function assertSingleShotRoundMatchesHost(
   if (!sameStringArray(round.logPaths, host.logPaths ?? [])) {
     mismatches.push("logPaths");
   }
-  const selection = singleShotSelectionFromSdkConfig(context.config);
+  const selection =
+    context.hostBindings.selection ??
+    singleShotSelectionFromSdkConfig(context.config);
   if (round.agentProvider !== selection.agentProvider)
     mismatches.push("agentProvider");
   if (round.model !== selection.model) mismatches.push("model");
@@ -648,6 +654,7 @@ function assertResumableDispatchBinding(
     family,
     context.config,
     host,
+    context.hostBindings.selection,
   );
   if (bindingCheckpoint?.detail !== expectedBinding) {
     throw new Error(
@@ -660,10 +667,12 @@ export function singleShotDispatchBindingDetail(
   family: SingleShotExecutorFamily,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
+  selection?: Readonly<SingleShotRoundSelection>,
 ): string {
   const payload = canonicalJson({
     family,
     config,
+    selection: selection ?? singleShotSelectionFromSdkConfig(config),
     start: {
       roundId: start.roundId,
       invocationId: start.invocationId,
@@ -730,8 +739,23 @@ function immutableSingleShotHostBindings(
     ...hostBindings.start,
     ...(logPaths !== undefined ? { logPaths } : {}),
   };
+  const selection =
+    hostBindings.selection === undefined
+      ? undefined
+      : {
+          ...hostBindings.selection,
+          source: { ...hostBindings.selection.source },
+        };
   Object.freeze(start);
-  return Object.freeze({ ...hostBindings, start });
+  if (selection !== undefined) {
+    Object.freeze(selection.source);
+    Object.freeze(selection);
+  }
+  return Object.freeze({
+    ...hostBindings,
+    start,
+    ...(selection !== undefined ? { selection } : {}),
+  });
 }
 
 function singleShotOutcomeFromCheckpoint(

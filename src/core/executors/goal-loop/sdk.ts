@@ -40,6 +40,8 @@ export type GoalLoopExecutorConfig = {
 
 export type GoalLoopExecutorHostBindings = {
   start: Omit<PlanGoalLoopRoundStartInput, "selection">;
+  /** Host-resolved identity actually used for execution and durable reattachment. */
+  selection?: GoalLoopRoundSelection;
   runRound?: GoalLoopRoundRunner;
   settleRepoOwnership?: (completionDurable: boolean) => void;
 };
@@ -89,7 +91,8 @@ export class GoalLoopSdkExecutor implements Executor<
         `GoalLoopSdkExecutor cannot run invocation ${context.state.invocation.invocationId} for ${context.state.invocation.executorFamily}.`,
       );
     }
-    const selection = selectionFromConfig(context.config);
+    const selection =
+      context.hostBindings.selection ?? selectionFromConfig(context.config);
     const current = context.state.currentRound;
     if (
       current !== null &&
@@ -97,6 +100,7 @@ export class GoalLoopSdkExecutor implements Executor<
       current.round.classification === null
     ) {
       try {
+        assertGoalLoopRoundMatchesHost(current.round, selection);
         const resumed = resumeCompletedRound(
           current.round,
           current.checkpoints,
@@ -197,6 +201,28 @@ export class GoalLoopSdkExecutor implements Executor<
     } finally {
       context.hostBindings.settleRepoOwnership?.(completionDurable);
     }
+  }
+}
+
+function assertGoalLoopRoundMatchesHost(
+  round: ExecutorRoundView,
+  selection: GoalLoopRoundSelection,
+): void {
+  const mismatches: string[] = [];
+  const expected = {
+    agentProvider: selection.agentProvider,
+    model: selection.model,
+    effort: selection.effort,
+  } as const;
+  for (const [field, value] of Object.entries(expected)) {
+    if (round[field as keyof ExecutorRoundView] !== value) {
+      mismatches.push(field);
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `Goal-loop round ${round.roundId} cannot reattach with changed dispatch inputs: ${mismatches.join(", ")}.`,
+    );
   }
 }
 

@@ -320,7 +320,7 @@ describe("built-in coding workflow definition", () => {
       ["implementation", { tool: "gnhf" }],
       ["postflight", undefined],
       ["no-mistakes", { tool: "no-mistakes" }],
-      ["merge-cleanup", undefined],
+      ["merge-cleanup", { command: "merge-cleanup" }],
       ["linear-refresh", undefined],
     ]);
   });

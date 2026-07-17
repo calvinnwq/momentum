@@ -9,6 +9,7 @@ import {
 import type {
   Executor,
   ExecutorEnvelopeSnapshot,
+  ExecutorRoundView,
   ExecutorTickContext,
   ExecutorTickResult,
 } from "../../executors/sdk/types.js";
@@ -57,10 +58,16 @@ export type RegisteredExecutorWorkflowDispatchOptions = {
 
 export class RegisteredExecutorHostBindingsError extends Error {
   readonly recoveryCode: string;
+  readonly settleRepoOwnership: (() => void) | undefined;
 
-  constructor(recoveryCode: string, message: string) {
+  constructor(
+    recoveryCode: string,
+    message: string,
+    settleRepoOwnership?: () => void,
+  ) {
     super(message);
     this.recoveryCode = recoveryCode;
+    this.settleRepoOwnership = settleRepoOwnership;
   }
 }
 
@@ -483,8 +490,13 @@ function createHostBindingsUnavailableExecutor(
       additionalProperties: false,
     },
     tick(context) {
-      const round = startGenericRound(context.state, context);
+      const round =
+        resumableCompletedRound(context.state) ??
+        startGenericRound(context.state, context);
       context.envelope.observeRound(round.roundId, { summary: reason });
+      if (error instanceof RegisteredExecutorHostBindingsError) {
+        error.settleRepoOwnership?.();
+      }
       return {
         roundId: round.roundId,
         recommendation: "manual_recovery_required",
@@ -496,6 +508,20 @@ function createHostBindingsUnavailableExecutor(
       };
     },
   };
+}
+
+function resumableCompletedRound(
+  state: ExecutorEnvelopeSnapshot,
+): ExecutorRoundView | undefined {
+  const current = state.currentRound;
+  return current !== null &&
+    current.round.attempt === state.invocation.attempt &&
+    current.round.classification === null &&
+    current.checkpoints.some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    )
+    ? current.round
+    : undefined;
 }
 
 function runtimeUnavailableTick(

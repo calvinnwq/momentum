@@ -16,6 +16,7 @@ import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
 import { GoalLoopSdkExecutor } from "../src/core/executors/goal-loop/sdk.js";
 import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
+import { resolveGoalLoopRoundSelection } from "../src/core/executors/goal-loop/executor.js";
 import {
   LiveStepSdkExecutor,
   liveStepBuiltInConfigSchema,
@@ -399,6 +400,17 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       fs.readFileSync(path.join(repoPath, "native-agent-env.txt"), "utf8"),
     ).toBe("codex|gpt-native|high\n");
+    expect(
+      db
+        .prepare(
+          "SELECT agent_provider, model, effort FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("native-agent-route-run"),
+    ).toEqual({
+      agent_provider: "codex",
+      model: "gpt-native",
+      effort: "high",
+    });
     db.close();
   });
 
@@ -418,7 +430,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           kind: "preflight",
           executor: "script",
           config: {
-            command: "sh",
+            command: "preflight",
             args: ["-c", NATIVE_SCRIPT_COMMAND],
             timeoutMs: 5_000,
           },
@@ -495,7 +507,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     {
       label: "command identity",
       config: {
-        command: "bash",
+        command: "other-command",
         args: ["-c", NATIVE_SCRIPT_COMMAND],
         timeoutMs: 5_000,
       },
@@ -503,7 +515,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     {
       label: "timeout",
       config: {
-        command: "sh",
+        command: "preflight",
         args: ["-c", NATIVE_SCRIPT_COMMAND],
         timeoutMs: 4_000,
       },
@@ -896,6 +908,13 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         logPaths: [path.join(artifactRoot, "executor.log")],
         startedAt: NOW + 1,
       },
+      selection: resolveGoalLoopRoundSelection({
+        stepConfig: {
+          agentProvider: "codex",
+          model: "gpt-native",
+          effort: "high",
+        },
+      }),
       runRound,
     };
     const executor = new GoalLoopSdkExecutor();
@@ -918,6 +937,25 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         encoding: "utf8",
       }).trim(),
     ).toBe("2");
+
+    expect(() =>
+      executor.tick({
+        state: envelope.snapshot(),
+        config: {},
+        hostBindings: {
+          ...hostBindings,
+          selection: resolveGoalLoopRoundSelection({
+            stepConfig: {
+              agentProvider: "claude",
+              model: "claude-native",
+              effort: "high",
+            },
+          }),
+        },
+        envelope: envelope.facade,
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("changed dispatch inputs: agentProvider, model");
 
     await driveExecutorTicks({
       db,
@@ -1118,6 +1156,137 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         ),
       ),
     ).toBe(false);
+    db.close();
+  });
+
+  it("classifies a checkpointed native round and settles its lock when host bindings disappear", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const definition: WorkflowDefinition = {
+      key: "missing-binding-native-recovery-workflow",
+      title: "Missing Binding Native Recovery Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const runId = "missing-binding-native-recovery-run";
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Classify completed work without host bindings",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "implementation",
+      holder: "missing-binding-native-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    executeWorkflowStepDispatch(claim.claim, {
+      db,
+      workerId: "missing-binding-native-worker",
+      now: NOW + 1,
+      executorOwnsRounds: true,
+    });
+    const invocationId = `${runId}::implementation::dispatch`;
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId,
+      now: () => NOW + 2,
+    });
+    const round = envelope.facade.startRound({
+      roundId: `${invocationId}::round::0`,
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attempt: 1,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: "sha256:checkpointed",
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordCheckpoint(round.roundId, {
+      checkpointId: `${round.roundId}-checkpoint-0`,
+      sequence: 0,
+      stage: "mechanism_completed",
+      detail: "durable native completion",
+    });
+    const retained = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "crashed-native-worker",
+      goalId: runId,
+      iteration: 1,
+      jobId: invocationId,
+      leaseExpiresAt: NOW + 60_000,
+      now: NOW + 2,
+    });
+    if (!retained.ok) throw new Error(retained.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    const resumed = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "missing-binding-native-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+
+    expect(resumed.code).toBe("dispatched");
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE invocation_id = ?",
+        )
+        .get(invocationId),
+    ).toEqual({ state: "manual_recovery_required" });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+        )
+        .get(round.roundId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "runtime_unavailable",
+    });
+    expect(
+      db
+        .prepare("SELECT state FROM repo_locks WHERE id = ?")
+        .get(retained.lockId),
+    ).toEqual({ state: "needs_manual_recovery" });
     db.close();
   });
 });

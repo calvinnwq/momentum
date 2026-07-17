@@ -62,6 +62,7 @@ import {
   SingleShotExecutor,
   type SingleShotExecutorHostBindings,
 } from "../executors/single-shot/sdk.js";
+import { resolveSingleShotRoundSelection } from "../executors/single-shot/executor.js";
 import {
   createOneShotLiveWrapperRoundRunner,
   createScriptCommandRoundRunner,
@@ -70,6 +71,7 @@ import {
   GoalLoopSdkExecutor,
   type GoalLoopExecutorHostBindings,
 } from "../executors/goal-loop/sdk.js";
+import { resolveGoalLoopRoundSelection } from "../executors/goal-loop/executor.js";
 import { goalLoopRoundMechanismFromPromptedResultFile } from "../executors/goal-loop/mechanism.js";
 import {
   DelegateSupervisorExecutor,
@@ -348,10 +350,32 @@ function createMissingProfileNativeDispatch(
   );
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
-    resolveHostBindings: ({ executorName }) => {
+    resolveHostBindings: ({ claim, context, executorName }) => {
+      const invocation = loadExecutorInvocation(
+        context.db,
+        deriveDispatchInvocationId(claim.runId, claim.stepId),
+      );
+      const settleRepoOwnership =
+        invocation !== undefined &&
+        hasUnclassifiedCompletedNativeMechanism(
+          context.db,
+          invocation.invocationId,
+          invocation.attempt,
+        )
+          ? recoverCompletedLiveStepRepoOwnership(
+              context.db,
+              claim.runId,
+              claim.stepId,
+              invocation.attempt,
+              context.now,
+            )
+          : undefined;
       throw new RegisteredExecutorHostBindingsError(
         "runtime_unavailable",
         `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required for native ${executorName} host bindings`,
+        settleRepoOwnership === undefined
+          ? undefined
+          : () => settleRepoOwnership(false),
       );
     },
   });
@@ -488,7 +512,7 @@ function createLiveStepHostBindingsResolver(
         invocation.invocationId,
         invocation.attempt,
       );
-    const completedNativeRepoOwnership = completedNativeMechanism
+    const recoveredNativeRepoOwnership = completedNativeMechanism
       ? recoverCompletedLiveStepRepoOwnership(
           context.db,
           claim.runId,
@@ -497,6 +521,17 @@ function createLiveStepHostBindingsResolver(
           context.now,
         )
       : undefined;
+    const failRecoveredNativeRepoOwnership = (error: unknown): never => {
+      recoveredNativeRepoOwnership?.(false);
+      throw error;
+    };
+    const guardRecoveredNativeRepoOwnership = <T>(operation: () => T): T => {
+      try {
+        return operation();
+      } catch (error) {
+        return failRecoveredNativeRepoOwnership(error);
+      }
+    };
     const noMistakesRuntime =
       delegateTool === "no-mistakes"
         ? resolveNoMistakesStatusRuntime(env, profile)
@@ -564,12 +599,14 @@ function createLiveStepHostBindingsResolver(
           },
         })
       : null;
-    const safety = resolveDaemonDispatchedRepoSafety(
-      context.db,
-      claim.runId,
-      resolved.exec.repoPath,
-      resolved.exec.runDir,
-      preparedCommitEvidence ?? undefined,
+    const safety = guardRecoveredNativeRepoOwnership(() =>
+      resolveDaemonDispatchedRepoSafety(
+        context.db,
+        claim.runId,
+        resolved.exec.repoPath,
+        resolved.exec.runDir,
+        preparedCommitEvidence ?? undefined,
+      ),
     );
     if (!safety.ok) {
       if (safety.recoveryArtifact !== null) {
@@ -583,9 +620,11 @@ function createLiveStepHostBindingsResolver(
           now: context.now,
         });
       }
-      throw new RegisteredExecutorHostBindingsError(
-        safety.recoveryCode,
-        safety.reason,
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          safety.recoveryCode,
+          safety.reason,
+        ),
       );
     }
     const attempt = invocation.attempt;
@@ -599,9 +638,11 @@ function createLiveStepHostBindingsResolver(
     try {
       fs.mkdirSync(runDir, { recursive: true });
     } catch (error) {
-      throw new RegisteredExecutorHostBindingsError(
-        "runtime_unavailable",
-        `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          "runtime_unavailable",
+          `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        ),
       );
     }
     const resultJsonPath = path.join(
@@ -613,18 +654,25 @@ function createLiveStepHostBindingsResolver(
       path.basename(resolved.exec.executorLogPath),
     );
     const step = getWorkflowStep(context.db, claim.runId, claim.stepId);
-    if (step === undefined) throw new Error("workflow_step_not_found");
-    const selection = resolveWorkflowStepDispatchRouteSelection(
-      context.db,
-      claim,
+    if (step === undefined) {
+      return failRecoveredNativeRepoOwnership(
+        new Error("workflow_step_not_found"),
+      );
+    }
+    const selection = guardRecoveredNativeRepoOwnership(() =>
+      resolveWorkflowStepDispatchRouteSelection(context.db, claim),
     );
-    if (!selection.ok) throw new Error(selection.reason);
+    if (!selection.ok) {
+      return failRecoveredNativeRepoOwnership(new Error(selection.reason));
+    }
     const nativeWrapper =
       isSingleShot || isGoalLoop ? profile.wrappers.get(step.kind) : undefined;
     if ((isSingleShot || isGoalLoop) && nativeWrapper === undefined) {
-      throw new RegisteredExecutorHostBindingsError(
-        "runtime_unavailable",
-        `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${input.executor.name}`,
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          "runtime_unavailable",
+          `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${input.executor.name}`,
+        ),
       );
     }
     if (
@@ -632,9 +680,11 @@ function createLiveStepHostBindingsResolver(
       typeof input.config.timeoutMs === "number" &&
       input.config.timeoutMs !== nativeWrapper!.timeoutSec * 1_000
     ) {
-      throw new RegisteredExecutorHostBindingsError(
-        "invalid_input",
-        "portable goal-loop timeoutMs does not match resolved host timeout",
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          "invalid_input",
+          "portable goal-loop timeoutMs does not match resolved host timeout",
+        ),
       );
     }
     if (
@@ -642,16 +692,20 @@ function createLiveStepHostBindingsResolver(
       typeof input.config.policyEnvelope === "string" &&
       input.config.policyEnvelope !== profile.name
     ) {
-      throw new RegisteredExecutorHostBindingsError(
-        "invalid_input",
-        "portable goal-loop policyEnvelope does not match resolved host policy",
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          "invalid_input",
+          "portable goal-loop policyEnvelope does not match resolved host policy",
+        ),
       );
     }
-    if (isGoalLoop) {
-      validatePortableAgentBinding(input.config, selection.selection);
+    if (isSingleShot || isGoalLoop) {
+      guardRecoveredNativeRepoOwnership(() =>
+        validatePortableAgentBinding(input.config, selection.selection),
+      );
     }
     const repoOwnership = completedNativeMechanism
-      ? completedMechanismRepoOwnership(completedNativeRepoOwnership)
+      ? completedMechanismRepoOwnership(recoveredNativeRepoOwnership)
       : acquireLiveStepRepoOwnership({
           claim,
           context,
@@ -765,6 +819,18 @@ function createLiveStepHostBindingsResolver(
           logPaths: [roundLogPath],
           startedAt: context.now,
         },
+        selection: resolveGoalLoopRoundSelection({
+          stepConfig: {
+            agentProvider: selection.selection.agentProvider,
+            model: selection.selection.model,
+            effort: selection.selection.effort,
+            timeoutMs: nativeWrapper!.timeoutSec * 1_000,
+            ...(typeof input.config.maxRounds === "number"
+              ? { maxRounds: input.config.maxRounds }
+              : {}),
+            policyEnvelope: profile.name,
+          },
+        }),
         runRound: (round) =>
           goalLoopRoundMechanismFromPromptedResultFile({
             repoPath: safety.repoPath,
@@ -854,7 +920,7 @@ function createLiveStepHostBindingsResolver(
               },
             })
           : createScriptCommandRoundRunner({
-              commandIdentity: path.basename(wrapper.command),
+              commandIdentity: step.kind,
               command: wrapper.command,
               args: [...wrapper.args],
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
@@ -908,6 +974,19 @@ function createLiveStepHostBindingsResolver(
           logPaths: [executorLogPath],
           startedAt: context.now,
         },
+        selection: resolveSingleShotRoundSelection({
+          stepConfig: {
+            ...(singleShot.name === "one-shot"
+              ? {
+                  agentProvider: selection.selection.agentProvider,
+                  model: selection.selection.model,
+                  effort: selection.selection.effort,
+                }
+              : {}),
+            timeoutMs: wrapper.timeoutSec * 1_000,
+            policyEnvelope: profile.name,
+          },
+        }),
         runRound,
         settleRepoOwnership: (completionDurable) => {
           const repo = inspectRepo(safety.repoPath);
@@ -1048,7 +1127,7 @@ function validatePortableAgentBinding(
   if (agent === null || typeof agent !== "object" || Array.isArray(agent)) {
     throw new RegisteredExecutorHostBindingsError(
       "invalid_input",
-      "portable goal-loop agent binding is invalid",
+      "portable native agent binding is invalid",
     );
   }
   const fields = [
@@ -1061,7 +1140,7 @@ function validatePortableAgentBinding(
     if (expected !== undefined && expected !== selection[resolvedField]) {
       throw new RegisteredExecutorHostBindingsError(
         "invalid_input",
-        `portable goal-loop agent.${portableField} does not match resolved host identity`,
+        `portable native agent.${portableField} does not match resolved host identity`,
       );
     }
   }

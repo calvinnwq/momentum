@@ -403,6 +403,7 @@ export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
       key: "merge-cleanup",
       kind: "merge-cleanup",
       executor: "script",
+      config: { command: "merge-cleanup" },
       order: 4,
       required: true,
     },
