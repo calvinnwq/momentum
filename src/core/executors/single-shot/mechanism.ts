@@ -334,10 +334,14 @@ function finishOneShotWrapperResult(
           ok: false,
           recoveryCode: repoRecoveryCode ?? recoveryCode,
         },
+        summary: result.error,
         artifacts,
       };
     }
-    return finalizeOneShotProcessFailure(options, recoveryCode, artifacts);
+    return {
+      ...finalizeOneShotProcessFailure(options, recoveryCode, artifacts),
+      summary: result.error,
+    };
   }
 
   const digest = digestFile(result.resultJsonPath);

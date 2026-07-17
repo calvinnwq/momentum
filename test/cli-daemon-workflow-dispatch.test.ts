@@ -1955,7 +1955,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             summary: string | null;
           }
         | undefined;
-      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.state).toBe("blocked");
       expect(round?.recovery_code).toBe("runtime_unavailable");
       expect(round?.summary).toContain("retryable setup failure");
     } finally {

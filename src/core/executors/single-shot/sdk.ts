@@ -178,6 +178,7 @@ export type SingleShotExecutorHostBindings = {
 /** Normalized output of one bounded runner-adapter call. */
 export type SingleShotRoundMechanismResult = {
   readonly outcome: SingleShotInvocationOutcome;
+  readonly summary?: string;
   readonly result?: RunnerResult | null;
   readonly resultDigest?: string | null;
   readonly artifacts?: SingleShotRoundArtifacts;
@@ -425,10 +426,15 @@ export class SingleShotExecutor implements Executor<
         // Capture result and repo-safety evidence, but deliberately omit terminal
         // state, classification, recovery gate, and recommendation. Those fields
         // are available only to the daemon controller after this tick returns.
-        observation: observationFromPersistencePlan(
-          plan.captureUpdate,
-          plan.terminalUpdate,
-        ),
+        observation: {
+          ...observationFromPersistencePlan(
+            plan.captureUpdate,
+            plan.terminalUpdate,
+          ),
+          ...(mechanism.summary !== undefined
+            ? { summary: mechanism.summary }
+            : {}),
+        },
         // The mechanism-completed proof and any result-capture checkpoint commit
         // with that observation. A restart can therefore either classify the
         // completed turn or see no completion proof; it never sees a torn pair.
@@ -829,6 +835,15 @@ function normalizeSingleShotMechanismResult(
         };
   const result = mechanism["result"];
   const resultDigest = mechanism["resultDigest"];
+  const summary = mechanism["summary"];
+  if (
+    summary !== undefined &&
+    (typeof summary !== "string" || summary.trim().length === 0)
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: summary must be a non-empty string.`,
+    );
+  }
   if (
     resultDigest !== undefined &&
     resultDigest !== null &&
@@ -869,6 +884,7 @@ function normalizeSingleShotMechanismResult(
   }
   const normalizedMechanism: SingleShotRoundMechanismResult = {
     outcome: normalizedOutcome,
+    ...(summary !== undefined ? { summary: summary as string } : {}),
     ...(normalizedResult !== undefined ? { result: normalizedResult } : {}),
     ...(resultDigest !== undefined
       ? { resultDigest: resultDigest as string | null }
