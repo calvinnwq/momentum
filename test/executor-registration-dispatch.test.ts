@@ -23,6 +23,7 @@ import {
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import { insertExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 import { validateExecutorConfig } from "../src/core/executors/sdk/config-schema.js";
 import {
   loadExecutorRegistry,
@@ -30,7 +31,10 @@ import {
   registerExecutor,
 } from "../src/core/executors/sdk/registry.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
-import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import {
+  CODING_WORKFLOW_DEFINITION,
+  type WorkflowDefinition,
+} from "../src/core/workflow/definition/definition.js";
 import { createRegisteredExecutorWorkflowDispatch } from "../src/core/workflow/dispatch/registered-executor.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import {
@@ -39,6 +43,7 @@ import {
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { preflightWorkflowExecutorConfigs } from "../src/core/workflow/preflight/structural.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import type { ExecutorTickContext } from "../src/core/executors/sdk/types.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
@@ -49,7 +54,13 @@ const NATIVE_ONE_SHOT_SCRIPT = `printf 'native dispatch\\n' > "$MOMENTUM_REPO_PA
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
 {"success":true,"summary":"native one-shot completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
 JSON`;
-const NATIVE_SCRIPT_COMMAND = "printf 'native script\\n' > native-script.txt";
+const NATIVE_SCRIPT_COMMAND = `test "$MOMENTUM_RUN_ID" = "native-script-run" || exit 8
+test "$MOMENTUM_STEP_ID" = "preflight" || exit 9
+test "$MOMENTUM_STEP_KIND" = "preflight" || exit 10
+test "$MOMENTUM_ATTEMPT" = "1" || exit 11
+test "$MOMENTUM_REPO_PATH" = "$PWD" || exit 12
+test -n "$MOMENTUM_ITERATION_DIR" || exit 13
+printf 'native script\\n' > native-script.txt`;
 const NATIVE_GOAL_LOOP_SCRIPT = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/goal-loop-count"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
@@ -175,6 +186,219 @@ describe("profile-backed built-in registration", () => {
       { stage: "result_captured" },
       { stage: "classified" },
     ]);
+    db.close();
+  });
+
+  it("fails closed when native host bindings have no live-wrapper profile", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const definition: WorkflowDefinition = {
+      key: "missing-native-profile-workflow",
+      title: "Missing Native Profile Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "missing-native-profile-run",
+      repoPath,
+      objective: "Refuse missing native host bindings",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("missing-native-profile-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "missing-native-profile-run",
+      stepId: "preflight",
+      holder: "missing-native-profile-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "missing-native-profile-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("missing-native-profile-run"),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "runtime_unavailable",
+      summary: expect.stringContaining(DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR),
+    });
+    db.close();
+  });
+
+  it.each([
+    { family: "one-shot", config: {} },
+    { family: "script", config: { command: "sh" } },
+    { family: "goal-loop", config: {} },
+  ] as const)(
+    "resumes a roundless native $family invocation through the scheduler",
+    async ({ family, config }) => {
+      const runId = `roundless-${family}-run`;
+      const definition: WorkflowDefinition = {
+        key: `roundless-${family}-workflow`,
+        title: `Roundless ${family} Workflow`,
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: family,
+            config,
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath: "/repos/fixture",
+        objective: "Resume a native invocation scaffold",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run(runId);
+      const claim = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "preflight",
+        holder: "roundless-native-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+      executeWorkflowStepDispatch(claim.claim, {
+        db,
+        workerId: "roundless-native-worker",
+        now: NOW,
+        executorOwnsRounds: true,
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      const dispatch = vi.fn(() => ({ status: "native_roundless_resumed" }));
+
+      const resumed = await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "roundless-native-worker",
+        continuationPollIntervalMs: 1,
+        dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(resumed.code).toBe("dispatched");
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      db.close();
+    },
+  );
+
+  it("forwards native coding route identity into the one-shot wrapper", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = path.join(tempDir(), "agent-route-profile.json");
+    fs.writeFileSync(
+      profilePath,
+      JSON.stringify({
+        name: "native-dispatch-test",
+        wrappers: {
+          postflight: {
+            command: "/bin/sh",
+            args: [
+              "-c",
+              `printf '%s|%s|%s\\n' "$MOMENTUM_AGENT_PROVIDER" "$MOMENTUM_MODEL" "$MOMENTUM_EFFORT" > "$MOMENTUM_REPO_PATH/native-agent-env.txt"
+${NATIVE_ONE_SHOT_SCRIPT}`,
+            ],
+            cwd: "repo",
+            timeout_sec: 5,
+            env_allow: [],
+            result_file: "result.json",
+          },
+        },
+      }),
+    );
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId: "native-agent-route-run",
+      repoPath,
+      objective: "Forward native agent route identity",
+      route: {
+        steps: {
+          postflight: {
+            harness: "codex",
+            model: "gpt-native",
+            effort: "high",
+          },
+        },
+      },
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      now: NOW,
+    });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = CASE
+            WHEN step_id IN ('preflight', 'implementation') THEN 'succeeded'
+            WHEN step_id = 'postflight' THEN 'approved'
+            ELSE state
+          END
+        WHERE run_id = ?`,
+    ).run("native-agent-route-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "native-agent-route-run",
+      stepId: "postflight",
+      holder: "native-agent-route-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "native-agent-route-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      fs.readFileSync(path.join(repoPath, "native-agent-env.txt"), "utf8"),
+    ).toBe("codex|gpt-native|high\n");
     db.close();
   });
 
@@ -490,6 +714,10 @@ describe("profile-backed built-in registration", () => {
       binding: "policy envelope",
       config: { policyEnvelope: "different-policy" },
     },
+    {
+      binding: "agent identity",
+      config: { agent: { harness: "portable-agent" } },
+    },
   ])(
     "fails closed before goal-loop execution on a mismatched $binding",
     async ({ config }) => {
@@ -719,6 +947,177 @@ describe("profile-backed built-in registration", () => {
         )
         .get(invocationId),
     ).toEqual({ state: "succeeded" });
+    db.close();
+  });
+
+  it("resumes checkpointed native work through the scheduler and releases its retained lock", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "native-lock-recovery-workflow",
+      title: "Native Lock Recovery Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "native-lock-recovery-run",
+      repoPath,
+      objective: "Resume native work without repeating it",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("native-lock-recovery-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "native-lock-recovery-run",
+      stepId: "implementation",
+      holder: "native-lock-recovery-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    executeWorkflowStepDispatch(claim.claim, {
+      db,
+      workerId: "native-lock-recovery-worker",
+      now: NOW + 1,
+      executorOwnsRounds: true,
+    });
+    const invocationId = "native-lock-recovery-run::implementation::dispatch";
+    const artifactRoot = path.join(
+      repoPath,
+      ".agent-workflows/native-lock-recovery-run/round-1",
+    );
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const baseHead = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-parse", "HEAD"],
+      { encoding: "utf8" },
+    ).trim();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId,
+      now: () => NOW + 2,
+    });
+    await new GoalLoopSdkExecutor().tick({
+      state: envelope.snapshot(),
+      config: {},
+      hostBindings: {
+        start: {
+          roundId: `${invocationId}::round::0`,
+          invocationId,
+          workflowRunId: "native-lock-recovery-run",
+          stepRunId: "implementation",
+          stepKey: "implementation",
+          attempt: 1,
+          roundIndex: 0,
+          inputDigest: "sha256:native-lock-recovery",
+          artifactRoot,
+          logPaths: [path.join(artifactRoot, "executor.log")],
+          startedAt: NOW + 2,
+        },
+        runRound: () => {
+          fs.writeFileSync(
+            path.join(repoPath, "native-lock-recovery.txt"),
+            "committed once\n",
+          );
+          const resultFilePath = path.join(artifactRoot, "result.json");
+          fs.writeFileSync(
+            resultFilePath,
+            JSON.stringify({
+              success: true,
+              summary: "checkpointed native lock recovery",
+              key_changes_made: ["native-lock-recovery.txt"],
+              key_learnings: [],
+              remaining_work: [],
+              goal_complete: true,
+              commit: {
+                type: "test",
+                subject: "checkpoint native lock recovery",
+                body: "",
+                breaking: false,
+              },
+            }),
+          );
+          return goalLoopRoundMechanismFromResultFile({
+            repoPath,
+            baseHead,
+            resultFilePath,
+            verificationCommands: [],
+            verificationTimeoutSec: 5,
+            verificationLogPath: path.join(artifactRoot, "verification.log"),
+          });
+        },
+      },
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+    const retained = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "crashed-native-worker",
+      goalId: "native-lock-recovery-run",
+      iteration: 1,
+      jobId: invocationId,
+      leaseExpiresAt: NOW + 60_000,
+      now: NOW + 2,
+    });
+    if (!retained.ok) throw new Error(retained.reason);
+    const commitCount = execFileSync(
+      "git",
+      ["-C", repoPath, "rev-list", "--count", "HEAD"],
+      { encoding: "utf8" },
+    ).trim();
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    const resumed = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "native-lock-recovery-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+
+    expect(resumed.code).toBe("dispatched");
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE invocation_id = ?",
+        )
+        .get(invocationId),
+    ).toEqual({ state: "succeeded" });
+    expect(
+      db
+        .prepare("SELECT state FROM repo_locks WHERE id = ?")
+        .get(retained.lockId),
+    ).toEqual({ state: "released" });
+    expect(
+      execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
+        encoding: "utf8",
+      }).trim(),
+    ).toBe(commitCount);
+    expect(
+      fs.existsSync(
+        path.join(
+          repoPath,
+          ".agent-workflows/native-lock-recovery-run/goal-loop-count",
+        ),
+      ),
+    ).toBe(false);
     db.close();
   });
 });

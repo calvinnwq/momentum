@@ -109,6 +109,12 @@ const NON_MONITOR_LEASE_KINDS: ReadonlySet<WorkflowLeaseKind> = new Set([
   "dispatch",
 ]);
 
+const NATIVE_RESUMABLE_SDK_EXECUTORS: ReadonlySet<string> = new Set([
+  "goal-loop",
+  "one-shot",
+  "script",
+]);
+
 /** A workflow step the scheduler considers safe to dispatch next. */
 export type RunnableWorkflowStep = {
   runId: string;
@@ -1382,7 +1388,8 @@ function isResumableRegisteredSdkTick(
   // Legacy dispatch inserts its invocation and first round in one transaction.
   // Only an SDK-owned dispatch can durably expose a roundless invocation.
   if (
-    invocation.executorFamily === "delegate-supervisor" &&
+    (invocation.executorFamily === "delegate-supervisor" ||
+      NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily)) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1403,6 +1410,16 @@ function isResumableRegisteredSdkTick(
     return true;
   }
   if (round.classification === "continue") return true;
+  if (
+    NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily) &&
+    round.classification === null &&
+    (round.state === "running" || round.state === "capturing_result") &&
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    )
+  ) {
+    return true;
+  }
   if (
     hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds, rounds)
   ) {

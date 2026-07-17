@@ -218,6 +218,15 @@ export function createOneShotLiveWrapperRoundRunner(
       runId: round.workflowRunId,
       stepId: round.stepRunId,
       attempt: round.attempt,
+      ...(options.hostIdentity?.agent?.harness !== undefined
+        ? { agentProvider: options.hostIdentity.agent.harness }
+        : {}),
+      ...(options.hostIdentity?.agent?.model !== undefined
+        ? { model: options.hostIdentity.agent.model }
+        : {}),
+      ...(options.hostIdentity?.agent?.effort !== undefined
+        ? { effort: options.hostIdentity.agent.effort }
+        : {}),
       repoPath: options.repoPath,
       iterationDir: round.artifactRoot,
       executorLogPath: logPath,

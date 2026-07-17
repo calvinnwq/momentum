@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
+import { buildLiveStepRuntimeEnvironment } from "../../adapters/live-step-wrapper.js";
 import { acquireRepoMutationFence } from "../../adapters/repo-mutation-fence.js";
 import {
   createPersistedProfileDelegateToolAdapter,
@@ -165,6 +166,12 @@ export type DaemonWorkflowDispatchResolution =
   | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
   | { ok: false; message: string };
 
+const NATIVE_PROFILE_EXECUTOR_FAMILIES: ReadonlySet<string> = new Set([
+  "goal-loop",
+  "one-shot",
+  "script",
+]);
+
 export function resolveDaemonWorkflowStepDispatch(
   env: Record<string, string | undefined>,
   baseDispatch: WorkflowStepDispatch,
@@ -241,6 +248,11 @@ export function resolveDaemonWorkflowStepDispatch(
   }
   if (!legacy.ok) return legacy;
 
+  const missingProfileDispatch =
+    profile.status === "not_configured"
+      ? createMissingProfileNativeDispatch(baseDispatch)
+      : undefined;
+
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
       baseDispatch,
@@ -250,6 +262,13 @@ export function resolveDaemonWorkflowStepDispatch(
       ok: true,
       dispatch: (claim, context) => {
         const runtime = resolveWorkflowStepExecutorRuntime(context.db, claim);
+        if (
+          runtime.ok &&
+          NATIVE_PROFILE_EXECUTOR_FAMILIES.has(runtime.executorName) &&
+          missingProfileDispatch !== undefined
+        ) {
+          return missingProfileDispatch(claim, context);
+        }
         return runtime.ok && !isWorkflowExecutorFamily(runtime.executorName)
           ? unavailableDispatch(claim, context)
           : legacy.dispatch(claim, context);
@@ -304,12 +323,38 @@ export function resolveDaemonWorkflowStepDispatch(
         }
         return registeredDispatch(claim, context);
       }
+      if (
+        runtime.ok &&
+        NATIVE_PROFILE_EXECUTOR_FAMILIES.has(runtime.executorName) &&
+        missingProfileDispatch !== undefined
+      ) {
+        return missingProfileDispatch(claim, context);
+      }
       return legacy.dispatch(claim, context);
     },
     ...(legacy.leaseDurationMs !== undefined
       ? { leaseDurationMs: legacy.leaseDurationMs }
       : {}),
   };
+}
+
+function createMissingProfileNativeDispatch(
+  baseDispatch: WorkflowStepDispatch,
+): AsyncWorkflowStepDispatch {
+  const registry = new Map(
+    buildProfileBackedSdkExecutors()
+      .filter((executor) => NATIVE_PROFILE_EXECUTOR_FAMILIES.has(executor.name))
+      .map((executor) => [executor.name, executor]),
+  );
+  return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
+    registry,
+    resolveHostBindings: ({ executorName }) => {
+      throw new RegisteredExecutorHostBindingsError(
+        "runtime_unavailable",
+        `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required for native ${executorName} host bindings`,
+      );
+    },
+  });
 }
 
 export function buildProfileBackedSdkExecutors(): Executor[] {
@@ -436,6 +481,22 @@ function createLiveStepHostBindingsResolver(
         ...(settleHandoff !== undefined ? { settleHandoff } : {}),
       };
     }
+    const completedNativeMechanism =
+      (isSingleShot || isGoalLoop) &&
+      hasUnclassifiedCompletedNativeMechanism(
+        context.db,
+        invocation.invocationId,
+        invocation.attempt,
+      );
+    const completedNativeRepoOwnership = completedNativeMechanism
+      ? recoverCompletedLiveStepRepoOwnership(
+          context.db,
+          claim.runId,
+          claim.stepId,
+          invocation.attempt,
+          context.now,
+        )
+      : undefined;
     const noMistakesRuntime =
       delegateTool === "no-mistakes"
         ? resolveNoMistakesStatusRuntime(env, profile)
@@ -586,21 +647,26 @@ function createLiveStepHostBindingsResolver(
         "portable goal-loop policyEnvelope does not match resolved host policy",
       );
     }
-    const repoOwnership = acquireLiveStepRepoOwnership({
-      claim,
-      context,
-      repoPath: safety.repoPath,
-      attempt,
-      repoSafety: safety.repoSafety,
-      runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
-      reclaimHandoffAttempt: isDelegate
-        ? findInterruptedDelegateHandoffAttempt(
-            context.db,
-            invocation.invocationId,
-            attempt,
-          )
-        : undefined,
-    });
+    if (isGoalLoop) {
+      validatePortableAgentBinding(input.config, selection.selection);
+    }
+    const repoOwnership = completedNativeMechanism
+      ? completedMechanismRepoOwnership(completedNativeRepoOwnership)
+      : acquireLiveStepRepoOwnership({
+          claim,
+          context,
+          repoPath: safety.repoPath,
+          attempt,
+          repoSafety: safety.repoSafety,
+          runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
+          reclaimHandoffAttempt: isDelegate
+            ? findInterruptedDelegateHandoffAttempt(
+                context.db,
+                invocation.invocationId,
+                attempt,
+              )
+            : undefined,
+        });
     if (!repoOwnership.ok) {
       throw new RegisteredExecutorHostBindingsError(
         repoOwnership.recoveryCode,
@@ -794,9 +860,19 @@ function createLiveStepHostBindingsResolver(
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
               timeoutSec: wrapper.timeoutSec,
               policyEnvelopeIdentity: profile.name,
-              env: Object.fromEntries(
-                wrapper.envAllow.flatMap((key) =>
-                  env[key] === undefined ? [] : [[key, env[key]]],
+              env: buildLiveStepRuntimeEnvironment(
+                {
+                  kind: step.kind,
+                  runId: claim.runId,
+                  stepId: claim.stepId,
+                  attempt,
+                  repoPath: safety.repoPath,
+                  iterationDir: runDir,
+                },
+                Object.fromEntries(
+                  wrapper.envAllow.flatMap((key) =>
+                    env[key] === undefined ? [] : [[key, env[key]]],
+                  ),
                 ),
               ),
               repoSafety: {
@@ -944,6 +1020,53 @@ function recoverCompletedLiveStepRepoOwnership(
   };
 }
 
+function completedMechanismRepoOwnership(
+  settleRepoOwnership: ((provenClean: boolean) => void) | undefined,
+): LiveStepRepoOwnership {
+  const unavailable = () => ({
+    ok: false as const,
+    error: "completed mechanism recovery cannot authorize repository mutation",
+  });
+  return {
+    ok: true,
+    authorizeMutation: unavailable,
+    beginMutation: unavailable,
+    settle: settleRepoOwnership ?? (() => {}),
+  };
+}
+
+function validatePortableAgentBinding(
+  config: Readonly<Record<string, unknown>>,
+  selection: {
+    agentProvider: string | null;
+    model: string | null;
+    effort: string | null;
+  },
+): void {
+  const agent = config["agent"];
+  if (agent === undefined) return;
+  if (agent === null || typeof agent !== "object" || Array.isArray(agent)) {
+    throw new RegisteredExecutorHostBindingsError(
+      "invalid_input",
+      "portable goal-loop agent binding is invalid",
+    );
+  }
+  const fields = [
+    ["harness", "agentProvider"],
+    ["model", "model"],
+    ["effort", "effort"],
+  ] as const;
+  for (const [portableField, resolvedField] of fields) {
+    const expected = (agent as Record<string, unknown>)[portableField];
+    if (expected !== undefined && expected !== selection[resolvedField]) {
+      throw new RegisteredExecutorHostBindingsError(
+        "invalid_input",
+        `portable goal-loop agent.${portableField} does not match resolved host identity`,
+      );
+    }
+  }
+}
+
 function hasCompletedLiveStepMechanism(
   db: MomentumDb,
   invocationId: string,
@@ -955,6 +1078,27 @@ function hasCompletedLiveStepMechanism(
     "mechanism_completed",
     attempt,
   );
+}
+
+function hasUnclassifiedCompletedNativeMechanism(
+  db: MomentumDb,
+  invocationId: string,
+  attempt: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.invocation_id = ?
+          AND r.attempt = ?
+          AND r.classification IS NULL
+          AND c.stage = 'mechanism_completed'
+        ORDER BY r.round_index DESC
+        LIMIT 1`,
+    )
+    .get(invocationId, attempt);
+  return row !== undefined;
 }
 
 function hasCompletedDelegateHandoff(

@@ -2510,6 +2510,28 @@ function resolveEnv(
     if (value !== undefined) env[key] = value;
   }
 
+  return buildLiveStepRuntimeEnvironment(input, env, resultJsonPath);
+}
+
+export function buildLiveStepRuntimeEnvironment(
+  input: Pick<
+    LiveStepWrapperInput,
+    | "kind"
+    | "runId"
+    | "stepId"
+    | "attempt"
+    | "agentProvider"
+    | "model"
+    | "effort"
+    | "repoPath"
+    | "iterationDir"
+    | "promptPath"
+  >,
+  baseEnv: NodeJS.ProcessEnv = {},
+  resultJsonPath?: string,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...baseEnv };
+
   env[LIVE_STEP_WRAPPER_ENV_VARS.RUN_ID] = input.runId;
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_ID] = input.stepId;
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_KIND] = input.kind;
@@ -2528,7 +2550,9 @@ function resolveEnv(
   if (input.promptPath !== undefined) {
     env[LIVE_STEP_WRAPPER_ENV_VARS.PROMPT_PATH] = input.promptPath;
   }
-  env[LIVE_STEP_WRAPPER_ENV_VARS.RESULT_PATH] = resultJsonPath;
+  if (resultJsonPath !== undefined) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.RESULT_PATH] = resultJsonPath;
+  }
 
   return env;
 }
