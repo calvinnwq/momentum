@@ -1,12 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDb } from "../src/adapters/db.js";
 import { runCli } from "../src/cli.js";
 import {
+  buildProfileBackedSdkExecutors,
   resolveDaemonWorkflowStepDispatch,
   resolveProfileBackedDelegateToolStepKind,
 } from "../src/core/daemon/workflow-dispatch.js";
@@ -37,6 +39,7 @@ import { preflightWorkflowExecutorConfigs } from "../src/core/workflow/preflight
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import type { ExecutorTickContext } from "../src/core/executors/sdk/types.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 
 const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
@@ -59,12 +62,162 @@ describe("profile-backed delegated tool dispatch", () => {
   });
 });
 
+describe("profile-backed built-in registration", () => {
+  it("selects the native single-shot lifecycle for one-shot only", () => {
+    const executors = new Map(
+      buildProfileBackedSdkExecutors().map((executor) => [
+        executor.name,
+        executor,
+      ]),
+    );
+
+    expect(executors.get("one-shot")).toBeInstanceOf(SingleShotExecutor);
+    expect(executors.get("goal-loop")).toBeInstanceOf(LiveStepSdkExecutor);
+    expect(executors.get("script")).toBeInstanceOf(LiveStepSdkExecutor);
+  });
+
+  it("runs one native one-shot round through production registered dispatch", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeNativeDispatchProfile(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "native-one-shot-workflow",
+      title: "Native One-shot Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "native-one-shot-run",
+      repoPath,
+      objective: "Run one bounded native agent turn",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("native-one-shot-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "native-one-shot-run",
+      stepId: "preflight",
+      holder: "native-one-shot-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "native-one-shot-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get("native-one-shot-run", "preflight"),
+    ).toEqual({ state: "succeeded" });
+    expect(
+      db
+        .prepare(
+          "SELECT round_id, state, summary FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("native-one-shot-run"),
+    ).toEqual({
+      round_id: "native-one-shot-run::preflight::dispatch::round::0",
+      state: "succeeded",
+      summary: "native one-shot completed",
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT stage FROM executor_checkpoints WHERE round_id = ? ORDER BY sequence",
+        )
+        .all("native-one-shot-run::preflight::dispatch::round::0"),
+    ).toEqual([
+      { stage: "round_started" },
+      { stage: "mechanism_completed" },
+      { stage: "result_captured" },
+      { stage: "classified" },
+    ]);
+    db.close();
+  });
+});
+
 function tempDir(): string {
   const value = fs.mkdtempSync(
     path.join(os.tmpdir(), "momentum-executor-sdk-"),
   );
   tempDirs.push(value);
   return value;
+}
+
+function initNativeDispatchRepo(): string {
+  const repoPath = tempDir();
+  execFileSync("git", ["-C", repoPath, "init", "--quiet"]);
+  execFileSync("git", ["-C", repoPath, "config", "user.name", "Momentum Test"]);
+  execFileSync("git", [
+    "-C",
+    repoPath,
+    "config",
+    "user.email",
+    "momentum@example.test",
+  ]);
+  fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-workflows/\n");
+  fs.writeFileSync(path.join(repoPath, "README.md"), "fixture\n");
+  execFileSync("git", ["-C", repoPath, "add", ".gitignore", "README.md"]);
+  execFileSync("git", [
+    "-C",
+    repoPath,
+    "commit",
+    "--quiet",
+    "-m",
+    "test: initialize fixture",
+  ]);
+  return repoPath;
+}
+
+function writeNativeDispatchProfile(profileDir: string): string {
+  const profilePath = path.join(profileDir, "profile.json");
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "native-dispatch-test",
+      wrappers: {
+        preflight: {
+          command: "/bin/sh",
+          args: [
+            "-c",
+            `printf 'native one shot\\n' > "$MOMENTUM_REPO_PATH/one-shot.txt"
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"native one-shot completed","key_changes_made":["one-shot.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
+JSON`,
+          ],
+          cwd: "iteration",
+          timeout_sec: 5,
+          env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    }),
+  );
+  return profilePath;
 }
 
 function fixtureDefinition(

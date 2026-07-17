@@ -169,6 +169,10 @@ export type SingleShotExecutorHostBindings = {
   start: Omit<PlanSingleShotRoundStartInput, "selection">;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
+  /** Host-resolved native runner for production registered dispatch. */
+  runRound?: SingleShotRoundRunner;
+  /** Release or retain repository ownership after durable mechanism evidence. */
+  settleRepoOwnership?: (completionDurable: boolean) => void;
 };
 
 /** Normalized output of one bounded runner-adapter call. */
@@ -320,11 +324,18 @@ export class SingleShotExecutor implements Executor<
       context.state.rounds.length > 0 &&
       hostBindings.roundAlreadyMaterialized !== true
     ) {
-      return resumeCompletedSingleShotRound(this.name, {
-        ...context,
-        config,
-        hostBindings,
-      });
+      try {
+        const resumed = resumeCompletedSingleShotRound(this.name, {
+          ...context,
+          config,
+          hostBindings,
+        });
+        hostBindings.settleRepoOwnership?.(true);
+        return resumed;
+      } catch (error) {
+        hostBindings.settleRepoOwnership?.(false);
+        throw error;
+      }
     }
 
     const selection = singleShotSelectionFromSdkConfig(config);
@@ -358,83 +369,92 @@ export class SingleShotExecutor implements Executor<
           planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
         ),
       );
-    context.signal.throwIfAborted();
+    let completionDurable = false;
+    try {
+      context.signal.throwIfAborted();
 
-    const mechanism = normalizeSingleShotMechanismResult(
-      this.name,
-      await this.#runRound(cloneRoundForRunner(durableStart), {
-        config,
-        hostBindings,
-        signal: context.signal,
-      }),
-    );
-
-    // Validate the complete persistence plan before appending artifacts. This
-    // preserves the existing all-or-nothing guard for malformed terminal
-    // evidence even though classification is now host-owned.
-    const plan = planSingleShotRoundPersistence({
-      outcome: mechanism.outcome,
-      ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
-      ...(mechanism.resultDigest !== undefined
-        ? { resultDigest: mechanism.resultDigest }
-        : {}),
-      ...(mechanism.evidence !== undefined
-        ? { evidence: mechanism.evidence }
-        : {}),
-    });
-
-    const artifacts = planSingleShotRoundArtifacts({
-      roundId: start.roundId,
-      logPaths: frozenLogPaths,
-      ...(mechanism.artifacts !== undefined
-        ? { artifacts: mechanism.artifacts }
-        : {}),
-    }).map((artifact) =>
-      context.envelope.recordArtifact(start.roundId, withoutRoundId(artifact)),
-    );
-
-    const checkpointPlan = planSingleShotRoundCheckpoints({
-      roundId: start.roundId,
-      outcome: mechanism.outcome,
-      capturedResult: mechanism.outcome.ok && mechanism.result != null,
-      classification: plan.decision.classification,
-    });
-    const classificationCheckpoint = checkpointPlan.at(-1);
-    if (classificationCheckpoint === undefined) {
-      throw new Error(
-        "Single-shot checkpoint plan omitted daemon classification.",
+      const mechanism = normalizeSingleShotMechanismResult(
+        this.name,
+        await this.#runRound(cloneRoundForRunner(durableStart), {
+          config,
+          hostBindings,
+          signal: context.signal,
+        }),
       );
-    }
-    const progress = context.envelope.recordRoundProgress(start.roundId, {
-      // Capture result and repo-safety evidence, but deliberately omit terminal
-      // state, classification, recovery gate, and recommendation. Those fields
-      // are available only to the daemon controller after this tick returns.
-      observation: observationFromPersistencePlan(
-        plan.captureUpdate,
-        plan.terminalUpdate,
-      ),
-      // The mechanism-completed proof and any result-capture checkpoint commit
-      // with that observation. A restart can therefore either classify the
-      // completed turn or see no completion proof; it never sees a torn pair.
-      checkpoints: checkpointPlan
-        .slice(1, -1)
-        .map((checkpoint) => withoutRoundId(checkpoint)),
-    });
-    const checkpoints = [roundStartedCheckpoint, ...progress.checkpoints];
 
-    return {
-      roundId: start.roundId,
-      recommendation: plan.decision.classification,
-      recommendedRoundState: plan.decision.roundState,
-      recommendedInvocationState: plan.decision.invocationState,
-      recoveryCode: plan.decision.recoveryCode,
-      humanGate: plan.decision.humanGate,
-      reason: plan.decision.reason,
-      decision: plan.decision,
-      artifacts,
-      checkpoints,
-      classificationCheckpoint,
-    };
+      // Validate the complete persistence plan before appending artifacts. This
+      // preserves the existing all-or-nothing guard for malformed terminal
+      // evidence even though classification is now host-owned.
+      const plan = planSingleShotRoundPersistence({
+        outcome: mechanism.outcome,
+        ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
+        ...(mechanism.resultDigest !== undefined
+          ? { resultDigest: mechanism.resultDigest }
+          : {}),
+        ...(mechanism.evidence !== undefined
+          ? { evidence: mechanism.evidence }
+          : {}),
+      });
+
+      const artifacts = planSingleShotRoundArtifacts({
+        roundId: start.roundId,
+        logPaths: frozenLogPaths,
+        ...(mechanism.artifacts !== undefined
+          ? { artifacts: mechanism.artifacts }
+          : {}),
+      }).map((artifact) =>
+        context.envelope.recordArtifact(
+          start.roundId,
+          withoutRoundId(artifact),
+        ),
+      );
+
+      const checkpointPlan = planSingleShotRoundCheckpoints({
+        roundId: start.roundId,
+        outcome: mechanism.outcome,
+        capturedResult: mechanism.outcome.ok && mechanism.result != null,
+        classification: plan.decision.classification,
+      });
+      const classificationCheckpoint = checkpointPlan.at(-1);
+      if (classificationCheckpoint === undefined) {
+        throw new Error(
+          "Single-shot checkpoint plan omitted daemon classification.",
+        );
+      }
+      const progress = context.envelope.recordRoundProgress(start.roundId, {
+        // Capture result and repo-safety evidence, but deliberately omit terminal
+        // state, classification, recovery gate, and recommendation. Those fields
+        // are available only to the daemon controller after this tick returns.
+        observation: observationFromPersistencePlan(
+          plan.captureUpdate,
+          plan.terminalUpdate,
+        ),
+        // The mechanism-completed proof and any result-capture checkpoint commit
+        // with that observation. A restart can therefore either classify the
+        // completed turn or see no completion proof; it never sees a torn pair.
+        checkpoints: checkpointPlan
+          .slice(1, -1)
+          .map((checkpoint) => withoutRoundId(checkpoint)),
+      });
+      const checkpoints = [roundStartedCheckpoint, ...progress.checkpoints];
+      completionDurable = true;
+
+      return {
+        roundId: start.roundId,
+        recommendation: plan.decision.classification,
+        recommendedRoundState: plan.decision.roundState,
+        recommendedInvocationState: plan.decision.invocationState,
+        recoveryCode: plan.decision.recoveryCode,
+        humanGate: plan.decision.humanGate,
+        reason: plan.decision.reason,
+        decision: plan.decision,
+        artifacts,
+        checkpoints,
+        classificationCheckpoint,
+      };
+    } finally {
+      hostBindings.settleRepoOwnership?.(completionDurable);
+    }
   }
 }
 
