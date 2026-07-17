@@ -442,8 +442,7 @@ Optional arguments:
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 - `--implementation-engine <engine>` - select the coding implementation engine recorded on the run's durable `route.implementationEngine`.
   Valid values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`; when omitted, the coding doors select and persist the honest `gnhf` label.
-  `gnhf` keeps the default `delegate-supervisor` implementation route, while persisted `native-goal-loop` uses the distinct native `goal-loop` SDK lifecycle; both resolve their local mechanism from the step-kind live-wrapper binding.
-  A run that selects `current-gnhf-cwfp` is parked at the implementation step with `route_config_invalid` rather than silently selecting another implementation.
+  Execution semantics for those values are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.

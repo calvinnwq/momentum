@@ -154,7 +154,7 @@ another execution mechanism.
 Other supported live-wrapper-owned steps keep the durable start scaffold for a
 later executor path.
 A configured profile that omits the dispatched step-kind binding also fails
-with `runtime_unavailable`.
+with `runtime_unavailable` without falling back to another mechanism.
 If a claimed step cannot be resolved or carries an invalid executor identity,
 the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
@@ -210,14 +210,8 @@ the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are normally driven one bounded tick per daemon scheduler
 pass, and a `continue` recommendation leaves the invocation resumable for the
 next pass after the configured poll interval.
-The production profile-backed registry uses the native goal-loop lifecycle for
-`goal-loop`, the native single-shot lifecycle for `one-shot` and `script`, and
-the delegate-supervisor lifecycle for delegated tools.
-Those native lifecycles resolve machine-local commands, environment, policy,
-and repository ownership only through daemon host bindings.
-Missing native bindings fail with `runtime_unavailable`, and a mismatch between
-portable config and the resolved host identity fails with `invalid_input`.
-The daemon does not fall back to the generic live-step or dogfood mechanism.
+Executor registration and portable/host binding matching are specified by [Executor SDK](executor-sdk.md#config-and-host-bindings).
+The daemon supplies profile-backed host bindings from the resolved live-wrapper profile.
 Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
 Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every

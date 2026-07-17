@@ -16,7 +16,8 @@
  * from a clean worktree before mapping verification, commit, reset, lock, and
  * git outcomes through the same recovery codes used by live workflow-step
  * finalization. Callers must supply absolute artifact log paths on the round;
- * `script` configs must also use an absolute executable path and absolute cwd.
+ * `script` runner host bindings must also use an absolute executable path and
+ * absolute cwd, while portable step config carries only command identity.
  */
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import crypto from "node:crypto";

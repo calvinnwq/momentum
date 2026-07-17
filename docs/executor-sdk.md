@@ -375,12 +375,13 @@ Executors receive any host-provided bindings through `ExecutorTickContext.hostBi
 The shipped goal-loop and single-shot lifecycles keep round-start identity and their resolved live-wrapper or script runner in that field.
 Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
-The production host cross-checks goal-loop agent/timeout/policy, script command/argv/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
+The production profile-backed host cross-checks goal-loop agent/timeout/policy, script command/argv/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
+Its policy identity is the resolved live-wrapper profile name, its agent identity is the persisted per-step route selection, and its script identity is the configured wrapper command basename plus exact argv.
+Any mismatch returns `invalid_input` before process launch.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.
 The deterministic script host also requires `timeoutSec` to be a positive integer no greater than 2,147,453 seconds.
 An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
-A missing profile or step-kind binding returns `runtime_unavailable` before native `goal-loop`, `one-shot`, or `script` mechanism execution.
-Those native registrations never fall back to the generic live-step or dogfood dispatch mechanism.
+Daemon profile availability and native no-fallback behavior are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
