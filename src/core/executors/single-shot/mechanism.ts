@@ -1375,17 +1375,9 @@ function validatePortableScriptConfig(
       error: `portable script command ${String(command)} does not match resolved host identity ${expectedIdentity}`,
     };
   }
-  const portableArgs = portable.args ?? [];
-  const resolvedArgs = resolved.args ?? [];
-  if (
-    portableArgs.length !== resolvedArgs.length ||
-    portableArgs.some((arg, index) => arg !== resolvedArgs[index])
-  ) {
-    return {
-      ok: false,
-      error: "portable script args do not match resolved host argv",
-    };
-  }
+  // The resolved argv belongs to the host capability. Portable workflow
+  // config names that capability but never duplicates executable paths,
+  // credentials, or other machine-local wrapper arguments into durable state.
   if (
     portable.timeoutMs !== undefined &&
     portable.timeoutMs !== resolved.timeoutSec * 1000

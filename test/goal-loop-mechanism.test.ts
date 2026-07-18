@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../src/adapters/live-step-wrapper.js";
 import {
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
@@ -117,6 +118,19 @@ function writeResultFile(content: string): string {
 function makeVerificationLogPath(): string {
   const dir = makeTempDir("momentum-goal-loop-mechanism-log-");
   return path.join(dir, "verification.log");
+}
+
+function makePromptedArtifactPaths(resultName: string): {
+  promptFilePath: string;
+  resultFilePath: string;
+  verificationLogPath: string;
+} {
+  const root = makeTempDir("momentum-goal-loop-mechanism-round-");
+  return {
+    promptFilePath: path.join(root, "prompt.md"),
+    resultFilePath: path.join(root, resultName),
+    verificationLogPath: path.join(root, "verification.log"),
+  };
 }
 
 function sha256Digest(content: string): string {
@@ -608,13 +622,8 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
 describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
   it("writes the native round prompt before finalizing the runner-authored result file", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md",
-    );
-    const resultFilePath = writeResultFile("");
-    fs.rmSync(resultFilePath);
-    const verificationLogPath = makeVerificationLogPath();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
     const calls: Array<{
       promptFilePath: string;
       resultFilePath: string;
@@ -688,15 +697,8 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("does not finalize a successful result when the prompted runner throws after writing it", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md",
-    );
-    const resultFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "runner-result.json",
-    );
-    const verificationLogPath = makeVerificationLogPath();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
       repoPath,
@@ -735,14 +737,12 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("does not finalize a stale result when the prompted runner throws before writing", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md",
-    );
-    const resultFilePath = writeResultFile(
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
+    fs.writeFileSync(
+      resultFilePath,
       JSON.stringify(baseRunnerResult({ goal_complete: true })),
     );
-    const verificationLogPath = makeVerificationLogPath();
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
       repoPath,
@@ -813,7 +813,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
       },
     });
 
-    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
     expect(mechanism.result).toBeNull();
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
@@ -828,11 +828,8 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     fs.writeFileSync(escapedPromptPath, "preserve me\n", "utf-8");
     const promptFilePath = path.join(promptDir, "prompt.md");
     fs.symlinkSync(escapedPromptPath, promptFilePath);
-    const resultFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "runner-result.json",
-    );
-    const verificationLogPath = makeVerificationLogPath();
+    const resultFilePath = path.join(promptDir, "runner-result.json");
+    const verificationLogPath = path.join(promptDir, "verification.log");
     let runnerStarted = false;
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
@@ -915,15 +912,8 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("routes a prompted runner that writes no result to explicit missing-result recovery", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md",
-    );
-    const resultFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "missing-result.json",
-    );
-    const verificationLogPath = makeVerificationLogPath();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("missing-result.json");
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
       repoPath,
@@ -961,15 +951,8 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("routes a prompted runner that writes schema-invalid JSON to explicit invalid-result recovery", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
-      "prompt.md",
-    );
-    const resultFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-result-"),
-      "invalid-result.json",
-    );
-    const verificationLogPath = makeVerificationLogPath();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("invalid-result.json");
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
       repoPath,
@@ -1014,6 +997,204 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     expect(mechanism.artifacts?.resultDocument?.path).toBe(resultFilePath);
     expect(mechanism.artifacts?.verificationOutput).toBeUndefined();
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("rejects a FIFO result without blocking the daemon", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("fifo-result.json");
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a FIFO result.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () => execFileSync("mkfifo", [resultFilePath]),
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("rejects an oversized result before parsing or finalization", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("oversized-result.json");
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject an oversized result.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () =>
+        fs.writeFileSync(
+          resultFilePath,
+          Buffer.alloc(LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1),
+        ),
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("does not truncate a hard-linked prompt artifact", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
+    const sentinelPath = path.join(
+      path.dirname(promptFilePath),
+      "sentinel.txt",
+    );
+    fs.writeFileSync(sentinelPath, "sentinel\n", "utf-8");
+    fs.linkSync(sentinelPath, promptFilePath);
+    let launched = false;
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Preserve hard-linked files.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () => {
+        launched = true;
+      },
+    });
+
+    expect(launched).toBe(false);
+    expect(fs.readFileSync(sentinelPath, "utf-8")).toBe("sentinel\n");
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+  });
+
+  it("refuses finalization when the runner replaces the round directory", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
+    const roundRoot = path.dirname(promptFilePath);
+    const movedRoundRoot = `${roundRoot}-moved`;
+    const attackerRoot = makeTempDir("momentum-goal-loop-attacker-");
+    tempRoots.push(movedRoundRoot);
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a replaced artifact directory.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () => {
+        fs.renameSync(roundRoot, movedRoundRoot);
+        fs.symlinkSync(attackerRoot, roundRoot, "dir");
+        fs.writeFileSync(
+          path.join(attackerRoot, path.basename(resultFilePath)),
+          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          "utf-8",
+        );
+      },
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("does not truncate a hard-linked finalization sidecar", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("runner-result.json");
+    const sentinelPath = path.join(
+      path.dirname(promptFilePath),
+      "sentinel.txt",
+    );
+    fs.writeFileSync(sentinelPath, "sentinel\n", "utf-8");
+    fs.linkSync(sentinelPath, `${verificationLogPath}.finalization.json`);
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Preserve hard-linked sidecars.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () =>
+        fs.writeFileSync(
+          resultFilePath,
+          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          "utf-8",
+        ),
+    });
+
+    expect(mechanism.finalize.outcome).toBe("committed");
+    expect(mechanism.artifacts?.commitOrResetEvidence).toBeUndefined();
+    expect(fs.readFileSync(sentinelPath, "utf-8")).toBe("sentinel\n");
   });
 });
 

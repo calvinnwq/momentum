@@ -55,6 +55,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  insertExecutorCheckpoint,
   insertExecutorInvocation,
   insertExecutorRound,
   loadExecutorInvocation,
@@ -163,6 +164,7 @@ export function executeWorkflowStepDispatch(
     now,
     selection.selection,
     context.executorOwnsRounds === true,
+    context.materializeOwnedRound,
   );
 }
 
@@ -178,6 +180,7 @@ function dispatchExecutorScaffold(
   now: number,
   selection: CodingStepExecutorSelection,
   executorOwnsRounds: boolean,
+  materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
@@ -187,6 +190,7 @@ function dispatchExecutorScaffold(
       now,
       selection,
       executorOwnsRounds,
+      materializeOwnedRound,
     );
     if (reopened.reopened) {
       return {
@@ -219,17 +223,27 @@ function dispatchExecutorScaffold(
       };
     }
 
-    insertExecutorInvocation(
-      db,
-      buildInvocationScaffold(claim, family, invocationId, now),
-      { now },
+    const invocation = buildInvocationScaffold(
+      claim,
+      family,
+      invocationId,
+      now,
     );
+    insertExecutorInvocation(db, invocation, { now });
     if (!executorOwnsRounds) {
       insertExecutorRound(
         db,
         buildRoundScaffold(claim, family, invocationId, now, selection),
         { now },
       );
+    } else if (materializeOwnedRound !== undefined) {
+      const materialized = materializeOwnedRound({
+        invocation,
+        selection,
+        now,
+      });
+      insertExecutorRound(db, materialized.round, { now });
+      insertExecutorCheckpoint(db, materialized.checkpoint, { now });
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
@@ -250,6 +264,7 @@ function dispatchRetryScaffold(
   now: number,
   selection: CodingStepExecutorSelection,
   executorOwnsRounds: boolean,
+  materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -273,6 +288,19 @@ function dispatchRetryScaffold(
     if (!reopened.reopened) {
       db.exec("ROLLBACK");
       return reopened;
+    }
+    if (materializeOwnedRound !== undefined) {
+      const invocation = loadExecutorInvocation(db, reopened.invocationId);
+      if (invocation === undefined) {
+        throw new Error("reopened executor invocation is unavailable");
+      }
+      const materialized = materializeOwnedRound({
+        invocation,
+        selection,
+        now,
+      });
+      insertExecutorRound(db, materialized.round, { now });
+      insertExecutorCheckpoint(db, materialized.checkpoint, { now });
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");

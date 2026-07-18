@@ -46,6 +46,13 @@ export type RegisteredExecutorWorkflowDispatchOptions = {
   registry: ExecutorRegistry;
   unavailableReasons?: ReadonlyMap<string, string>;
   resolveHostBindings?: RegisteredExecutorHostBindingsResolver;
+  resolveOwnedRoundMaterializer?: (input: {
+    claim: ClaimedWorkflowStep;
+    context: WorkflowStepDispatchContext;
+    executor: Executor;
+    executorName: string;
+    config: Readonly<Record<string, unknown>>;
+  }) => WorkflowStepDispatchContext["materializeOwnedRound"];
   maxTicks?: number;
   /** Resolve a per-invocation bounded tick cap, overriding `maxTicks`. */
   resolveMaxTicks?: (input: {
@@ -148,9 +155,17 @@ export function createRegisteredExecutorWorkflowDispatch(
       }
     }
 
+    const materializeOwnedRound = options.resolveOwnedRoundMaterializer?.({
+      claim,
+      context,
+      executor,
+      executorName: runtime.executorName,
+      config,
+    });
     const result = baseDispatch(claim, {
       ...context,
       executorOwnsRounds: true,
+      ...(materializeOwnedRound === undefined ? {} : { materializeOwnedRound }),
     });
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
@@ -518,7 +533,9 @@ function resumableCompletedRound(
     current.round.attempt === state.invocation.attempt &&
     current.round.classification === null &&
     current.checkpoints.some(
-      (checkpoint) => checkpoint.stage === "mechanism_completed",
+      (checkpoint) =>
+        checkpoint.stage === "round_started" ||
+        checkpoint.stage === "mechanism_completed",
     )
     ? current.round
     : undefined;

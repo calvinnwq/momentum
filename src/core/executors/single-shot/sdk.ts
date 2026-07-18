@@ -169,6 +169,8 @@ export type SingleShotExecutorHostBindings = {
   start: Omit<PlanSingleShotRoundStartInput, "selection">;
   /** Host-resolved identity actually used for execution and durable reattachment. */
   selection?: SingleShotRoundSelection;
+  /** Opaque digest of the resolved host command, argv, cwd, and environment. */
+  hostBindingIdentity?: string;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
   /** Host-resolved native runner for production registered dispatch. */
@@ -323,8 +325,11 @@ export class SingleShotExecutor implements Executor<
     if (configError !== null) throw new Error(configError);
     const config = immutableSingleShotConfig(context.config);
     const hostBindings = immutableSingleShotHostBindings(context.hostBindings);
+    const currentAttemptRounds = context.state.rounds.filter(
+      (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+    );
     if (
-      context.state.rounds.length > 0 &&
+      currentAttemptRounds.length > 0 &&
       hostBindings.roundAlreadyMaterialized !== true
     ) {
       try {
@@ -354,6 +359,7 @@ export class SingleShotExecutor implements Executor<
       config,
       hostBindings.start,
       selection,
+      hostBindings.hostBindingIdentity,
     );
     const materialized =
       hostBindings.roundAlreadyMaterialized === true
@@ -476,12 +482,15 @@ function loadMaterializedSingleShotRound(
     SingleShotExecutorHostBindings
   >,
 ): { round: ExecutorRoundView; checkpoint: ExecutorCheckpointRecord } {
-  if (context.state.rounds.length !== 1) {
+  const currentAttemptRounds = context.state.rounds.filter(
+    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+  );
+  if (currentAttemptRounds.length !== 1) {
     throw new Error(
       `SingleShotExecutor ${family} expected exactly one atomically materialized round.`,
     );
   }
-  const snapshot = context.state.rounds[0];
+  const snapshot = currentAttemptRounds[0];
   if (snapshot === undefined) {
     throw new Error("Single-shot materialized round snapshot is missing.");
   }
@@ -534,12 +543,15 @@ function resumeCompletedSingleShotRound(
     SingleShotExecutorHostBindings
   >,
 ): SingleShotExecutorTickResult {
-  if (context.state.rounds.length !== 1) {
+  const currentAttemptRounds = context.state.rounds.filter(
+    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+  );
+  if (currentAttemptRounds.length !== 1) {
     throw new Error(
       `SingleShotExecutor ${family} invocation ${context.state.invocation.invocationId} must own exactly one resumable round.`,
     );
   }
-  const snapshot = context.state.rounds[0];
+  const snapshot = currentAttemptRounds[0];
   if (snapshot === undefined) {
     throw new Error("Single-shot resumable round snapshot is missing.");
   }
@@ -655,8 +667,17 @@ function assertResumableDispatchBinding(
     context.config,
     host,
     context.hostBindings.selection,
+    context.hostBindings.hostBindingIdentity,
   );
-  if (bindingCheckpoint?.detail !== expectedBinding) {
+  const legacyBinding = legacySingleShotDispatchBindingDetail(
+    family,
+    context.config,
+    host,
+  );
+  if (
+    bindingCheckpoint?.detail !== expectedBinding &&
+    bindingCheckpoint?.detail !== legacyBinding
+  ) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
     );
@@ -668,11 +689,38 @@ export function singleShotDispatchBindingDetail(
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
   selection?: Readonly<SingleShotRoundSelection>,
+  hostBindingIdentity?: string,
+): string {
+  const payload = canonicalJson({
+    version: 2,
+    family,
+    config,
+    selection: selection ?? singleShotSelectionFromSdkConfig(config),
+    hostBindingIdentity: hostBindingIdentity ?? null,
+    start: {
+      roundId: start.roundId,
+      invocationId: start.invocationId,
+      workflowRunId: start.workflowRunId,
+      stepRunId: start.stepRunId,
+      stepKey: start.stepKey,
+      family: start.family,
+      attempt: start.attempt,
+      inputDigest: start.inputDigest,
+      artifactRoot: start.artifactRoot,
+      logPaths: start.logPaths ?? [],
+    },
+  });
+  return `dispatch binding v2: sha256:${crypto.createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function legacySingleShotDispatchBindingDetail(
+  family: SingleShotExecutorFamily,
+  config: Readonly<SingleShotExecutorConfig>,
+  start: SingleShotExecutorHostBindings["start"],
 ): string {
   const payload = canonicalJson({
     family,
     config,
-    selection: selection ?? singleShotSelectionFromSdkConfig(config),
     start: {
       roundId: start.roundId,
       invocationId: start.invocationId,

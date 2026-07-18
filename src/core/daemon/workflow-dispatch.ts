@@ -60,18 +60,27 @@ import {
 } from "../executors/live-step/sdk-executor.js";
 import {
   SingleShotExecutor,
+  singleShotDispatchBindingDetail,
   type SingleShotExecutorHostBindings,
 } from "../executors/single-shot/sdk.js";
-import { resolveSingleShotRoundSelection } from "../executors/single-shot/executor.js";
+import {
+  planSingleShotRoundStart,
+  planSingleShotRoundStartedCheckpoint,
+  resolveSingleShotRoundSelection,
+} from "../executors/single-shot/executor.js";
 import {
   createOneShotLiveWrapperRoundRunner,
   createScriptCommandRoundRunner,
 } from "../executors/single-shot/mechanism.js";
 import {
   GoalLoopSdkExecutor,
+  goalLoopDispatchBindingDetail,
   type GoalLoopExecutorHostBindings,
 } from "../executors/goal-loop/sdk.js";
-import { resolveGoalLoopRoundSelection } from "../executors/goal-loop/executor.js";
+import {
+  planGoalLoopRoundStart,
+  resolveGoalLoopRoundSelection,
+} from "../executors/goal-loop/executor.js";
 import { goalLoopRoundMechanismFromPromptedResultFile } from "../executors/goal-loop/mechanism.js";
 import {
   DelegateSupervisorExecutor,
@@ -126,6 +135,7 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
 import {
+  listExecutorCheckpointsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
 } from "../executors/loop/persist.js";
@@ -223,6 +233,8 @@ export function resolveDaemonWorkflowStepDispatch(
       liveRegistry,
       profile.profile,
     );
+    const resolveOwnedRoundMaterializer =
+      createNativeOwnedRoundMaterializerResolver(env, profile.profile);
     legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
@@ -230,6 +242,7 @@ export function resolveDaemonWorkflowStepDispatch(
           createRegisteredExecutorWorkflowDispatch(baseDispatch, {
             registry,
             resolveHostBindings,
+            resolveOwnedRoundMaterializer,
             // A delegated handoff is one durable SDK round; allow only that
             // executor to perform its first bounded read under the same claim.
             resolveMaxTicks: ({ executorName, invocation, context }) =>
@@ -291,6 +304,10 @@ export function resolveDaemonWorkflowStepDispatch(
           profile.profile,
         )
       : undefined;
+  const profileOwnedRoundMaterializer =
+    profile.status === "resolved"
+      ? createNativeOwnedRoundMaterializerResolver(env, profile.profile)
+      : undefined;
   return {
     ok: true,
     dispatch: async (claim, context) => {
@@ -318,6 +335,12 @@ export function resolveDaemonWorkflowStepDispatch(
               unavailableReasons,
               ...(profileHostBindings !== undefined
                 ? { resolveHostBindings: profileHostBindings }
+                : {}),
+              ...(profileOwnedRoundMaterializer !== undefined
+                ? {
+                    resolveOwnedRoundMaterializer:
+                      profileOwnedRoundMaterializer,
+                  }
                 : {}),
             },
           );
@@ -403,6 +426,219 @@ export function buildProfileBackedSdkExecutors(): Executor[] {
             })
           : new LiveStepSdkExecutor(name, liveStepBuiltInConfigSchema(name)),
   );
+}
+
+function createNativeOwnedRoundMaterializerResolver(
+  env: Record<string, string | undefined>,
+  profile: LiveWrapperProfile,
+) {
+  return (input: {
+    claim: Parameters<AsyncWorkflowStepDispatch>[0];
+    context: Parameters<AsyncWorkflowStepDispatch>[1];
+    executor: Executor;
+    executorName: string;
+    config: Readonly<Record<string, unknown>>;
+  }): Parameters<AsyncWorkflowStepDispatch>[1]["materializeOwnedRound"] => {
+    const isSingleShot = input.executor instanceof SingleShotExecutor;
+    const isGoalLoop = input.executor instanceof GoalLoopSdkExecutor;
+    if (!isSingleShot && !isGoalLoop) return undefined;
+    const provenance = loadDispatchedStepRunProvenance(
+      input.context.db,
+      input.claim.runId,
+    );
+    if (provenance === undefined) return undefined;
+    const resolved = resolveDispatchedStepExecutorContext(
+      input.claim.runId,
+      provenance,
+    );
+    if (!resolved.ok) return undefined;
+    const step = getWorkflowStep(
+      input.context.db,
+      input.claim.runId,
+      input.claim.stepId,
+    );
+    if (step === undefined) return undefined;
+    const wrapper = profile.wrappers.get(step.kind);
+    if (wrapper === undefined) return undefined;
+
+    return ({ invocation, selection, now }) => {
+      const existingRounds = listExecutorRoundsForInvocation(
+        input.context.db,
+        invocation.invocationId,
+      );
+      const roundIndex = existingRounds.length;
+      const canonicalRepoPath = fs.realpathSync(resolved.exec.repoPath);
+      const canonicalRunDir = canonicalizeRunDir(
+        resolved.exec.repoPath,
+        canonicalRepoPath,
+        resolved.exec.runDir,
+      );
+      const artifactRoot =
+        invocation.attempt <= 1
+          ? canonicalRunDir
+          : path.join(canonicalRunDir, `attempt-${invocation.attempt}`);
+      const selectionBinding = isGoalLoop
+        ? resolveGoalLoopRoundSelection({
+            stepConfig: {
+              agentProvider: selection.agentProvider,
+              model: selection.model,
+              effort: selection.effort,
+              timeoutMs: wrapper.timeoutSec * 1_000,
+              ...(typeof input.config.maxRounds === "number"
+                ? { maxRounds: input.config.maxRounds }
+                : {}),
+              policyEnvelope: profile.name,
+            },
+          })
+        : resolveSingleShotRoundSelection({
+            stepConfig: {
+              ...(input.executorName === "one-shot"
+                ? {
+                    agentProvider: selection.agentProvider,
+                    model: selection.model,
+                    effort: selection.effort,
+                  }
+                : {}),
+              timeoutMs: wrapper.timeoutSec * 1_000,
+              policyEnvelope: profile.name,
+            },
+          });
+      const capability =
+        input.executorName === "script"
+          ? (wrapper.commandIdentity ?? step.kind)
+          : step.kind;
+      const hostBindingIdentity = nativeHostBindingIdentity({
+        profile: profile.name,
+        capability,
+        command: wrapper.command,
+        args: wrapper.args,
+        cwd:
+          wrapper.cwd === "repo"
+            ? fs.realpathSync(resolved.exec.repoPath)
+            : isGoalLoop
+              ? path.join(artifactRoot, `round-${roundIndex + 1}`)
+              : artifactRoot,
+        timeoutSec: wrapper.timeoutSec,
+        environment: Object.fromEntries(
+          wrapper.envAllow.map((key) => [key, env[key] ?? null]),
+        ),
+      });
+      if (isGoalLoop) {
+        const goalLoopSelection = selectionBinding as ReturnType<
+          typeof resolveGoalLoopRoundSelection
+        >;
+        const roundRoot = path.join(artifactRoot, `round-${roundIndex + 1}`);
+        const start = {
+          roundId: `${invocation.invocationId}::round::${roundIndex}`,
+          invocationId: invocation.invocationId,
+          workflowRunId: invocation.workflowRunId,
+          stepRunId: invocation.stepRunId,
+          stepKey: invocation.stepKey,
+          attempt: invocation.attempt,
+          roundIndex,
+          selection: goalLoopSelection,
+          inputDigest: goalLoopInputDigest(input.config, existingRounds),
+          artifactRoot: roundRoot,
+          logPaths: [
+            path.join(roundRoot, path.basename(resolved.exec.executorLogPath)),
+          ],
+          startedAt: now,
+        };
+        const round = planGoalLoopRoundStart(start);
+        const hostBindings: GoalLoopExecutorHostBindings = {
+          start: withoutSelection(start),
+          selection: goalLoopSelection,
+          hostBindingIdentity,
+        };
+        return {
+          round,
+          checkpoint: {
+            checkpointId: `${round.roundId}-checkpoint-0`,
+            roundId: round.roundId,
+            sequence: 0,
+            stage: "round_started",
+            detail: goalLoopDispatchBindingDetail(
+              hostBindings,
+              goalLoopSelection,
+            ),
+          },
+        };
+      }
+
+      const start = {
+        roundId: `${invocation.invocationId}::round::${roundIndex}`,
+        invocationId: invocation.invocationId,
+        workflowRunId: invocation.workflowRunId,
+        stepRunId: invocation.stepRunId,
+        stepKey: invocation.stepKey,
+        family: input.executorName as "one-shot" | "script",
+        attempt: invocation.attempt,
+        selection: selectionBinding,
+        inputDigest: singleShotInputDigest(input.config),
+        artifactRoot,
+        logPaths: [
+          path.join(artifactRoot, path.basename(resolved.exec.executorLogPath)),
+        ],
+        startedAt: now,
+      };
+      const sdkStart = withoutSelection(start);
+      const round = planSingleShotRoundStart(start);
+      return {
+        round,
+        checkpoint: planSingleShotRoundStartedCheckpoint(
+          round.roundId,
+          singleShotDispatchBindingDetail(
+            start.family,
+            input.config,
+            sdkStart,
+            selectionBinding,
+            hostBindingIdentity,
+          ),
+        ),
+      };
+    };
+  };
+}
+
+function withoutSelection<T extends { selection: unknown }>(
+  input: T,
+): Omit<T, "selection"> {
+  const { selection: _selection, ...rest } = input;
+  return rest;
+}
+
+function singleShotInputDigest(
+  config: Readonly<Record<string, unknown>>,
+): string {
+  return `sha256:${crypto
+    .createHash("sha256")
+    .update(JSON.stringify(config))
+    .digest("hex")}`;
+}
+
+function goalLoopInputDigest(
+  config: Readonly<Record<string, unknown>>,
+  priorRounds: readonly Readonly<{
+    roundIndex: number;
+    resultDigest: string | null;
+    commitSha: string | null;
+    recoveryCode: string | null;
+  }>[],
+): string {
+  return `sha256:${crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        config,
+        priorRounds: priorRounds.map((round) => ({
+          roundIndex: round.roundIndex,
+          resultDigest: round.resultDigest,
+          commitSha: round.commitSha,
+          recoveryCode: round.recoveryCode,
+        })),
+      }),
+    )
+    .digest("hex")}`;
 }
 
 function createLiveStepHostBindingsResolver(
@@ -737,10 +973,18 @@ function createLiveStepHostBindingsResolver(
       beginGitMutation: repoOwnership.beginMutation,
     };
     if (isGoalLoop) {
-      const roundIndex = listExecutorRoundsForInvocation(
+      const invocationRounds = listExecutorRoundsForInvocation(
         context.db,
         invocation.invocationId,
-      ).length;
+      );
+      const resumableRound = [...invocationRounds]
+        .reverse()
+        .find(
+          (round) =>
+            round.attempt === invocation.attempt &&
+            round.classification === null,
+        );
+      const roundIndex = resumableRound?.roundIndex ?? invocationRounds.length;
       const preparedRound = prepareGoalLoopRoundRoot(runDir, roundIndex + 1);
       if (!preparedRound.ok) {
         repoOwnership.settle(false);
@@ -750,6 +994,16 @@ function createLiveStepHostBindingsResolver(
         );
       }
       const roundRoot = preparedRound.roundRoot;
+      if (
+        typeof resumableRound?.artifactRoot === "string" &&
+        fs.realpathSync(resumableRound.artifactRoot) !== roundRoot
+      ) {
+        repoOwnership.settle(false);
+        throw new RegisteredExecutorHostBindingsError(
+          "invalid_input",
+          "goal-loop resumable round artifact root does not match its bound round directory",
+        );
+      }
       const roundResultPath = path.join(
         roundRoot,
         path.basename(resolved.exec.resultJsonPath),
@@ -771,9 +1025,8 @@ function createLiveStepHostBindingsResolver(
           "goal-loop objective is unavailable",
         );
       }
-      const priorRounds = listExecutorRoundsForInvocation(
-        context.db,
-        invocation.invocationId,
+      const priorRounds = invocationRounds.filter(
+        (round) => round.roundId !== resumableRound?.roundId,
       );
       const executorInput = buildDispatchedStepExecutorInput(
         step.kind,
@@ -791,32 +1044,40 @@ function createLiveStepHostBindingsResolver(
         },
         selection.selection,
       );
+      let expectedRepoHead = expectedSettledRepoHead(
+        resumableRound,
+        repoSafety.baseHead,
+      );
       const bindings: GoalLoopExecutorHostBindings = {
         start: {
-          roundId: `${invocation.invocationId}::round::${roundIndex}`,
+          roundId:
+            resumableRound?.roundId ??
+            `${invocation.invocationId}::round::${roundIndex}`,
           invocationId: invocation.invocationId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
           stepKey: invocation.stepKey,
           attempt: invocation.attempt,
           roundIndex,
-          inputDigest: `sha256:${crypto
-            .createHash("sha256")
-            .update(
-              JSON.stringify({
-                config: input.config,
-                priorRounds: priorRounds.map((round) => ({
-                  roundIndex: round.roundIndex,
-                  resultDigest: round.resultDigest,
-                  commitSha: round.commitSha,
-                  recoveryCode: round.recoveryCode,
-                })),
-              }),
-            )
-            .digest("hex")}`,
+          inputDigest:
+            resumableRound?.inputDigest ??
+            `sha256:${crypto
+              .createHash("sha256")
+              .update(
+                JSON.stringify({
+                  config: input.config,
+                  priorRounds: priorRounds.map((round) => ({
+                    roundIndex: round.roundIndex,
+                    resultDigest: round.resultDigest,
+                    commitSha: round.commitSha,
+                    recoveryCode: round.recoveryCode,
+                  })),
+                }),
+              )
+              .digest("hex")}`,
           artifactRoot: roundRoot,
-          logPaths: [roundLogPath],
-          startedAt: context.now,
+          logPaths: resumableRound?.logPaths ?? [roundLogPath],
+          startedAt: resumableRound?.startedAt ?? context.now,
         },
         selection: resolveGoalLoopRoundSelection({
           stepConfig: {
@@ -830,9 +1091,26 @@ function createLiveStepHostBindingsResolver(
             policyEnvelope: profile.name,
           },
         }),
-        runRound: (round) =>
-          goalLoopRoundMechanismFromPromptedResultFile({
-            artifactRoot: roundRoot,
+        hostBindingIdentity: nativeHostBindingIdentity({
+          profile: profile.name,
+          capability: step.kind,
+          command: nativeWrapper!.command,
+          args: nativeWrapper!.args,
+          cwd: nativeWrapper!.cwd === "repo" ? safety.repoPath : roundRoot,
+          timeoutSec: nativeWrapper!.timeoutSec,
+          environment: Object.fromEntries(
+            nativeWrapper!.envAllow.map((key) => [key, env[key] ?? null]),
+          ),
+        }),
+        ...(resumableRound !== undefined &&
+        !listExecutorCheckpointsForRound(
+          context.db,
+          resumableRound.roundId,
+        ).some((checkpoint) => checkpoint.stage === "mechanism_completed")
+          ? { roundAlreadyMaterialized: true }
+          : {}),
+        runRound: (round) => {
+          const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
             repoPath: safety.repoPath,
             baseHead: repoSafety.baseHead,
             resultFilePath: roundResultPath,
@@ -879,10 +1157,21 @@ function createLiveStepHostBindingsResolver(
                 throw new Error(`${dispatched.code}: ${dispatched.error}`);
               }
             },
-          }),
+          });
+          expectedRepoHead = expectedSettledRepoHeadFromGoalLoopFinalize(
+            mechanism.finalize,
+            repoSafety.baseHead,
+          );
+          return mechanism;
+        },
         settleRepoOwnership: (completionDurable) => {
           const repo = inspectRepo(safety.repoPath);
-          repoOwnership.settle(completionDurable && repo.ok);
+          repoOwnership.settle(
+            completionDurable &&
+              repo.ok &&
+              expectedRepoHead !== null &&
+              repo.head === expectedRepoHead,
+          );
         },
       };
       return bindings;
@@ -890,6 +1179,18 @@ function createLiveStepHostBindingsResolver(
     if (isSingleShot) {
       const singleShot = input.executor as SingleShotExecutor;
       const wrapper = nativeWrapper!;
+      const invocationRounds = listExecutorRoundsForInvocation(
+        context.db,
+        invocation.invocationId,
+      );
+      const resumableRound = [...invocationRounds]
+        .reverse()
+        .find(
+          (round) =>
+            round.attempt === invocation.attempt &&
+            round.classification === null,
+        );
+      const roundIndex = resumableRound?.roundIndex ?? invocationRounds.length;
       const runRound =
         singleShot.name === "one-shot"
           ? createOneShotLiveWrapperRoundRunner(wrapper, {
@@ -920,7 +1221,7 @@ function createLiveStepHostBindingsResolver(
               },
             })
           : createScriptCommandRoundRunner({
-              commandIdentity: step.kind,
+              commandIdentity: wrapper.commandIdentity ?? step.kind,
               command: wrapper.command,
               args: [...wrapper.args],
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
@@ -958,22 +1259,30 @@ function createLiveStepHostBindingsResolver(
                 },
               },
             });
+      let expectedRepoHead = expectedSettledRepoHead(
+        resumableRound,
+        repoSafety.baseHead,
+      );
       const bindings: SingleShotExecutorHostBindings = {
         start: {
-          roundId: `${invocation.invocationId}::round::0`,
+          roundId:
+            resumableRound?.roundId ??
+            `${invocation.invocationId}::round::${roundIndex}`,
           invocationId: invocation.invocationId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
           stepKey: invocation.stepKey,
           family: singleShot.name,
           attempt: invocation.attempt,
-          inputDigest: `sha256:${crypto
-            .createHash("sha256")
-            .update(JSON.stringify(input.config))
-            .digest("hex")}`,
-          artifactRoot: runDir,
-          logPaths: [executorLogPath],
-          startedAt: context.now,
+          inputDigest:
+            resumableRound?.inputDigest ??
+            `sha256:${crypto
+              .createHash("sha256")
+              .update(JSON.stringify(input.config))
+              .digest("hex")}`,
+          artifactRoot: resumableRound?.artifactRoot ?? runDir,
+          logPaths: resumableRound?.logPaths ?? [executorLogPath],
+          startedAt: resumableRound?.startedAt ?? context.now,
         },
         selection: resolveSingleShotRoundSelection({
           stepConfig: {
@@ -988,10 +1297,43 @@ function createLiveStepHostBindingsResolver(
             policyEnvelope: profile.name,
           },
         }),
-        runRound,
+        hostBindingIdentity: nativeHostBindingIdentity({
+          profile: profile.name,
+          capability:
+            singleShot.name === "script"
+              ? (wrapper.commandIdentity ?? step.kind)
+              : step.kind,
+          command: wrapper.command,
+          args: wrapper.args,
+          cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
+          timeoutSec: wrapper.timeoutSec,
+          environment: Object.fromEntries(
+            wrapper.envAllow.map((key) => [key, env[key] ?? null]),
+          ),
+        }),
+        ...(resumableRound !== undefined &&
+        !listExecutorCheckpointsForRound(
+          context.db,
+          resumableRound.roundId,
+        ).some((checkpoint) => checkpoint.stage === "mechanism_completed")
+          ? { roundAlreadyMaterialized: true }
+          : {}),
+        runRound: async (round, runnerContext) => {
+          const mechanism = await runRound(round, runnerContext);
+          expectedRepoHead = expectedSettledRepoHeadFromSingleShotMechanism(
+            mechanism,
+            repoSafety.baseHead,
+          );
+          return mechanism;
+        },
         settleRepoOwnership: (completionDurable) => {
           const repo = inspectRepo(safety.repoPath);
-          repoOwnership.settle(completionDurable && repo.ok);
+          repoOwnership.settle(
+            completionDurable &&
+              repo.ok &&
+              expectedRepoHead !== null &&
+              repo.head === expectedRepoHead,
+          );
         },
       };
       return bindings;
@@ -1113,6 +1455,94 @@ function completedMechanismRepoOwnership(
     beginMutation: unavailable,
     settle: settleRepoOwnership ?? (() => {}),
   };
+}
+
+function nativeHostBindingIdentity(input: {
+  profile: string;
+  capability: string;
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  timeoutSec: number;
+  environment: Readonly<Record<string, string | null>>;
+}): string {
+  return `sha256:${crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        version: 1,
+        profile: input.profile,
+        capability: input.capability,
+        command: input.command,
+        args: [...input.args],
+        cwd: input.cwd,
+        timeoutSec: input.timeoutSec,
+        environment: Object.fromEntries(
+          Object.entries(input.environment).sort(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        ),
+      }),
+    )
+    .digest("hex")}`;
+}
+
+const UNSAFE_REPO_SETTLEMENT_RECOVERY_CODES = new Set([
+  "head_mismatch",
+  "repo_lock_lost",
+  "reset_failed",
+  "commit_failed",
+  "git_failed",
+  "invalid_input",
+]);
+
+function expectedSettledRepoHead(
+  round:
+    | Readonly<{ commitSha: string | null; recoveryCode: string | null }>
+    | undefined,
+  baseHead: string,
+): string | null {
+  if (round === undefined) return null;
+  if (round.commitSha !== null) return round.commitSha;
+  return round.recoveryCode !== null &&
+    UNSAFE_REPO_SETTLEMENT_RECOVERY_CODES.has(round.recoveryCode)
+    ? null
+    : baseHead;
+}
+
+function expectedSettledRepoHeadFromGoalLoopFinalize(
+  finalize: Readonly<{ outcome: string }>,
+  baseHead: string,
+): string | null {
+  if (finalize.outcome === "committed") {
+    return (
+      finalize as Readonly<{
+        outcome: "committed";
+        commit: Readonly<{ commitSha: string }>;
+      }>
+    ).commit.commitSha;
+  }
+  return finalize.outcome === "reset_step_failure" ||
+    finalize.outcome === "reset_verification_failure"
+    ? baseHead
+    : null;
+}
+
+function expectedSettledRepoHeadFromSingleShotMechanism(
+  mechanism: Readonly<{
+    outcome: Readonly<{ ok: boolean; recoveryCode?: string }>;
+    evidence?: Readonly<{ commitSha?: string | null }>;
+  }>,
+  baseHead: string,
+): string | null {
+  if (mechanism.outcome.ok) {
+    return mechanism.evidence?.commitSha ?? null;
+  }
+  const recoveryCode = mechanism.outcome.recoveryCode;
+  return recoveryCode !== undefined &&
+    !UNSAFE_REPO_SETTLEMENT_RECOVERY_CODES.has(recoveryCode)
+    ? baseHead
+    : null;
 }
 
 function validatePortableAgentBinding(

@@ -173,7 +173,9 @@ function expectDurableDispatchBinding(db: MomentumDb): void {
       roundId: "round-1",
       sequence: 0,
       stage: "round_started",
-      detail: expect.stringMatching(/^dispatch binding: sha256:[a-f0-9]{64}$/),
+      detail: expect.stringMatching(
+        /^dispatch binding v2: sha256:[a-f0-9]{64}$/,
+      ),
     },
   ]);
 }
@@ -293,7 +295,7 @@ describe("runSingleShotRound — one-shot success", () => {
         sequence: 0,
         stage: "round_started",
         detail: expect.stringMatching(
-          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+          /^dispatch binding v2: sha256:[a-f0-9]{64}$/,
         ),
       },
       {
@@ -388,7 +390,7 @@ describe("runSingleShotRound — one-shot success", () => {
         sequence: 0,
         stage: "round_started",
         detail: expect.stringMatching(
-          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+          /^dispatch binding v2: sha256:[a-f0-9]{64}$/,
         ),
       },
       {
@@ -468,7 +470,7 @@ describe("runSingleShotRound — one-shot success", () => {
         sequence: 0,
         stage: "round_started",
         detail: expect.stringMatching(
-          /^dispatch binding: sha256:[a-f0-9]{64}$/,
+          /^dispatch binding v2: sha256:[a-f0-9]{64}$/,
         ),
       },
     ]);

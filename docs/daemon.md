@@ -240,6 +240,8 @@ step is handled by the daemon's policy-gated `external-apply` adapter, not a
 live-wrapper command. Each wrapper requires:
 
 - `command` — absolute executable path.
+- `command_identity` - optional portable capability name for script steps.
+  Use it when the durable `config.command` identity differs from the workflow step kind or executable basename.
 - `args` — array of strings or numbers; use `[]` when no arguments are needed.
 - `cwd` — `repo` or `iteration`.
 - `timeout_sec` — positive integer seconds no greater than 2,147,453.
@@ -251,7 +253,7 @@ live-wrapper command. Each wrapper requires:
   string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
   seconds and uses the same 2,147,453-second maximum.
 
-Serialized profiles must use the canonical `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
+Serialized profiles must use the canonical `command_identity`, `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
 The retired `timeoutSec`, `envAllow`, `resultFile`, and `probe.timeoutSec` aliases are rejected whenever present, including alongside their canonical replacements, and the refusal names the alias and replacement.
 This targeted compatibility refusal does not make wrapper objects strict; unrelated unknown keys remain tolerated.
 

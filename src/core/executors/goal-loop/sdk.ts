@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
 import type { ExecutorRoundRecord } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
@@ -42,6 +44,10 @@ export type GoalLoopExecutorHostBindings = {
   start: Omit<PlanGoalLoopRoundStartInput, "selection">;
   /** Host-resolved identity actually used for execution and durable reattachment. */
   selection?: GoalLoopRoundSelection;
+  /** Opaque digest of the resolved host runner, argv, cwd, and environment. */
+  hostBindingIdentity?: string;
+  /** True only when the host atomically inserted this fresh bound round. */
+  roundAlreadyMaterialized?: boolean;
   runRound?: GoalLoopRoundRunner;
   settleRepoOwnership?: (completionDurable: boolean) => void;
 };
@@ -94,13 +100,27 @@ export class GoalLoopSdkExecutor implements Executor<
     const selection =
       context.hostBindings.selection ?? selectionFromConfig(context.config);
     const current = context.state.currentRound;
+    const reusingMaterializedRound =
+      current !== null &&
+      current.round.attempt === context.state.invocation.attempt &&
+      current.round.classification === null &&
+      context.hostBindings.roundAlreadyMaterialized === true &&
+      !current.checkpoints.some(
+        (checkpoint) => checkpoint.stage === "mechanism_completed",
+      );
     if (
       current !== null &&
       current.round.attempt === context.state.invocation.attempt &&
-      current.round.classification === null
+      current.round.classification === null &&
+      !reusingMaterializedRound
     ) {
       try {
-        assertGoalLoopRoundMatchesHost(current.round, selection);
+        assertGoalLoopRoundMatchesHost(
+          current.round,
+          current.checkpoints,
+          context.hostBindings,
+          selection,
+        );
         const resumed = resumeCompletedRound(
           current.round,
           current.checkpoints,
@@ -113,7 +133,9 @@ export class GoalLoopSdkExecutor implements Executor<
       }
     }
 
-    const expectedRoundIndex = context.state.rounds.length;
+    const expectedRoundIndex = reusingMaterializedRound
+      ? current.round.roundIndex
+      : context.state.rounds.length;
     const hostStart = context.hostBindings.start;
     if (
       hostStart.invocationId !== context.state.invocation.invocationId ||
@@ -130,13 +152,24 @@ export class GoalLoopSdkExecutor implements Executor<
       );
     }
     const start = planGoalLoopRoundStart({ ...hostStart, selection });
-    const durableRound = context.envelope.startRound(roundStartForSdk(start));
-    context.envelope.recordCheckpoint(durableRound.roundId, {
-      checkpointId: `${durableRound.roundId}-checkpoint-0`,
-      sequence: 0,
-      stage: "round_started",
-      detail: null,
-    });
+    let durableRound: ExecutorRoundView;
+    if (reusingMaterializedRound) {
+      assertGoalLoopRoundMatchesHost(
+        current.round,
+        current.checkpoints,
+        context.hostBindings,
+        selection,
+      );
+      durableRound = current.round;
+    } else {
+      durableRound = context.envelope.startRound(roundStartForSdk(start));
+      context.envelope.recordCheckpoint(durableRound.roundId, {
+        checkpointId: `${durableRound.roundId}-checkpoint-0`,
+        sequence: 0,
+        stage: "round_started",
+        detail: goalLoopDispatchBindingDetail(context.hostBindings, selection),
+      });
+    }
 
     let completionDurable = false;
     try {
@@ -206,6 +239,8 @@ export class GoalLoopSdkExecutor implements Executor<
 
 function assertGoalLoopRoundMatchesHost(
   round: ExecutorRoundView,
+  checkpoints: readonly Readonly<{ stage: string; detail: string | null }>[],
+  hostBindings: Readonly<GoalLoopExecutorHostBindings>,
   selection: GoalLoopRoundSelection,
 ): void {
   const mismatches: string[] = [];
@@ -224,6 +259,64 @@ function assertGoalLoopRoundMatchesHost(
       `Goal-loop round ${round.roundId} cannot reattach with changed dispatch inputs: ${mismatches.join(", ")}.`,
     );
   }
+  const binding = checkpoints.find(
+    (checkpoint) => checkpoint.stage === "round_started",
+  );
+  const expectedBinding = goalLoopDispatchBindingDetail(
+    hostBindings,
+    selection,
+  );
+  if (binding?.detail !== expectedBinding) {
+    // Rounds written before the versioned binding shipped carried a null
+    // checkpoint detail. Their persisted round fields still protect the legacy
+    // agent identity, while every newly launched round binds the full host and
+    // portable dispatch envelope below.
+    if (binding?.detail !== null) {
+      throw new Error(
+        `Goal-loop round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
+      );
+    }
+  }
+}
+
+export function goalLoopDispatchBindingDetail(
+  hostBindings: Readonly<GoalLoopExecutorHostBindings>,
+  selection: Readonly<GoalLoopRoundSelection>,
+): string {
+  const start = hostBindings.start;
+  const payload = canonicalJson({
+    version: 2,
+    selection,
+    hostBindingIdentity: hostBindings.hostBindingIdentity ?? null,
+    start: {
+      roundId: start.roundId,
+      invocationId: start.invocationId,
+      workflowRunId: start.workflowRunId,
+      stepRunId: start.stepRunId,
+      stepKey: start.stepKey,
+      attempt: start.attempt,
+      roundIndex: start.roundIndex,
+      inputDigest: start.inputDigest,
+      artifactRoot: start.artifactRoot,
+      logPaths: start.logPaths ?? [],
+    },
+  });
+  return `dispatch binding v2: sha256:${crypto.createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function selectionFromConfig(

@@ -368,11 +368,18 @@ export function finalizeWorkflowStepFromResultFile(
     };
   }
 
+  return finalizeWorkflowStepFromValidatedResult(input, read.result);
+}
+
+export function finalizeWorkflowStepFromValidatedResult(
+  input: FinalizeWorkflowStepFromResultFileInput,
+  result: RunnerResult,
+): FinalizeWorkflowStepFromResultFileResult {
   return finalizeWorkflowStep({
     repoPath: input.repoPath,
     baseHead: input.baseHead,
-    stepSuccess: read.result.success,
-    commitIntent: read.result.commit,
+    stepSuccess: result.success,
+    commitIntent: result.commit,
     verificationCommands: input.verificationCommands,
     verificationTimeoutSec: input.verificationTimeoutSec,
     verificationLogPath: input.verificationLogPath,
@@ -388,8 +395,8 @@ export function finalizeWorkflowStepFromResultFile(
   });
 }
 
-type ReadNormalizedResultFile =
-  | { ok: true; result: RunnerResult }
+export type ReadNormalizedResultFile =
+  | { ok: true; result: RunnerResult; raw: string }
   | { ok: false; code: "result_missing" | "result_invalid"; error: string };
 
 /**
@@ -404,14 +411,16 @@ type ReadNormalizedResultFile =
  * it is intentionally kept verbatim across the relocation, not updated to match
  * the neutral symbol names.
  */
-function readNormalizedResultFile(
+export function readNormalizedResultFile(
   resultFilePath: string,
 ): ReadNormalizedResultFile {
-  let handle: number;
+  let descriptor: number;
   try {
-    handle = fs.openSync(
+    descriptor = fs.openSync(
       resultFilePath,
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      fs.constants.O_RDONLY |
+        fs.constants.O_NONBLOCK |
+        (fs.constants.O_NOFOLLOW ?? 0),
     );
   } catch (error) {
     if (errnoCode(error) === "ENOENT") {
@@ -430,24 +439,56 @@ function readNormalizedResultFile(
   }
 
   try {
-    const stat = fs.fstatSync(handle);
-    if (!stat.isFile()) {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile() || before.nlink !== 1) {
       return {
         ok: false,
         code: "result_invalid",
-        error: `live step result file at ${resultFilePath} is not a regular file.`,
+        error: `live step result file at ${resultFilePath} is not a private regular file.`,
       };
     }
-
-    if (stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
+    if (before.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
       return {
         ok: false,
         code: "result_invalid",
         error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
       };
     }
-
-    const raw = fs.readFileSync(handle, "utf-8");
+    const buffer = Buffer.allocUnsafe(LIVE_STEP_WRAPPER_RESULT_MAX_BYTES + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const count = fs.readSync(
+        descriptor,
+        buffer,
+        offset,
+        buffer.length - offset,
+        null,
+      );
+      if (count === 0) break;
+      offset += count;
+    }
+    if (offset > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
+      return {
+        ok: false,
+        code: "result_invalid",
+        error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`,
+      };
+    }
+    const after = fs.fstatSync(descriptor);
+    if (
+      !after.isFile() ||
+      after.nlink !== 1 ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.size !== offset
+    ) {
+      return {
+        ok: false,
+        code: "result_invalid",
+        error: `live step result file at ${resultFilePath} changed while it was being read.`,
+      };
+    }
+    const raw = buffer.subarray(0, offset).toString("utf-8");
     const parsed = parseRunnerResult(raw);
     if (!parsed.ok) {
       return {
@@ -456,8 +497,7 @@ function readNormalizedResultFile(
         error: `live step result JSON is invalid: ${parsed.error}`,
       };
     }
-
-    return { ok: true, result: parsed.value };
+    return { ok: true, result: parsed.value, raw };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -466,7 +506,7 @@ function readNormalizedResultFile(
       error: `live step result file at ${resultFilePath} is unreadable: ${detail}`,
     };
   } finally {
-    fs.closeSync(handle);
+    fs.closeSync(descriptor);
   }
 }
 

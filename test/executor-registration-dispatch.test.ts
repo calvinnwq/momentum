@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -426,6 +427,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const profilePath = writeNativeDispatchProfile(
       tempDir(),
       NATIVE_ITERATION_SCRIPT_COMMAND,
+      "repo-cleanup",
       "iteration",
     );
     const definition: WorkflowDefinition = {
@@ -438,8 +440,8 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           kind: "preflight",
           executor: "script",
           config: {
-            command: "preflight",
-            args: ["-c", NATIVE_ITERATION_SCRIPT_COMMAND],
+            command: "repo-cleanup",
+            args: ["-c", NATIVE_SCRIPT_COMMAND],
             timeoutMs: 5_000,
           },
           order: 0,
@@ -1035,6 +1037,44 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       }),
     ).toThrow("changed dispatch inputs: agentProvider, model");
 
+    for (const changedHostBindings of [
+      {
+        ...hostBindings,
+        selection: {
+          ...hostBindings.selection,
+          timeoutMs: 6_000,
+        },
+      },
+      {
+        ...hostBindings,
+        selection: {
+          ...hostBindings.selection,
+          maxRounds: 9,
+        },
+      },
+      {
+        ...hostBindings,
+        selection: {
+          ...hostBindings.selection,
+          policyEnvelope: "changed-policy",
+        },
+      },
+      {
+        ...hostBindings,
+        hostBindingIdentity: "sha256:changed-runner",
+      },
+    ]) {
+      expect(() =>
+        executor.tick({
+          state: envelope.snapshot(),
+          config: {},
+          hostBindings: changedHostBindings,
+          envelope: envelope.facade,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow("changed portable config or host inputs");
+    }
+
     await driveExecutorTicks({
       db,
       invocationId,
@@ -1120,6 +1160,10 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       ["-C", repoPath, "rev-parse", "HEAD"],
       { encoding: "utf8" },
     ).trim();
+    const inputDigest = `sha256:${crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ config: {}, priorRounds: [] }))
+      .digest("hex")}`;
     const envelope = createDurableExecutorEnvelope({
       db,
       invocationId,
@@ -1137,7 +1181,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           stepKey: "implementation",
           attempt: 1,
           roundIndex: 0,
-          inputDigest: "sha256:native-lock-recovery",
+          inputDigest,
           artifactRoot,
           logPaths: [path.join(artifactRoot, "executor.log")],
           startedAt: NOW + 2,
@@ -1178,6 +1222,9 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       envelope: envelope.facade,
       signal: new AbortController().signal,
     });
+    db.prepare(
+      "UPDATE executor_checkpoints SET detail = NULL WHERE round_id = ? AND stage = 'round_started'",
+    ).run(`${invocationId}::round::0`);
     const retained = acquireRepoLock(db, {
       repoRoot: repoPath,
       holder: "crashed-native-worker",
@@ -1405,6 +1452,7 @@ function initNativeDispatchRepo(): string {
 function writeNativeDispatchProfile(
   profileDir: string,
   script = NATIVE_ONE_SHOT_SCRIPT,
+  commandIdentity = "preflight",
   cwd: "repo" | "iteration" = "repo",
 ): string {
   const profilePath = path.join(profileDir, "profile.json");
@@ -1414,6 +1462,7 @@ function writeNativeDispatchProfile(
       name: "native-dispatch-test",
       wrappers: {
         preflight: {
+          command_identity: commandIdentity,
           command: "/bin/sh",
           args: ["-c", script],
           cwd,

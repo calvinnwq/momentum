@@ -64,12 +64,11 @@ import {
 } from "./executor.js";
 import type { GoalLoopRoundMechanismResult } from "./orchestrator.js";
 import {
-  finalizeWorkflowStepFromResultFile,
+  finalizeWorkflowStepFromValidatedResult,
+  readNormalizedResultFile,
   type FinalizeWorkflowStepFromResultFileInput,
   type FinalizeWorkflowStepFromResultFileResult,
 } from "../shared/step-finalize.js";
-import { parseRunnerResult } from "../runner/result.js";
-import type { RunnerResult } from "../runner/types.js";
 import {
   renderGoalLoopRoundPrompt,
   type GoalLoopRoundPromptInput,
@@ -83,7 +82,16 @@ import {
  * `resultFilePath` before this bridge runs.
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
-  FinalizeWorkflowStepFromResultFileInput;
+  FinalizeWorkflowStepFromResultFileInput & {
+    artifactDirectoryIdentity?: ArtifactDirectoryIdentity;
+  };
+
+type ArtifactDirectoryIdentity = {
+  path: string;
+  descriptor: number;
+  dev: number;
+  ino: number;
+};
 
 /**
  * Runner-facing input for a prompted native goal-loop round.
@@ -113,14 +121,6 @@ export type GoalLoopRoundMechanismFromPromptedResultFileInput =
     runPromptedRound: (input: GoalLoopPromptedRoundRunnerInput) => void;
   };
 
-type GoalLoopArtifactDirectory = {
-  root: string;
-  canonicalRoot: string;
-  handle: number;
-  device: number;
-  inode: number;
-};
-
 /**
  * Run the existing shared goal / iteration finalize safety over a finished round's
  * result document and project the outcome into the {@link GoalLoopRoundMechanismResult}
@@ -129,48 +129,31 @@ type GoalLoopArtifactDirectory = {
 export function goalLoopRoundMechanismFromResultFile(
   input: GoalLoopRoundMechanismFromResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  return goalLoopRoundMechanismFromResultFileWithDirectory(input, null);
-}
-
-function goalLoopRoundMechanismFromResultFileWithDirectory(
-  input: GoalLoopRoundMechanismFromResultFileInput,
-  artifactDirectory: GoalLoopArtifactDirectory | null,
-): GoalLoopRoundMechanismResult {
-  const capturedBeforeFinalize = readResultForCapture(input.resultFilePath);
-  const guardedInput =
-    artifactDirectory === null
-      ? input
-      : {
-          ...input,
-          beforeGitMutation: (mutation: "commit" | "reset") => {
-            if (!artifactDirectoryIsCurrent(artifactDirectory)) {
-              return {
-                ok: false as const,
-                error: "goal-loop artifact directory identity changed",
-              };
-            }
-            return input.beforeGitMutation?.(mutation) ?? { ok: true as const };
-          },
-        };
-  const finalize = finalizeWorkflowStepFromResultFile(guardedInput);
-  const captured = documentUnusable(finalize)
-    ? { result: null, resultDigest: null }
-    : capturedBeforeFinalize;
+  const snapshot = readNormalizedResultFile(input.resultFilePath);
+  const finalize: FinalizeWorkflowStepFromResultFileResult = snapshot.ok
+    ? finalizeWorkflowStepFromValidatedResult(input, snapshot.result)
+    : {
+        outcome: snapshot.code,
+        resultFilePath: input.resultFilePath,
+        error: snapshot.error,
+      };
+  const captured = snapshot.ok
+    ? {
+        result: snapshot.result,
+        resultDigest: sha256ContentDigest(snapshot.raw),
+      }
+    : { result: null, resultDigest: null };
   const changedFiles = committedChangedFiles(input, finalize);
-  const artifactsSafe =
-    artifactDirectory === null || artifactDirectoryIsCurrent(artifactDirectory);
   return {
     result: captured.result,
     resultDigest: captured.resultDigest,
     finalize,
-    artifacts: artifactsSafe
-      ? goalLoopMechanismArtifacts(
-          input,
-          finalize,
-          captured.resultDigest,
-          changedFiles,
-        )
-      : {},
+    artifacts: goalLoopMechanismArtifacts(
+      input,
+      finalize,
+      captured.resultDigest,
+      changedFiles,
+    ),
     changedFiles,
   };
 }
@@ -188,188 +171,73 @@ function goalLoopRoundMechanismFromResultFileWithDirectory(
 export function goalLoopRoundMechanismFromPromptedResultFile(
   input: GoalLoopRoundMechanismFromPromptedResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  const openedDirectory = openGoalLoopArtifactDirectory(input);
-  if (!openedDirectory.ok) {
-    return promptedRoundUnsafeArtifactRecovery(input, openedDirectory.error);
-  }
-  const artifactDirectory = openedDirectory.directory;
+  let directory: ArtifactDirectoryIdentity;
   try {
-    return runPromptedResultFileMechanism(input, artifactDirectory);
-  } finally {
-    if (artifactDirectory !== null) fs.closeSync(artifactDirectory.handle);
-  }
-}
-
-function runPromptedResultFileMechanism(
-  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
-  artifactDirectory: GoalLoopArtifactDirectory | null,
-): GoalLoopRoundMechanismResult {
-  const clearedResult = clearPromptedResultFile(input.resultFilePath);
-  if (!clearedResult.ok) {
+    directory = openArtifactDirectory(input);
+  } catch (error) {
     return promptedRoundRecovery(
       input,
       "result_invalid",
-      `goal-loop result path could not be prepared: ${clearedResult.error}`,
-    );
-  }
-
-  let prompt: string;
-  try {
-    prompt = renderGoalLoopRoundPrompt({
-      ...input.promptInput,
-      resultPath: input.resultFilePath,
-    });
-    fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
-    writeFileNoFollow(input.promptFilePath, prompt);
-    if (
-      artifactDirectory !== null &&
-      !artifactDirectoryIsCurrent(artifactDirectory)
-    ) {
-      return promptedRoundUnsafeArtifactRecovery(
-        input,
-        "goal-loop artifact directory identity changed before execution",
-      );
-    }
-  } catch (error) {
-    if (
-      artifactDirectory !== null &&
-      !artifactDirectoryIsCurrent(artifactDirectory)
-    ) {
-      return promptedRoundUnsafeArtifactRecovery(
-        input,
-        "goal-loop artifact directory identity changed before execution",
-      );
-    }
-    return promptedRoundRecovery(
-      input,
-      promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop round prompt could not be written: ${errorMessage(error)}`,
+      `goal-loop artifact directory is unsafe: ${errorMessage(error)}`,
     );
   }
 
   try {
-    input.runPromptedRound({
-      promptFilePath: input.promptFilePath,
-      resultFilePath: input.resultFilePath,
-      prompt,
-    });
-  } catch (error) {
-    if (
-      artifactDirectory !== null &&
-      !artifactDirectoryIsCurrent(artifactDirectory)
-    ) {
-      return promptedRoundUnsafeArtifactRecovery(
-        input,
-        "goal-loop artifact directory identity changed during execution",
-      );
-    }
-    return promptedRoundRecovery(
-      input,
-      promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop prompted runner failed: ${errorMessage(error)}`,
-    );
-  }
-
-  if (
-    artifactDirectory !== null &&
-    !artifactDirectoryIsCurrent(artifactDirectory)
-  ) {
-    return promptedRoundUnsafeArtifactRecovery(
-      input,
-      "goal-loop artifact directory identity changed during execution",
-    );
-  }
-
-  return goalLoopRoundMechanismFromResultFileWithDirectory(
-    input,
-    artifactDirectory,
-  );
-}
-
-function openGoalLoopArtifactDirectory(
-  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
-):
-  | { ok: true; directory: GoalLoopArtifactDirectory | null }
-  | { ok: false; error: string } {
-  if (input.artifactRoot === undefined) {
-    return { ok: true, directory: null };
-  }
-  const root = path.resolve(input.artifactRoot);
-  for (const artifactPath of [
-    input.promptFilePath,
-    input.resultFilePath,
-    input.verificationLogPath,
-    `${input.verificationLogPath}.finalization.json`,
-  ]) {
-    if (path.dirname(path.resolve(artifactPath)) !== root) {
-      return {
-        ok: false,
-        error: "goal-loop artifact path is outside the round directory",
-      };
-    }
-  }
-  let handle: number;
-  try {
-    handle = fs.openSync(
-      root,
-      fs.constants.O_RDONLY |
-        fs.constants.O_DIRECTORY |
-        fs.constants.O_NOFOLLOW,
-    );
-  } catch (error) {
-    return { ok: false, error: errorMessage(error) };
-  }
-  let retained = false;
-  try {
-    const stat = fs.fstatSync(handle);
-    if (!stat.isDirectory()) {
-      return { ok: false, error: "goal-loop artifact root is not a directory" };
-    }
-    const directory: GoalLoopArtifactDirectory = {
-      root,
-      canonicalRoot: fs.realpathSync(root),
-      handle,
-      device: stat.dev,
-      inode: stat.ino,
+    const securedInput = {
+      ...input,
+      artifactDirectoryIdentity: directory,
     };
-    if (!artifactDirectoryIsCurrent(directory)) {
-      return {
-        ok: false,
-        error: "goal-loop artifact directory identity changed",
-      };
-    }
-    retained = true;
-    return { ok: true, directory };
-  } catch (error) {
-    return { ok: false, error: errorMessage(error) };
-  } finally {
-    if (!retained) fs.closeSync(handle);
-  }
-}
-
-function artifactDirectoryIsCurrent(
-  directory: GoalLoopArtifactDirectory,
-): boolean {
-  try {
-    const openStat = fs.fstatSync(directory.handle);
-    const pathStat = fs.lstatSync(directory.root);
-    return (
-      openStat.isDirectory() &&
-      !pathStat.isSymbolicLink() &&
-      pathStat.isDirectory() &&
-      openStat.dev === directory.device &&
-      openStat.ino === directory.inode &&
-      pathStat.dev === directory.device &&
-      pathStat.ino === directory.inode &&
-      fs.realpathSync(directory.root) === directory.canonicalRoot
+    const clearedResult = clearPromptedResultFile(
+      input.resultFilePath,
+      directory,
     );
-  } catch {
-    return false;
+    if (!clearedResult.ok) {
+      return promptedRoundRecovery(
+        securedInput,
+        "result_invalid",
+        `goal-loop result path could not be prepared: ${clearedResult.error}`,
+      );
+    }
+
+    let prompt: string;
+    try {
+      prompt = renderGoalLoopRoundPrompt({
+        ...input.promptInput,
+        resultPath: input.resultFilePath,
+      });
+      writePrivateArtifact(input.promptFilePath, prompt, directory);
+    } catch (error) {
+      return promptedRoundRecovery(
+        securedInput,
+        promptedResultRecoveryOutcome(input.resultFilePath),
+        `goal-loop round prompt could not be written: ${errorMessage(error)}`,
+      );
+    }
+
+    try {
+      input.runPromptedRound({
+        promptFilePath: input.promptFilePath,
+        resultFilePath: input.resultFilePath,
+        prompt,
+      });
+      assertArtifactDirectoryIdentity(directory);
+    } catch (error) {
+      return promptedRoundRecovery(
+        securedInput,
+        promptedResultRecoveryOutcome(input.resultFilePath),
+        `goal-loop prompted runner failed: ${errorMessage(error)}`,
+      );
+    }
+
+    return goalLoopRoundMechanismFromResultFile(securedInput);
+  } finally {
+    fs.closeSync(directory.descriptor);
   }
 }
 
 function clearPromptedResultFile(
   resultFilePath: string,
+  directory: ArtifactDirectoryIdentity,
 ): { ok: true } | { ok: false; error: string } {
   if (
     typeof resultFilePath !== "string" ||
@@ -378,11 +246,114 @@ function clearPromptedResultFile(
     return { ok: true };
   }
   try {
+    assertArtifactDirectoryIdentity(directory);
     fs.rmSync(resultFilePath, { force: true });
+    assertArtifactDirectoryIdentity(directory);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
   }
+}
+
+function openArtifactDirectory(
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
+): ArtifactDirectoryIdentity {
+  const directories = [
+    input.promptFilePath,
+    input.resultFilePath,
+    input.verificationLogPath,
+  ].map((filePath) => path.resolve(path.dirname(filePath)));
+  const directoryPath = directories[0];
+  if (
+    directoryPath === undefined ||
+    directories.some((candidate) => candidate !== directoryPath)
+  ) {
+    throw new Error("goal-loop artifacts must share one round directory");
+  }
+  const pathStat = fs.lstatSync(directoryPath);
+  if (pathStat.isSymbolicLink() || !pathStat.isDirectory()) {
+    throw new Error("round artifact root is not a directory");
+  }
+  const descriptor = fs.openSync(
+    directoryPath,
+    fs.constants.O_RDONLY |
+      (fs.constants.O_DIRECTORY ?? 0) |
+      (fs.constants.O_NOFOLLOW ?? 0),
+  );
+  const descriptorStat = fs.fstatSync(descriptor);
+  if (
+    !descriptorStat.isDirectory() ||
+    descriptorStat.dev !== pathStat.dev ||
+    descriptorStat.ino !== pathStat.ino
+  ) {
+    fs.closeSync(descriptor);
+    throw new Error("round artifact root changed while it was opened");
+  }
+  return {
+    path: directoryPath,
+    descriptor,
+    dev: descriptorStat.dev,
+    ino: descriptorStat.ino,
+  };
+}
+
+function assertArtifactDirectoryIdentity(
+  directory: ArtifactDirectoryIdentity,
+): void {
+  const descriptorStat = fs.fstatSync(directory.descriptor);
+  const pathStat = fs.lstatSync(directory.path);
+  if (
+    !descriptorStat.isDirectory() ||
+    pathStat.isSymbolicLink() ||
+    !pathStat.isDirectory() ||
+    descriptorStat.dev !== directory.dev ||
+    descriptorStat.ino !== directory.ino ||
+    pathStat.dev !== directory.dev ||
+    pathStat.ino !== directory.ino
+  ) {
+    throw new Error("round artifact root identity changed");
+  }
+}
+
+function artifactDirectoryIdentityIsCurrent(
+  directory: ArtifactDirectoryIdentity,
+): boolean {
+  try {
+    assertArtifactDirectoryIdentity(directory);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function writePrivateArtifact(
+  filePath: string,
+  body: string,
+  directory: ArtifactDirectoryIdentity,
+): void {
+  if (path.resolve(path.dirname(filePath)) !== directory.path) {
+    throw new Error("artifact path escapes the round directory");
+  }
+  assertArtifactDirectoryIdentity(directory);
+  const descriptor = fs.openSync(
+    filePath,
+    fs.constants.O_CREAT |
+      fs.constants.O_WRONLY |
+      (fs.constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new Error("artifact path is not a private regular file");
+    }
+    fs.ftruncateSync(descriptor, 0);
+    fs.writeFileSync(descriptor, body, "utf-8");
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  assertArtifactDirectoryIdentity(directory);
 }
 
 function promptedResultRecoveryOutcome(
@@ -410,24 +381,11 @@ function promptedRoundRecovery(
     result: null,
     resultDigest: null,
     finalize,
-    artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
-    changedFiles: [],
-  };
-}
-
-function promptedRoundUnsafeArtifactRecovery(
-  input: GoalLoopRoundMechanismFromResultFileInput,
-  error: string,
-): GoalLoopRoundMechanismResult {
-  return {
-    result: null,
-    resultDigest: null,
-    finalize: {
-      outcome: "result_invalid",
-      resultFilePath: input.resultFilePath,
-      error,
-    },
-    artifacts: {},
+    artifacts:
+      input.artifactDirectoryIdentity !== undefined &&
+      !artifactDirectoryIdentityIsCurrent(input.artifactDirectoryIdentity)
+        ? {}
+        : goalLoopMechanismArtifacts(input, finalize, null, []),
     changedFiles: [],
   };
 }
@@ -462,68 +420,6 @@ function committedChangedFiles(
     );
   } catch {
     return [];
-  }
-}
-
-/**
- * Whether the finalize seam judged the result document unusable. These are the
- * only outcomes for which the round produced no result to capture; the bridge
- * returns a `null` result so the driver routes straight to manual recovery
- * instead of capturing from a document the finalize seam refused to trust.
- */
-function documentUnusable(
-  finalize: FinalizeWorkflowStepFromResultFileResult,
-): boolean {
-  return (
-    finalize.outcome === "result_missing" ||
-    finalize.outcome === "result_invalid"
-  );
-}
-
-/**
- * The result document the round captured, with its content digest. Both fields
- * are `null` together (an unreadable / unparseable document yields no result and
- * no digest) so the digest can never claim to fingerprint a result the round did
- * not capture.
- */
-type CapturedResultDocument = {
-  result: RunnerResult | null;
-  resultDigest: string | null;
-};
-
-/**
- * Re-read the normalized result document into the {@link RunnerResult} the round
- * captures, plus a content digest of its exact bytes (the round-schema
- * `result_digest` reattach fingerprint). Only called when the finalize seam
- * already accepted the document, so this read succeeds in practice; it is
- * defensively total (returns an all-`null` capture on any read / parse failure)
- * so the mechanism never throws.
- */
-function readResultForCapture(resultFilePath: string): CapturedResultDocument {
-  let handle: number;
-  try {
-    handle = fs.openSync(
-      resultFilePath,
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
-    );
-  } catch {
-    return { result: null, resultDigest: null };
-  }
-  try {
-    const stat = fs.fstatSync(handle);
-    if (!stat.isFile()) {
-      return { result: null, resultDigest: null };
-    }
-    const raw = fs.readFileSync(handle, "utf-8");
-    const parsed = parseRunnerResult(raw);
-    if (!parsed.ok) {
-      return { result: null, resultDigest: null };
-    }
-    return { result: parsed.value, resultDigest: sha256ContentDigest(raw) };
-  } catch {
-    return { result: null, resultDigest: null };
-  } finally {
-    fs.closeSync(handle);
   }
 }
 
@@ -672,8 +568,26 @@ function writeFinalizationEvidence(
     2,
   )}\n`;
   try {
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    writeFileNoFollow(evidencePath, body);
+    if (input.artifactDirectoryIdentity !== undefined) {
+      writePrivateArtifact(evidencePath, body, input.artifactDirectoryIdentity);
+    } else {
+      fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+      const descriptor = fs.openSync(
+        evidencePath,
+        fs.constants.O_CREAT |
+          fs.constants.O_WRONLY |
+          (fs.constants.O_NOFOLLOW ?? 0),
+        0o600,
+      );
+      try {
+        const stat = fs.fstatSync(descriptor);
+        if (!stat.isFile() || stat.nlink !== 1) return null;
+        fs.ftruncateSync(descriptor, 0);
+        fs.writeFileSync(descriptor, body, "utf-8");
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    }
   } catch {
     return null;
   }
@@ -691,22 +605,6 @@ function finalizationEvidencePath(verificationLogPath: string): string | null {
     return null;
   }
   return `${verificationLogPath}.finalization.json`;
-}
-
-function writeFileNoFollow(filePath: string, body: string): void {
-  const handle = fs.openSync(
-    filePath,
-    fs.constants.O_WRONLY |
-      fs.constants.O_CREAT |
-      fs.constants.O_TRUNC |
-      fs.constants.O_NOFOLLOW,
-    0o600,
-  );
-  try {
-    fs.writeFileSync(handle, body, "utf-8");
-  } finally {
-    fs.closeSync(handle);
-  }
 }
 
 function finalizationRecoveryCode(

@@ -44,6 +44,12 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import type {
+  ExecutorCheckpointRecord,
+  ExecutorInvocationRecord,
+  ExecutorRoundRecord,
+} from "../../executors/loop/reducer.js";
+import type { CodingStepExecutorSelection } from "../route/coding.js";
 import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
@@ -1152,6 +1158,15 @@ export type WorkflowStepDispatchContext = {
   now: number;
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
+  /** Optional SDK hook that binds the invocation and first round atomically. */
+  materializeOwnedRound?: (input: {
+    invocation: ExecutorInvocationRecord;
+    selection: CodingStepExecutorSelection;
+    now: number;
+  }) => {
+    round: ExecutorRoundRecord;
+    checkpoint: ExecutorCheckpointRecord;
+  };
   /** Stale dispatch owner proven and released during this scheduler tick. */
   staleDispatchTakeover?: {
     previousHolder: string;
@@ -1415,7 +1430,9 @@ function isResumableRegisteredSdkTick(
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(
-      (checkpoint) => checkpoint.stage === "mechanism_completed",
+      (checkpoint) =>
+        checkpoint.stage === "round_started" ||
+        checkpoint.stage === "mechanism_completed",
     )
   ) {
     return true;

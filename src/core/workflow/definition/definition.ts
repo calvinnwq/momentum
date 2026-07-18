@@ -404,7 +404,6 @@ export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
       key: "merge-cleanup",
       kind: "merge-cleanup",
       executor: "script",
-      config: { command: "merge-cleanup" },
       order: 4,
       required: true,
     },
@@ -435,6 +434,12 @@ export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
         ...step,
         executor: "delegate-supervisor",
         config: { tool: "no-mistakes" },
+      };
+    }
+    if (step.key === "merge-cleanup") {
+      return {
+        ...step,
+        config: { command: "merge-cleanup" },
       };
     }
     return { ...step };
