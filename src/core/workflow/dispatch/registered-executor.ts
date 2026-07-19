@@ -9,17 +9,27 @@ import {
 import type {
   Executor,
   ExecutorEnvelopeSnapshot,
+  ExecutorRoundStart,
   ExecutorRoundView,
   ExecutorTickContext,
   ExecutorTickResult,
 } from "../../executors/sdk/types.js";
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
+import {
+  listExecutorRoundsForInvocation,
+  loadExecutorInvocation,
+} from "../../executors/loop/persist.js";
+import {
+  isTerminalExecutorInvocationState,
+  type ExecutorRoundRecord,
+} from "../../executors/loop/reducer.js";
 import { classifyWorkflowLease } from "../run/reducer.js";
 import { getWorkflowLease, heartbeatWorkflowLease } from "../leases.js";
 import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
-import { deriveDispatchInvocationId } from "./execute.js";
+import {
+  deriveDispatchInvocationId,
+  ExecutorOwnedRoundMaterializationError,
+} from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import {
@@ -162,11 +172,47 @@ export function createRegisteredExecutorWorkflowDispatch(
       executorName: runtime.executorName,
       config,
     });
-    const result = baseDispatch(claim, {
-      ...context,
-      executorOwnsRounds: true,
-      ...(materializeOwnedRound === undefined ? {} : { materializeOwnedRound }),
-    });
+    let result: WorkflowStepDispatchResult;
+    try {
+      result = baseDispatch(claim, {
+        ...context,
+        executorOwnsRounds: true,
+        ...(materializeOwnedRound === undefined
+          ? {}
+          : { materializeOwnedRound }),
+      });
+    } catch (error) {
+      if (!(error instanceof ExecutorOwnedRoundMaterializationError)) {
+        throw error;
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      executor = createRuntimeUnavailableExecutor(
+        runtime.executorName,
+        `Executor scaffold materialization failed: ${reason}`,
+      );
+      config = {};
+      result = baseDispatch(claim, {
+        ...context,
+        executorOwnsRounds: true,
+        materializeOwnedRound: ({ invocation, now }) => {
+          const roundIndex = listExecutorRoundsForInvocation(
+            context.db,
+            invocation.invocationId,
+          ).length;
+          const round = genericRoundRecord(invocation, roundIndex, now);
+          return {
+            round,
+            checkpoint: {
+              checkpointId: `${round.roundId}-checkpoint-0`,
+              roundId: round.roundId,
+              sequence: 0,
+              stage: "round_started",
+              detail: `runtime_unavailable: ${reason}`,
+            },
+          };
+        },
+      });
+    }
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
     const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
@@ -506,7 +552,7 @@ function createHostBindingsUnavailableExecutor(
     },
     tick(context) {
       const round =
-        resumableCompletedRound(context.state) ??
+        resumableBoundRound(context.state) ??
         startGenericRound(context.state, context);
       context.envelope.observeRound(round.roundId, { summary: reason });
       if (error instanceof RegisteredExecutorHostBindingsError) {
@@ -525,7 +571,7 @@ function createHostBindingsUnavailableExecutor(
   };
 }
 
-function resumableCompletedRound(
+function resumableBoundRound(
   state: ExecutorEnvelopeSnapshot,
 ): ExecutorRoundView | undefined {
   const current = state.currentRound;
@@ -545,7 +591,9 @@ function runtimeUnavailableTick(
   context: ExecutorTickContext<Record<string, never>, Record<string, never>>,
   reason: string,
 ): ExecutorTickResult {
-  const round = startGenericRound(context.state, context);
+  const round =
+    resumableBoundRound(context.state) ??
+    startGenericRound(context.state, context);
   context.envelope.observeRound(round.roundId, { summary: reason });
   return {
     roundId: round.roundId,
@@ -563,15 +611,24 @@ function startGenericRound(
   context: ExecutorTickContext<Record<string, never>, Record<string, never>>,
 ) {
   const invocation = state.invocation;
-  return context.envelope.startRound({
-    roundId: `${invocation.invocationId}::round-${state.rounds.length + 1}`,
+  return context.envelope.startRound(
+    genericRoundStart(invocation, state.rounds.length),
+  );
+}
+
+function genericRoundStart(
+  invocation: ExecutorEnvelopeSnapshot["invocation"],
+  roundIndex: number,
+): ExecutorRoundStart {
+  return {
+    roundId: `${invocation.invocationId}::round-${roundIndex + 1}`,
     invocationId: invocation.invocationId,
     workflowRunId: invocation.workflowRunId,
     stepRunId: invocation.stepRunId,
     stepKey: invocation.stepKey,
     executorFamily: invocation.executorFamily,
     attempt: invocation.attempt,
-    roundIndex: state.rounds.length,
+    roundIndex,
     state: "running",
     agentProvider: null,
     model: null,
@@ -587,5 +644,32 @@ function startGenericRound(
     changedFiles: [],
     verificationStatus: null,
     commitSha: null,
-  });
+  };
+}
+
+function genericRoundRecord(
+  invocation: ExecutorEnvelopeSnapshot["invocation"],
+  roundIndex: number,
+  now: number,
+): ExecutorRoundRecord {
+  const start = genericRoundStart(invocation, roundIndex);
+  return {
+    ...start,
+    logPaths: [...start.logPaths],
+    keyChanges: [...start.keyChanges],
+    keyLearnings: [...start.keyLearnings],
+    remainingWork: [...start.remainingWork],
+    changedFiles: [...start.changedFiles],
+    verificationResults:
+      start.verificationResults === undefined
+        ? undefined
+        : [...start.verificationResults],
+    classification: null,
+    executorRecommendation: null,
+    startedAt: now,
+    heartbeatAt: now,
+    finishedAt: null,
+    recoveryCode: null,
+    humanGate: null,
+  };
 }

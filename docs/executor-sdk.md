@@ -297,7 +297,7 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 `ExecutorEnvelope` is bound to one invocation. It supports:
 
 - `snapshot()` to re-read the durable invocation, rounds, artifacts, checkpoints, findings, and decisions;
-- `startRound()` for the next sequential round;
+- `startRound()` for the next sequential round, with an optional initial checkpoint batch committed atomically with the round;
 - `observeRound()` for non-terminal phase and result/verification/commit evidence;
 - `recordRoundProgress()` to commit an observation and its supporting checkpoint batch atomically;
 - `heartbeat()` for liveness;
@@ -308,7 +308,8 @@ Executor writes are available only while the invocation is `running`; a daemon t
 
 If `mechanism_completed` evidence is durable but daemon classification is not, the profile-backed native `goal-loop`, `one-shot`, and `script` entrypoints reattach the matching non-terminal deterministic invocation, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
 Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
-For a new single-shot dispatch, the invocation, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its complete durable reattach binding.
+For a new native dispatch, the invocation, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its complete durable reattach binding.
+Every subsequent native goal-loop round uses the same atomic round plus binding operation before its mechanism launches.
 Reattach requires the durable `round_started` binding plus unchanged invocation identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
 An invocation without that complete binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
 

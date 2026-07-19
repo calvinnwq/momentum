@@ -118,6 +118,18 @@ const FAIL_CLOSED_GATE_ACTIONS: readonly string[] = [
 ];
 const FAIL_CLOSED_RECOMMENDED_ACTION = "clear_recovery";
 
+export class ExecutorOwnedRoundMaterializationError extends Error {
+  constructor(cause: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : `unknown owned-round materialization failure: ${String(cause)}`,
+      { cause },
+    );
+    this.name = "ExecutorOwnedRoundMaterializationError";
+  }
+}
+
 /**
  * Apply the production workflow-lane dispatch decision for a claimed step. This
  * is the {@link WorkflowStepDispatch} the bounded `daemon start` lane invokes; see
@@ -237,11 +249,16 @@ function dispatchExecutorScaffold(
         { now },
       );
     } else if (materializeOwnedRound !== undefined) {
-      const materialized = materializeOwnedRound({
-        invocation,
-        selection,
-        now,
-      });
+      let materialized;
+      try {
+        materialized = materializeOwnedRound({
+          invocation,
+          selection,
+          now,
+        });
+      } catch (error) {
+        throw new ExecutorOwnedRoundMaterializationError(error);
+      }
       insertExecutorRound(db, materialized.round, { now });
       insertExecutorCheckpoint(db, materialized.checkpoint, { now });
     }

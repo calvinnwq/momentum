@@ -62,6 +62,7 @@ import {
   type SingleShotRoundRunnerContext,
 } from "./sdk.js";
 import type { WorkflowStepKind } from "../../workflow/run/reducer.js";
+import { openStandalonePrivateArtifactFile } from "../shared/private-artifact.js";
 
 export type OneShotLiveWrapperRoundRunnerOptions = {
   /** Absolute repository root passed to the live wrapper and safety checks. */
@@ -193,6 +194,7 @@ export function createOneShotLiveWrapperRoundRunner(
     if (platformError !== undefined) {
       return unsupportedPlatformRecovery(
         logPath,
+        round.artifactRoot,
         "one-shot",
         platformError.message,
       );
@@ -425,8 +427,10 @@ export function createScriptCommandRoundRunner(
     }
 
     const logPath = primaryLogPath(round);
-    if (logPath === null) {
-      return invalidInput("script rounds require at least one log path");
+    if (round.artifactRoot === null || logPath === null) {
+      return invalidInput(
+        "script rounds require artifactRoot and at least one log path",
+      );
     }
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
@@ -435,6 +439,7 @@ export function createScriptCommandRoundRunner(
     if (platformError !== undefined) {
       return unsupportedPlatformRecovery(
         logPath,
+        round.artifactRoot,
         "script",
         platformError.message,
       );
@@ -462,12 +467,14 @@ export function createScriptCommandRoundRunner(
       ? executeScriptCommandSync(
           config,
           logPath,
+          round.artifactRoot,
           outputMaxBytes,
           readOnlySnapshot.snapshot,
         )
       : executeScriptCommandAsync(
           config,
           logPath,
+          round.artifactRoot,
           outputMaxBytes,
           readOnlySnapshot.snapshot,
           context.signal,
@@ -479,10 +486,11 @@ export function createScriptCommandRoundRunner(
 function executeScriptCommandSync(
   config: ScriptCommandRoundRunnerConfig,
   logPath: string,
+  artifactRoot: string,
   outputMaxBytes: number,
   readOnlySnapshot: ReadOnlyRepoSnapshot | undefined,
 ): SingleShotRoundMechanismResult {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput("script command runner could not open log path");
   }
@@ -513,11 +521,12 @@ function executeScriptCommandSync(
 async function executeScriptCommandAsync(
   config: ScriptCommandRoundRunnerConfig,
   logPath: string,
+  artifactRoot: string,
   outputMaxBytes: number,
   readOnlySnapshot: ReadOnlyRepoSnapshot | undefined,
   signal: AbortSignal,
 ): Promise<SingleShotRoundMechanismResult> {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput("script command runner could not open log path");
   }
@@ -670,10 +679,9 @@ function classifyScriptProcess(
   return finalizeScriptResult(config, true, "command_failed", readOnlySnapshot);
 }
 
-function openScriptLog(logPath: string): number | null {
+function openScriptLog(logPath: string, artifactRoot: string): number | null {
   try {
-    ensureParentDir(logPath);
-    return fs.openSync(logPath, "w");
+    return openStandalonePrivateArtifactFile(logPath, artifactRoot);
   } catch {
     return null;
   }
@@ -721,10 +729,11 @@ function readOnlyRecovery(
 
 function unsupportedPlatformRecovery(
   logPath: string,
+  artifactRoot: string,
   family: "one-shot" | "script",
   detail: string,
 ): SingleShotRoundMechanismResult {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput(`${family} runner could not open refusal log path`);
   }
@@ -1633,10 +1642,6 @@ function runScriptProcess(
 
 function scriptEnv(config: ScriptCommandRoundRunnerConfig): NodeJS.ProcessEnv {
   return config.env ?? {};
-}
-
-function ensureParentDir(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
 function errnoCode(error: Error | undefined): string | undefined {

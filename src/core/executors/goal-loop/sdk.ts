@@ -162,13 +162,17 @@ export class GoalLoopSdkExecutor implements Executor<
       );
       durableRound = current.round;
     } else {
-      durableRound = context.envelope.startRound(roundStartForSdk(start));
-      context.envelope.recordCheckpoint(durableRound.roundId, {
-        checkpointId: `${durableRound.roundId}-checkpoint-0`,
-        sequence: 0,
-        stage: "round_started",
-        detail: goalLoopDispatchBindingDetail(context.hostBindings, selection),
-      });
+      durableRound = context.envelope.startRound(roundStartForSdk(start), [
+        {
+          checkpointId: `${start.roundId}-checkpoint-0`,
+          sequence: 0,
+          stage: "round_started",
+          detail: goalLoopDispatchBindingDetail(
+            context.hostBindings,
+            selection,
+          ),
+        },
+      ]);
     }
 
     let completionDurable = false;

@@ -1643,6 +1643,33 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.evidence?.verificationStatus).toBe("skipped");
   });
 
+  it("tightens permissions before reusing a legacy script log", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const logPath = path.join(artifactRoot, "script.log");
+    fs.writeFileSync(logPath, "legacy log\n", { mode: 0o644 });
+    fs.chmodSync(logPath, 0o644);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'script ok'"],
+      cwd: repoPath,
+      repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [logPath],
+      }),
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
+  });
+
   it("finalizes script repo safety when post-process log writes fail", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();

@@ -73,6 +73,10 @@ import {
   createScriptCommandRoundRunner,
 } from "../executors/single-shot/mechanism.js";
 import {
+  assertPrivateArtifactDirectoryPath,
+  preparePrivateArtifactDirectory,
+} from "../executors/shared/private-artifact.js";
+import {
   GoalLoopSdkExecutor,
   goalLoopDispatchBindingDetail,
   type GoalLoopExecutorHostBindings,
@@ -835,6 +839,29 @@ function createLiveStepHostBindingsResolver(
           },
         })
       : null;
+    try {
+      const canonicalRepoPath = fs.realpathSync(resolved.exec.repoPath);
+      const canonicalRunDir = canonicalizeRunDir(
+        resolved.exec.repoPath,
+        canonicalRepoPath,
+        resolved.exec.runDir,
+      );
+      const relativeRunDir = path.relative(canonicalRepoPath, canonicalRunDir);
+      if (
+        relativeRunDir.length > 0 &&
+        !relativeRunDir.startsWith("..") &&
+        !path.isAbsolute(relativeRunDir)
+      ) {
+        assertPrivateArtifactDirectoryPath(canonicalRunDir, canonicalRepoPath);
+      }
+    } catch (error) {
+      return failRecoveredNativeRepoOwnership(
+        new RegisteredExecutorHostBindingsError(
+          "runtime_unavailable",
+          `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    }
     const safety = guardRecoveredNativeRepoOwnership(() =>
       resolveDaemonDispatchedRepoSafety(
         context.db,
@@ -867,12 +894,39 @@ function createLiveStepHostBindingsResolver(
     const artifactRoot = isDelegate
       ? path.join(safety.runDir, "delegate", claim.stepId)
       : safety.runDir;
-    const runDir =
+    let runDir =
       attempt <= 1
         ? artifactRoot
         : path.join(artifactRoot, `attempt-${attempt}`);
     try {
-      fs.mkdirSync(runDir, { recursive: true });
+      if (isSingleShot || isGoalLoop) {
+        const relativeArtifactRoot = path.relative(
+          safety.repoPath,
+          safety.runDir,
+        );
+        const trustedArtifactRoot =
+          relativeArtifactRoot.length > 0 &&
+          !relativeArtifactRoot.startsWith("..") &&
+          !path.isAbsolute(relativeArtifactRoot)
+            ? safety.repoPath
+            : fs.realpathSync(safety.runDir);
+        if (trustedArtifactRoot !== safety.repoPath) {
+          const relativeRunDir = path.relative(safety.runDir, runDir);
+          if (
+            relativeRunDir.startsWith("..") ||
+            path.isAbsolute(relativeRunDir)
+          ) {
+            throw new Error("native run directory escapes its artifact root");
+          }
+          runDir =
+            relativeRunDir.length === 0
+              ? trustedArtifactRoot
+              : path.join(trustedArtifactRoot, relativeRunDir);
+        }
+        runDir = preparePrivateArtifactDirectory(runDir, trustedArtifactRoot);
+      } else {
+        fs.mkdirSync(runDir, { recursive: true });
+      }
     } catch (error) {
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
@@ -2097,7 +2151,11 @@ function canonicalizeRunDir(
   ) {
     return path.join(canonicalRepoPath, relativeToRequestedRepo);
   }
-  return resolvedRunDir;
+  try {
+    return fs.realpathSync(resolvedRunDir);
+  } catch {
+    return resolvedRunDir;
+  }
 }
 
 function prepareGoalLoopRoundRoot(
@@ -2161,6 +2219,16 @@ function verifyRepoLocalRunDirIgnored(
       ok: false,
       reason:
         "repo_safety_unavailable: run artifact directory resolves to the repository root",
+      recoveryCode: "invalid_input",
+      recoveryArtifact: null,
+    };
+  }
+  try {
+    assertPrivateArtifactDirectoryPath(runDir, repoPath);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `repo_safety_unavailable: unsafe run artifact directory: ${error instanceof Error ? error.message : String(error)}`,
       recoveryCode: "invalid_input",
       recoveryArtifact: null,
     };

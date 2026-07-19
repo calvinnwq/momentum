@@ -73,6 +73,13 @@ import {
   renderGoalLoopRoundPrompt,
   type GoalLoopRoundPromptInput,
 } from "./prompt.js";
+import {
+  assertPrivateArtifactDirectoryIdentity,
+  openPrivateArtifactDirectory,
+  privateArtifactDirectoryIdentityIsCurrent,
+  writePrivateArtifact,
+  type PrivateArtifactDirectoryIdentity,
+} from "../shared/private-artifact.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the
@@ -83,15 +90,8 @@ import {
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
   FinalizeWorkflowStepFromResultFileInput & {
-    artifactDirectoryIdentity?: ArtifactDirectoryIdentity;
+    artifactDirectoryIdentity?: PrivateArtifactDirectoryIdentity;
   };
-
-type ArtifactDirectoryIdentity = {
-  path: string;
-  descriptor: number;
-  dev: number;
-  ino: number;
-};
 
 /**
  * Runner-facing input for a prompted native goal-loop round.
@@ -171,9 +171,13 @@ export function goalLoopRoundMechanismFromResultFile(
 export function goalLoopRoundMechanismFromPromptedResultFile(
   input: GoalLoopRoundMechanismFromPromptedResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  let directory: ArtifactDirectoryIdentity;
+  let directory: PrivateArtifactDirectoryIdentity;
   try {
-    directory = openArtifactDirectory(input);
+    directory = openPrivateArtifactDirectory([
+      input.promptFilePath,
+      input.resultFilePath,
+      input.verificationLogPath,
+    ]);
   } catch (error) {
     return promptedRoundRecovery(
       input,
@@ -220,7 +224,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
         resultFilePath: input.resultFilePath,
         prompt,
       });
-      assertArtifactDirectoryIdentity(directory);
+      assertPrivateArtifactDirectoryIdentity(directory);
     } catch (error) {
       return promptedRoundRecovery(
         securedInput,
@@ -237,7 +241,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
 
 function clearPromptedResultFile(
   resultFilePath: string,
-  directory: ArtifactDirectoryIdentity,
+  directory: PrivateArtifactDirectoryIdentity,
 ): { ok: true } | { ok: false; error: string } {
   if (
     typeof resultFilePath !== "string" ||
@@ -246,114 +250,13 @@ function clearPromptedResultFile(
     return { ok: true };
   }
   try {
-    assertArtifactDirectoryIdentity(directory);
+    assertPrivateArtifactDirectoryIdentity(directory);
     fs.rmSync(resultFilePath, { force: true });
-    assertArtifactDirectoryIdentity(directory);
+    assertPrivateArtifactDirectoryIdentity(directory);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
   }
-}
-
-function openArtifactDirectory(
-  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
-): ArtifactDirectoryIdentity {
-  const directories = [
-    input.promptFilePath,
-    input.resultFilePath,
-    input.verificationLogPath,
-  ].map((filePath) => path.resolve(path.dirname(filePath)));
-  const directoryPath = directories[0];
-  if (
-    directoryPath === undefined ||
-    directories.some((candidate) => candidate !== directoryPath)
-  ) {
-    throw new Error("goal-loop artifacts must share one round directory");
-  }
-  const pathStat = fs.lstatSync(directoryPath);
-  if (pathStat.isSymbolicLink() || !pathStat.isDirectory()) {
-    throw new Error("round artifact root is not a directory");
-  }
-  const descriptor = fs.openSync(
-    directoryPath,
-    fs.constants.O_RDONLY |
-      (fs.constants.O_DIRECTORY ?? 0) |
-      (fs.constants.O_NOFOLLOW ?? 0),
-  );
-  const descriptorStat = fs.fstatSync(descriptor);
-  if (
-    !descriptorStat.isDirectory() ||
-    descriptorStat.dev !== pathStat.dev ||
-    descriptorStat.ino !== pathStat.ino
-  ) {
-    fs.closeSync(descriptor);
-    throw new Error("round artifact root changed while it was opened");
-  }
-  return {
-    path: directoryPath,
-    descriptor,
-    dev: descriptorStat.dev,
-    ino: descriptorStat.ino,
-  };
-}
-
-function assertArtifactDirectoryIdentity(
-  directory: ArtifactDirectoryIdentity,
-): void {
-  const descriptorStat = fs.fstatSync(directory.descriptor);
-  const pathStat = fs.lstatSync(directory.path);
-  if (
-    !descriptorStat.isDirectory() ||
-    pathStat.isSymbolicLink() ||
-    !pathStat.isDirectory() ||
-    descriptorStat.dev !== directory.dev ||
-    descriptorStat.ino !== directory.ino ||
-    pathStat.dev !== directory.dev ||
-    pathStat.ino !== directory.ino
-  ) {
-    throw new Error("round artifact root identity changed");
-  }
-}
-
-function artifactDirectoryIdentityIsCurrent(
-  directory: ArtifactDirectoryIdentity,
-): boolean {
-  try {
-    assertArtifactDirectoryIdentity(directory);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function writePrivateArtifact(
-  filePath: string,
-  body: string,
-  directory: ArtifactDirectoryIdentity,
-): void {
-  if (path.resolve(path.dirname(filePath)) !== directory.path) {
-    throw new Error("artifact path escapes the round directory");
-  }
-  assertArtifactDirectoryIdentity(directory);
-  const descriptor = fs.openSync(
-    filePath,
-    fs.constants.O_CREAT |
-      fs.constants.O_WRONLY |
-      (fs.constants.O_NOFOLLOW ?? 0),
-    0o600,
-  );
-  try {
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile() || stat.nlink !== 1) {
-      throw new Error("artifact path is not a private regular file");
-    }
-    fs.ftruncateSync(descriptor, 0);
-    fs.writeFileSync(descriptor, body, "utf-8");
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
-  assertArtifactDirectoryIdentity(directory);
 }
 
 function promptedResultRecoveryOutcome(
@@ -383,7 +286,9 @@ function promptedRoundRecovery(
     finalize,
     artifacts:
       input.artifactDirectoryIdentity !== undefined &&
-      !artifactDirectoryIdentityIsCurrent(input.artifactDirectoryIdentity)
+      !privateArtifactDirectoryIdentityIsCurrent(
+        input.artifactDirectoryIdentity,
+      )
         ? {}
         : goalLoopMechanismArtifacts(input, finalize, null, []),
     changedFiles: [],

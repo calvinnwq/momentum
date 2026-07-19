@@ -202,7 +202,11 @@ export type ExecutorRoundProgressResult = {
  */
 export interface ExecutorEnvelope {
   snapshot(): ExecutorEnvelopeSnapshot;
-  startRound(record: ExecutorRoundStart): ExecutorRoundView;
+  /** Atomically starts a round with any initial durable binding checkpoints. */
+  startRound(
+    record: ExecutorRoundStart,
+    initialCheckpoints?: readonly ExecutorCheckpointInput[],
+  ): ExecutorRoundView;
   observeRound(
     roundId: string,
     observation: ExecutorRoundObservation,
