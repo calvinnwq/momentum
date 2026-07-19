@@ -1281,7 +1281,10 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it("refuses to relaunch an incomplete legacy goal-loop round without a dispatch binding", () => {
+  it("refuses an incomplete legacy goal-loop round without a dispatch binding through scheduler recovery", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const runId = "legacy-null-binding";
     const db = openDb(tempDir());
     const definition: WorkflowDefinition = {
       key: "legacy-null-binding-workflow",
@@ -1300,51 +1303,61 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     persistWorkflowDefinition(db, definition, { now: NOW });
     persistWorkflowRunStart(db, {
       definition,
-      runId: "legacy-null-binding",
-      repoPath: "/repos/legacy-null-binding",
+      runId,
+      repoPath,
       objective: "Refuse an unbound legacy relaunch",
       now: NOW,
     });
-    const invocationId = "legacy-null-binding::implementation::dispatch";
-    insertExecutorInvocation(
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "implementation",
+      holder: "legacy-null-binding-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    executeWorkflowStepDispatch(claim.claim, {
       db,
-      {
-        invocationId,
-        workflowRunId: "legacy-null-binding",
-        stepRunId: "implementation",
-        stepKey: "implementation",
-        executorFamily: "goal-loop",
-        state: "running",
-        attempt: 1,
-        startedAt: NOW,
-        heartbeatAt: NOW,
-        finishedAt: null,
-      },
-      { now: NOW },
+      workerId: "legacy-null-binding-worker",
+      now: NOW + 1,
+      executorOwnsRounds: true,
+    });
+    const invocationId = `${runId}::implementation::dispatch`;
+    const artifactRoot = path.join(
+      repoPath,
+      `.agent-workflows/${runId}/round-1`,
     );
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const inputDigest = `sha256:${crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ config: {}, priorRounds: [] }))
+      .digest("hex")}`;
     const envelope = createDurableExecutorEnvelope({
       db,
       invocationId,
-      now: () => NOW + 1,
+      now: () => NOW + 2,
     });
     const roundId = `${invocationId}::round::0`;
     envelope.facade.startRound({
       roundId,
       invocationId,
-      workflowRunId: "legacy-null-binding",
+      workflowRunId: runId,
       stepRunId: "implementation",
       stepKey: "implementation",
       executorFamily: "goal-loop",
       attempt: 1,
       roundIndex: 0,
       state: "running",
-      agentProvider: "codex",
-      model: "legacy-model",
-      effort: "high",
-      inputDigest: "sha256:legacy-input",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest,
       resultDigest: null,
-      artifactRoot: "/artifacts/legacy-null-binding",
-      logPaths: ["/artifacts/legacy-null-binding/executor.log"],
+      artifactRoot,
+      logPaths: [path.join(artifactRoot, "executor.log")],
       summary: null,
       keyChanges: [],
       keyLearnings: [],
@@ -1359,53 +1372,37 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       stage: "round_started",
       detail: null,
     });
-    let launched = false;
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
 
-    expect(() =>
-      new GoalLoopSdkExecutor().tick({
-        state: envelope.snapshot(),
-        config: {},
-        hostBindings: {
-          start: {
-            roundId,
-            invocationId,
-            workflowRunId: "legacy-null-binding",
-            stepRunId: "implementation",
-            stepKey: "implementation",
-            attempt: 1,
-            roundIndex: 0,
-            inputDigest: "sha256:legacy-input",
-            artifactRoot: "/artifacts/legacy-null-binding",
-            logPaths: ["/artifacts/legacy-null-binding/executor.log"],
-            startedAt: NOW,
-          },
-          selection: resolveGoalLoopRoundSelection({
-            stepConfig: {
-              agentProvider: "codex",
-              model: "legacy-model",
-              effort: "high",
-              timeoutMs: 60_000,
-              maxRounds: 5,
-              policyEnvelope: "changed-policy",
-            },
-          }),
-          hostBindingIdentity: "sha256:changed-host-authority",
-          roundAlreadyMaterialized: true,
-          runRound: () => {
-            launched = true;
-            throw new Error("legacy round must not launch");
-          },
-        },
-        envelope: envelope.facade,
-        signal: new AbortController().signal,
-      }),
-    ).toThrow("changed portable config or host inputs");
-    expect(launched).toBe(false);
+    const resumed = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "legacy-null-binding-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+
+    expect(resumed.code).toBe("dispatched");
+    expect(
+      fs.existsSync(
+        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+      ),
+    ).toBe(false);
     expect(
       db
-        .prepare("SELECT state FROM executor_rounds WHERE round_id = ?")
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+        )
         .get(roundId),
-    ).toEqual({ state: "running" });
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "executor_threw",
+    });
     db.close();
   });
 
