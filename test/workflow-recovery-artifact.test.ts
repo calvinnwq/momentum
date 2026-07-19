@@ -223,6 +223,7 @@ describe("live run-level recovery classifications (M9)", () => {
       "repo_lock_lost",
       "git_failed",
       "commit_failed",
+      "host_binding_mismatch",
       "invalid_input",
       "unsupported_platform",
       "runtime_unavailable",

@@ -195,10 +195,15 @@ export function createRegisteredExecutorWorkflowDispatch(
         ...context,
         executorOwnsRounds: true,
         materializeOwnedRound: ({ invocation, now }) => {
-          const roundIndex = listExecutorRoundsForInvocation(
-            context.db,
-            invocation.invocationId,
-          ).length;
+          const roundIndex =
+            listExecutorRoundsForInvocation(
+              context.db,
+              invocation.invocationId,
+            ).reduce(
+              (highestRoundIndex, round) =>
+                Math.max(highestRoundIndex, round.roundIndex),
+              -1,
+            ) + 1;
           const round = genericRoundRecord(invocation, roundIndex, now);
           return {
             round,

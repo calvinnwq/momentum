@@ -44,9 +44,9 @@
  *     `result_missing` / `result_invalid` are `failed`: "the step should fail
  *     under the current policy." These are genuine execution failures of the
  *     bounded unit itself.
- *   - The unsafe repo-finalization / invalid-input codes (`head_mismatch`,
+ *   - The unsafe repo-finalization / binding / invalid-input codes (`head_mismatch`,
  *     `repo_lock_lost`, `reset_failed`, `commit_failed`, `git_failed`,
- *     `invalid_input`) route to `manual_recovery_required` and preserve the
+ *     `host_binding_mismatch`, `invalid_input`) route to `manual_recovery_required` and preserve the
  *     precise code, mirroring how `decideGoalLoopRound` treats unsafe finalize
  *     ambiguity: Momentum cannot safely proceed without operator inspection.
  *     `invalid_input` also covers pre-launch mechanism/config precondition
@@ -144,6 +144,7 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
   "reset_failed",
   "commit_failed",
   "git_failed",
+  "host_binding_mismatch",
   "invalid_input",
 ] as const;
 
@@ -515,8 +516,8 @@ export function resolveSingleShotRoundSelection(
  * the single-shot `family`, the resolved {@link SingleShotRoundSelection}, the
  * round's input digest / artifact root / optional log paths, and the start clock.
  * The orchestrator owns the ids / clock; this module owns projecting them into a
- * durable round record. There is no `roundIndex` — a single shot is always the one
- * round at index 0.
+ * durable round record. A single attempt owns one round, while retry attempts use
+ * a fresh global round index to preserve the prior attempt's evidence.
  */
 export type PlanSingleShotRoundStartInput = {
   roundId: string;
@@ -526,6 +527,7 @@ export type PlanSingleShotRoundStartInput = {
   stepKey: string;
   family: SingleShotExecutorFamily;
   attempt: number;
+  roundIndex?: number;
   selection: SingleShotRoundSelection;
   inputDigest: string | null;
   artifactRoot: string | null;
@@ -537,7 +539,7 @@ export type PlanSingleShotRoundStartInput = {
  * Project a resolved selection and the daemon-owned round identity into the durable
  * round-start {@link ExecutorRoundRecord} the orchestrator inserts before invoking
  * external work (contract Round Lifecycle steps 2 and 4). The round starts `running`
- * at index 0 (a single shot has exactly one round) with its agent / model / effort,
+ * at its daemon-owned global index (index 0 for a first attempt) with its agent / model / effort,
  * input digest, artifact root, and log paths copied in and empty result evidence;
  * the terminal projection fills the rest. The `family` is carried from the input —
  * unlike the goal-loop projection that hard-codes its one family — so a `one-shot`
@@ -556,7 +558,7 @@ export function planSingleShotRoundStart(
     stepKey: input.stepKey,
     executorFamily: input.family,
     attempt: input.attempt,
-    roundIndex: 0,
+    roundIndex: input.roundIndex ?? 0,
     state: "running",
     classification: null,
     startedAt: input.startedAt,

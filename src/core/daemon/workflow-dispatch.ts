@@ -470,7 +470,12 @@ function createNativeOwnedRoundMaterializerResolver(
         input.context.db,
         invocation.invocationId,
       );
-      const roundIndex = existingRounds.length;
+      const roundIndex =
+        existingRounds.reduce(
+          (highestRoundIndex, round) =>
+            Math.max(highestRoundIndex, round.roundIndex),
+          -1,
+        ) + 1;
       const canonicalRepoPath = fs.realpathSync(resolved.exec.repoPath);
       const canonicalRunDir = canonicalizeRunDir(
         resolved.exec.repoPath,
@@ -577,6 +582,7 @@ function createNativeOwnedRoundMaterializerResolver(
         stepKey: invocation.stepKey,
         family: input.executorName as "one-shot" | "script",
         attempt: invocation.attempt,
+        roundIndex,
         selection: selectionBinding,
         inputDigest: singleShotInputDigest(input.config),
         artifactRoot,
@@ -993,6 +999,18 @@ function createLiveStepHostBindingsResolver(
       guardRecoveredNativeRepoOwnership(() =>
         validatePortableAgentBinding(input.config, selection.selection),
       );
+    }
+    if (
+      completedNativeMechanism &&
+      recoveredNativeRepoOwnership === undefined
+    ) {
+      assertCompletedNativeMechanismRepositoryProof({
+        db: context.db,
+        invocationId: invocation.invocationId,
+        attempt: invocation.attempt,
+        repoPath: safety.repoPath,
+        baseHead: safety.repoSafety.baseHead,
+      });
     }
     const repoOwnership = completedNativeMechanism
       ? completedMechanismRepoOwnership(recoveredNativeRepoOwnership)
@@ -1597,6 +1615,41 @@ function expectedSettledRepoHeadFromSingleShotMechanism(
     !UNSAFE_REPO_SETTLEMENT_RECOVERY_CODES.has(recoveryCode)
     ? baseHead
     : null;
+}
+
+/**
+ * A completed native mechanism can be reclassified only when its final
+ * repository state is still independently proven. The repo lock normally owns
+ * that settlement, but a post-completion crash may leave no active lock. In
+ * that case, never let the absent lock turn a missing or replaced commit into a
+ * successful replay.
+ */
+function assertCompletedNativeMechanismRepositoryProof(input: {
+  db: MomentumDb;
+  invocationId: string;
+  attempt: number;
+  repoPath: string;
+  baseHead: string;
+}): void {
+  const completedRound = [
+    ...listExecutorRoundsForInvocation(input.db, input.invocationId),
+  ]
+    .reverse()
+    .find(
+      (round) =>
+        round.attempt === input.attempt &&
+        round.classification === null &&
+        listExecutorCheckpointsForRound(input.db, round.roundId).some(
+          (checkpoint) => checkpoint.stage === "mechanism_completed",
+        ),
+    );
+  const expectedHead = expectedSettledRepoHead(completedRound, input.baseHead);
+  const repo = inspectRepo(input.repoPath);
+  if (repo.ok && expectedHead !== null && repo.head === expectedHead) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "head_mismatch",
+    "completed native mechanism cannot be reattached because its recorded repository HEAD is no longer proven",
+  );
 }
 
 function validatePortableAgentBinding(

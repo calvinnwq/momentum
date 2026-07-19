@@ -309,13 +309,20 @@ function dispatchRetryScaffold(
     if (materializeOwnedRound !== undefined) {
       const invocation = loadExecutorInvocation(db, reopened.invocationId);
       if (invocation === undefined) {
-        throw new Error("reopened executor invocation is unavailable");
+        throw new ExecutorOwnedRoundMaterializationError(
+          new Error("reopened executor invocation is unavailable"),
+        );
       }
-      const materialized = materializeOwnedRound({
-        invocation,
-        selection,
-        now,
-      });
+      let materialized;
+      try {
+        materialized = materializeOwnedRound({
+          invocation,
+          selection,
+          now,
+        });
+      } catch (error) {
+        throw new ExecutorOwnedRoundMaterializationError(error);
+      }
       insertExecutorRound(db, materialized.round, { now });
       insertExecutorCheckpoint(db, materialized.checkpoint, { now });
     }

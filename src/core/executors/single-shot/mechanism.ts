@@ -177,7 +177,9 @@ export function createOneShotLiveWrapperRoundRunner(
         config,
         options.hostIdentity,
       );
-      if (!portableValidation.ok) return invalidInput(portableValidation.error);
+      if (!portableValidation.ok) {
+        return hostBindingMismatch(portableValidation.error);
+      }
     }
     const logPath = primaryLogPath(round);
     if (round.artifactRoot === null || logPath === null) {
@@ -422,7 +424,7 @@ export function createScriptCommandRoundRunner(
     if (!validation.ok) return invalidInput(validation.error);
     if (context !== undefined) {
       const portable = validatePortableScriptConfig(context.config, config);
-      if (!portable.ok) return invalidInput(portable.error);
+      if (!portable.ok) return hostBindingMismatch(portable.error);
       context.signal.throwIfAborted();
     }
 
@@ -719,6 +721,11 @@ function closeLog(logHandle: number): void {
 function invalidInput(error: string): SingleShotRoundMechanismResult {
   void error;
   return { outcome: { ok: false, recoveryCode: "invalid_input" } };
+}
+
+function hostBindingMismatch(error: string): SingleShotRoundMechanismResult {
+  void error;
+  return { outcome: { ok: false, recoveryCode: "host_binding_mismatch" } };
 }
 
 function readOnlyRecovery(

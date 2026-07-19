@@ -835,7 +835,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           .get(runId),
       ).toEqual({
         state: "manual_recovery_required",
-        recovery_code: "invalid_input",
+        recovery_code: "host_binding_mismatch",
       });
       expect(fs.existsSync(path.join(repoPath, "native-script.txt"))).toBe(
         false,
@@ -965,7 +965,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       ),
     ).toBe("2\n");
     db.close();
-  });
+  }, 15_000);
 
   it("rolls back a second native goal-loop round when its binding cannot be persisted", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -1154,6 +1154,39 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         )
         .get(`${runId}::preflight::dispatch::round-1`),
     ).toEqual({ count: 1 });
+
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "preflight",
+        recoveryCode: "runtime_unavailable",
+      },
+    });
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "missing-repo-native-dispatch-worker",
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "manual_recovery_required", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ? AND recovery_code = 'runtime_unavailable'",
+        )
+        .get(runId),
+    ).toEqual({ count: 2 });
     db.close();
   });
 
@@ -1314,6 +1347,235 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       db.close();
     },
   );
+
+  it("retries a repaired native script host binding while preserving the failed attempt", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profileDir = tempDir();
+    const runId = "repaired-native-script-binding-run";
+    const script = "printf repaired > repaired-native-script.txt";
+    const definition: WorkflowDefinition = {
+      key: "repaired-native-script-binding-workflow",
+      title: "Repaired Native Script Binding Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "script",
+          config: { command: "repo-cleanup", timeoutMs: 5_000 },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Repair a native script host binding",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    writeNativeDispatchProfile(profileDir, script, "wrong-command");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "preflight",
+      holder: "repaired-native-script-binding-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const first = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: path.join(
+          profileDir,
+          "profile.json",
+        ),
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!first.ok) throw new Error(first.message);
+    await first.dispatch(claim.claim, {
+      db,
+      workerId: "repaired-native-script-binding-worker",
+      now: NOW + 1,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "host_binding_mismatch",
+    });
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "preflight",
+        recoveryCode: "host_binding_mismatch",
+      },
+    });
+    writeNativeDispatchProfile(profileDir, script, "repo-cleanup");
+    const repaired = resolveDaemonWorkflowStepDispatch(
+      {
+        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: path.join(
+          profileDir,
+          "profile.json",
+        ),
+      },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!repaired.ok) throw new Error(repaired.message);
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "repaired-native-script-binding-worker",
+      dispatch: repaired.dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all(runId),
+    ).toEqual([
+      { attempt: 1, recovery_code: "host_binding_mismatch" },
+      { attempt: 2, recovery_code: null },
+    ]);
+    db.close();
+  }, 15_000);
+
+  it("retries a repaired native one-shot host binding while preserving the failed attempt", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profileDir = tempDir();
+    const runId = "repaired-native-one-shot-binding-run";
+    const definition: WorkflowDefinition = {
+      key: "repaired-native-one-shot-binding-workflow",
+      title: "Repaired Native One-shot Binding Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          config: { timeoutMs: 4_000 },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Repair a native one-shot host binding",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const profilePath = writeNativeDispatchProfile(profileDir);
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "preflight",
+      holder: "repaired-native-one-shot-binding-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const first = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!first.ok) throw new Error(first.message);
+    await first.dispatch(claim.claim, {
+      db,
+      workerId: "repaired-native-one-shot-binding-worker",
+      now: NOW + 1,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "host_binding_mismatch",
+    });
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "preflight",
+        recoveryCode: "host_binding_mismatch",
+      },
+    });
+    writeNativeDispatchProfile(
+      profileDir,
+      NATIVE_ONE_SHOT_SCRIPT,
+      "preflight",
+      "repo",
+      4,
+    );
+    const repaired = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!repaired.ok) throw new Error(repaired.message);
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "repaired-native-one-shot-binding-worker",
+      dispatch: repaired.dispatch,
+      now: () => NOW + 3,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all(runId),
+    ).toEqual([
+      { attempt: 1, recovery_code: "host_binding_mismatch" },
+      { attempt: 2, recovery_code: null },
+    ]);
+    db.close();
+  }, 15_000);
 
   it("reattaches a checkpointed goal-loop mechanism without rerunning or recommitting", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -1839,6 +2101,139 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
+  it("fails closed when a completed native round loses its recorded commit after lock release", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const runId = "missing-commit-native-reattach-run";
+    const definition: WorkflowDefinition = {
+      key: "missing-commit-native-reattach-workflow",
+      title: "Missing Commit Native Reattach Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Never classify a lost native commit as success",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "implementation",
+      holder: "missing-commit-native-reattach-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    executeWorkflowStepDispatch(claim.claim, {
+      db,
+      workerId: "missing-commit-native-reattach-worker",
+      now: NOW + 1,
+      executorOwnsRounds: true,
+    });
+    const invocationId = `${runId}::implementation::dispatch`;
+    const roundId = `${invocationId}::round::0`;
+    const artifactRoot = path.join(
+      repoPath,
+      `.agent-workflows/${runId}/round-1`,
+    );
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId,
+      now: () => NOW + 2,
+    });
+    envelope.facade.startRound({
+      roundId,
+      invocationId,
+      workflowRunId: runId,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attempt: 1,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: "sha256:checkpointed",
+      resultDigest: null,
+      artifactRoot,
+      logPaths: [path.join(artifactRoot, "executor.log")],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: "passed",
+      commitSha: "a".repeat(40),
+    });
+    envelope.facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-checkpoint-0`,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    });
+    envelope.facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-checkpoint-1`,
+      sequence: 1,
+      stage: "mechanism_completed",
+      detail: "durable native completion",
+    });
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "missing-commit-native-reattach-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: production.dispatch,
+      now: () => NOW + 3,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE invocation_id = ?",
+        )
+        .get(invocationId),
+    ).toEqual({ state: "manual_recovery_required" });
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+        )
+        .get(roundId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "head_mismatch",
+    });
+    expect(
+      fs.existsSync(
+        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+      ),
+    ).toBe(false);
+    db.close();
+  });
+
   it("classifies a checkpointed native round and settles its lock when host bindings disappear", async () => {
     const repoPath = initNativeDispatchRepo();
     const definition: WorkflowDefinition = {
@@ -2009,6 +2404,7 @@ function writeNativeDispatchProfile(
   script = NATIVE_ONE_SHOT_SCRIPT,
   commandIdentity = "preflight",
   cwd: "repo" | "iteration" = "repo",
+  timeoutSec = 5,
 ): string {
   const profilePath = path.join(profileDir, "profile.json");
   fs.writeFileSync(
@@ -2021,7 +2417,7 @@ function writeNativeDispatchProfile(
           command: "/bin/sh",
           args: ["-c", script],
           cwd,
-          timeout_sec: 5,
+          timeout_sec: timeoutSec,
           env_allow: [],
           result_file: "result.json",
         },
