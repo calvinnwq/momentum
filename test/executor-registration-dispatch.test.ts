@@ -441,7 +441,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           executor: "script",
           config: {
             command: "repo-cleanup",
-            args: ["-c", NATIVE_SCRIPT_COMMAND],
             timeoutMs: 5_000,
           },
           order: 0,
@@ -518,7 +517,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       label: "command identity",
       config: {
         command: "other-command",
-        args: ["-c", NATIVE_SCRIPT_COMMAND],
         timeoutMs: 5_000,
       },
     },
@@ -526,7 +524,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       label: "timeout",
       config: {
         command: "preflight",
-        args: ["-c", NATIVE_SCRIPT_COMMAND],
         timeoutMs: 4_000,
       },
     },
@@ -1281,6 +1278,134 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         ),
       ),
     ).toBe(false);
+    db.close();
+  });
+
+  it("refuses to relaunch an incomplete legacy goal-loop round without a dispatch binding", () => {
+    const db = openDb(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "legacy-null-binding-workflow",
+      title: "Legacy Null Binding Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "legacy-null-binding",
+      repoPath: "/repos/legacy-null-binding",
+      objective: "Refuse an unbound legacy relaunch",
+      now: NOW,
+    });
+    const invocationId = "legacy-null-binding::implementation::dispatch";
+    insertExecutorInvocation(
+      db,
+      {
+        invocationId,
+        workflowRunId: "legacy-null-binding",
+        stepRunId: "implementation",
+        stepKey: "implementation",
+        executorFamily: "goal-loop",
+        state: "running",
+        attempt: 1,
+        startedAt: NOW,
+        heartbeatAt: NOW,
+        finishedAt: null,
+      },
+      { now: NOW },
+    );
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      invocationId,
+      now: () => NOW + 1,
+    });
+    const roundId = `${invocationId}::round::0`;
+    envelope.facade.startRound({
+      roundId,
+      invocationId,
+      workflowRunId: "legacy-null-binding",
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attempt: 1,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: "codex",
+      model: "legacy-model",
+      effort: "high",
+      inputDigest: "sha256:legacy-input",
+      resultDigest: null,
+      artifactRoot: "/artifacts/legacy-null-binding",
+      logPaths: ["/artifacts/legacy-null-binding/executor.log"],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-checkpoint-0`,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    });
+    let launched = false;
+
+    expect(() =>
+      new GoalLoopSdkExecutor().tick({
+        state: envelope.snapshot(),
+        config: {},
+        hostBindings: {
+          start: {
+            roundId,
+            invocationId,
+            workflowRunId: "legacy-null-binding",
+            stepRunId: "implementation",
+            stepKey: "implementation",
+            attempt: 1,
+            roundIndex: 0,
+            inputDigest: "sha256:legacy-input",
+            artifactRoot: "/artifacts/legacy-null-binding",
+            logPaths: ["/artifacts/legacy-null-binding/executor.log"],
+            startedAt: NOW,
+          },
+          selection: resolveGoalLoopRoundSelection({
+            stepConfig: {
+              agentProvider: "codex",
+              model: "legacy-model",
+              effort: "high",
+              timeoutMs: 60_000,
+              maxRounds: 5,
+              policyEnvelope: "changed-policy",
+            },
+          }),
+          hostBindingIdentity: "sha256:changed-host-authority",
+          roundAlreadyMaterialized: true,
+          runRound: () => {
+            launched = true;
+            throw new Error("legacy round must not launch");
+          },
+        },
+        envelope: envelope.facade,
+        signal: new AbortController().signal,
+      }),
+    ).toThrow("changed portable config or host inputs");
+    expect(launched).toBe(false);
+    expect(
+      db
+        .prepare("SELECT state FROM executor_rounds WHERE round_id = ?")
+        .get(roundId),
+    ).toEqual({ state: "running" });
     db.close();
   });
 

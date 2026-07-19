@@ -364,8 +364,9 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *
  * The delegated tool is portable step config, never an executor-family value.
  * Version 1 remains registered so existing runs keep resolving its legacy
- * implementation and no-mistakes identities; its merge-cleanup step carries
- * the portable command identity required by native script dispatch.
+ * implementation and no-mistakes identities. Dispatch projects the native
+ * merge-cleanup command identity for recorded V1 runs without rewriting the
+ * immutable definition.
  */
 export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,

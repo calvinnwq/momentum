@@ -268,10 +268,14 @@ function assertGoalLoopRoundMatchesHost(
   );
   if (binding?.detail !== expectedBinding) {
     // Rounds written before the versioned binding shipped carried a null
-    // checkpoint detail. Their persisted round fields still protect the legacy
-    // agent identity, while every newly launched round binds the full host and
-    // portable dispatch envelope below.
-    if (binding?.detail !== null) {
+    // checkpoint detail. That legacy evidence is sufficient only to classify
+    // an already-completed mechanism. Relaunching incomplete work requires the
+    // full host and portable dispatch envelope because the original authority
+    // cannot otherwise be proven.
+    const mechanismCompleted = checkpoints.some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    );
+    if (binding?.detail !== null || !mechanismCompleted) {
       throw new Error(
         `Goal-loop round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
       );

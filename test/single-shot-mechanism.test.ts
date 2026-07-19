@@ -266,7 +266,7 @@ describe("single-shot concrete mechanisms", () => {
             mode === "sync"
               ? mechanism(scriptRound)
               : mechanism(scriptRound, {
-                  config: { command: path.basename(process.execPath), args },
+                  config: { command: path.basename(process.execPath) },
                   hostBindings:
                     {} as SingleShotRoundRunnerContext["hostBindings"],
                   signal: new AbortController().signal,
@@ -482,7 +482,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -582,7 +582,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -624,7 +624,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -669,7 +669,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -724,7 +724,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -786,7 +786,7 @@ describe("single-shot concrete mechanisms", () => {
       },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -819,7 +819,7 @@ describe("single-shot concrete mechanisms", () => {
       repoSafety: { mode: "read-only" },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args: ["-c", "exit 0"] },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     };
@@ -869,7 +869,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -1357,7 +1357,7 @@ describe("single-shot concrete mechanisms", () => {
 
     const syncResult = mechanism(scriptRound);
     const sdkResult = await mechanism(scriptRound, {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     });
@@ -1382,7 +1382,7 @@ describe("single-shot concrete mechanisms", () => {
       repoSafety: { mode: "read-only" },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "node", args: ["--version"] },
+      config: { command: "node" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     };
@@ -1414,7 +1414,6 @@ describe("single-shot concrete mechanisms", () => {
     const context: SingleShotRoundRunnerContext = {
       config: {
         command: "sh",
-        args,
         policyEnvelope: "portable-unrestricted",
       },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],

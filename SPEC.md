@@ -34,9 +34,10 @@ The legacy values remain readable for durable compatibility. The current
 `coding-workflow` definition classifies implementation and no-mistakes as
 `delegate-supervisor`, with `{ "tool": "gnhf" }` and
 `{ "tool": "no-mistakes" }` stored as portable step config.
-Version 1 remains registered for runs that recorded it with its legacy
-implementation and no-mistakes identities and the portable
-`{ "command": "merge-cleanup" }` script identity required by native dispatch.
+Version 1 remains registered unchanged for runs that recorded its legacy
+implementation and no-mistakes identities.
+Native dispatch projects `{ "command": "merge-cleanup" }` for the V1
+merge-cleanup step at runtime without rewriting that immutable definition.
 
 The daemon owns scheduling, leases, recovery rechecks, gate enforcement, and
 bounded progress. Executors own bounded work and may recommend `continue`,

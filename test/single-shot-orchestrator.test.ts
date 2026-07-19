@@ -979,7 +979,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       {
         family: "script",
         config: { command: "test-script", args: "--bad" },
-        message: "config.args must contain only strings",
+        message: "does not allow property args",
       },
       {
         family: "one-shot",

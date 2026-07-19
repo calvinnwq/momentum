@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { isPortableScriptCommandIdentity } from "../core/executors/sdk/portable-command.js";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind,
@@ -168,8 +169,7 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   const rawCommandIdentity = value["command_identity"];
   if (
     rawCommandIdentity !== undefined &&
-    (typeof rawCommandIdentity !== "string" ||
-      !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(rawCommandIdentity))
+    !isPortableScriptCommandIdentity(rawCommandIdentity)
   ) {
     return configInvalid(
       "Live wrapper `command_identity` must be a portable command identity.",

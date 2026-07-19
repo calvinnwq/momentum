@@ -76,6 +76,19 @@ describe("parseLiveWrapperConfig shape", () => {
     expect(result.error).toContain("command_identity");
   });
 
+  it.each(["@scope:cleanup", "cleanup+safe"])(
+    "accepts SDK-compatible portable command identity %s",
+    (commandIdentity) => {
+      const result = parseLiveWrapperConfig({
+        ...clone(validWrapper),
+        command_identity: commandIdentity,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.commandIdentity).toBe(commandIdentity);
+    },
+  );
+
   it("rejects a retired camelCase alias that replaces its canonical key", () => {
     for (const [alias, canonical] of [
       ["timeoutSec", "timeout_sec"],

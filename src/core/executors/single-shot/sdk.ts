@@ -12,6 +12,10 @@ import type {
 import { normalizeRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
 import {
+  SCRIPT_COMMAND_IDENTITY_PATTERN,
+  isPortableScriptCommandIdentity,
+} from "../sdk/portable-command.js";
+import {
   EXECUTOR_OBSERVATION_PHASES,
   type ExecutorObservationPhase,
   type Executor,
@@ -58,7 +62,6 @@ export type SingleShotExecutorConfig = {
   policyEnvelope?: string;
   /** Portable script/tool identity; host bindings resolve it to an executable. */
   command?: string;
-  args?: readonly string[];
 };
 
 export type ScriptExecutorConfig = SingleShotExecutorConfig & {
@@ -68,23 +71,15 @@ export type ScriptExecutorConfig = SingleShotExecutorConfig & {
 
 export type AgentOnceExecutorConfig = Omit<
   SingleShotExecutorConfig,
-  "command" | "args"
+  "command"
 > & {
   command?: never;
-  args?: never;
 };
 
-export const SCRIPT_COMMAND_IDENTITY_PATTERN =
-  "^(?!\\.{1,2}$)(?![A-Za-z]:)[A-Za-z0-9@][A-Za-z0-9._:@+-]*$";
-
-export function isPortableScriptCommandIdentity(
-  value: unknown,
-): value is string {
-  return (
-    typeof value === "string" &&
-    new RegExp(SCRIPT_COMMAND_IDENTITY_PATTERN).test(value)
-  );
-}
+export {
+  SCRIPT_COMMAND_IDENTITY_PATTERN,
+  isPortableScriptCommandIdentity,
+} from "../sdk/portable-command.js";
 
 export function singleShotExecutorConfigError(
   family: SingleShotExecutorFamily,
@@ -97,7 +92,7 @@ export function singleShotExecutorConfigError(
   }
   const allowed =
     family === "script"
-      ? new Set(["command", "args", "timeoutMs", "policyEnvelope"])
+      ? new Set(["command", "timeoutMs", "policyEnvelope"])
       : new Set(["agent", "timeoutMs", "policyEnvelope"]);
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown !== undefined) {
@@ -132,13 +127,6 @@ export function singleShotExecutorConfigError(
   if (family === "script") {
     if (!isPortableScriptCommandIdentity(value["command"])) {
       return "Script config requires a portable config.command identity.";
-    }
-    if (
-      value["args"] !== undefined &&
-      (!Array.isArray(value["args"]) ||
-        value["args"].some((arg) => typeof arg !== "string"))
-    ) {
-      return "Script config.args must contain only strings.";
     }
     return null;
   }
@@ -259,7 +247,6 @@ export const SCRIPT_EXECUTOR_CONFIG_SCHEMA = {
       description:
         "Portable command identity; the host resolves the executable path.",
     },
-    args: { type: "array", items: { type: "string" } },
     timeoutMs: {
       type: "integer",
       minimum: 1_000,
@@ -765,13 +752,10 @@ function immutableSingleShotConfig(
   config: Readonly<SingleShotExecutorConfig>,
 ): Readonly<SingleShotExecutorConfig> {
   const agent = config.agent === undefined ? undefined : { ...config.agent };
-  const args = config.args === undefined ? undefined : [...config.args];
   if (agent !== undefined) Object.freeze(agent);
-  if (args !== undefined) Object.freeze(args);
   return Object.freeze({
     ...config,
     ...(agent !== undefined ? { agent } : {}),
-    ...(args !== undefined ? { args } : {}),
   });
 }
 

@@ -353,17 +353,17 @@ The shipped schemas accept these shapes:
 ```json
 {
   "command": "repo-cleanup",
-  "args": ["--prune"],
   "timeoutMs": 60000,
   "policyEnvelope": "cleanup-only"
 }
 ```
 
 Every shown field is optional for the `goal-loop` and `one-shot` families.
-The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command` and `args`.
+The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command`.
 `goal-loop` also accepts only a positive integer `maxRounds`.
-Agent and policy strings must be non-empty, `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000) no greater than 2,147,453,000, and every `args` item is a string.
+Agent and policy strings must be non-empty, and `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000) no greater than 2,147,453,000.
 A script command is a portable identity, not a path or shell fragment: it starts with an alphanumeric character or `@`, then uses only alphanumerics plus `.`, `_`, `:`, `@`, `+`, and `-`; `.` and `..` and Windows drive prefixes are rejected.
+Script argv remains entirely host-owned as part of the resolved command capability and is not accepted in portable workflow config.
 Both top-level schemas and the nested `agent` object reject unknown properties.
 
 `ExecutorConfigSchema` is a JSON-Schema-shaped declaration subset rather than a general JSON Schema dialect.
