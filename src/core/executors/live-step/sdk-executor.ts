@@ -7,6 +7,7 @@ import type {
   ExecutorTickResult,
 } from "../sdk/types.js";
 import { DELEGATE_SUPERVISOR_CONFIG_SCHEMA } from "../delegate-supervisor/executor.js";
+import { nextExecutorRoundIndex } from "../loop/reducer.js";
 import type {
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorErrorCode,
@@ -105,7 +106,10 @@ export class LiveStepSdkExecutor implements Executor<
       };
     }
 
-    const roundId = `${attempt.attemptId}::round-${context.state.rounds.length + 1}`;
+    const nextRoundIndex = nextExecutorRoundIndex(
+      context.state.rounds.map((snapshot) => snapshot.round),
+    );
+    const roundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
     context.envelope.startRound({
       roundId,
       attemptId: attempt.attemptId,
@@ -114,7 +118,7 @@ export class LiveStepSdkExecutor implements Executor<
       stepKey: attempt.stepKey,
       executorFamily: attempt.executorFamily,
       attemptNumber: attempt.attemptNumber,
-      roundIndex: context.state.rounds.length,
+      roundIndex: nextRoundIndex,
       state: "running",
       agentProvider: null,
       model: null,

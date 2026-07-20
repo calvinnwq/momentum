@@ -12,6 +12,7 @@ import {
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
+  nextExecutorRoundIndex,
   selectExecutorDecisionForHumanGate,
   type ExecutorAttemptRecord,
   type ExecutorRoundRecord,
@@ -128,7 +129,9 @@ export async function driveExecutorTicks(
               stepKey: afterThrow.attempt.stepKey,
               executorFamily: afterThrow.attempt.executorFamily,
               attemptNumber: afterThrow.attempt.attemptNumber,
-              roundIndex: afterThrow.rounds.length,
+              roundIndex: nextExecutorRoundIndex(
+                afterThrow.rounds.map((snapshot) => snapshot.round),
+              ),
               state: "running",
               agentProvider: null,
               model: null,

@@ -18,6 +18,7 @@ import {
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorRoundState,
   isExecutorDecisionEligibleForHumanGate,
+  nextExecutorRoundIndex,
 } from "../loop/reducer.js";
 import {
   classifyDelegateSupervisorInconsistent,
@@ -646,7 +647,10 @@ function startRound(
   summary: string,
 ): string {
   const attempt = context.state.attempt;
-  const roundId = `${attempt.attemptId}::round-${context.state.rounds.length + 1}`;
+  const nextRoundIndex = nextExecutorRoundIndex(
+    context.state.rounds.map((snapshot) => snapshot.round),
+  );
+  const roundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
   context.envelope.startRound({
     roundId,
     attemptId: attempt.attemptId,
@@ -655,7 +659,7 @@ function startRound(
     stepKey: attempt.stepKey,
     executorFamily: attempt.executorFamily,
     attemptNumber: attempt.attemptNumber,
-    roundIndex: context.state.rounds.length,
+    roundIndex: nextRoundIndex,
     state,
     agentProvider: null,
     model: null,

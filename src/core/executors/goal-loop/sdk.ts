@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
-import type { ExecutorRoundRecord } from "../loop/reducer.js";
+import {
+  nextExecutorRoundIndex,
+  type ExecutorRoundRecord,
+} from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import type {
   Executor,
@@ -135,7 +138,9 @@ export class GoalLoopSdkExecutor implements Executor<
 
     const expectedRoundIndex = reusingMaterializedRound
       ? current.round.roundIndex
-      : context.state.rounds.length;
+      : nextExecutorRoundIndex(
+          context.state.rounds.map((snapshot) => snapshot.round),
+        );
     const hostStart = context.hostBindings.start;
     if (
       hostStart.attemptId !== context.state.attempt.attemptId ||

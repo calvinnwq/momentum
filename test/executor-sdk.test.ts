@@ -11,6 +11,7 @@ import {
 } from "../src/core/executors/goal-loop/executor.js";
 import {
   insertExecutorAttempt,
+  insertExecutorRound,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
@@ -648,6 +649,41 @@ describe("executor SDK core contract", () => {
       envelope.facade.startRound(roundStartForSdk(mismatched)),
     ).toThrow("stepKey");
     expect(loadExecutorRound(db, gapped.roundId)).toBeUndefined();
+  });
+
+  it("continues migrated one-based round indexes at max plus one", () => {
+    // Migrated SDK-05 dispatch rounds are 1-based, so the next expected index
+    // is max(roundIndex) + 1 across the step, never the round count.
+    const { db, attempt } = openExecutorDb("one-shot");
+    insertExecutorRound(db, {
+      ...emptyRound(attempt, "manual_recovery_required"),
+      roundId: `${attempt.attemptId}::round-1`,
+      roundIndex: 1,
+      classification: "manual_recovery_required",
+      recoveryCode: "executor_threw",
+      humanGate: "manual_recovery_required",
+      finishedAt: 20,
+    });
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+    });
+    const duplicate = {
+      ...emptyRound(attempt, "running"),
+      roundId: `${attempt.attemptId}::round::1`,
+      roundIndex: 1,
+    };
+    expect(() =>
+      envelope.facade.startRound(roundStartForSdk(duplicate)),
+    ).toThrow("expected roundIndex 2");
+    const next = {
+      ...emptyRound(attempt, "running"),
+      roundId: `${attempt.attemptId}::round::2`,
+      roundIndex: 2,
+    };
+    expect(envelope.facade.startRound(roundStartForSdk(next)).roundIndex).toBe(
+      2,
+    );
   });
 
   it("rejects every executor evidence path after a round becomes terminal", () => {

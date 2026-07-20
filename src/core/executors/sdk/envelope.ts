@@ -30,6 +30,7 @@ import {
   isExecutorRoundStateCompatibleWithClassification,
   isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
+  nextExecutorRoundIndex,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorDecisionRecord,
@@ -180,7 +181,7 @@ export class DurableExecutorEnvelope {
           `Cannot start round ${record.roundId}: previous round ${previous.roundId} is still active (${previous.state}).`,
         );
       }
-      const expectedIndex = rounds.length;
+      const expectedIndex = nextExecutorRoundIndex(rounds);
       if (record.roundIndex !== expectedIndex) {
         throw new ExecutorEnvelopeAccessError(
           `Cannot start round ${record.roundId}: expected roundIndex ${expectedIndex}, got ${record.roundIndex}.`,

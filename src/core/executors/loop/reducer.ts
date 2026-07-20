@@ -606,6 +606,20 @@ export type ExecutorDecisionRecord = {
   externalRef?: string | null;
 };
 
+/**
+ * The next round index for a step-spanning round list. Indices stay monotone
+ * across every attempt of the step, and migrated SDK-05 data may be 1-based,
+ * so the successor is always `max(roundIndex) + 1` - never the list length.
+ */
+export function nextExecutorRoundIndex(
+  rounds: readonly { roundIndex: number }[],
+): number {
+  return (
+    rounds.reduce((highest, round) => Math.max(highest, round.roundIndex), -1) +
+    1
+  );
+}
+
 /** True only when neither durable resolution field has settled the decision. */
 export function isExecutorDecisionEligibleForHumanGate(decision: {
   chosenAction?: string | null;

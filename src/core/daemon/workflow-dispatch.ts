@@ -1045,7 +1045,13 @@ function createLiveStepHostBindingsResolver(
             round.attemptNumber === attempt.attemptNumber &&
             round.classification === null,
         );
-      const roundIndex = resumableRound?.roundIndex ?? attemptRounds.length;
+      const roundIndex =
+        resumableRound?.roundIndex ??
+        attemptRounds.reduce(
+          (highestRoundIndex, round) =>
+            Math.max(highestRoundIndex, round.roundIndex),
+          -1,
+        ) + 1;
       const preparedRound = prepareGoalLoopRoundRoot(runDir, roundIndex + 1);
       if (!preparedRound.ok) {
         repoOwnership.settle(false);

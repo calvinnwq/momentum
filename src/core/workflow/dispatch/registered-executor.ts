@@ -6,7 +6,10 @@ import {
   resolveRegisteredExecutor,
   type ExecutorRegistry,
 } from "../../executors/sdk/registry.js";
-import type { ExecutorAttemptRecord } from "../../executors/loop/reducer.js";
+import {
+  nextExecutorRoundIndex,
+  type ExecutorAttemptRecord,
+} from "../../executors/loop/reducer.js";
 import type {
   Executor,
   ExecutorEnvelopeSnapshot,
@@ -624,7 +627,10 @@ function startGenericRound(
 ) {
   const attempt = state.attempt;
   return context.envelope.startRound(
-    genericRoundStart(attempt, state.rounds.length),
+    genericRoundStart(
+      attempt,
+      nextExecutorRoundIndex(state.rounds.map((snapshot) => snapshot.round)),
+    ),
   );
 }
 
