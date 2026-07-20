@@ -33,7 +33,7 @@
  * Boundary discipline (so the reconciliation seam stays the single finalization owner and a high-risk
  * external write is never duplicated):
  *
- *   - It acts only when a `<run>::<step>::dispatch` attempt exists. A step
+ *   - It acts only when a dispatch attempt row exists for the step. A step
  *     finalized by a live wrapper (or never dispatched through the executor-loop lane)
  *     writes no such attempt, so this seam refuses it (`notDispatched`) and
  *     never runs the external write.

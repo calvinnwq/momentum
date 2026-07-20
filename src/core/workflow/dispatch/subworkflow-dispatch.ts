@@ -6,7 +6,7 @@
  * dispatch so a successfully-dispatched `subworkflow` step's child run is observed
  * and reconciled in the same tick, through the landed producer
  * {@link executeAndReconcileDispatchedSubworkflowStep}. The base dispatch creates
- * the `<run>::<step>::dispatch` scaffold; this wrapper then runs the producer
+ * the dispatch attempt scaffold; this wrapper then runs the producer
  * against it, gated on the shared dispatch-status predicate and the dispatched
  * attempt's executor family.
  *

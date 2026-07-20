@@ -5,7 +5,7 @@
  * runtime-consolidation plan names the reconciliation seam: the deterministic decision that turns a
  * dispatched executor-loop step's terminal executor evidence into a workflow-step
  * finalization outcome. It is the brain; the effect twin reads the
- * `<run>::<step>::dispatch` attempt, applies the decision durably
+ * newest dispatch attempt, applies the decision durably
  * (`finishWorkflowStep` + dispatch-lease release + run-state refresh), and is
  * idempotent on the deterministic dispatch id so re-entry cannot double-finalize.
  *

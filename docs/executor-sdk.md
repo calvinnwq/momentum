@@ -80,16 +80,16 @@ export const executor: Executor<Config, HostBindings> = {
     context: ExecutorTickContext<Config, HostBindings>
   ) {
     context.signal.throwIfAborted();
-    const invocation = context.state.invocation;
+    const attempt = context.state.attempt;
     const roundIndex = context.state.rounds.length;
     const round = context.envelope.startRound({
-      roundId: `${invocation.invocationId}::round-${roundIndex + 1}`,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      roundId: `${attempt.attemptId}::round-${roundIndex + 1}`,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex,
       state: "capturing_result",
       agentProvider: null,
@@ -111,7 +111,7 @@ export const executor: Executor<Config, HostBindings> = {
       roundId: round.roundId,
       recommendation: "complete",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: "succeeded",
+      recommendedAttemptState: "succeeded",
       recoveryCode: null,
       humanGate: null,
       humanGateDecisionId: null,
@@ -123,14 +123,14 @@ export const executor: Executor<Config, HostBindings> = {
 
 `ExecutorTickContext` contains:
 
-- `state`: a read-only invocation plus ordered round/evidence snapshots captured before the tick;
+- `state`: a read-only attempt plus ordered round/evidence snapshots captured before the tick; the round snapshot spans the step's rounds across attempts so retry evidence stays visible, while writes stay bound to the current attempt;
 - `config`: machine-portable workflow intent described by `configSchema`;
 - `hostBindings`: machine-local executable, environment, credential, and client resolution;
 - `envelope`: the only durable-state API available to executor code;
 - `signal`: the daemon's cancellation signal for the bounded turn.
 
 The tick may be synchronous or asynchronous.
-It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason.
+It returns a recommendation, suggested round and attempt states, a recovery code or gate when applicable, and a reason.
 Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
 The daemon's registered-executor driver currently accepts a validated single-shot recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
@@ -159,7 +159,7 @@ Generic profile-backed recovery accepts a completed reset or commit only when th
 If interruption leaves a verified commit staged but not created, host preflight accepts the otherwise-dirty index only when the `finalizing` receipt matches the current base `HEAD`, exact staged tree, configured artifact paths, result digest, and successful result, with no unstaged or untracked changes.
 Prepared-commit recovery then rechecks repository ownership, result bytes, expected tree, and commit message immediately before committing.
 Delegate receipts, result documents, persisted external-state documents, and no-mistakes launch logs must be bounded regular files; symbolic links, oversized files, named pipes, and path substitution fail closed before evidence is read or refreshed.
-Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; a legacy no-mistakes receipt must explicitly record successful handoff finalization, and invocation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
+Correlated legacy run-root delegate state and no-mistakes receipts remain recoverable through a one-way migration into the step-scoped delegate root; a legacy no-mistakes receipt must explicitly record successful handoff finalization, and attempt-correlation and branch checks plus current-head validation for finalized state prevent unrelated legacy evidence from migrating.
 Finalized profile-backed state must also carry a full 40-character head SHA that matches the repository's current `HEAD`.
 Missing receipts or mismatched branch, result, worktree, commit, or current-head evidence preserve the worktree and refuse a duplicate launch.
 Existing `mechanism_completed` checkpoints from the earlier profile-backed path remain reattachable and are classified without repeating the tool handoff.
@@ -184,7 +184,7 @@ Findings and decision revisions are append-only projections keyed by their exter
 Every accepted read stores the digest of the raw adapter response in `inputDigest` and a stable semantic-state digest in `resultDigest`.
 The semantic digest ignores ordering differences in findings, selected ids, decisions, and allowed actions.
 Each unchanged running read still refreshes durable liveness, but it carries forward the time of the last semantic change.
-After four minutes without semantic progress or terminal evidence, the invocation enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
+After four minutes without semantic progress or terminal evidence, the attempt enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
 Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 Profile-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
@@ -202,7 +202,7 @@ Profile-backed built-ins use Momentum's internal host-binding resolver for live-
 ## Registered dispatch lifecycle
 
 The managed daemon normally drives at most one registered-executor tick per scheduler pass.
-For the first completed delegate-supervisor handoff in an invocation, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
+For the first completed delegate-supervisor handoff in an attempt, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
 If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
