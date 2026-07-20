@@ -50,14 +50,14 @@ export function runVerification(input: VerificationInput): VerificationResult {
 
   let logHandle: number;
   try {
-    logHandle = fs.openSync(logPath, "w");
+    logHandle = openVerificationLogFile(logPath);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ok: false,
       code: "log_write_failed",
       error: `failed to open verification log ${logPath}: ${detail}`,
-      results: []
+      results: [],
     };
   }
 
@@ -84,36 +84,39 @@ export function runVerification(input: VerificationInput): VerificationResult {
           timeout: timeoutMs,
           encoding: "utf-8",
           maxBuffer: VERIFICATION_MAX_BUFFER_BYTES,
-          stdio: ["ignore", "pipe", "pipe"]
+          stdio: ["ignore", "pipe", "pipe"],
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : "unknown error";
         writeLine(logHandle, `[verify]   spawn_error: ${detail}`);
         writeLine(
           logHandle,
-          `[verify] summary: verification failed to spawn command ${index + 1}`
+          `[verify] summary: verification failed to spawn command ${index + 1}`,
         );
         return {
           ok: false,
           code: "spawn_failed",
           error: `failed to spawn verification command ${index + 1} (${command}): ${detail}`,
-          results
+          results,
         };
       }
 
       const durationMs = Date.now() - start;
 
-      if (spawn.error !== undefined && (spawn.error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (
+        spawn.error !== undefined &&
+        (spawn.error as NodeJS.ErrnoException).code === "ENOENT"
+      ) {
         writeLine(logHandle, `[verify]   spawn_error: ${spawn.error.message}`);
         writeLine(
           logHandle,
-          `[verify] summary: verification failed to spawn command ${index + 1}`
+          `[verify] summary: verification failed to spawn command ${index + 1}`,
         );
         return {
           ok: false,
           code: "spawn_failed",
           error: `failed to spawn verification command ${index + 1} (${command}): ${spawn.error.message}`,
-          results
+          results,
         };
       }
 
@@ -129,11 +132,11 @@ export function runVerification(input: VerificationInput): VerificationResult {
       ) {
         writeLine(
           logHandle,
-          `[verify]   output_overflow: stdout or stderr exceeded ${VERIFICATION_MAX_BUFFER_BYTES} bytes`
+          `[verify]   output_overflow: stdout or stderr exceeded ${VERIFICATION_MAX_BUFFER_BYTES} bytes`,
         );
         writeLine(
           logHandle,
-          `[verify] summary: verification output overflowed buffer on command ${index + 1}: ${command}`
+          `[verify] summary: verification output overflowed buffer on command ${index + 1}: ${command}`,
         );
         results.push({
           command,
@@ -141,13 +144,13 @@ export function runVerification(input: VerificationInput): VerificationResult {
           signal: spawn.signal ?? null,
           duration_ms: durationMs,
           timed_out: false,
-          succeeded: false
+          succeeded: false,
         });
         return {
           ok: false,
           code: "output_overflow",
           error: `verification command ${index + 1} produced more than ${VERIFICATION_MAX_BUFFER_BYTES} bytes on stdout or stderr (${command}); raise the cap or reduce the command's verbosity.`,
-          results
+          results,
         };
       }
 
@@ -165,7 +168,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
         signal,
         duration_ms: durationMs,
         timed_out: timedOut,
-        succeeded: !timedOut && exitCode === 0
+        succeeded: !timedOut && exitCode === 0,
       };
       results.push(result);
 
@@ -179,13 +182,13 @@ export function runVerification(input: VerificationInput): VerificationResult {
         writeLine(logHandle, "[verify]   result: timed_out");
         writeLine(
           logHandle,
-          `[verify] summary: verification timed out on command ${index + 1}: ${command}`
+          `[verify] summary: verification timed out on command ${index + 1}: ${command}`,
         );
         return {
           ok: false,
           code: "command_timed_out",
           error: `verification command ${index + 1} timed out after ${timeoutSec}s: ${command}`,
-          results
+          results,
         };
       }
 
@@ -193,13 +196,13 @@ export function runVerification(input: VerificationInput): VerificationResult {
         writeLine(logHandle, "[verify]   result: failed");
         writeLine(
           logHandle,
-          `[verify] summary: verification failed on command ${index + 1}: ${command}`
+          `[verify] summary: verification failed on command ${index + 1}: ${command}`,
         );
         return {
           ok: false,
           code: "command_failed",
           error: `verification command ${index + 1} failed (${command}): exit ${formatExit(exitCode)}`,
-          results
+          results,
         };
       }
 
@@ -208,7 +211,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
 
     writeLine(
       logHandle,
-      `[verify] summary: all ${commands.length} verification command(s) passed`
+      `[verify] summary: all ${commands.length} verification command(s) passed`,
     );
     return { ok: true, results };
   } finally {
@@ -220,13 +223,55 @@ export function runVerification(input: VerificationInput): VerificationResult {
   }
 }
 
-function validateInput(input: VerificationInput): VerificationFailure | { ok: true } {
-  if (typeof input.repoPath !== "string" || input.repoPath.trim().length === 0) {
+/**
+ * Open a verification log only after proving that its existing inode is a
+ * private regular file.  In particular, never pass O_TRUNC to open: doing so
+ * would mutate a hard-linked target before its link count can be checked.
+ */
+export function openVerificationLogFile(logPath: string): number {
+  const descriptor = fs.openSync(
+    logPath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_NONBLOCK |
+      (fs.constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    const stat = fs.fstatSync(descriptor);
+    const pathStat = fs.lstatSync(logPath);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      pathStat.isSymbolicLink() ||
+      !pathStat.isFile() ||
+      pathStat.nlink !== 1 ||
+      pathStat.dev !== stat.dev ||
+      pathStat.ino !== stat.ino
+    ) {
+      throw new Error("verification log is not a private regular file");
+    }
+    fs.fchmodSync(descriptor, 0o600);
+    fs.ftruncateSync(descriptor, 0);
+    return descriptor;
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
+  }
+}
+
+function validateInput(
+  input: VerificationInput,
+): VerificationFailure | { ok: true } {
+  if (
+    typeof input.repoPath !== "string" ||
+    input.repoPath.trim().length === 0
+  ) {
     return {
       ok: false,
       code: "invalid_input",
       error: "repoPath is required.",
-      results: []
+      results: [],
     };
   }
   if (typeof input.logPath !== "string" || input.logPath.trim().length === 0) {
@@ -234,7 +279,7 @@ function validateInput(input: VerificationInput): VerificationFailure | { ok: tr
       ok: false,
       code: "invalid_input",
       error: "logPath is required.",
-      results: []
+      results: [],
     };
   }
   if (!Number.isInteger(input.timeoutSec) || input.timeoutSec <= 0) {
@@ -242,7 +287,7 @@ function validateInput(input: VerificationInput): VerificationFailure | { ok: tr
       ok: false,
       code: "invalid_input",
       error: "timeoutSec must be a positive integer.",
-      results: []
+      results: [],
     };
   }
   if (!Array.isArray(input.commands)) {
@@ -250,7 +295,7 @@ function validateInput(input: VerificationInput): VerificationFailure | { ok: tr
       ok: false,
       code: "invalid_input",
       error: "commands must be an array of strings.",
-      results: []
+      results: [],
     };
   }
   for (let index = 0; index < input.commands.length; index += 1) {
@@ -260,7 +305,7 @@ function validateInput(input: VerificationInput): VerificationFailure | { ok: tr
         ok: false,
         code: "invalid_input",
         error: `commands[${index}] must be a non-empty string.`,
-        results: []
+        results: [],
       };
     }
   }
@@ -280,7 +325,7 @@ function writeChunk(handle: number, chunk: string): void {
 function ensureTrailingNewline(
   handle: number,
   stdout: string,
-  stderr: string
+  stderr: string,
 ): void {
   const last = stderr.length > 0 ? stderr : stdout;
   if (last.length > 0 && !last.endsWith("\n")) {

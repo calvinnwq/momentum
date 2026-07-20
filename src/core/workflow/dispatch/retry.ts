@@ -11,6 +11,7 @@ const GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "runtime_unavailable",
   "executor_threw",
   "executor_contract_invalid",
+  "host_binding_mismatch",
 ]);
 
 const DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set(

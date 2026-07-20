@@ -167,6 +167,7 @@ describe("decideSingleShotInvocation — manual recovery", () => {
     "reset_failed",
     "commit_failed",
     "git_failed",
+    "host_binding_mismatch",
     "invalid_input",
   ] as const)(
     "routes the unsafe finalize outcome %s to manual recovery",

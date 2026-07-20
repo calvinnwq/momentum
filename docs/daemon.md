@@ -148,11 +148,15 @@ committed as work.
 Process-backed live-wrapper dispatch is supported on Linux and macOS.
 On native Windows, the wrapper launches no supervised command, parks the run
 with `unsupported_platform`, and preserves the refused round for recovery.
-When the variable is unset or blank, supported live-wrapper-owned steps
-get the durable start scaffold only, while unconfigured wrapper kinds fail
-honestly with `runtime_unavailable` if a profile is configured but omits that
-step kind. If a claimed step cannot be resolved or carries an invalid executor
-identity, the dispatcher parks the run behind a
+When the variable is unset or blank, native `goal-loop`, `one-shot`, and
+`script` dispatches fail honestly with `runtime_unavailable` instead of using
+another execution mechanism.
+Other supported live-wrapper-owned steps keep the durable start scaffold for a
+later executor path.
+A configured profile that omits the dispatched step-kind binding also fails
+with `runtime_unavailable` without falling back to another mechanism.
+If a claimed step cannot be resolved or carries an invalid executor identity,
+the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
 if the run row vanished before that gate can be written, it still releases the
 dispatch lease so no claim is stranded. Register-only `daemon start` exits before
@@ -206,6 +210,8 @@ the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are normally driven one bounded tick per daemon scheduler
 pass, and a `continue` recommendation leaves the invocation resumable for the
 next pass after the configured poll interval.
+Executor registration and portable/host binding matching are specified by [Executor SDK](executor-sdk.md#config-and-host-bindings).
+The daemon supplies profile-backed host bindings from the resolved live-wrapper profile.
 Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
 Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
@@ -234,6 +240,8 @@ step is handled by the daemon's policy-gated `external-apply` adapter, not a
 live-wrapper command. Each wrapper requires:
 
 - `command` — absolute executable path.
+- `command_identity` - optional portable capability name for script steps.
+  Use it when the durable `config.command` identity differs from the workflow step kind or executable basename.
 - `args` — array of strings or numbers; use `[]` when no arguments are needed.
 - `cwd` — `repo` or `iteration`.
 - `timeout_sec` — positive integer seconds no greater than 2,147,453.
@@ -245,7 +253,7 @@ live-wrapper command. Each wrapper requires:
   string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
   seconds and uses the same 2,147,453-second maximum.
 
-Serialized profiles must use the canonical `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
+Serialized profiles must use the canonical `command_identity`, `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
 The retired `timeoutSec`, `envAllow`, `resultFile`, and `probe.timeoutSec` aliases are rejected whenever present, including alongside their canonical replacements, and the refusal names the alias and replacement.
 This targeted compatibility refusal does not make wrapper objects strict; unrelated unknown keys remain tolerated.
 
@@ -301,7 +309,9 @@ The `--profile <name>` option on `workflow run start` and `workflow run start-co
 The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
-Native dispatch executes `gnhf` and legacy `native-goal-loop` through the same kind-keyed live-wrapper path; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
+The version-pinned built-in definition remains authoritative for the implementation executor: current version 2 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label, while recorded version 1 runs use the native `goal-loop` SDK lifecycle.
+Both executor paths resolve their machine-local mechanism from the step-kind live-wrapper binding.
+A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.

@@ -13,6 +13,7 @@ import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   resolveClaimedWorkflowStepFamily,
+  resolveWorkflowStepExecutorRuntime,
   resolveWorkflowStepDispatchPlan,
 } from "../src/core/workflow/dispatch/persist.js";
 
@@ -91,6 +92,21 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
         stepId: "no-mistakes",
       }),
     ).toEqual({ ok: true, executorFamily: "no-mistakes" });
+    expect(
+      resolveWorkflowStepExecutorRuntime(db, {
+        runId: "native-v1",
+        stepId: "merge-cleanup",
+      }),
+    ).toEqual({
+      ok: true,
+      executorName: "script",
+      config: { command: "merge-cleanup" },
+    });
+    expect(
+      CODING_WORKFLOW_DEFINITION_V1.steps.find(
+        (step) => step.key === "merge-cleanup",
+      )?.config,
+    ).toBeUndefined();
   });
 
   it("resolves a step to a real-but-unsupported executor family (still ok)", () => {

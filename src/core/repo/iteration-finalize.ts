@@ -10,6 +10,7 @@ import {
 } from "../../adapters/git-transaction.js";
 import type { CommitIntent } from "../executors/runner/types.js";
 import {
+  openVerificationLogFile,
   runVerification,
   type VerificationFailure,
   type VerificationSuccess,
@@ -264,9 +265,17 @@ function validateInput(
 
 function writeVerificationSkipNote(logPath: string, reason: string): void {
   const body = `[verify] skipped: ${reason}\n[verify] summary: verification skipped (${reason})\n`;
+  let handle: number | undefined;
   try {
-    fs.writeFileSync(logPath, body, "utf-8");
+    handle = openVerificationLogFile(logPath);
+    fs.writeFileSync(handle, body, "utf-8");
   } catch {
     // best-effort artifact; do not block reset on log write failures
+  } finally {
+    if (handle !== undefined) {
+      try {
+        fs.closeSync(handle);
+      } catch {}
+    }
   }
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { isPortableScriptCommandIdentity } from "../core/executors/sdk/portable-command.js";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind,
@@ -44,6 +45,7 @@ export type LiveWrapperProbeConfig = {
 };
 
 export type LiveWrapperConfig = {
+  commandIdentity?: string;
   command: string;
   args: readonly string[];
   cwd: LiveWrapperCwd;
@@ -164,6 +166,16 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   const commandResult = parseAbsoluteCommand(value["command"], "command");
   if (!commandResult.ok) return commandResult;
   const command = commandResult.value;
+  const rawCommandIdentity = value["command_identity"];
+  if (
+    rawCommandIdentity !== undefined &&
+    !isPortableScriptCommandIdentity(rawCommandIdentity)
+  ) {
+    return configInvalid(
+      "Live wrapper `command_identity` must be a portable command identity.",
+    );
+  }
+  const commandIdentity = rawCommandIdentity as string | undefined;
 
   const argsResult = parseRequiredStringArray(value["args"], "args");
   if (!argsResult.ok) return argsResult;
@@ -194,7 +206,16 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
 
   return {
     ok: true,
-    config: { command, args, cwd, timeoutSec, envAllow, resultFile, probe },
+    config: {
+      ...(commandIdentity !== undefined ? { commandIdentity } : {}),
+      command,
+      args,
+      cwd,
+      timeoutSec,
+      envAllow,
+      resultFile,
+      probe,
+    },
   };
 }
 

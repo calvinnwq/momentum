@@ -60,20 +60,26 @@ import { listCommittedChangedFiles } from "../../../adapters/git-transaction.js"
 import {
   goalLoopFinalizeEvidenceFromResult,
   type GoalLoopArtifactPointer,
-  type GoalLoopRoundArtifacts
+  type GoalLoopRoundArtifacts,
 } from "./executor.js";
 import type { GoalLoopRoundMechanismResult } from "./orchestrator.js";
 import {
-  finalizeWorkflowStepFromResultFile,
+  finalizeWorkflowStepFromValidatedResult,
+  readNormalizedResultFile,
   type FinalizeWorkflowStepFromResultFileInput,
-  type FinalizeWorkflowStepFromResultFileResult
+  type FinalizeWorkflowStepFromResultFileResult,
 } from "../shared/step-finalize.js";
-import { parseRunnerResult } from "../runner/result.js";
-import type { RunnerResult } from "../runner/types.js";
 import {
   renderGoalLoopRoundPrompt,
-  type GoalLoopRoundPromptInput
+  type GoalLoopRoundPromptInput,
 } from "./prompt.js";
+import {
+  assertPrivateArtifactDirectoryIdentity,
+  openPrivateArtifactDirectory,
+  privateArtifactDirectoryIdentityIsCurrent,
+  writePrivateArtifact,
+  type PrivateArtifactDirectoryIdentity,
+} from "../shared/private-artifact.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the
@@ -83,7 +89,9 @@ import {
  * `resultFilePath` before this bridge runs.
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
-  FinalizeWorkflowStepFromResultFileInput;
+  FinalizeWorkflowStepFromResultFileInput & {
+    artifactDirectoryIdentity?: PrivateArtifactDirectoryIdentity;
+  };
 
 /**
  * Runner-facing input for a prompted native goal-loop round.
@@ -107,6 +115,7 @@ export type GoalLoopPromptedRoundRunnerInput = {
  */
 export type GoalLoopRoundMechanismFromPromptedResultFileInput =
   GoalLoopRoundMechanismFromResultFileInput & {
+    artifactRoot?: string;
     promptFilePath: string;
     promptInput: Omit<GoalLoopRoundPromptInput, "resultPath">;
     runPromptedRound: (input: GoalLoopPromptedRoundRunnerInput) => void;
@@ -118,12 +127,22 @@ export type GoalLoopRoundMechanismFromPromptedResultFileInput =
  * the goal-loop driver consumes. See the module doc for the consistency rules.
  */
 export function goalLoopRoundMechanismFromResultFile(
-  input: GoalLoopRoundMechanismFromResultFileInput
+  input: GoalLoopRoundMechanismFromResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  const finalize = finalizeWorkflowStepFromResultFile(input);
-  const captured = documentUnusable(finalize)
-    ? { result: null, resultDigest: null }
-    : readResultForCapture(input.resultFilePath);
+  const snapshot = readNormalizedResultFile(input.resultFilePath);
+  const finalize: FinalizeWorkflowStepFromResultFileResult = snapshot.ok
+    ? finalizeWorkflowStepFromValidatedResult(input, snapshot.result)
+    : {
+        outcome: snapshot.code,
+        resultFilePath: input.resultFilePath,
+        error: snapshot.error,
+      };
+  const captured = snapshot.ok
+    ? {
+        result: snapshot.result,
+        resultDigest: sha256ContentDigest(snapshot.raw),
+      }
+    : { result: null, resultDigest: null };
   const changedFiles = committedChangedFiles(input, finalize);
   return {
     result: captured.result,
@@ -133,9 +152,9 @@ export function goalLoopRoundMechanismFromResultFile(
       input,
       finalize,
       captured.resultDigest,
-      changedFiles
+      changedFiles,
     ),
-    changedFiles
+    changedFiles,
   };
 }
 
@@ -150,58 +169,90 @@ export function goalLoopRoundMechanismFromResultFile(
  * `result_invalid` recovery evidence.
  */
 export function goalLoopRoundMechanismFromPromptedResultFile(
-  input: GoalLoopRoundMechanismFromPromptedResultFileInput
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput,
 ): GoalLoopRoundMechanismResult {
-  const clearedResult = clearPromptedResultFile(input.resultFilePath);
-  if (!clearedResult.ok) {
+  let directory: PrivateArtifactDirectoryIdentity;
+  try {
+    directory = openPrivateArtifactDirectory([
+      input.promptFilePath,
+      input.resultFilePath,
+      input.verificationLogPath,
+    ]);
+  } catch (error) {
     return promptedRoundRecovery(
       input,
       "result_invalid",
-      `goal-loop result path could not be prepared: ${clearedResult.error}`
-    );
-  }
-
-  let prompt: string;
-  try {
-    prompt = renderGoalLoopRoundPrompt({
-      ...input.promptInput,
-      resultPath: input.resultFilePath
-    });
-    fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
-    fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
-  } catch (error) {
-    return promptedRoundRecovery(
-      input,
-      promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop round prompt could not be written: ${errorMessage(error)}`
+      `goal-loop artifact directory is unsafe: ${errorMessage(error)}`,
     );
   }
 
   try {
-    input.runPromptedRound({
-      promptFilePath: input.promptFilePath,
-      resultFilePath: input.resultFilePath,
-      prompt
-    });
-  } catch (error) {
-    return promptedRoundRecovery(
-      input,
-      promptedResultRecoveryOutcome(input.resultFilePath),
-      `goal-loop prompted runner failed: ${errorMessage(error)}`
+    const securedInput = {
+      ...input,
+      artifactDirectoryIdentity: directory,
+    };
+    const clearedResult = clearPromptedResultFile(
+      input.resultFilePath,
+      directory,
     );
-  }
+    if (!clearedResult.ok) {
+      return promptedRoundRecovery(
+        securedInput,
+        "result_invalid",
+        `goal-loop result path could not be prepared: ${clearedResult.error}`,
+      );
+    }
 
-  return goalLoopRoundMechanismFromResultFile(input);
+    let prompt: string;
+    try {
+      prompt = renderGoalLoopRoundPrompt({
+        ...input.promptInput,
+        resultPath: input.resultFilePath,
+      });
+      writePrivateArtifact(input.promptFilePath, prompt, directory);
+    } catch (error) {
+      return promptedRoundRecovery(
+        securedInput,
+        promptedResultRecoveryOutcome(input.resultFilePath),
+        `goal-loop round prompt could not be written: ${errorMessage(error)}`,
+      );
+    }
+
+    try {
+      input.runPromptedRound({
+        promptFilePath: input.promptFilePath,
+        resultFilePath: input.resultFilePath,
+        prompt,
+      });
+      assertPrivateArtifactDirectoryIdentity(directory);
+    } catch (error) {
+      return promptedRoundRecovery(
+        securedInput,
+        promptedResultRecoveryOutcome(input.resultFilePath),
+        `goal-loop prompted runner failed: ${errorMessage(error)}`,
+      );
+    }
+
+    return goalLoopRoundMechanismFromResultFile(securedInput);
+  } finally {
+    fs.closeSync(directory.descriptor);
+  }
 }
 
 function clearPromptedResultFile(
-  resultFilePath: string
+  resultFilePath: string,
+  directory: PrivateArtifactDirectoryIdentity,
 ): { ok: true } | { ok: false; error: string } {
-  if (typeof resultFilePath !== "string" || resultFilePath.trim().length === 0) {
+  if (
+    typeof resultFilePath !== "string" ||
+    resultFilePath.trim().length === 0
+  ) {
     return { ok: true };
   }
   try {
+    assertPrivateArtifactDirectoryIdentity(directory);
     fs.rmSync(resultFilePath, { force: true });
+    assertPrivateArtifactDirectoryIdentity(directory);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
@@ -209,7 +260,7 @@ function clearPromptedResultFile(
 }
 
 function promptedResultRecoveryOutcome(
-  resultFilePath: string
+  resultFilePath: string,
 ): "result_missing" | "result_invalid" {
   try {
     fs.lstatSync(resultFilePath);
@@ -222,19 +273,25 @@ function promptedResultRecoveryOutcome(
 function promptedRoundRecovery(
   input: GoalLoopRoundMechanismFromResultFileInput,
   outcome: "result_missing" | "result_invalid",
-  error: string
+  error: string,
 ): GoalLoopRoundMechanismResult {
   const finalize: FinalizeWorkflowStepFromResultFileResult = {
     outcome,
     resultFilePath: input.resultFilePath,
-    error
+    error,
   };
   return {
     result: null,
     resultDigest: null,
     finalize,
-    artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
-    changedFiles: []
+    artifacts:
+      input.artifactDirectoryIdentity !== undefined &&
+      !privateArtifactDirectoryIdentityIsCurrent(
+        input.artifactDirectoryIdentity,
+      )
+        ? {}
+        : goalLoopMechanismArtifacts(input, finalize, null, []),
+    changedFiles: [],
   };
 }
 
@@ -257,66 +314,18 @@ function errnoCode(error: unknown): string | undefined {
  */
 function committedChangedFiles(
   input: GoalLoopRoundMechanismFromResultFileInput,
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string[] {
   if (finalize.outcome !== "committed") return [];
   try {
     return listCommittedChangedFiles(
       input.repoPath,
       finalize.commit.parentSha,
-      finalize.commit.commitSha
+      finalize.commit.commitSha,
     );
   } catch {
     return [];
   }
-}
-
-/**
- * Whether the finalize seam judged the result document unusable. These are the
- * only outcomes for which the round produced no result to capture; the bridge
- * returns a `null` result so the driver routes straight to manual recovery
- * instead of capturing from a document the finalize seam refused to trust.
- */
-function documentUnusable(
-  finalize: FinalizeWorkflowStepFromResultFileResult
-): boolean {
-  return (
-    finalize.outcome === "result_missing" ||
-    finalize.outcome === "result_invalid"
-  );
-}
-
-/**
- * The result document the round captured, with its content digest. Both fields
- * are `null` together (an unreadable / unparseable document yields no result and
- * no digest) so the digest can never claim to fingerprint a result the round did
- * not capture.
- */
-type CapturedResultDocument = {
-  result: RunnerResult | null;
-  resultDigest: string | null;
-};
-
-/**
- * Re-read the normalized result document into the {@link RunnerResult} the round
- * captures, plus a content digest of its exact bytes (the round-schema
- * `result_digest` reattach fingerprint). Only called when the finalize seam
- * already accepted the document, so this read succeeds in practice; it is
- * defensively total (returns an all-`null` capture on any read / parse failure)
- * so the mechanism never throws.
- */
-function readResultForCapture(resultFilePath: string): CapturedResultDocument {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(resultFilePath, "utf-8");
-  } catch {
-    return { result: null, resultDigest: null };
-  }
-  const parsed = parseRunnerResult(raw);
-  if (!parsed.ok) {
-    return { result: null, resultDigest: null };
-  }
-  return { result: parsed.value, resultDigest: sha256ContentDigest(raw) };
 }
 
 /**
@@ -341,13 +350,24 @@ function sha256ContentDigest(raw: string): string {
  * mechanism never throws.
  */
 function verificationLogDigest(verificationLogPath: string): string | null {
-  let raw: string;
+  let handle: number;
   try {
-    raw = fs.readFileSync(verificationLogPath, "utf-8");
+    handle = fs.openSync(
+      verificationLogPath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
   } catch {
     return null;
   }
-  return sha256ContentDigest(raw);
+  try {
+    const stat = fs.fstatSync(handle);
+    if (!stat.isFile()) return null;
+    return sha256ContentDigest(fs.readFileSync(handle, "utf-8"));
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
 /**
@@ -367,34 +387,34 @@ function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
   resultDigest: string | null,
-  changedFiles: readonly string[]
+  changedFiles: readonly string[],
 ): GoalLoopRoundArtifacts {
   const evidence = goalLoopFinalizeEvidenceFromResult(finalize);
   const finalizationEvidence = writeFinalizationEvidence(
     input,
     finalize,
     evidence.verificationStatus,
-    changedFiles
+    changedFiles,
   );
   return {
     ...(finalize.outcome !== "result_missing"
       ? {
           resultDocument: {
             path: input.resultFilePath,
-            ...(resultDigest !== null ? { digest: resultDigest } : {})
-          }
+            ...(resultDigest !== null ? { digest: resultDigest } : {}),
+          },
         }
       : {}),
     ...(evidence.verificationStatus !== null
       ? {
           verificationOutput: verificationOutputPointer(
-            input.verificationLogPath
-          )
+            input.verificationLogPath,
+          ),
         }
       : {}),
     ...(finalizationEvidence !== null
       ? { commitOrResetEvidence: finalizationEvidence }
-      : {})
+      : {}),
   };
 }
 
@@ -405,12 +425,12 @@ function goalLoopMechanismArtifacts(
  * and cannot drift from the file it points at.
  */
 function verificationOutputPointer(
-  verificationLogPath: string
+  verificationLogPath: string,
 ): GoalLoopArtifactPointer {
   const digest = verificationLogDigest(verificationLogPath);
   return {
     path: verificationLogPath,
-    ...(digest !== null ? { digest } : {})
+    ...(digest !== null ? { digest } : {}),
   };
 }
 
@@ -426,7 +446,7 @@ function writeFinalizationEvidence(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
   verificationStatus: string | null,
-  changedFiles: readonly string[]
+  changedFiles: readonly string[],
 ): GoalLoopArtifactPointer | null {
   const evidencePath = finalizationEvidencePath(input.verificationLogPath);
   if (evidencePath === null) return null;
@@ -447,14 +467,32 @@ function writeFinalizationEvidence(
       verificationLogPath: input.verificationLogPath,
       error: finalizationError(finalize),
       commitError: finalizationCommitError(finalize),
-      resetError: finalizationResetError(finalize)
+      resetError: finalizationResetError(finalize),
     },
     null,
-    2
+    2,
   )}\n`;
   try {
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    fs.writeFileSync(evidencePath, body, "utf-8");
+    if (input.artifactDirectoryIdentity !== undefined) {
+      writePrivateArtifact(evidencePath, body, input.artifactDirectoryIdentity);
+    } else {
+      fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+      const descriptor = fs.openSync(
+        evidencePath,
+        fs.constants.O_CREAT |
+          fs.constants.O_WRONLY |
+          (fs.constants.O_NOFOLLOW ?? 0),
+        0o600,
+      );
+      try {
+        const stat = fs.fstatSync(descriptor);
+        if (!stat.isFile() || stat.nlink !== 1) return null;
+        fs.ftruncateSync(descriptor, 0);
+        fs.writeFileSync(descriptor, body, "utf-8");
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    }
   } catch {
     return null;
   }
@@ -475,7 +513,7 @@ function finalizationEvidencePath(verificationLogPath: string): string | null {
 }
 
 function finalizationRecoveryCode(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "committed":
@@ -498,7 +536,7 @@ function finalizationRecoveryCode(
 }
 
 function finalizationError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "committed":
@@ -510,7 +548,9 @@ function finalizationError(
     case "reset_failed":
       return finalize.reset.error;
     case "commit_failed":
-      return commitFailureResetFailure(finalize)?.error ?? finalize.commit.error;
+      return (
+        commitFailureResetFailure(finalize)?.error ?? finalize.commit.error
+      );
     case "git_failed":
     case "repo_lock_lost":
     case "invalid_input":
@@ -521,13 +561,13 @@ function finalizationError(
 }
 
 function finalizationCommitError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   return finalize.outcome === "commit_failed" ? finalize.commit.error : null;
 }
 
 function finalizationResetError(
-  finalize: FinalizeWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult,
 ): string | null {
   switch (finalize.outcome) {
     case "reset_failed":
@@ -543,7 +583,7 @@ function commitFailureResetFailure(
   finalize: Extract<
     FinalizeWorkflowStepFromResultFileResult,
     { outcome: "commit_failed" }
-  >
+  >,
 ): Extract<NonNullable<typeof finalize.reset>, { ok: false }> | null {
   if (finalize.reset !== undefined && !finalize.reset.ok) {
     return finalize.reset;

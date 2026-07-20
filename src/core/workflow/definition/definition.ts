@@ -7,8 +7,9 @@
  * system, no executor invocation. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
  * `definition/persist.ts`; first-class workflow run start, executor
- * records, the opt-in daemon scheduler lane, the landed goal-loop / one-shot /
- * script / legacy no-mistakes mirror / delegate-supervisor live-wrapper paths,
+ * records, the opt-in daemon scheduler lane, the native goal-loop / one-shot /
+ * script SDK paths, and the legacy no-mistakes mirror / delegate-supervisor
+ * profile-backed paths,
  * gates, and production dispatch scaffolds are layered on later modules.
  * Closeout dogfood and deferred executor-family adapters stay outside this
  * primitive module.
@@ -355,15 +356,17 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *   - implementation -> delegate-supervisor (GNHF owns the implementation loop)
  *   - postflight     -> one-shot      (a single bounded review pass)
  *   - no-mistakes    -> delegate-supervisor (no-mistakes owns validation)
- *   - merge-cleanup  -> script        (deterministic local cleanup; remote git
- *                                       stays out of executor-loop scope)
+ *   - merge-cleanup  -> script        (deterministic profile-resolved command;
+ *                                       operator-gated as a side-effecting tail)
  *   - linear-refresh -> external-apply (operator-mediated external write;
  *                                       daemon-dispatchable through the
  *                                       external-apply safety-gated adapter)
  *
  * The delegated tool is portable step config, never an executor-family value.
- * Version 1 remains registered exactly as shipped so existing runs keep
- * resolving their recorded definition.
+ * Version 1 remains registered so existing runs keep resolving its legacy
+ * implementation and no-mistakes identities. Dispatch projects the native
+ * merge-cleanup command identity for recorded V1 runs without rewriting the
+ * immutable definition.
  */
 export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,
@@ -432,6 +435,12 @@ export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
         ...step,
         executor: "delegate-supervisor",
         config: { tool: "no-mistakes" },
+      };
+    }
+    if (step.key === "merge-cleanup") {
+      return {
+        ...step,
+        config: { command: "merge-cleanup" },
       };
     }
     return { ...step };

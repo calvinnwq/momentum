@@ -12,6 +12,10 @@ import type {
 import { normalizeRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
 import {
+  SCRIPT_COMMAND_IDENTITY_PATTERN,
+  isPortableScriptCommandIdentity,
+} from "../sdk/portable-command.js";
+import {
   EXECUTOR_OBSERVATION_PHASES,
   type ExecutorObservationPhase,
   type Executor,
@@ -58,7 +62,6 @@ export type SingleShotExecutorConfig = {
   policyEnvelope?: string;
   /** Portable script/tool identity; host bindings resolve it to an executable. */
   command?: string;
-  args?: readonly string[];
 };
 
 export type ScriptExecutorConfig = SingleShotExecutorConfig & {
@@ -68,23 +71,15 @@ export type ScriptExecutorConfig = SingleShotExecutorConfig & {
 
 export type AgentOnceExecutorConfig = Omit<
   SingleShotExecutorConfig,
-  "command" | "args"
+  "command"
 > & {
   command?: never;
-  args?: never;
 };
 
-export const SCRIPT_COMMAND_IDENTITY_PATTERN =
-  "^(?!\\.{1,2}$)(?![A-Za-z]:)[A-Za-z0-9@][A-Za-z0-9._:@+-]*$";
-
-export function isPortableScriptCommandIdentity(
-  value: unknown,
-): value is string {
-  return (
-    typeof value === "string" &&
-    new RegExp(SCRIPT_COMMAND_IDENTITY_PATTERN).test(value)
-  );
-}
+export {
+  SCRIPT_COMMAND_IDENTITY_PATTERN,
+  isPortableScriptCommandIdentity,
+} from "../sdk/portable-command.js";
 
 export function singleShotExecutorConfigError(
   family: SingleShotExecutorFamily,
@@ -97,7 +92,7 @@ export function singleShotExecutorConfigError(
   }
   const allowed =
     family === "script"
-      ? new Set(["command", "args", "timeoutMs", "policyEnvelope"])
+      ? new Set(["command", "timeoutMs", "policyEnvelope"])
       : new Set(["agent", "timeoutMs", "policyEnvelope"]);
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown !== undefined) {
@@ -133,13 +128,6 @@ export function singleShotExecutorConfigError(
     if (!isPortableScriptCommandIdentity(value["command"])) {
       return "Script config requires a portable config.command identity.";
     }
-    if (
-      value["args"] !== undefined &&
-      (!Array.isArray(value["args"]) ||
-        value["args"].some((arg) => typeof arg !== "string"))
-    ) {
-      return "Script config.args must contain only strings.";
-    }
     return null;
   }
   if (value["agent"] === undefined) return null;
@@ -167,13 +155,22 @@ export function singleShotExecutorConfigError(
 /** Host-owned round identity/runtime context. No database handle crosses here. */
 export type SingleShotExecutorHostBindings = {
   start: Omit<PlanSingleShotRoundStartInput, "selection">;
+  /** Host-resolved identity actually used for execution and durable reattachment. */
+  selection?: SingleShotRoundSelection;
+  /** Opaque digest of the resolved host command, argv, cwd, and environment. */
+  hostBindingIdentity?: string;
   /** True only for the host call that atomically inserted this new round. */
   roundAlreadyMaterialized?: boolean;
+  /** Host-resolved native runner for production registered dispatch. */
+  runRound?: SingleShotRoundRunner;
+  /** Release or retain repository ownership after durable mechanism evidence. */
+  settleRepoOwnership?: (completionDurable: boolean) => void;
 };
 
 /** Normalized output of one bounded runner-adapter call. */
 export type SingleShotRoundMechanismResult = {
   readonly outcome: SingleShotInvocationOutcome;
+  readonly summary?: string;
   readonly result?: RunnerResult | null;
   readonly resultDigest?: string | null;
   readonly artifacts?: SingleShotRoundArtifacts;
@@ -250,7 +247,6 @@ export const SCRIPT_EXECUTOR_CONFIG_SCHEMA = {
       description:
         "Portable command identity; the host resolves the executable path.",
     },
-    args: { type: "array", items: { type: "string" } },
     timeoutMs: {
       type: "integer",
       minimum: 1_000,
@@ -316,18 +312,29 @@ export class SingleShotExecutor implements Executor<
     if (configError !== null) throw new Error(configError);
     const config = immutableSingleShotConfig(context.config);
     const hostBindings = immutableSingleShotHostBindings(context.hostBindings);
+    const currentAttemptRounds = context.state.rounds.filter(
+      (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+    );
     if (
-      context.state.rounds.length > 0 &&
+      currentAttemptRounds.length > 0 &&
       hostBindings.roundAlreadyMaterialized !== true
     ) {
-      return resumeCompletedSingleShotRound(this.name, {
-        ...context,
-        config,
-        hostBindings,
-      });
+      try {
+        const resumed = resumeCompletedSingleShotRound(this.name, {
+          ...context,
+          config,
+          hostBindings,
+        });
+        hostBindings.settleRepoOwnership?.(true);
+        return resumed;
+      } catch (error) {
+        hostBindings.settleRepoOwnership?.(false);
+        throw error;
+      }
     }
 
-    const selection = singleShotSelectionFromSdkConfig(config);
+    const selection =
+      hostBindings.selection ?? singleShotSelectionFromSdkConfig(config);
     const start = planSingleShotRoundStart({
       ...hostBindings.start,
       family: this.name,
@@ -338,6 +345,8 @@ export class SingleShotExecutor implements Executor<
       this.name,
       config,
       hostBindings.start,
+      selection,
+      hostBindings.hostBindingIdentity,
     );
     const materialized =
       hostBindings.roundAlreadyMaterialized === true
@@ -358,83 +367,97 @@ export class SingleShotExecutor implements Executor<
           planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
         ),
       );
-    context.signal.throwIfAborted();
+    let completionDurable = false;
+    try {
+      context.signal.throwIfAborted();
 
-    const mechanism = normalizeSingleShotMechanismResult(
-      this.name,
-      await this.#runRound(cloneRoundForRunner(durableStart), {
-        config,
-        hostBindings,
-        signal: context.signal,
-      }),
-    );
-
-    // Validate the complete persistence plan before appending artifacts. This
-    // preserves the existing all-or-nothing guard for malformed terminal
-    // evidence even though classification is now host-owned.
-    const plan = planSingleShotRoundPersistence({
-      outcome: mechanism.outcome,
-      ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
-      ...(mechanism.resultDigest !== undefined
-        ? { resultDigest: mechanism.resultDigest }
-        : {}),
-      ...(mechanism.evidence !== undefined
-        ? { evidence: mechanism.evidence }
-        : {}),
-    });
-
-    const artifacts = planSingleShotRoundArtifacts({
-      roundId: start.roundId,
-      logPaths: frozenLogPaths,
-      ...(mechanism.artifacts !== undefined
-        ? { artifacts: mechanism.artifacts }
-        : {}),
-    }).map((artifact) =>
-      context.envelope.recordArtifact(start.roundId, withoutRoundId(artifact)),
-    );
-
-    const checkpointPlan = planSingleShotRoundCheckpoints({
-      roundId: start.roundId,
-      outcome: mechanism.outcome,
-      capturedResult: mechanism.outcome.ok && mechanism.result != null,
-      classification: plan.decision.classification,
-    });
-    const classificationCheckpoint = checkpointPlan.at(-1);
-    if (classificationCheckpoint === undefined) {
-      throw new Error(
-        "Single-shot checkpoint plan omitted daemon classification.",
+      const mechanism = normalizeSingleShotMechanismResult(
+        this.name,
+        await this.#runRound(cloneRoundForRunner(durableStart), {
+          config,
+          hostBindings,
+          signal: context.signal,
+        }),
       );
-    }
-    const progress = context.envelope.recordRoundProgress(start.roundId, {
-      // Capture result and repo-safety evidence, but deliberately omit terminal
-      // state, classification, recovery gate, and recommendation. Those fields
-      // are available only to the daemon controller after this tick returns.
-      observation: observationFromPersistencePlan(
-        plan.captureUpdate,
-        plan.terminalUpdate,
-      ),
-      // The mechanism-completed proof and any result-capture checkpoint commit
-      // with that observation. A restart can therefore either classify the
-      // completed turn or see no completion proof; it never sees a torn pair.
-      checkpoints: checkpointPlan
-        .slice(1, -1)
-        .map((checkpoint) => withoutRoundId(checkpoint)),
-    });
-    const checkpoints = [roundStartedCheckpoint, ...progress.checkpoints];
 
-    return {
-      roundId: start.roundId,
-      recommendation: plan.decision.classification,
-      recommendedRoundState: plan.decision.roundState,
-      recommendedInvocationState: plan.decision.invocationState,
-      recoveryCode: plan.decision.recoveryCode,
-      humanGate: plan.decision.humanGate,
-      reason: plan.decision.reason,
-      decision: plan.decision,
-      artifacts,
-      checkpoints,
-      classificationCheckpoint,
-    };
+      // Validate the complete persistence plan before appending artifacts. This
+      // preserves the existing all-or-nothing guard for malformed terminal
+      // evidence even though classification is now host-owned.
+      const plan = planSingleShotRoundPersistence({
+        outcome: mechanism.outcome,
+        ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
+        ...(mechanism.resultDigest !== undefined
+          ? { resultDigest: mechanism.resultDigest }
+          : {}),
+        ...(mechanism.evidence !== undefined
+          ? { evidence: mechanism.evidence }
+          : {}),
+      });
+
+      const artifacts = planSingleShotRoundArtifacts({
+        roundId: start.roundId,
+        logPaths: frozenLogPaths,
+        ...(mechanism.artifacts !== undefined
+          ? { artifacts: mechanism.artifacts }
+          : {}),
+      }).map((artifact) =>
+        context.envelope.recordArtifact(
+          start.roundId,
+          withoutRoundId(artifact),
+        ),
+      );
+
+      const checkpointPlan = planSingleShotRoundCheckpoints({
+        roundId: start.roundId,
+        outcome: mechanism.outcome,
+        capturedResult: mechanism.outcome.ok && mechanism.result != null,
+        classification: plan.decision.classification,
+      });
+      const classificationCheckpoint = checkpointPlan.at(-1);
+      if (classificationCheckpoint === undefined) {
+        throw new Error(
+          "Single-shot checkpoint plan omitted daemon classification.",
+        );
+      }
+      const progress = context.envelope.recordRoundProgress(start.roundId, {
+        // Capture result and repo-safety evidence, but deliberately omit terminal
+        // state, classification, recovery gate, and recommendation. Those fields
+        // are available only to the daemon controller after this tick returns.
+        observation: {
+          ...observationFromPersistencePlan(
+            plan.captureUpdate,
+            plan.terminalUpdate,
+          ),
+          ...(mechanism.summary !== undefined
+            ? { summary: mechanism.summary }
+            : {}),
+        },
+        // The mechanism-completed proof and any result-capture checkpoint commit
+        // with that observation. A restart can therefore either classify the
+        // completed turn or see no completion proof; it never sees a torn pair.
+        checkpoints: checkpointPlan
+          .slice(1, -1)
+          .map((checkpoint) => withoutRoundId(checkpoint)),
+      });
+      const checkpoints = [roundStartedCheckpoint, ...progress.checkpoints];
+      completionDurable = true;
+
+      return {
+        roundId: start.roundId,
+        recommendation: plan.decision.classification,
+        recommendedRoundState: plan.decision.roundState,
+        recommendedInvocationState: plan.decision.invocationState,
+        recoveryCode: plan.decision.recoveryCode,
+        humanGate: plan.decision.humanGate,
+        reason: plan.decision.reason,
+        decision: plan.decision,
+        artifacts,
+        checkpoints,
+        classificationCheckpoint,
+      };
+    } finally {
+      hostBindings.settleRepoOwnership?.(completionDurable);
+    }
   }
 }
 
@@ -446,12 +469,15 @@ function loadMaterializedSingleShotRound(
     SingleShotExecutorHostBindings
   >,
 ): { round: ExecutorRoundView; checkpoint: ExecutorCheckpointRecord } {
-  if (context.state.rounds.length !== 1) {
+  const currentAttemptRounds = context.state.rounds.filter(
+    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+  );
+  if (currentAttemptRounds.length !== 1) {
     throw new Error(
       `SingleShotExecutor ${family} expected exactly one atomically materialized round.`,
     );
   }
-  const snapshot = context.state.rounds[0];
+  const snapshot = currentAttemptRounds[0];
   if (snapshot === undefined) {
     throw new Error("Single-shot materialized round snapshot is missing.");
   }
@@ -504,12 +530,15 @@ function resumeCompletedSingleShotRound(
     SingleShotExecutorHostBindings
   >,
 ): SingleShotExecutorTickResult {
-  if (context.state.rounds.length !== 1) {
+  const currentAttemptRounds = context.state.rounds.filter(
+    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+  );
+  if (currentAttemptRounds.length !== 1) {
     throw new Error(
       `SingleShotExecutor ${family} invocation ${context.state.invocation.invocationId} must own exactly one resumable round.`,
     );
   }
-  const snapshot = context.state.rounds[0];
+  const snapshot = currentAttemptRounds[0];
   if (snapshot === undefined) {
     throw new Error("Single-shot resumable round snapshot is missing.");
   }
@@ -593,7 +622,9 @@ function assertSingleShotRoundMatchesHost(
   if (!sameStringArray(round.logPaths, host.logPaths ?? [])) {
     mismatches.push("logPaths");
   }
-  const selection = singleShotSelectionFromSdkConfig(context.config);
+  const selection =
+    context.hostBindings.selection ??
+    singleShotSelectionFromSdkConfig(context.config);
   if (round.agentProvider !== selection.agentProvider)
     mismatches.push("agentProvider");
   if (round.model !== selection.model) mismatches.push("model");
@@ -622,8 +653,18 @@ function assertResumableDispatchBinding(
     family,
     context.config,
     host,
+    context.hostBindings.selection,
+    context.hostBindings.hostBindingIdentity,
   );
-  if (bindingCheckpoint?.detail !== expectedBinding) {
+  const legacyBinding = legacySingleShotDispatchBindingDetail(
+    family,
+    context.config,
+    host,
+  );
+  if (
+    bindingCheckpoint?.detail !== expectedBinding &&
+    bindingCheckpoint?.detail !== legacyBinding
+  ) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
     );
@@ -631,6 +672,35 @@ function assertResumableDispatchBinding(
 }
 
 export function singleShotDispatchBindingDetail(
+  family: SingleShotExecutorFamily,
+  config: Readonly<SingleShotExecutorConfig>,
+  start: SingleShotExecutorHostBindings["start"],
+  selection?: Readonly<SingleShotRoundSelection>,
+  hostBindingIdentity?: string,
+): string {
+  const payload = canonicalJson({
+    version: 2,
+    family,
+    config,
+    selection: selection ?? singleShotSelectionFromSdkConfig(config),
+    hostBindingIdentity: hostBindingIdentity ?? null,
+    start: {
+      roundId: start.roundId,
+      invocationId: start.invocationId,
+      workflowRunId: start.workflowRunId,
+      stepRunId: start.stepRunId,
+      stepKey: start.stepKey,
+      family: start.family,
+      attempt: start.attempt,
+      inputDigest: start.inputDigest,
+      artifactRoot: start.artifactRoot,
+      logPaths: start.logPaths ?? [],
+    },
+  });
+  return `dispatch binding v2: sha256:${crypto.createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function legacySingleShotDispatchBindingDetail(
   family: SingleShotExecutorFamily,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
@@ -682,13 +752,10 @@ function immutableSingleShotConfig(
   config: Readonly<SingleShotExecutorConfig>,
 ): Readonly<SingleShotExecutorConfig> {
   const agent = config.agent === undefined ? undefined : { ...config.agent };
-  const args = config.args === undefined ? undefined : [...config.args];
   if (agent !== undefined) Object.freeze(agent);
-  if (args !== undefined) Object.freeze(args);
   return Object.freeze({
     ...config,
     ...(agent !== undefined ? { agent } : {}),
-    ...(args !== undefined ? { args } : {}),
   });
 }
 
@@ -704,8 +771,23 @@ function immutableSingleShotHostBindings(
     ...hostBindings.start,
     ...(logPaths !== undefined ? { logPaths } : {}),
   };
+  const selection =
+    hostBindings.selection === undefined
+      ? undefined
+      : {
+          ...hostBindings.selection,
+          source: { ...hostBindings.selection.source },
+        };
   Object.freeze(start);
-  return Object.freeze({ ...hostBindings, start });
+  if (selection !== undefined) {
+    Object.freeze(selection.source);
+    Object.freeze(selection);
+  }
+  return Object.freeze({
+    ...hostBindings,
+    start,
+    ...(selection !== undefined ? { selection } : {}),
+  });
 }
 
 function singleShotOutcomeFromCheckpoint(
@@ -809,6 +891,15 @@ function normalizeSingleShotMechanismResult(
         };
   const result = mechanism["result"];
   const resultDigest = mechanism["resultDigest"];
+  const summary = mechanism["summary"];
+  if (
+    summary !== undefined &&
+    (typeof summary !== "string" || summary.trim().length === 0)
+  ) {
+    throw new Error(
+      `Invalid ${family} mechanism output: summary must be a non-empty string.`,
+    );
+  }
   if (
     resultDigest !== undefined &&
     resultDigest !== null &&
@@ -849,6 +940,7 @@ function normalizeSingleShotMechanismResult(
   }
   const normalizedMechanism: SingleShotRoundMechanismResult = {
     outcome: normalizedOutcome,
+    ...(summary !== undefined ? { summary: summary as string } : {}),
     ...(normalizedResult !== undefined ? { result: normalizedResult } : {}),
     ...(resultDigest !== undefined
       ? { resultDigest: resultDigest as string | null }

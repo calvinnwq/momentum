@@ -110,7 +110,8 @@ export class DurableExecutorEnvelope {
     this.#loadInvocation();
     const facade: ExecutorEnvelope = {
       snapshot: () => this.snapshot(),
-      startRound: (record) => this.startRound(record),
+      startRound: (record, initialCheckpoints) =>
+        this.startRound(record, initialCheckpoints),
       observeRound: (roundId, observation) =>
         this.observeRound(roundId, observation),
       recordRoundProgress: (roundId, progress) =>
@@ -146,9 +147,13 @@ export class DurableExecutorEnvelope {
     };
   }
 
-  startRound(record: ExecutorRoundStart): ExecutorRoundView {
+  startRound(
+    record: ExecutorRoundStart,
+    initialCheckpoints: readonly ExecutorCheckpointInput[] = [],
+  ): ExecutorRoundView {
     return withSqliteTransaction(this.#db, "write", () => {
       assertRoundStartInput(record);
+      initialCheckpoints.forEach(assertCheckpointInput);
       const invocation = this.#loadInvocation();
       assertObservationPhase(record.state, `start round ${record.roundId}`);
       this.#assertRoundIdentity(record, invocation);
@@ -175,11 +180,15 @@ export class DurableExecutorEnvelope {
       }
       const now = this.#now();
       const durableRecord = roundRecordFromStart(record, now);
-      return cloneRound(
-        insertExecutorRound(this.#db, durableRecord, {
-          now,
-        }),
-      );
+      const round = insertExecutorRound(this.#db, durableRecord, { now });
+      for (const checkpoint of initialCheckpoints) {
+        insertExecutorCheckpoint(
+          this.#db,
+          { ...checkpoint, roundId: round.roundId },
+          { now },
+        );
+      }
+      return cloneRound(round);
     });
   }
 

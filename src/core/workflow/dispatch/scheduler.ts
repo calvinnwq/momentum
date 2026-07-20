@@ -44,6 +44,12 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import type {
+  ExecutorCheckpointRecord,
+  ExecutorInvocationRecord,
+  ExecutorRoundRecord,
+} from "../../executors/loop/reducer.js";
+import type { CodingStepExecutorSelection } from "../route/coding.js";
 import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
@@ -107,6 +113,12 @@ const RUN_TERMINAL_STATE_SET: ReadonlySet<string> = new Set(
 const NON_MONITOR_LEASE_KINDS: ReadonlySet<WorkflowLeaseKind> = new Set([
   "managed-step",
   "dispatch",
+]);
+
+const NATIVE_RESUMABLE_SDK_EXECUTORS: ReadonlySet<string> = new Set([
+  "goal-loop",
+  "one-shot",
+  "script",
 ]);
 
 /** A workflow step the scheduler considers safe to dispatch next. */
@@ -1146,6 +1158,15 @@ export type WorkflowStepDispatchContext = {
   now: number;
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
+  /** Optional SDK hook that binds the invocation and first round atomically. */
+  materializeOwnedRound?: (input: {
+    invocation: ExecutorInvocationRecord;
+    selection: CodingStepExecutorSelection;
+    now: number;
+  }) => {
+    round: ExecutorRoundRecord;
+    checkpoint: ExecutorCheckpointRecord;
+  };
   /** Stale dispatch owner proven and released during this scheduler tick. */
   staleDispatchTakeover?: {
     previousHolder: string;
@@ -1382,7 +1403,8 @@ function isResumableRegisteredSdkTick(
   // Legacy dispatch inserts its invocation and first round in one transaction.
   // Only an SDK-owned dispatch can durably expose a roundless invocation.
   if (
-    invocation.executorFamily === "delegate-supervisor" &&
+    (invocation.executorFamily === "delegate-supervisor" ||
+      NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily)) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1403,6 +1425,16 @@ function isResumableRegisteredSdkTick(
     return true;
   }
   if (round.classification === "continue") return true;
+  if (
+    NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily) &&
+    round.classification === null &&
+    (round.state === "running" || round.state === "capturing_result") &&
+    listExecutorCheckpointsForRound(db, round.roundId).some(
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
+    )
+  ) {
+    return true;
+  }
   if (
     hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds, rounds)
   ) {

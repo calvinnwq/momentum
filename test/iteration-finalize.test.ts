@@ -157,6 +157,28 @@ describe("finalizeIteration", () => {
     expect(log).not.toContain("should-not-run");
   });
 
+  it("does not truncate a hard-linked skipped-verification log", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const sentinelPath = path.join(path.dirname(logPath), "sentinel.txt");
+    fs.writeFileSync(sentinelPath, "sentinel remains private\n", "utf-8");
+    fs.linkSync(sentinelPath, logPath);
+
+    const result = finalizeIteration({
+      repoPath,
+      baseHead,
+      runnerSuccess: false,
+      commitIntent: baseIntent(),
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath,
+    });
+
+    expect(result.outcome).toBe("reset_runner_failure");
+    expect(fs.readFileSync(sentinelPath, "utf-8")).toBe(
+      "sentinel remains private\n",
+    );
+  });
+
   it("resets uncommitted changes when verification fails", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
 

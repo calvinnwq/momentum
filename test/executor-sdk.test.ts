@@ -1283,7 +1283,7 @@ describe("single-shot built-in SDK proof", () => {
     await expect(
       executor.tick({
         state: envelope.snapshot(),
-        config: { command: "test", args: ["--run"] },
+        config: { command: "test" },
         hostBindings: {
           start: {
             roundId,
@@ -1496,6 +1496,7 @@ describe("single-shot built-in SDK proof", () => {
     );
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.additionalProperties).toBe(false);
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties).toHaveProperty("command");
+    expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.properties).not.toHaveProperty("args");
     expect(SCRIPT_EXECUTOR_CONFIG_SCHEMA.required).toEqual(["command"]);
     expect(AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA.properties.timeoutMs).toEqual(
       expect.objectContaining({

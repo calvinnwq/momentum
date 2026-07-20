@@ -47,7 +47,7 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
- * unsafe `commit_failed`, `invalid_input`), result-document checks during
+ * unsafe `commit_failed`, `host_binding_mismatch`, `invalid_input`), result-document checks during
  * finalization or process dispatch (`result_missing` / `result_invalid`), live
  * wrapper process dispatch failures (`unsupported_platform`,
  * `runtime_unavailable`, `auth_unavailable`,
@@ -68,6 +68,7 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "repo_lock_lost",
   "git_failed",
   "commit_failed",
+  "host_binding_mismatch",
   "invalid_input",
   "unsupported_platform",
   "runtime_unavailable",
@@ -191,6 +192,11 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the commit failure and current worktree state before approving any later step.",
     "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
     "Commit, reset, or preserve the worktree manually before clearing recovery.",
+  ],
+  host_binding_mismatch: [
+    "Inspect the portable executor config against the repaired native host profile.",
+    "Confirm the selected command capability, timeout, policy, and agent identity now agree.",
+    "Clear recovery only after the host binding is repaired, then re-dispatch the prepared step.",
   ],
   invalid_input: [
     "Inspect the live-step finalization inputs and run directory before approving any later step.",

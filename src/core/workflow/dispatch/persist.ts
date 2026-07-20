@@ -108,7 +108,14 @@ export function resolveWorkflowStepExecutorRuntime(
     );
     return step === undefined
       ? { ok: false, reason: "step_definition_not_found" }
-      : { ok: true, executorName: step.executor, config: step.config ?? {} };
+      : {
+          ok: true,
+          executorName: step.executor,
+          config:
+            version === 1 && target.stepId === "merge-cleanup"
+              ? { command: "merge-cleanup" }
+              : (step.config ?? {}),
+        };
   }
   const row = db
     .prepare(

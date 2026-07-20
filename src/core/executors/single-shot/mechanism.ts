@@ -16,7 +16,8 @@
  * from a clean worktree before mapping verification, commit, reset, lock, and
  * git outcomes through the same recovery codes used by live workflow-step
  * finalization. Callers must supply absolute artifact log paths on the round;
- * `script` configs must also use an absolute executable path and absolute cwd.
+ * `script` runner host bindings must also use an absolute executable path and
+ * absolute cwd, while portable step config carries only command identity.
  */
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import crypto from "node:crypto";
@@ -61,6 +62,7 @@ import {
   type SingleShotRoundRunnerContext,
 } from "./sdk.js";
 import type { WorkflowStepKind } from "../../workflow/run/reducer.js";
+import { openStandalonePrivateArtifactFile } from "../shared/private-artifact.js";
 
 export type OneShotLiveWrapperRoundRunnerOptions = {
   /** Absolute repository root passed to the live wrapper and safety checks. */
@@ -129,8 +131,10 @@ export type ScriptCommandRoundRunnerConfig = {
   command: string;
   /** Explicit argv passed to the executable. */
   args?: readonly string[];
-  /** Absolute working directory and repo root for safety/finalization checks. */
+  /** Absolute child-process working directory. */
   cwd: string;
+  /** Absolute repository root for safety and finalization checks. */
+  repoPath: string;
   /** Positive command timeout in seconds within the built-in supervisor limit. */
   timeoutSec: number;
   /** Host-resolved policy identity checked against portable policy intent. */
@@ -173,7 +177,9 @@ export function createOneShotLiveWrapperRoundRunner(
         config,
         options.hostIdentity,
       );
-      if (!portableValidation.ok) return invalidInput(portableValidation.error);
+      if (!portableValidation.ok) {
+        return hostBindingMismatch(portableValidation.error);
+      }
     }
     const logPath = primaryLogPath(round);
     if (round.artifactRoot === null || logPath === null) {
@@ -190,6 +196,7 @@ export function createOneShotLiveWrapperRoundRunner(
     if (platformError !== undefined) {
       return unsupportedPlatformRecovery(
         logPath,
+        round.artifactRoot,
         "one-shot",
         platformError.message,
       );
@@ -218,6 +225,15 @@ export function createOneShotLiveWrapperRoundRunner(
       runId: round.workflowRunId,
       stepId: round.stepRunId,
       attempt: round.attempt,
+      ...(options.hostIdentity?.agent?.harness !== undefined
+        ? { agentProvider: options.hostIdentity.agent.harness }
+        : {}),
+      ...(options.hostIdentity?.agent?.model !== undefined
+        ? { model: options.hostIdentity.agent.model }
+        : {}),
+      ...(options.hostIdentity?.agent?.effort !== undefined
+        ? { effort: options.hostIdentity.agent.effort }
+        : {}),
       repoPath: options.repoPath,
       iterationDir: round.artifactRoot,
       executorLogPath: logPath,
@@ -334,10 +350,14 @@ function finishOneShotWrapperResult(
           ok: false,
           recoveryCode: repoRecoveryCode ?? recoveryCode,
         },
+        summary: result.error,
         artifacts,
       };
     }
-    return finalizeOneShotProcessFailure(options, recoveryCode, artifacts);
+    return {
+      ...finalizeOneShotProcessFailure(options, recoveryCode, artifacts),
+      summary: result.error,
+    };
   }
 
   const digest = digestFile(result.resultJsonPath);
@@ -404,13 +424,15 @@ export function createScriptCommandRoundRunner(
     if (!validation.ok) return invalidInput(validation.error);
     if (context !== undefined) {
       const portable = validatePortableScriptConfig(context.config, config);
-      if (!portable.ok) return invalidInput(portable.error);
+      if (!portable.ok) return hostBindingMismatch(portable.error);
       context.signal.throwIfAborted();
     }
 
     const logPath = primaryLogPath(round);
-    if (logPath === null) {
-      return invalidInput("script rounds require at least one log path");
+    if (round.artifactRoot === null || logPath === null) {
+      return invalidInput(
+        "script rounds require artifactRoot and at least one log path",
+      );
     }
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
@@ -419,18 +441,19 @@ export function createScriptCommandRoundRunner(
     if (platformError !== undefined) {
       return unsupportedPlatformRecovery(
         logPath,
+        round.artifactRoot,
         "script",
         platformError.message,
       );
     }
     if (config.repoSafety.mode === "finalize") {
       const recoveryCode = finalizeRepoReadyRecoveryCode(
-        config.cwd,
+        config.repoPath,
         config.repoSafety.baseHead,
       );
       if (recoveryCode !== null) return readOnlyRecovery(recoveryCode);
     }
-    const readOnlySnapshot = captureReadOnlyRepoSnapshot(config.cwd, [
+    const readOnlySnapshot = captureReadOnlyRepoSnapshot(config.repoPath, [
       round.artifactRoot,
       logPath,
       ...(config.repoSafety.mode === "finalize"
@@ -446,12 +469,14 @@ export function createScriptCommandRoundRunner(
       ? executeScriptCommandSync(
           config,
           logPath,
+          round.artifactRoot,
           outputMaxBytes,
           readOnlySnapshot.snapshot,
         )
       : executeScriptCommandAsync(
           config,
           logPath,
+          round.artifactRoot,
           outputMaxBytes,
           readOnlySnapshot.snapshot,
           context.signal,
@@ -463,10 +488,11 @@ export function createScriptCommandRoundRunner(
 function executeScriptCommandSync(
   config: ScriptCommandRoundRunnerConfig,
   logPath: string,
+  artifactRoot: string,
   outputMaxBytes: number,
   readOnlySnapshot: ReadOnlyRepoSnapshot | undefined,
 ): SingleShotRoundMechanismResult {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput("script command runner could not open log path");
   }
@@ -497,11 +523,12 @@ function executeScriptCommandSync(
 async function executeScriptCommandAsync(
   config: ScriptCommandRoundRunnerConfig,
   logPath: string,
+  artifactRoot: string,
   outputMaxBytes: number,
   readOnlySnapshot: ReadOnlyRepoSnapshot | undefined,
   signal: AbortSignal,
 ): Promise<SingleShotRoundMechanismResult> {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput("script command runner could not open log path");
   }
@@ -654,10 +681,9 @@ function classifyScriptProcess(
   return finalizeScriptResult(config, true, "command_failed", readOnlySnapshot);
 }
 
-function openScriptLog(logPath: string): number | null {
+function openScriptLog(logPath: string, artifactRoot: string): number | null {
   try {
-    ensureParentDir(logPath);
-    return fs.openSync(logPath, "w");
+    return openStandalonePrivateArtifactFile(logPath, artifactRoot);
   } catch {
     return null;
   }
@@ -697,6 +723,11 @@ function invalidInput(error: string): SingleShotRoundMechanismResult {
   return { outcome: { ok: false, recoveryCode: "invalid_input" } };
 }
 
+function hostBindingMismatch(error: string): SingleShotRoundMechanismResult {
+  void error;
+  return { outcome: { ok: false, recoveryCode: "host_binding_mismatch" } };
+}
+
 function readOnlyRecovery(
   recoveryCode: SingleShotRecoveryCode,
 ): SingleShotRoundMechanismResult {
@@ -705,10 +736,11 @@ function readOnlyRecovery(
 
 function unsupportedPlatformRecovery(
   logPath: string,
+  artifactRoot: string,
   family: "one-shot" | "script",
   detail: string,
 ): SingleShotRoundMechanismResult {
-  const logHandle = openScriptLog(logPath);
+  const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
     return invalidInput(`${family} runner could not open refusal log path`);
   }
@@ -813,7 +845,10 @@ function finalizeScriptResult(
   readOnlySnapshot?: ReadOnlyRepoSnapshot,
 ): SingleShotRoundMechanismResult {
   if (config.repoSafety.mode === "read-only") {
-    const recoveryCode = readOnlyRepoRecoveryCode(config.cwd, readOnlySnapshot);
+    const recoveryCode = readOnlyRepoRecoveryCode(
+      config.repoPath,
+      readOnlySnapshot,
+    );
     if (recoveryCode !== null) {
       return { outcome: { ok: false, recoveryCode } };
     }
@@ -822,9 +857,9 @@ function finalizeScriptResult(
       : { outcome: { ok: false, recoveryCode: failureCode } };
   }
   return projectFinalizeResult({
-    repoPath: config.cwd,
+    repoPath: config.repoPath,
     finalize: finalizeWorkflowStep({
-      repoPath: config.cwd,
+      repoPath: config.repoPath,
       baseHead: config.repoSafety.baseHead,
       stepSuccess,
       commitIntent: config.repoSafety.commitIntent,
@@ -1322,6 +1357,12 @@ function validateScriptCommandConfig(
   if (typeof config.cwd !== "string" || !path.isAbsolute(config.cwd)) {
     return { ok: false, error: "script cwd must be an absolute path" };
   }
+  if (
+    typeof config.repoPath !== "string" ||
+    !path.isAbsolute(config.repoPath)
+  ) {
+    return { ok: false, error: "script repoPath must be an absolute path" };
+  }
   if (!Number.isInteger(config.timeoutSec) || config.timeoutSec <= 0) {
     return { ok: false, error: "script timeoutSec must be a positive integer" };
   }
@@ -1350,17 +1391,9 @@ function validatePortableScriptConfig(
       error: `portable script command ${String(command)} does not match resolved host identity ${expectedIdentity}`,
     };
   }
-  const portableArgs = portable.args ?? [];
-  const resolvedArgs = resolved.args ?? [];
-  if (
-    portableArgs.length !== resolvedArgs.length ||
-    portableArgs.some((arg, index) => arg !== resolvedArgs[index])
-  ) {
-    return {
-      ok: false,
-      error: "portable script args do not match resolved host argv",
-    };
-  }
+  // The resolved argv belongs to the host capability. Portable workflow
+  // config names that capability but never duplicates executable paths,
+  // credentials, or other machine-local wrapper arguments into durable state.
   if (
     portable.timeoutMs !== undefined &&
     portable.timeoutMs !== resolved.timeoutSec * 1000
@@ -1509,14 +1542,14 @@ function cleanupScriptRepoAfterCancellation(
 ): void {
   if (config.repoSafety.mode === "read-only") {
     cleanupReadOnlyRepoAfterCancellation(
-      config.cwd,
+      config.repoPath,
       readOnlySnapshot,
       config.repoSafety.beforeGitMutation,
     );
     return;
   }
   cleanupFinalizingRepoAfterCancellation(
-    config.cwd,
+    config.repoPath,
     config.repoSafety,
     config.repoSafety.commitIntent,
     readOnlySnapshot,
@@ -1616,10 +1649,6 @@ function runScriptProcess(
 
 function scriptEnv(config: ScriptCommandRoundRunnerConfig): NodeJS.ProcessEnv {
   return config.env ?? {};
-}
-
-function ensureParentDir(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
 function errnoCode(error: Error | undefined): string | undefined {

@@ -45,10 +45,14 @@ describe("parseLiveWrapperConfig missing", () => {
 
 describe("parseLiveWrapperConfig shape", () => {
   it("maps a fully specified wrapper into a typed config", () => {
-    const result = parseLiveWrapperConfig(clone(validWrapper));
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      command_identity: "repo-cleanup",
+    });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.command).toBe("/usr/bin/gnhf-runner");
+    expect(result.config.commandIdentity).toBe("repo-cleanup");
     expect(result.config.args).toEqual(["--run", "1"]);
     expect(result.config.cwd).toBe("repo");
     expect(result.config.timeoutSec).toBe(1800);
@@ -60,6 +64,30 @@ describe("parseLiveWrapperConfig shape", () => {
       timeoutSec: 15,
     });
   });
+
+  it("rejects an unsafe portable command identity", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      command_identity: "/tmp/repo-cleanup",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("command_identity");
+  });
+
+  it.each(["@scope:cleanup", "cleanup+safe"])(
+    "accepts SDK-compatible portable command identity %s",
+    (commandIdentity) => {
+      const result = parseLiveWrapperConfig({
+        ...clone(validWrapper),
+        command_identity: commandIdentity,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.commandIdentity).toBe(commandIdentity);
+    },
+  );
 
   it("rejects a retired camelCase alias that replaces its canonical key", () => {
     for (const [alias, canonical] of [

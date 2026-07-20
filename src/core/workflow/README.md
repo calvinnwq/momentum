@@ -90,15 +90,10 @@ deterministic fake registry lives under `test/helpers/` and is injected only by
 tests that need substrate smoke coverage.
 
 Registered executor dispatch supersedes the interim live-wrapper composition.
-`dispatch/registered-executor.ts` creates the durable scaffold, resolves the
-executor by permanent name, drives bounded SDK ticks, and reconciles daemon-owned
-classification. Profile-backed built-ins run through
-`executors/live-step/sdk-executor.ts`; that executor records its observation and
-`mechanism_completed` checkpoint before daemon classification, so reattachment
-classifies durable completed work without rerunning the bounded mechanism.
-`dispatch/executor-evidence.ts` and `dispatch/executor-recovery.ts` retain neutral
-settlement helpers used by external-apply and subworkflow; they are not an
-alternate live-wrapper execution lane.
+`dispatch/registered-executor.ts` creates the durable scaffold, resolves the executor by permanent name, drives bounded SDK ticks, and reconciles daemon-owned classification.
+Profile-backed `goal-loop` uses `executors/goal-loop/sdk.ts`, `one-shot` and `script` use `executors/single-shot/sdk.ts`, delegated tools use `executors/delegate-supervisor/executor.ts`, and the legacy `no-mistakes` identity uses `executors/live-step/sdk-executor.ts`.
+The native goal-loop, single-shot, and live-step lifecycles record replay-safe `mechanism_completed` evidence before daemon classification, so reattachment classifies durable completed work without rerunning the bounded mechanism.
+`dispatch/executor-evidence.ts` and `dispatch/executor-recovery.ts` retain neutral settlement helpers used by external-apply and subworkflow; they are not an alternate live-wrapper execution lane.
 
 `live-wrapper/daemon-profile.ts` resolves the optional daemon profile source, and
 `live-wrapper/daemon-exec-context.ts` maps durable run provenance to host-local
@@ -172,7 +167,10 @@ Ordinary failed no-mistakes steps remain `retry_failed_step` with `recoveryDetai
 
 `workflow run start-coding` is the explicit Momentum-native start door.
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, stores the selected implementation path under `route.implementationEngine`, and keeps CWFP/default switching explicit.
-The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, default to persisted `gnhf`, and fail closed before implementation dispatch when a persisted current-GNHF/CWFP route is selected because that compatibility lane is not wired into native dispatch yet. The current built-in definition classifies implementation and no-mistakes as `delegate-supervisor` with their tool in portable step config; version 1 remains registered unchanged for recorded runs.
+The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-live-wrapper-profile).
+The current built-in definition classifies implementation and no-mistakes as `delegate-supervisor` with their tool in portable step config.
+Version 1 remains registered unchanged for recorded runs with its legacy executor identities.
+Native dispatch projects the portable merge-cleanup command for those V1 runs without rewriting the immutable definition.
 
 `workflow run preview-coding` is the read-only native plan-preview door.
 It shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` after those checks pass.

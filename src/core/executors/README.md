@@ -3,7 +3,7 @@
 Executor runtime domain. This folder owns the executor registration, config
 validation, bounded tick driver, and durable execution _mechanisms_: the
 executor-loop reducer/persistence, the goal-loop, single-shot, and
-delegate-supervisor executor families, the production live-step wrapper
+delegate-supervisor executor families, the compatibility live-step wrapper
 executor, and the no-mistakes state reader and legacy mirror support, plus their
 runner-profile, foreground iteration, and runner-smoke support. It holds
 business/runtime behavior only:
@@ -17,19 +17,19 @@ were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern                        | Modules                                                                                                    |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/driver.ts`              |
-| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                       |
-| Goal-loop executor             | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts`      |
-| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
-| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`     |
-| Live-step executor             | `live-step/executor.ts` (production live-wrapper lane)                                                     |
-| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                          |
-| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                 |
-| Runner support                 | `runner/profile.ts`                                                                                        |
-| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                        |
-| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                      |
+| Concern                        | Modules                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/portable-command.ts`, `sdk/driver.ts`  |
+| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                                      |
+| Goal-loop executor             | `goal-loop/sdk.ts`, `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
+| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                |
+| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`                    |
+| Live-step executor             | `live-step/executor.ts`, `live-step/sdk-executor.ts` (compatibility live-wrapper lane)                                    |
+| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                                         |
+| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                                |
+| Runner support                 | `runner/profile.ts`                                                                                                       |
+| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                                       |
+| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                                     |
 
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
@@ -48,11 +48,9 @@ Classification, its checkpoint, and invocation settlement commit atomically on
 the controller after a tick returns.
 The controller also rejects classification decisions whose invocation or round
 state is inconsistent with the classification before writing any settlement.
-`single-shot/sdk.ts` is the first built-in proof: the current `one-shot` and
-`script` families implement the same `Executor` interface and accept a runner
-adapter as their narrower lifecycle extension point.
-`live-step/sdk-executor.ts` registers profile-backed built-ins through the same
-guard and records replay-safe mechanism completion before daemon classification.
+`goal-loop/sdk.ts` and `single-shot/sdk.ts` are the native profile-backed built-ins: `goal-loop`, `one-shot`, and `script` implement the same `Executor` interface and accept narrow runner adapters as lifecycle extension points.
+`delegate-supervisor/executor.ts` remains the default coding implementation route, while `live-step/sdk-executor.ts` retains the compatibility `no-mistakes` identity.
+These native goal-loop, single-shot, and live-step lifecycles record replay-safe mechanism completion before daemon classification.
 The built-in runner
 mechanisms supervise process groups asynchronously below a crash-surviving
 anchor/watchdog, terminate them on tick cancellation or daemon loss, require a
@@ -153,6 +151,7 @@ Every current adapter → executor-core edge has an explicit SDK disposition:
 | Adapter edge                                                                                                                                 | Disposition                                                                                                                                                                                                                                                      |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`                                                                            | Resolved: the pure `RunnerResult` schema, parser, and normalizers are official SDK runtime surface.                                                                                                                                                              |
+| `live-wrapper-registry.ts` → `sdk/portable-command.ts`                                                                                       | Resolved: the dependency-free portable command identity validator is official SDK config surface shared with host profiles.                                                                                                                                      |
 | `git-transaction.ts` → `runner/types.ts`                                                                                                     | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                                                                         |
 | `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                                                              | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                                                                           |
 | `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`                                          | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` invocations, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter.                                                      |

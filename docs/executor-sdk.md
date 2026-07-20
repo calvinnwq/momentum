@@ -4,7 +4,7 @@ Momentum executors run below workflow steps inside the same durable invocation a
 
 The source contract is `src/core/executors/sdk/types.ts`.
 Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`.
-The current `one-shot` and `script` built-ins prove the single-turn contract through `src/core/executors/single-shot/sdk.ts`, while `delegate-supervisor` proves repeated bounded supervision through `src/core/executors/delegate-supervisor/`.
+The current `goal-loop` built-in proves repeated native rounds through `src/core/executors/goal-loop/sdk.ts`, `one-shot` and `script` prove the single-turn contract through `src/core/executors/single-shot/sdk.ts`, and `delegate-supervisor` proves repeated bounded external supervision through `src/core/executors/delegate-supervisor/`.
 
 Module registration, discovery, declared-schema preflight, and daemon dispatch use this interface for both built-ins and third-party executors.
 
@@ -132,7 +132,7 @@ export const executor: Executor<Config, HostBindings> = {
 The tick may be synchronous or asynchronous.
 It returns a recommendation, suggested round and invocation states, a recovery code or gate when applicable, and a reason.
 Those fields remain advisory until the daemon accepts, refines, or refuses the recommendation and applies its decision.
-The shipped single-shot compatibility host currently accepts a validated recommendation; the decision seam allows stricter policy without granting that authority to the executor.
+The daemon's registered-executor driver currently accepts a validated single-shot recommendation; the decision seam allows stricter policy without granting that authority to the executor.
 
 The built-in `delegate-supervisor` uses the same interface.
 Its strict portable config is `{ "tool": "<adapter-name>" }`.
@@ -208,6 +208,7 @@ A continuation-only pass waits the configured daemon poll interval before the ne
 If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
+Native completed-mechanism reattachment follows the durable-envelope rule below.
 If the process instead dies after gate classification but before gate parking finishes, stale dispatch recovery reuses or reconstructs the round-scoped gate from the durable decision selector and unresolved decision.
 That recovery verifies and releases the exact stale lease in the same transaction, preserving the executor's selected operator target without opening manual recovery.
 If a delegate dies earlier after persisting a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation but before classification, stale recovery makes that unclassified round resumable under the same invocation so classification and gate parking can finish.
@@ -296,7 +297,7 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 `ExecutorEnvelope` is bound to one invocation. It supports:
 
 - `snapshot()` to re-read the durable invocation, rounds, artifacts, checkpoints, findings, and decisions;
-- `startRound()` for the next sequential round;
+- `startRound()` for the next sequential round, with an optional initial checkpoint batch committed atomically with the round;
 - `observeRound()` for non-terminal phase and result/verification/commit evidence;
 - `recordRoundProgress()` to commit an observation and its supporting checkpoint batch atomically;
 - `heartbeat()` for liveness;
@@ -305,9 +306,10 @@ When Momentum observes an unowned escaped descendant, loses ownership visibility
 It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
 Executor writes are available only while the invocation is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the invocation again.
 
-If `mechanism_completed` evidence is durable but daemon classification is not, the single-shot daemon entrypoint reattaches the matching non-terminal deterministic invocation, reconstructs the outcome from that checkpoint, and returns the same recommendation without rerunning the mechanism.
+If `mechanism_completed` evidence is durable but daemon classification is not, the profile-backed native `goal-loop`, `one-shot`, and `script` entrypoints reattach the matching non-terminal deterministic invocation, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
 Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
-For a new single-shot dispatch, the invocation, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its complete durable reattach binding.
+For a new native dispatch, the invocation, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its complete durable reattach binding.
+Every subsequent native goal-loop round uses the same atomic round plus binding operation before its mechanism launches.
 Reattach requires the durable `round_started` binding plus unchanged invocation identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
 An invocation without that complete binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
 
@@ -317,6 +319,21 @@ Apply the portability test: a workflow definition should move to another machine
 
 Portable step config is lifecycle-specific.
 The shipped schemas accept these shapes:
+
+`goal-loop`:
+
+```json
+{
+  "agent": {
+    "harness": "codex",
+    "model": "gpt-5",
+    "effort": "high"
+  },
+  "timeoutMs": 900000,
+  "maxRounds": 8,
+  "policyEnvelope": "repo-write"
+}
+```
 
 `one-shot`:
 
@@ -337,34 +354,38 @@ The shipped schemas accept these shapes:
 ```json
 {
   "command": "repo-cleanup",
-  "args": ["--prune"],
   "timeoutMs": 60000,
   "policyEnvelope": "cleanup-only"
 }
 ```
 
-Every shown field is optional for the `one-shot` family.
-The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command` and `args`.
-Agent and policy strings must be non-empty, `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000) no greater than 2,147,453,000, and every `args` item is a string.
+Every shown field is optional for the `goal-loop` and `one-shot` families.
+The `script` family requires `command` and forbids `agent`; `one-shot` forbids `command`.
+`goal-loop` also accepts only a positive integer `maxRounds`.
+Agent and policy strings must be non-empty, and `timeoutMs` is a positive whole number of seconds expressed in milliseconds (a multiple of 1,000) no greater than 2,147,453,000.
 A script command is a portable identity, not a path or shell fragment: it starts with an alphanumeric character or `@`, then uses only alphanumerics plus `.`, `_`, `:`, `@`, `+`, and `-`; `.` and `..` and Windows drive prefixes are rejected.
+Script argv remains entirely host-owned as part of the resolved command capability and is not accepted in portable workflow config.
 Both top-level schemas and the nested `agent` object reject unknown properties.
 
 `ExecutorConfigSchema` is a JSON-Schema-shaped declaration subset rather than a general JSON Schema dialect.
 It supports string schemas with `enum`, `minLength`, and `pattern`; integer or number schemas with `minimum`, `maximum`, and `multipleOf`; boolean schemas; array schemas with `items` and `minItems`; and strict nested object schemas with `properties`, `required`, and `additionalProperties: false`.
 Registration and structural preflight apply the declaration before a tick.
 
-Looping lifecycle schemas may add an opt-in round cap when they ship.
 Machine-local executable paths, cwd, allowed environment, credentials, stdin policy, repo-lock hooks, and instantiated clients are host bindings.
 Executors receive any host-provided bindings through `ExecutorTickContext.hostBindings`; config-only third-party registration currently provides the empty object described above.
-The shipped single-shot lifecycle keeps round-start identity in that field and captures its resolved live-wrapper or script runtime when the runner adapter is constructed.
+The shipped goal-loop and single-shot lifecycles keep round-start identity and their resolved live-wrapper or script runner in that field.
 Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
-The shipped adapters cross-check script command/argv/timeout/policy and agent-once agent/timeout/policy identity before launching a process.
+The production profile-backed host cross-checks goal-loop agent/timeout/policy, script command/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
+Its policy identity is the resolved live-wrapper profile name, its agent identity is the persisted per-step route selection, and its script identity is the profile's optional `command_identity` or the workflow step kind for older profiles.
+Resolved executable paths, raw argv, cwd, and environment remain host-owned and contribute only an opaque digest to the durable reattachment binding.
+Any mismatch returns `invalid_input` before process launch.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.
 The deterministic script host also requires `timeoutSec` to be a positive integer no greater than 2,147,453 seconds.
 An invalid or oversized host timeout returns `invalid_input` before either the synchronous compatibility path or the asynchronous SDK path launches the command.
+Daemon profile availability and native no-fallback behavior are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 
-The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the shipped compatibility host repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
+The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the native single-shot lifecycle repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
 The lifecycle runtime-normalizes the complete runner-adapter return before writing artifacts, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized invocation, running round, and dispatch-binding checkpoint for recovery.
@@ -374,15 +395,15 @@ Successful turns pass through `capturing_result`, but only a captured document p
 
 ## Lifecycle extension points
 
-There are three public extension levels:
+There are four public extension levels:
 
 1. Use a built-in lifecycle with config only.
 2. Supply the shipped single-shot lifecycle's narrower runner adapter for agent-once or script.
-3. Implement `Executor` directly for a new lifecycle.
+3. Supply the shipped goal-loop lifecycle's narrow bounded round adapter.
+4. Implement `Executor` directly for a new lifecycle.
 
 The shipped delegate-supervisor has a narrower tool-adapter interface inside the profile-backed built-in host, but there is not yet a public tool-adapter registry for third-party modules.
-Agent-loop's planned runner adapter can add another narrower extension point without changing the core interface.
-Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
+Goal-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
 A looping executor must never add an implicit cap in its own adapter.
 
 ## RunnerResult SDK surface

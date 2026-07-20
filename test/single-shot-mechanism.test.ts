@@ -249,6 +249,7 @@ describe("single-shot concrete mechanisms", () => {
         command: process.execPath,
         args,
         cwd: missingRepo,
+        repoPath: missingRepo,
         timeoutSec: 5,
         repoSafety: { mode: "read-only" },
       });
@@ -265,7 +266,7 @@ describe("single-shot concrete mechanisms", () => {
             mode === "sync"
               ? mechanism(scriptRound)
               : mechanism(scriptRound, {
-                  config: { command: path.basename(process.execPath), args },
+                  config: { command: path.basename(process.execPath) },
                   hostBindings:
                     {} as SingleShotRoundRunnerContext["hostBindings"],
                   signal: new AbortController().signal,
@@ -319,6 +320,7 @@ describe("single-shot concrete mechanisms", () => {
     const mechanism = createMockedScriptCommandRoundRunner({
       command: process.execPath,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -429,6 +431,7 @@ describe("single-shot concrete mechanisms", () => {
     const mechanism = createMockedScriptCommandRoundRunner({
       command: process.execPath,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -469,6 +472,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { CANCEL_MARKER: marker },
       repoSafety: {
@@ -478,7 +482,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -571,13 +575,14 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { MARKER: marker },
       repoSafety: { mode: "read-only" },
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -609,6 +614,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
       repoSafety: {
@@ -618,7 +624,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -654,6 +660,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "read-only",
@@ -662,7 +669,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -697,6 +704,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "finalize",
@@ -716,7 +724,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -756,6 +764,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: {
         mode: "finalize",
@@ -777,7 +786,7 @@ describe("single-shot concrete mechanisms", () => {
       },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -805,11 +814,12 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       repoSafety: { mode: "read-only" },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args: ["-c", "exit 0"] },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     };
@@ -839,6 +849,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 10,
       env: { MARKER: marker },
       repoSafety: {
@@ -858,7 +869,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const abort = new AbortController();
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "sh", args, timeoutMs: 10_000 },
+      config: { command: "sh", timeoutMs: 10_000 },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
@@ -913,7 +924,7 @@ describe("single-shot concrete mechanisms", () => {
       });
       expect(result.outcome).toEqual({
         ok: false,
-        recoveryCode: "invalid_input",
+        recoveryCode: "host_binding_mismatch",
       });
     }
     expect(fs.existsSync(marker)).toBe(false);
@@ -1192,6 +1203,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'script ok'; printf 'changed\n' > script.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1269,6 +1281,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1287,6 +1300,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: `${repoPath}${path.sep}`,
+      repoPath: `${repoPath}${path.sep}`,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1308,6 +1322,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "chmod 700 ignored"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1330,6 +1345,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: MAX_BUILT_IN_PROCESS_TIMEOUT_SEC + 1,
       repoSafety: { mode: "read-only" },
     });
@@ -1341,7 +1357,7 @@ describe("single-shot concrete mechanisms", () => {
 
     const syncResult = mechanism(scriptRound);
     const sdkResult = await mechanism(scriptRound, {
-      config: { command: "sh", args },
+      config: { command: "sh" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     });
@@ -1361,11 +1377,12 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "exit 0"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
     const context: SingleShotRoundRunnerContext = {
-      config: { command: "node", args: ["--version"] },
+      config: { command: "node" },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: new AbortController().signal,
     };
@@ -1377,7 +1394,7 @@ describe("single-shot concrete mechanisms", () => {
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input",
+      recoveryCode: "host_binding_mismatch",
     });
   });
 
@@ -1389,6 +1406,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args,
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       policyEnvelopeIdentity: "host-restricted",
       repoSafety: { mode: "read-only" },
@@ -1396,7 +1414,6 @@ describe("single-shot concrete mechanisms", () => {
     const context: SingleShotRoundRunnerContext = {
       config: {
         command: "sh",
-        args,
         policyEnvelope: "portable-unrestricted",
       },
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
@@ -1410,7 +1427,7 @@ describe("single-shot concrete mechanisms", () => {
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input",
+      recoveryCode: "host_binding_mismatch",
     });
     expect(fs.existsSync(marker)).toBe(false);
   });
@@ -1422,6 +1439,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > dirty.txt; exit 7"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1460,6 +1478,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'launched\n' > launched-script.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1507,6 +1526,7 @@ describe("single-shot concrete mechanisms", () => {
         `nohup /bin/sh -c 'sleep 2; touch ${sentinelPath}' >/dev/null 2>&1 & sleep 10`,
       ],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 1,
       repoSafety: {
         mode: "finalize",
@@ -1538,7 +1558,7 @@ describe("single-shot concrete mechanisms", () => {
 
     waitMs(2_500);
     expect(fs.existsSync(sentinelPath)).toBe(false);
-  });
+  }, 10_000);
 
   it("rejects relative script log paths before launching the command", () => {
     const { repoPath } = initRepo();
@@ -1546,6 +1566,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'should not run' > launched.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1572,6 +1593,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'should not run'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       env: { BAD_ENV: 1n } as unknown as NodeJS.ProcessEnv,
       repoSafety: { mode: "read-only" },
@@ -1604,6 +1626,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'script ok'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1618,6 +1641,33 @@ describe("single-shot concrete mechanisms", () => {
 
     expect(result.outcome).toEqual({ ok: true });
     expect(result.evidence?.verificationStatus).toBe("skipped");
+  });
+
+  it("tightens permissions before reusing a legacy script log", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const logPath = path.join(artifactRoot, "script.log");
+    fs.writeFileSync(logPath, "legacy log\n", { mode: 0o644 });
+    fs.chmodSync(logPath, 0o644);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'script ok'"],
+      cwd: repoPath,
+      repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" },
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [logPath],
+      }),
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
   });
 
   it("finalizes script repo safety when post-process log writes fail", () => {
@@ -1648,6 +1698,7 @@ describe("single-shot concrete mechanisms", () => {
         "printf 'dirty\\n' > dirty-log.txt; printf \"$THROW_MARKER\"",
       ],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       env: { THROW_MARKER: marker },
       repoSafety: {
@@ -1724,6 +1775,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'unused'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1764,6 +1816,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'no changes'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1811,6 +1864,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > hook-failure.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1882,6 +1936,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > ignored.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
@@ -1921,6 +1976,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > dirty.txt"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1954,6 +2010,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "printf 'clean command'"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
@@ -1983,6 +2040,7 @@ describe("single-shot concrete mechanisms", () => {
       command: "/bin/sh",
       args: ["-c", "chmod 700 .agent-runs"],
       cwd: repoPath,
+      repoPath,
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
