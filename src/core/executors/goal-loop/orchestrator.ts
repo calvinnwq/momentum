@@ -302,7 +302,7 @@ export type GoalLoopAttemptRoundPlanner = (
   context: GoalLoopAttemptRoundContext
 ) => GoalLoopAttemptRoundPlan;
 
-export type RunGoalLoopInvocationInput = {
+export type RunGoalLoopAttemptInput = {
   db: MomentumDb;
   /**
    * The attempt row to insert before any round runs. It is inserted at its
@@ -349,7 +349,7 @@ export type RunGoalLoopAttemptResult = {
  * exists (via {@link runGoalLoopRound}).
  */
 export function runGoalLoopAttempt(
-  input: RunGoalLoopInvocationInput
+  input: RunGoalLoopAttemptInput
 ): RunGoalLoopAttemptResult {
   const { db, attempt, planRound, runRound } = input;
 
@@ -401,7 +401,7 @@ export function runGoalLoopAttempt(
     const attemptState = attemptStateForRoundClassification(
       roundOutcome.decision.classification
     );
-    const finalInvocation = updateExecutorAttemptState(
+    const finalAttempt = updateExecutorAttemptState(
       db,
       attempt.attemptId,
       attemptState,
@@ -413,7 +413,7 @@ export function runGoalLoopAttempt(
         now: plan.finishedAt
       }
     );
-    return { attempt: finalInvocation, rounds };
+    return { attempt: finalAttempt, rounds };
   }
 }
 
@@ -451,7 +451,7 @@ export type RunGoalLoopStepInput = {
 
 /**
  * The goal-loop executor adapter "below `StepRun`" (contract "State Model":
- * `StepRun -> ExecutorInvocation -> ExecutorRound[]`). This is the single
+ * `StepRun -> ExecutorAttempt -> ExecutorRound[]`). This is the single
  * entrypoint a daemon / scheduler calls with a step-run identity: it
  * {@link planGoalLoopAttempt | materializes} the durable goal-loop
  * `executor_attempts` row with a deterministic, reattachable id, then drives

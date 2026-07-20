@@ -945,15 +945,15 @@ export function runNoMistakesMirrorStep(
     db,
     "no_mistakes_mirror_start",
     () => {
-      const invocationStartedAt = now();
+      const attemptStartedAt = now();
       const attempt = planNoMistakesAttempt({
         workflowRunId: input.workflowRunId,
         stepRunId: input.stepRunId,
         stepKey: input.stepKey,
         attemptNumber: input.attemptNumber,
-        startedAt: invocationStartedAt,
+        startedAt: attemptStartedAt,
       });
-      insertExecutorAttempt(db, attempt, { now: invocationStartedAt });
+      insertExecutorAttempt(db, attempt, { now: attemptStartedAt });
 
       // 2. Insert the single mirror round-start row (born in mirroring_external_state),
       //    inheriting the attempt's identity + family and freezing the daemon's
@@ -991,7 +991,7 @@ export function runNoMistakesMirrorStep(
   //    it `running`, a gate pauses it in non-terminal `waiting_operator`, and only a
   //    terminal settle stamps `finished_at`.
   const attemptState = round.decision.attemptState;
-  const finalInvocation = updateExecutorAttemptState(
+  const finalAttempt = updateExecutorAttemptState(
     db,
     attempt.attemptId,
     attemptState,
@@ -1004,5 +1004,5 @@ export function runNoMistakesMirrorStep(
     },
   );
 
-  return { attempt: finalInvocation, round };
+  return { attempt: finalAttempt, round };
 }

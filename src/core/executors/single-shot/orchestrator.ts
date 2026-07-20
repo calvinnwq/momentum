@@ -344,7 +344,7 @@ export type RunSingleShotStepResult = {
 
 /**
  * The single-shot executor adapter "below `StepRun`" (contract "State Model":
- * `StepRun -> ExecutorInvocation -> ExecutorRound[]`, here exactly one round).
+ * `StepRun -> ExecutorAttempt -> ExecutorRound[]`, here exactly one round).
  * This is the single entrypoint a daemon / scheduler calls with a step-run
  * identity: it atomically materializes the durable attempt, initial round,
  * and hashed dispatch-binding checkpoint with a deterministic, reattachable id,
@@ -409,7 +409,7 @@ export async function runSingleShotStep(
 
   // Resolve caller-owned clocks and filesystem inputs before insertion. If one
   // aborts or throws, no attempt exists without a round to carry recovery.
-  const invocationStartedAt = now();
+  const attemptStartedAt = now();
   const roundStartedAt = now();
   const runtime = input.resolveRoundInputs();
   input.signal?.throwIfAborted();
@@ -418,36 +418,36 @@ export async function runSingleShotStep(
   //    A new dispatch inserts both rows in one transaction, so a crash can leave
   //    either no owner or a complete recovery binding, never an attempt-only
   //    owner that deterministic reattach cannot classify.
-  const plannedInvocation = planSingleShotAttempt({
+  const plannedAttempt = planSingleShotAttempt({
     family: input.family,
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     attemptNumber: input.attemptNumber,
-    startedAt: invocationStartedAt,
+    startedAt: attemptStartedAt,
   });
-  const existingInvocation = loadExecutorAttempt(
+  const existingAttempt = loadExecutorAttempt(
     db,
-    plannedInvocation.attemptId,
+    plannedAttempt.attemptId,
   );
-  let attempt = plannedInvocation;
+  let attempt = plannedAttempt;
   let start = planSingleShotRoundStartForAttempt({
-    attempt: plannedInvocation,
+    attempt: plannedAttempt,
     selection: effectiveSelection,
     runtime,
     startedAt: roundStartedAt,
   });
   let roundAlreadyMaterialized = false;
   if (
-    existingInvocation === undefined ||
-    isTerminalExecutorAttemptState(existingInvocation.state)
+    existingAttempt === undefined ||
+    isTerminalExecutorAttemptState(existingAttempt.state)
   ) {
     // A terminal duplicate still conflicts on attempt identity. The
     // transaction rolls back the attempt if round insertion fails.
     const { selection: _selection, ...sdkStart } = start;
     materializeSingleShotDispatch(
       db,
-      plannedInvocation,
+      plannedAttempt,
       planSingleShotRoundStart(start),
       planSingleShotRoundStartedCheckpoint(
         start.roundId,
@@ -457,20 +457,20 @@ export async function runSingleShotStep(
           sdkStart,
         ),
       ),
-      invocationStartedAt,
+      attemptStartedAt,
     );
     roundAlreadyMaterialized = true;
   } else {
-    assertMatchingSingleShotAttempt(existingInvocation, plannedInvocation);
+    assertMatchingSingleShotAttempt(existingAttempt, plannedAttempt);
     if (
-      listExecutorRoundsForAttempt(db, existingInvocation.attemptId)
+      listExecutorRoundsForAttempt(db, existingAttempt.attemptId)
         .length === 0
     ) {
       throw new Error(
-        `Cannot reattach executor attempt ${existingInvocation.attemptId}: no durable round dispatch binding exists.`,
+        `Cannot reattach executor attempt ${existingAttempt.attemptId}: no durable round dispatch binding exists.`,
       );
     }
-    attempt = existingInvocation;
+    attempt = existingAttempt;
     start = planSingleShotRoundStartForAttempt({
       attempt,
       selection: effectiveSelection,

@@ -343,7 +343,7 @@ export type GoalLoopRoundRuntimeInputs = {
  * into every round, the 0-based round index, the per-round runtime inputs, and the
  * round start clock.
  */
-export type PlanGoalLoopRoundStartForInvocationInput = {
+export type PlanGoalLoopRoundStartForAttemptInput = {
   attempt: ExecutorAttemptRecord;
   selection: GoalLoopRoundSelection;
   roundIndex: number;
@@ -600,7 +600,7 @@ export function goalLoopRoundId(
 /**
  * Project a `StepRun` identity into the durable goal-loop
  * {@link ExecutorAttemptRecord} the orchestrator inserts before any round runs
- * (contract "State Model": `StepRun -> ExecutorInvocation -> ExecutorRound[]`).
+ * (contract "State Model": `StepRun -> ExecutorAttempt -> ExecutorRound[]`).
  * This is the start of the adapter "below `StepRun`": one configured executor
  * session for the step, materialized at `running` with a deterministic id and the
  * start clock copied in. Pure: no ids or clocks are invented beyond the supplied
@@ -638,7 +638,7 @@ export function planGoalLoopAttempt(
  * identity. This is the round-identity half of the adapter "below `StepRun`".
  */
 export function planGoalLoopRoundStartForAttempt(
-  input: PlanGoalLoopRoundStartForInvocationInput,
+  input: PlanGoalLoopRoundStartForAttemptInput,
 ): PlanGoalLoopRoundStartInput {
   const { attempt, runtime } = input;
   return {

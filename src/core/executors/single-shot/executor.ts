@@ -10,7 +10,7 @@
  *   - `script` "runs deterministic local commands with explicit argv/env/cwd and
  *     bounded logs."
  *
- * Both families share the same control shape: one {@link ExecutorInvocation} with
+ * Both families share the same control shape: one {@link ExecutorAttemptRecord} with
  * exactly one {@link ExecutorRound}, no continue-loop and no round budget (a
  * retry is a fresh `attempt`, never a `continue`). They differ only in their
  * *mechanism* — `one-shot` requires a normalized {@link RunnerResult} document
@@ -330,7 +330,7 @@ export type PlanSingleShotAttemptInput = {
 /**
  * Project a `StepRun` identity into the durable single-shot
  * {@link ExecutorAttemptRecord} the orchestrator inserts before the round runs
- * (contract "State Model": `StepRun -> ExecutorInvocation -> ExecutorRound[]`).
+ * (contract "State Model": `StepRun -> ExecutorAttempt -> ExecutorRound[]`).
  * One configured executor session for the step, materialized at `running` with a
  * deterministic id and the start clock copied in. Pure: no ids or clocks are
  * invented beyond the supplied `startedAt`.
@@ -603,7 +603,7 @@ export type SingleShotRoundRuntimeInputs = {
  * resolved selection frozen into the round, the per-round runtime inputs, and the
  * round start clock. There is no round index — the single round is always index 0.
  */
-export type PlanSingleShotRoundStartForInvocationInput = {
+export type PlanSingleShotRoundStartForAttemptInput = {
   attempt: ExecutorAttemptRecord;
   selection: SingleShotRoundSelection;
   runtime: SingleShotRoundRuntimeInputs;
@@ -626,7 +626,7 @@ export type PlanSingleShotRoundStartForInvocationInput = {
  * invariant {@link planSingleShotAttempt} establishes).
  */
 export function planSingleShotRoundStartForAttempt(
-  input: PlanSingleShotRoundStartForInvocationInput,
+  input: PlanSingleShotRoundStartForAttemptInput,
 ): PlanSingleShotRoundStartInput {
   const { attempt, runtime } = input;
   const family = attempt.executorFamily;

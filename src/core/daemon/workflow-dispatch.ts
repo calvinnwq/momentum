@@ -689,7 +689,7 @@ function createLiveStepHostBindingsResolver(
     }
     const attempt = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId);
     if (attempt === undefined)
-      throw new Error("dispatch_invocation_not_found");
+      throw new Error("dispatch_attempt_not_found");
     const delegateTool = isDelegate
       ? resolveDelegateToolName(input.config)
       : undefined;

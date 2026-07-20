@@ -18,7 +18,7 @@
  *     executor gate can never drift into two vocabularies — there is one set,
  *     and the contract describes one set.
  *   - A gate's *target scope* (ticket "target scope") names which layer of the
- *     `WorkflowDefinition -> StepRun -> ExecutorInvocation -> ExecutorRound`
+ *     `WorkflowDefinition -> StepRun -> ExecutorAttempt -> ExecutorRound`
  *     tree the gate hangs from. The scope is independent of the decision brain:
  *     resolving a workflow-level approval and resolving a round-level operator
  *     decision run the same evaluation.
@@ -63,7 +63,7 @@ export function isWorkflowGateType(value: string): value is WorkflowGateType {
 export const WORKFLOW_GATE_SCOPES = [
   "workflow",
   "step",
-  "invocation",
+  "attempt",
   "round"
 ] as const;
 export type WorkflowGateScope = (typeof WORKFLOW_GATE_SCOPES)[number];
