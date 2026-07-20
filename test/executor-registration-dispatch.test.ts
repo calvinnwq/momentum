@@ -1001,7 +1001,8 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         { encoding: "utf8" },
       ).trim();
       const runId = `native-goal-loop-artifact-collision-${resultFile.replaceAll(".", "-")}`;
-      const profilePath = writeGoalLoopDispatchProfile(tempDir(), {
+      const profileDir = tempDir();
+      const profilePath = writeGoalLoopDispatchProfile(profileDir, {
         resultFile,
       });
       const definition: WorkflowDefinition = {
@@ -1060,7 +1061,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           .get(runId),
       ).toEqual({
         state: "manual_recovery_required",
-        recovery_code: "invalid_input",
+        recovery_code: "host_binding_mismatch",
       });
       expect(
         fs.existsSync(
@@ -1072,8 +1073,77 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           encoding: "utf8",
         }).trim(),
       ).toBe(baseCommitCount);
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId: "implementation",
+          recoveryCode: "host_binding_mismatch",
+        },
+      });
+      writeGoalLoopDispatchProfile(profileDir);
+      const repaired = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!repaired.ok) throw new Error(repaired.message);
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "native-goal-loop-artifact-collision-worker",
+        continuationPollIntervalMs: 1,
+        dispatch: repaired.dispatch,
+        now: () => NOW + 3,
+      });
+      await runWorkflowSchedulerOnceAsync({
+        db,
+        workerId: "native-goal-loop-artifact-collision-worker",
+        continuationPollIntervalMs: 1,
+        dispatch: repaired.dispatch,
+        now: () => NOW + 4,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ state: "succeeded", attempt: 2 });
+      expect(
+        db
+          .prepare(
+            "SELECT attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          )
+          .all(runId),
+      ).toEqual([
+        {
+          attempt: 1,
+          state: "manual_recovery_required",
+          classification: "manual_recovery_required",
+          recovery_code: "host_binding_mismatch",
+        },
+        {
+          attempt: 2,
+          state: "succeeded",
+          classification: "continue",
+          recovery_code: null,
+        },
+        {
+          attempt: 2,
+          state: "succeeded",
+          classification: "complete",
+          recovery_code: null,
+        },
+      ]);
       db.close();
     },
+    30_000,
   );
 
   it("rolls back a second native goal-loop round when its binding cannot be persisted", async () => {

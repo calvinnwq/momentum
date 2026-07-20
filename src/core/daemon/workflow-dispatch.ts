@@ -1116,7 +1116,7 @@ function createLiveStepHostBindingsResolver(
       if (collidingArtifact !== undefined) {
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
-          "invalid_input",
+          "host_binding_mismatch",
           `goal-loop result_file collides with daemon-owned artifact path: ${collidingArtifact[0]}`,
         );
       }
