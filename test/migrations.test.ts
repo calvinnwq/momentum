@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
 import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
+import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
 
 const tempRoots: string[] = [];
 
@@ -1648,7 +1649,7 @@ describe("applyQueueMigrations", () => {
       db.prepare(
         `INSERT INTO executor_attempts
            (attempt_id, workflow_run_id, step_run_id, step_key,
-            executor_family, state, attempt, created_at, updated_at)
+            executor_family, state, attempt_number, created_at, updated_at)
          VALUES ('inv-x', 'run-x', 'step-x', 'implementation',
                  'goal-loop', 'pending', 1, 1, 1)`,
       ).run();
@@ -1673,7 +1674,7 @@ describe("applyQueueMigrations", () => {
           "step_run_id",
           "step_key",
           "executor_family",
-          "attempt",
+          "attempt_number",
           "round_index",
           "state",
           "classification",
@@ -1713,7 +1714,7 @@ describe("applyQueueMigrations", () => {
           "step_key",
           "executor_family",
           "state",
-          "attempt",
+          "attempt_number",
           "started_at",
           "heartbeat_at",
           "finished_at",
@@ -1768,13 +1769,14 @@ describe("applyQueueMigrations", () => {
             .all() as Array<{ name: string }>
         ).map((row) => row.name);
         for (const idx of [
-          "idx_executor_invocations_run",
-          "idx_executor_invocations_step",
-          "idx_executor_invocations_state",
-          "idx_executor_rounds_invocation",
+          "idx_executor_attempts_run",
+          "idx_executor_attempts_step",
+          "idx_executor_attempts_state",
+          "idx_executor_attempts_step_number",
+          "idx_executor_rounds_attempt",
           "idx_executor_rounds_run",
           "idx_executor_rounds_step",
-          "idx_executor_rounds_invocation_index",
+          "idx_executor_rounds_attempt_index",
           "idx_executor_artifacts_round",
           "idx_executor_checkpoints_round",
           "idx_executor_checkpoints_round_sequence",
@@ -1797,7 +1799,7 @@ describe("applyQueueMigrations", () => {
         const insertRound = db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-              executor_family, attempt, round_index, state,
+              executor_family, attempt_number, round_index, state,
               created_at, updated_at)
            VALUES (?, 'inv-x', 'run-x', 'step-x', 'implementation',
                    'goal-loop', 1, ?, 'pending', 1, 1)`,
@@ -1821,7 +1823,7 @@ describe("applyQueueMigrations", () => {
         db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-              executor_family, attempt, round_index, state,
+              executor_family, attempt_number, round_index, state,
               created_at, updated_at)
            VALUES ('round-x', 'inv-x', 'run-x', 'step-x', 'implementation',
                    'goal-loop', 1, 0, 'pending', 1, 1)`,
@@ -1849,7 +1851,7 @@ describe("applyQueueMigrations", () => {
             .prepare(
               `INSERT INTO executor_attempts
                  (attempt_id, workflow_run_id, step_run_id, step_key,
-                  executor_family, state, attempt, created_at, updated_at)
+                  executor_family, state, attempt_number, created_at, updated_at)
                VALUES ('inv-orphan', 'run-missing', 'step-missing',
                        'implementation', 'goal-loop', 'pending', 1, 1, 1)`,
             )
@@ -1871,7 +1873,7 @@ describe("applyQueueMigrations", () => {
             .prepare(
               `INSERT INTO executor_rounds
                  (round_id, attempt_id, workflow_run_id, step_run_id,
-                  step_key, executor_family, attempt, round_index, state,
+                  step_key, executor_family, attempt_number, round_index, state,
                   created_at, updated_at)
                VALUES ('round-orphan', 'inv-missing', 'run-x', 'step-x',
                        'implementation', 'goal-loop', 1, 0, 'pending', 1, 1)`,
@@ -2006,5 +2008,278 @@ describe("applyQueueMigrations", () => {
         db.close();
       }
     });
+  });
+});
+
+describe("SDK-05 executor invocation to attempt/round migration", () => {
+  const fixturePath = path.join(
+    __dirname,
+    "fixtures",
+    "sdk05-legacy-executor-invocations.sql",
+  );
+
+  function seedLegacyDataDir(): string {
+    const dataDir = makeTempDir("momentum-sdk05-migration-");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      db.exec(fs.readFileSync(fixturePath, "utf8"));
+    } finally {
+      db.close();
+    }
+    return dataDir;
+  }
+
+  it("opens a two-attempt recovered SDK-05 database and splits the invocation into immutable attempts", () => {
+    const dataDir = seedLegacyDataDir();
+    const db = openDb(dataDir);
+    try {
+      expect(tableNames(db)).not.toContain("executor_invocations");
+
+      const attempts = db
+        .prepare(
+          `SELECT attempt_id, workflow_run_id, step_run_id, executor_family,
+                  state, attempt_number, started_at, heartbeat_at, finished_at,
+                  legacy_invocation_id, legacy_provenance
+             FROM executor_attempts
+            ORDER BY step_run_id, attempt_number`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(attempts).toHaveLength(3);
+
+      const [implFirst, implLatest, preflight] = attempts as [
+        Record<string, unknown>,
+        Record<string, unknown>,
+        Record<string, unknown>,
+      ];
+
+      // Earlier retry group: derived id, state and timestamps reconstructed
+      // from its own terminal rounds, provenance recorded.
+      expect(implFirst.attempt_id).toBe(
+        "run-1::implementation::dispatch::attempt-1",
+      );
+      expect(implFirst.attempt_number).toBe(1);
+      expect(implFirst.state).toBe("manual_recovery_required");
+      expect(implFirst.started_at).toBe(1000);
+      expect(implFirst.heartbeat_at).toBe(1400);
+      expect(implFirst.finished_at).toBe(1500);
+      expect(implFirst.legacy_invocation_id).toBe(
+        "run-1::implementation::dispatch",
+      );
+      expect(
+        JSON.parse(String(implFirst.legacy_provenance)),
+      ).toMatchObject({
+        legacyInvocationId: "run-1::implementation::dispatch",
+        source: "reconstructed_from_round_evidence",
+      });
+
+      // Latest group inherits the legacy invocation id and its live
+      // state/timestamps unchanged.
+      expect(implLatest.attempt_id).toBe("run-1::implementation::dispatch");
+      expect(implLatest.attempt_number).toBe(2);
+      expect(implLatest.state).toBe("running");
+      expect(implLatest.started_at).toBe(2000);
+      expect(implLatest.heartbeat_at).toBe(2500);
+      expect(implLatest.finished_at).toBeNull();
+      expect(
+        JSON.parse(String(implLatest.legacy_provenance)),
+      ).toMatchObject({ source: "legacy_invocation_row" });
+
+      expect(preflight.attempt_id).toBe("run-1::preflight::dispatch");
+      expect(preflight.attempt_number).toBe(1);
+      expect(preflight.state).toBe("succeeded");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves every round id, ordering, and evidence link across the split", () => {
+    const dataDir = seedLegacyDataDir();
+    const db = openDb(dataDir);
+    try {
+      const rounds = db
+        .prepare(
+          `SELECT round_id, attempt_id, attempt_number, round_index, state,
+                  classification, recovery_code, summary, key_learnings,
+                  verification_results
+             FROM executor_rounds
+            WHERE step_run_id = 'implementation'
+            ORDER BY attempt_number, round_index`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(rounds.map((round) => round.round_id)).toEqual([
+        "run-1::implementation::dispatch::round-1",
+        "run-1::implementation::dispatch::round-2",
+        "run-1::implementation::dispatch::round-3",
+      ]);
+      expect(rounds.map((round) => round.attempt_id)).toEqual([
+        "run-1::implementation::dispatch::attempt-1",
+        "run-1::implementation::dispatch::attempt-1",
+        "run-1::implementation::dispatch",
+      ]);
+      expect(rounds.map((round) => round.round_index)).toEqual([1, 2, 3]);
+      expect(rounds[1]?.recovery_code).toBe("executor_threw");
+      expect(rounds[0]?.key_learnings).toBe('["learning-1"]');
+      expect(rounds[0]?.verification_results).toBe(
+        '[{"command":"pnpm test","exitCode":0,"durationMs":10,"timedOut":false}]',
+      );
+
+      const evidence = db
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM executor_artifacts) AS artifacts,
+             (SELECT COUNT(*) FROM executor_checkpoints) AS checkpoints,
+             (SELECT COUNT(*) FROM executor_findings) AS findings,
+             (SELECT COUNT(*) FROM executor_decisions) AS decisions`,
+        )
+        .get() as Record<string, number>;
+      expect(evidence).toEqual({
+        artifacts: 2,
+        checkpoints: 4,
+        findings: 1,
+        decisions: 1,
+      });
+      expect(
+        db.prepare("PRAGMA foreign_key_check(executor_rounds)").all(),
+      ).toEqual([]);
+      expect(
+        db.prepare("PRAGMA foreign_key_check(executor_artifacts)").all(),
+      ).toEqual([]);
+      expect(
+        db.prepare("PRAGMA foreign_key_check(executor_checkpoints)").all(),
+      ).toEqual([]);
+
+      // External handoff correlation survives untouched as frozen evidence.
+      const intent = db
+        .prepare(
+          "SELECT detail FROM executor_checkpoints WHERE checkpoint_id = 'checkpoint-2'",
+        )
+        .get() as { detail: string };
+      expect(JSON.parse(intent.detail)).toEqual({
+        tool: "gnhf",
+        invocationId: "run-1::implementation::dispatch",
+        attempt: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates workflow gates to the attempt scope and re-anchors round-scoped gates", () => {
+    const dataDir = seedLegacyDataDir();
+    const db = openDb(dataDir);
+    try {
+      const columns = getColumns(db, "workflow_gates").map((row) => row.name);
+      expect(columns).toContain("attempt_id");
+      expect(columns).not.toContain("invocation_id");
+
+      const gates = db
+        .prepare(
+          `SELECT gate_id, attempt_id, round_id, target_scope
+             FROM workflow_gates ORDER BY gate_id`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(gates).toEqual([
+        {
+          gate_id: "gate-invocation",
+          attempt_id: "run-1::implementation::dispatch",
+          round_id: null,
+          target_scope: "attempt",
+        },
+        {
+          gate_id: "gate-round",
+          attempt_id: "run-1::implementation::dispatch::attempt-1",
+          round_id: "run-1::implementation::dispatch::round-2",
+          target_scope: "round",
+        },
+        {
+          gate_id: "gate-step",
+          attempt_id: null,
+          round_id: null,
+          target_scope: "step",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is a no-op when the migrated database is opened again", () => {
+    const dataDir = seedLegacyDataDir();
+    const first = openDb(dataDir);
+    const snapshot = (db: DatabaseSync) => ({
+      attempts: db
+        .prepare("SELECT * FROM executor_attempts ORDER BY attempt_id")
+        .all(),
+      rounds: db
+        .prepare("SELECT * FROM executor_rounds ORDER BY round_id")
+        .all(),
+      gates: db
+        .prepare("SELECT * FROM workflow_gates ORDER BY gate_id")
+        .all(),
+    });
+    const before = snapshot(first);
+    first.close();
+    const second = openDb(dataDir);
+    try {
+      expect(snapshot(second)).toEqual(before);
+      expect(tableNames(second)).not.toContain("executor_invocations");
+    } finally {
+      second.close();
+    }
+  });
+
+  it("retries insert a fresh immutable attempt on a migrated database and leave history unchanged", () => {
+    const dataDir = seedLegacyDataDir();
+    // Park the migrated latest attempt in a retryable terminal first.
+    const db = openDb(dataDir);
+    try {
+      db.exec(`
+        UPDATE executor_attempts
+           SET state = 'manual_recovery_required', finished_at = 2600
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_rounds
+           SET state = 'manual_recovery_required',
+               classification = 'manual_recovery_required',
+               recovery_code = 'executor_threw', finished_at = 2600
+         WHERE round_id = 'run-1::implementation::dispatch::round-3';
+      `);
+      const started = startRetryableDispatchAttempt(db, {
+        runId: "run-1",
+        stepId: "implementation",
+        now: 3000,
+        stepState: "running",
+      });
+      expect(started).toMatchObject({
+        started: true,
+        attemptId: "run-1::implementation::attempt-3",
+        attemptNumber: 3,
+        roundIndex: 4,
+      });
+      const attempts = db
+        .prepare(
+          `SELECT attempt_id, state, attempt_number FROM executor_attempts
+            WHERE step_run_id = 'implementation' ORDER BY attempt_number`,
+        )
+        .all();
+      expect(attempts).toEqual([
+        {
+          attempt_id: "run-1::implementation::dispatch::attempt-1",
+          state: "manual_recovery_required",
+          attempt_number: 1,
+        },
+        {
+          attempt_id: "run-1::implementation::dispatch",
+          state: "manual_recovery_required",
+          attempt_number: 2,
+        },
+        {
+          attempt_id: "run-1::implementation::attempt-3",
+          state: "running",
+          attempt_number: 3,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
   });
 });

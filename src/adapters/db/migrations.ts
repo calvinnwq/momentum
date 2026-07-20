@@ -530,20 +530,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 // ON`), so an attempt requires a real `(workflow_run_id, step_run_id)`, a
 // round requires a real attempt, and each evidence row requires a real
 // round — bounded autonomy can never orphan itself above its owning StepRun.
-const EXECUTOR_LOOP_DDL = `
-CREATE TABLE IF NOT EXISTS executor_definitions (
-  executor_key TEXT PRIMARY KEY,
-  family TEXT NOT NULL,
-  agent_provider TEXT,
-  model TEXT,
-  effort TEXT,
-  timeout_ms INTEGER,
-  max_rounds INTEGER,
-  policy_envelope TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-) STRICT;
-
+const EXECUTOR_ATTEMPTS_DDL = `
 CREATE TABLE IF NOT EXISTS executor_attempts (
   attempt_id TEXT PRIMARY KEY,
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
@@ -578,8 +565,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_attempts_step_number
 CREATE INDEX IF NOT EXISTS idx_executor_attempts_legacy_invocation
   ON executor_attempts(legacy_invocation_id)
   WHERE legacy_invocation_id IS NOT NULL;
+`;
 
-CREATE TABLE IF NOT EXISTS executor_rounds (
+// The executor_rounds column set, parameterized so the legacy attempt/round
+// migration can rebuild the table under a scratch name before swapping it in.
+function executorRoundsTableDdl(tableName: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${tableName} (
   round_id TEXT PRIMARY KEY,
   attempt_id TEXT NOT NULL REFERENCES executor_attempts(attempt_id),
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
@@ -616,7 +608,10 @@ CREATE TABLE IF NOT EXISTS executor_rounds (
   FOREIGN KEY (workflow_run_id, step_run_id)
     REFERENCES workflow_steps(run_id, step_id)
 ) STRICT;
+`;
+}
 
+const EXECUTOR_ROUNDS_INDEX_DDL = `
 CREATE INDEX IF NOT EXISTS idx_executor_rounds_attempt
   ON executor_rounds(attempt_id);
 
@@ -628,6 +623,27 @@ CREATE INDEX IF NOT EXISTS idx_executor_rounds_step
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_rounds_attempt_index
   ON executor_rounds(attempt_id, round_index);
+`;
+
+const EXECUTOR_LOOP_DDL = `
+CREATE TABLE IF NOT EXISTS executor_definitions (
+  executor_key TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  agent_provider TEXT,
+  model TEXT,
+  effort TEXT,
+  timeout_ms INTEGER,
+  max_rounds INTEGER,
+  policy_envelope TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+${EXECUTOR_ATTEMPTS_DDL}
+
+${executorRoundsTableDdl("executor_rounds")}
+
+${EXECUTOR_ROUNDS_INDEX_DDL}
 
 CREATE TABLE IF NOT EXISTS executor_artifacts (
   artifact_id TEXT PRIMARY KEY,
@@ -745,7 +761,350 @@ CREATE INDEX IF NOT EXISTS idx_workflow_events_run_cursor
   ON workflow_events(run_id, occurred_at, event_id);
 `;
 
+// Legacy (SDK-05 era) invocation rows before the attempt/round migration.
+type LegacyExecutorInvocationRow = {
+  invocation_id: string;
+  workflow_run_id: string;
+  step_run_id: string;
+  step_key: string;
+  executor_family: string;
+  state: string;
+  attempt: number;
+  started_at: number | null;
+  heartbeat_at: number | null;
+  finished_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+type LegacyExecutorRoundGroupRow = {
+  round_id: string;
+  invocation_id: string;
+  attempt: number;
+  round_index: number;
+  state: string;
+  started_at: number | null;
+  heartbeat_at: number | null;
+  finished_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
+  "manual_recovery_required",
+  "blocked",
+  "failed",
+  "succeeded",
+  "cancelled",
+]);
+
+/**
+ * Migrate the legacy SDK-05 `executor_invocations` schema into the immutable
+ * `executor_attempts` model, in place and exactly once.
+ *
+ * The legacy model reopened one deterministic invocation row per step: a retry
+ * incremented `attempt` on that row, its state/timestamps described only the
+ * latest reopened lifecycle, and rounds from every retry shared the row via
+ * `invocation_id` while each round carried its own `attempt` number.
+ *
+ * Mapping, per legacy invocation:
+ *   - Attempt groups are the distinct round `attempt` numbers plus the
+ *     invocation's own current `attempt` (a reopened row may not have written a
+ *     round yet).
+ *   - The highest-numbered group is the only lifecycle the invocation row still
+ *     describes, so that attempt inherits the row's id, state, and timestamps
+ *     unchanged. Preserving the id also preserves every external reference to
+ *     it (gates, receipts, checkpoint details).
+ *   - Earlier groups become immutable historical attempts with deterministic
+ *     derived ids (`<invocationId>::attempt-<n>`). Their state and timestamps
+ *     are reconstructed from their own terminal rounds; a group whose last
+ *     round is somehow non-terminal (impossible through the SDK-05 write path)
+ *     is conservatively recorded as `manual_recovery_required` and flagged in
+ *     provenance rather than inventing a clean terminal.
+ *   - Every migrated attempt keeps `legacy_invocation_id` plus a compact
+ *     `legacy_provenance` JSON describing how its facts were derived.
+ *   - Rounds keep their ids, indices, evidence links, and `attempt` number
+ *     (now `attempt_number`); only their parent key moves from the shared
+ *     invocation to their own attempt row.
+ *   - `workflow_gates.invocation_id` becomes `attempt_id`; round-scoped gates
+ *     are re-anchored to the round's attempt, and the `invocation` target
+ *     scope becomes `attempt`.
+ *
+ * Idempotent: the legacy table is dropped inside the same transaction, so a
+ * second open finds nothing to migrate. Runs outside the main migration
+ * transaction because the table rebuild requires `PRAGMA foreign_keys = OFF`,
+ * which SQLite ignores inside a transaction; a `foreign_key_check` over the
+ * rebuilt tables guards the swap before commit.
+ */
+function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
+  if (!tableExists(db, "executor_invocations")) return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      // Very old data dirs may predate the late round column backfills; align
+      // the legacy table first so the rebuild below can copy every column.
+      for (const column of EXECUTOR_ROUND_LEARNING_COLUMNS) {
+        ensureColumn(db, "executor_rounds", column);
+      }
+      db.exec(EXECUTOR_ATTEMPTS_DDL);
+
+      const invocations = db
+        .prepare(
+          `SELECT invocation_id, workflow_run_id, step_run_id, step_key,
+                  executor_family, state, attempt, started_at, heartbeat_at,
+                  finished_at, created_at, updated_at
+             FROM executor_invocations
+            ORDER BY invocation_id`,
+        )
+        .all() as unknown as LegacyExecutorInvocationRow[];
+      const insertAttempt = db.prepare(
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+           state, attempt_number, started_at, heartbeat_at, finished_at,
+           legacy_invocation_id, legacy_provenance, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const attemptIdByLegacyGroup = new Map<string, string>();
+
+      for (const invocation of invocations) {
+        const rounds = db
+          .prepare(
+            `SELECT round_id, invocation_id, attempt, round_index, state,
+                    started_at, heartbeat_at, finished_at, created_at, updated_at
+               FROM executor_rounds
+              WHERE invocation_id = ?
+              ORDER BY attempt, round_index, round_id`,
+          )
+          .all(invocation.invocation_id) as
+          unknown as LegacyExecutorRoundGroupRow[];
+        const groups = new Map<number, LegacyExecutorRoundGroupRow[]>();
+        for (const round of rounds) {
+          const group = groups.get(round.attempt) ?? [];
+          group.push(round);
+          groups.set(round.attempt, group);
+        }
+        if (!groups.has(invocation.attempt)) {
+          groups.set(invocation.attempt, []);
+        }
+        const attemptNumbers = [...groups.keys()].sort((a, b) => a - b);
+        const latestAttemptNumber = attemptNumbers.at(-1)!;
+
+        for (const attemptNumber of attemptNumbers) {
+          const groupRounds = groups.get(attemptNumber)!;
+          const isLatest = attemptNumber === latestAttemptNumber;
+          const attemptId = isLatest
+            ? invocation.invocation_id
+            : `${invocation.invocation_id}::attempt-${attemptNumber}`;
+          attemptIdByLegacyGroup.set(
+            `${invocation.invocation_id}::${attemptNumber}`,
+            attemptId,
+          );
+          if (isLatest) {
+            insertAttempt.run(
+              attemptId,
+              invocation.workflow_run_id,
+              invocation.step_run_id,
+              invocation.step_key,
+              invocation.executor_family,
+              invocation.state,
+              attemptNumber,
+              invocation.started_at,
+              invocation.heartbeat_at,
+              invocation.finished_at,
+              invocation.invocation_id,
+              JSON.stringify({
+                legacyInvocationId: invocation.invocation_id,
+                source: "legacy_invocation_row",
+              }),
+              invocation.created_at,
+              invocation.updated_at,
+            );
+            continue;
+          }
+          const lastRound = groupRounds.at(-1);
+          const lastRoundState = lastRound?.state;
+          const stateReconstructed =
+            lastRoundState === undefined ||
+            !LEGACY_TERMINAL_ATTEMPT_STATES.has(lastRoundState);
+          const state = stateReconstructed
+            ? "manual_recovery_required"
+            : lastRoundState;
+          const startedAts = groupRounds
+            .map((round) => round.started_at)
+            .filter((value): value is number => value !== null);
+          const heartbeatAts = groupRounds
+            .map((round) => round.heartbeat_at)
+            .filter((value): value is number => value !== null);
+          const finishedAts = groupRounds
+            .map((round) => round.finished_at)
+            .filter((value): value is number => value !== null);
+          insertAttempt.run(
+            attemptId,
+            invocation.workflow_run_id,
+            invocation.step_run_id,
+            invocation.step_key,
+            invocation.executor_family,
+            state,
+            attemptNumber,
+            startedAts.length > 0 ? Math.min(...startedAts) : null,
+            heartbeatAts.length > 0 ? Math.max(...heartbeatAts) : null,
+            finishedAts.length > 0 ? Math.max(...finishedAts) : null,
+            invocation.invocation_id,
+            JSON.stringify({
+              legacyInvocationId: invocation.invocation_id,
+              source: "reconstructed_from_round_evidence",
+              ...(stateReconstructed
+                ? { stateReconstructed: true, lastRoundState: lastRoundState ?? null }
+                : {}),
+            }),
+            groupRounds.length > 0
+              ? Math.min(...groupRounds.map((round) => round.created_at))
+              : invocation.created_at,
+            groupRounds.length > 0
+              ? Math.max(...groupRounds.map((round) => round.updated_at))
+              : invocation.updated_at,
+          );
+        }
+      }
+
+      // Rebuild executor_rounds under the attempt hierarchy. Round ids,
+      // indices, evidence FKs, and every result column are preserved verbatim;
+      // only the parent key changes.
+      db.exec(executorRoundsTableDdl("executor_rounds_next"));
+      const legacyRounds = db
+        .prepare(
+          `SELECT * FROM executor_rounds
+            ORDER BY invocation_id, attempt, round_index, round_id`,
+        )
+        .all() as unknown as Array<Record<string, unknown>>;
+      const insertRound = db.prepare(
+        `INSERT INTO executor_rounds_next (
+           round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt_number, round_index, state, classification,
+           executor_recommendation, started_at, heartbeat_at, finished_at,
+           agent_provider, model, effort, input_digest, result_digest,
+           artifact_root, log_paths, summary, key_changes, key_learnings,
+           remaining_work, changed_files, verification_status,
+           verification_results, commit_sha, recovery_code, human_gate,
+           created_at, updated_at
+         ) VALUES (
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         )`,
+      );
+      for (const round of legacyRounds) {
+        const attemptId = attemptIdByLegacyGroup.get(
+          `${String(round.invocation_id)}::${Number(round.attempt)}`,
+        );
+        if (attemptId === undefined) {
+          throw new Error(
+            `executor attempt migration cannot re-anchor round ${String(round.round_id)}: no attempt group for invocation ${String(round.invocation_id)} attempt ${String(round.attempt)}`,
+          );
+        }
+        insertRound.run(
+          round.round_id as string,
+          attemptId,
+          round.workflow_run_id as string,
+          round.step_run_id as string,
+          round.step_key as string,
+          round.executor_family as string,
+          round.attempt as number,
+          round.round_index as number,
+          round.state as string,
+          round.classification as string | null,
+          round.executor_recommendation as string | null,
+          round.started_at as number | null,
+          round.heartbeat_at as number | null,
+          round.finished_at as number | null,
+          round.agent_provider as string | null,
+          round.model as string | null,
+          round.effort as string | null,
+          round.input_digest as string | null,
+          round.result_digest as string | null,
+          round.artifact_root as string | null,
+          round.log_paths as string,
+          round.summary as string | null,
+          round.key_changes as string,
+          round.key_learnings as string,
+          round.remaining_work as string,
+          round.changed_files as string,
+          round.verification_status as string | null,
+          round.verification_results as string,
+          round.commit_sha as string | null,
+          round.recovery_code as string | null,
+          round.human_gate as string | null,
+          round.created_at as number,
+          round.updated_at as number,
+        );
+      }
+      db.exec("DROP TABLE executor_rounds");
+      db.exec("ALTER TABLE executor_rounds_next RENAME TO executor_rounds");
+      db.exec(EXECUTOR_ROUNDS_INDEX_DDL);
+
+      if (
+        tableExists(db, "workflow_gates") &&
+        columnExists(db, "workflow_gates", "invocation_id")
+      ) {
+        db.exec(
+          "ALTER TABLE workflow_gates RENAME COLUMN invocation_id TO attempt_id",
+        );
+        db.exec(
+          "UPDATE workflow_gates SET target_scope = 'attempt' WHERE target_scope = 'invocation'",
+        );
+        // A round-scoped gate identifies its attempt through its round; the
+        // remaining attempt references are the latest lifecycle the legacy
+        // invocation row described, and that attempt kept the legacy id.
+        db.exec(
+          `UPDATE workflow_gates
+              SET attempt_id = (
+                SELECT executor_rounds.attempt_id
+                  FROM executor_rounds
+                 WHERE executor_rounds.round_id = workflow_gates.round_id
+              )
+            WHERE round_id IS NOT NULL
+              AND attempt_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM executor_rounds
+                 WHERE executor_rounds.round_id = workflow_gates.round_id
+              )`,
+        );
+      }
+
+      db.exec("DROP TABLE executor_invocations");
+
+      const violations = db
+        .prepare("PRAGMA foreign_key_check(executor_rounds)")
+        .all();
+      const attemptViolations = db
+        .prepare("PRAGMA foreign_key_check(executor_attempts)")
+        .all();
+      if (violations.length > 0 || attemptViolations.length > 0) {
+        throw new Error(
+          "executor attempt migration produced foreign-key violations; rolling back",
+        );
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+function columnExists(db: MomentumDb, table: string, column: string): boolean {
+  const rows = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as PragmaColumnRow[];
+  return rows.some((row) => row.name === column);
+}
+
 export function applyQueueMigrations(db: MomentumDb): void {
+  // Runs before the main additive pass because it must rebuild tables with
+  // foreign keys disabled, which SQLite only allows outside a transaction.
+  migrateLegacyExecutorInvocationSchema(db);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
