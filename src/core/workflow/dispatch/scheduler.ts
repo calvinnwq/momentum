@@ -1404,6 +1404,12 @@ function isResumableRegisteredSdkTick(
   const currentAttemptRounds = rounds.filter(
     (round) => round.attemptNumber === attempt.attemptNumber,
   );
+  // Deliberately step-wide, matching the SDK-05 shared-row behavior exactly:
+  // an SDK-owned dispatch lineage starts its very first round at index 0,
+  // while the legacy non-SDK scaffold starts at index 1. A step whose first
+  // round is 1-based (including migrated history and mixed-lineage retries
+  // over it) was never SDK-resumable under SDK-05 either - it parks for the
+  // reconcile/recovery lanes instead of being redispatched as an SDK tick.
   if (rounds.length > 0 && rounds[0]?.roundIndex !== 0) return false;
   // Legacy dispatch inserts its attempt and first round in one transaction.
   // Only an SDK-owned dispatch can durably expose a roundless attempt.
