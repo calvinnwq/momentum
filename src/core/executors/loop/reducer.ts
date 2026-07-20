@@ -607,9 +607,11 @@ export type ExecutorDecisionRecord = {
 };
 
 /**
- * The next round index for a step-spanning round list. Indices stay monotone
- * across every attempt of the step, and migrated SDK-05 data may be 1-based,
- * so the successor is always `max(roundIndex) + 1` - never the list length.
+ * The next round index for a round list, computed as `max(roundIndex) + 1` -
+ * never the list length, because migrated SDK-05 data may be 1-based. The
+ * dispatch/SDK lane passes the step-spanning list so its indices stay monotone
+ * across attempts; direct executor adapters pass per-attempt lists and number
+ * each attempt's rounds from zero.
  */
 export function nextExecutorRoundIndex(
   rounds: readonly { roundIndex: number }[],

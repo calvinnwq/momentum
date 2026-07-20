@@ -20,9 +20,10 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
   rounds, artifacts, result summaries, verification status, commit metadata,
   recovery codes, findings, decisions, and checkpoints. An attempt is one
   immutable executor go for one step and one executor identity: a retry inserts
-  a fresh attempt with the next attempt number, and round indices stay monotone
-  across the whole step so cross-attempt ordering is attempt number, then round
-  index. Opening an SDK-05 database migrates in place, exactly once: each legacy
+  a fresh attempt with the next attempt number. Round order is deterministic
+  within an attempt and cross-attempt ordering is attempt number, then round
+  index; the dispatch lane additionally keeps round indices monotone across the
+  whole step. Opening an SDK-05 database migrates in place, exactly once: each legacy
   invocation splits into immutable attempts by round attempt groups, preserving
   round ids, evidence links, and `legacy_invocation_id` / `legacy_provenance`
   columns.
