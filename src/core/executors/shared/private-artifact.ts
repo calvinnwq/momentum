@@ -89,6 +89,7 @@ export function openPrivateArtifactFile(
     filePath,
     fs.constants.O_CREAT |
       fs.constants.O_WRONLY |
+      fs.constants.O_NONBLOCK |
       (fs.constants.O_NOFOLLOW ?? 0),
     0o600,
   );

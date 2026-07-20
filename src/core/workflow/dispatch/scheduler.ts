@@ -1430,9 +1430,7 @@ function isResumableRegisteredSdkTick(
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(
-      (checkpoint) =>
-        checkpoint.stage === "round_started" ||
-        checkpoint.stage === "mechanism_completed",
+      (checkpoint) => checkpoint.stage === "mechanism_completed",
     )
   ) {
     return true;

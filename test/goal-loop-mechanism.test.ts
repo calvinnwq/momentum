@@ -1031,6 +1031,43 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
 
+  it("rejects a FIFO prompt without blocking the daemon", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const { promptFilePath, resultFilePath, verificationLogPath } =
+      makePromptedArtifactPaths("fifo-prompt-result.json");
+    execFileSync("mkfifo", [promptFilePath]);
+    let launched = false;
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a FIFO prompt.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1,
+        },
+        repo: { path: repoPath, baseHead },
+      },
+      runPromptedRound: () => {
+        launched = true;
+      },
+    });
+
+    expect(launched).toBe(false);
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
   it("rejects an oversized result before parsing or finalization", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const { promptFilePath, resultFilePath, verificationLogPath } =

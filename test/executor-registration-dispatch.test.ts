@@ -15,7 +15,10 @@ import {
 } from "../src/core/daemon/workflow-dispatch.js";
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
-import { GoalLoopSdkExecutor } from "../src/core/executors/goal-loop/sdk.js";
+import {
+  GoalLoopSdkExecutor,
+  goalLoopDispatchBindingDetail,
+} from "../src/core/executors/goal-loop/sdk.js";
 import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
 import { resolveGoalLoopRoundSelection } from "../src/core/executors/goal-loop/executor.js";
 import {
@@ -589,8 +592,8 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it.each(["symlink", "hard-link"] as const)(
-    "refuses a production native script log $linkKind without touching its target",
+  it.each(["symlink", "hard-link", "fifo"] as const)(
+    "refuses a production native script log $linkKind without launching the command",
     async (linkKind) => {
       const repoPath = initNativeDispatchRepo();
       const profilePath = writeNativeDispatchProfile(
@@ -634,11 +637,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       );
       fs.mkdirSync(path.dirname(logPath), { recursive: true });
       const sentinelPath = path.join(tempDir(), `${linkKind}-sentinel.txt`);
-      fs.writeFileSync(sentinelPath, "sentinel remains private\n");
       if (linkKind === "symlink") {
+        fs.writeFileSync(sentinelPath, "sentinel remains private\n");
         fs.symlinkSync(sentinelPath, logPath);
-      } else {
+      } else if (linkKind === "hard-link") {
+        fs.writeFileSync(sentinelPath, "sentinel remains private\n");
         fs.linkSync(sentinelPath, logPath);
+      } else {
+        execFileSync("mkfifo", [logPath]);
       }
       const claim = claimRunnableWorkflowStep(db, {
         runId,
@@ -661,9 +667,11 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         now: NOW + 1,
       });
 
-      expect(fs.readFileSync(sentinelPath, "utf8")).toBe(
-        "sentinel remains private\n",
-      );
+      if (linkKind !== "fifo") {
+        expect(fs.readFileSync(sentinelPath, "utf8")).toBe(
+          "sentinel remains private\n",
+        );
+      }
       expect(fs.existsSync(path.join(repoPath, "native-script.txt"))).toBe(
         false,
       );
@@ -844,9 +852,11 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     },
   );
 
-  it("persists continue then complete across two native goal-loop dispatch turns", async () => {
+  it("persists continue then complete across two native goal-loop dispatch turns with a nested result path", async () => {
     const repoPath = initNativeDispatchRepo();
-    const profilePath = writeGoalLoopDispatchProfile(tempDir());
+    const profilePath = writeGoalLoopDispatchProfile(tempDir(), {
+      resultFile: "live/result.json",
+    });
     const definition: WorkflowDefinition = {
       key: "native-goal-loop-workflow",
       title: "Native Goal-loop Workflow",
@@ -964,6 +974,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         "utf8",
       ),
     ).toBe("2\n");
+    expect(
+      fs.existsSync(
+        path.join(
+          repoPath,
+          ".agent-workflows/native-goal-loop-run/round-2/live/result.json",
+        ),
+      ),
+    ).toBe(true);
     db.close();
   }, 15_000);
 
@@ -1334,7 +1352,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           .get("refused-native-goal-loop-run"),
       ).toEqual({
         state: "manual_recovery_required",
-        recovery_code: "invalid_input",
+        recovery_code: "host_binding_mismatch",
       });
       expect(
         fs.existsSync(
@@ -1347,6 +1365,145 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       db.close();
     },
   );
+
+  it("retries a repaired native goal-loop host binding while preserving the failed attempt", async () => {
+    const repoPath = initNativeDispatchRepo();
+    const profileDir = tempDir();
+    const runId = "repaired-native-goal-loop-binding-run";
+    const definition: WorkflowDefinition = {
+      key: "repaired-native-goal-loop-binding-workflow",
+      title: "Repaired Native Goal-loop Binding Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          config: { timeoutMs: 4_000, maxRounds: 3 },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Repair a native goal-loop host binding",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+    const profilePath = writeGoalLoopDispatchProfile(profileDir);
+    const claim = claimRunnableWorkflowStep(db, {
+      runId,
+      stepId: "implementation",
+      holder: "repaired-native-goal-loop-binding-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const first = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!first.ok) throw new Error(first.message);
+    await first.dispatch(claim.claim, {
+      db,
+      workerId: "repaired-native-goal-loop-binding-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({
+      state: "manual_recovery_required",
+      recovery_code: "host_binding_mismatch",
+    });
+    expect(
+      clearWorkflowRunManualRecoveryGuarded(db, {
+        runId,
+        now: NOW + 2,
+      }),
+    ).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId: "implementation",
+        recoveryCode: "host_binding_mismatch",
+      },
+    });
+
+    writeGoalLoopDispatchProfile(profileDir, { timeoutSec: 4 });
+    const repaired = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!repaired.ok) throw new Error(repaired.message);
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "repaired-native-goal-loop-binding-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: repaired.dispatch,
+      now: () => NOW + 3,
+    });
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "repaired-native-goal-loop-binding-worker",
+      continuationPollIntervalMs: 1,
+      dispatch: repaired.dispatch,
+      now: () => NOW + 4,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ state: "succeeded", attempt: 2 });
+    expect(
+      db
+        .prepare(
+          "SELECT attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all(runId),
+    ).toEqual([
+      {
+        attempt: 1,
+        state: "manual_recovery_required",
+        classification: "manual_recovery_required",
+        recovery_code: "host_binding_mismatch",
+      },
+      {
+        attempt: 2,
+        state: "succeeded",
+        classification: "continue",
+        recovery_code: null,
+      },
+      {
+        attempt: 2,
+        state: "succeeded",
+        classification: "complete",
+        recovery_code: null,
+      },
+    ]);
+    expect(
+      fs.readFileSync(
+        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        "utf8",
+      ),
+    ).toBe("2\n");
+    db.close();
+  }, 30_000);
 
   it("retries a repaired native script host binding while preserving the failed attempt", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -1976,7 +2133,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it("refuses an incomplete legacy goal-loop round without a dispatch binding through scheduler recovery", async () => {
+  it("parks a stale native round after a runner side effect without replaying it", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeGoalLoopDispatchProfile(tempDir());
     const runId = "legacy-null-binding";
@@ -2000,7 +2157,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       definition,
       runId,
       repoPath,
-      objective: "Refuse an unbound legacy relaunch",
+      objective: "Never replay a native runner after an uncertain crash",
       now: NOW,
     });
     db.prepare(
@@ -2010,7 +2167,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       runId,
       stepId: "implementation",
       holder: "legacy-null-binding-worker",
-      leaseExpiresAt: NOW + 30_000,
+      leaseExpiresAt: NOW + 2,
       now: NOW,
     });
     if (!claim.ok) throw new Error(claim.reason);
@@ -2036,7 +2193,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: () => NOW + 2,
     });
     const roundId = `${invocationId}::round::0`;
-    envelope.facade.startRound({
+    const roundStart = {
       roundId,
       invocationId,
       workflowRunId: runId,
@@ -2045,7 +2202,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       executorFamily: "goal-loop",
       attempt: 1,
       roundIndex: 0,
-      state: "running",
+      state: "running" as const,
       agentProvider: null,
       model: null,
       effort: null,
@@ -2060,12 +2217,28 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       changedFiles: [],
       verificationStatus: null,
       commitSha: null,
-    });
+      startedAt: NOW + 2,
+    };
+    envelope.facade.startRound(roundStart);
+    // Simulate the native runner returning after a side effect, followed by a
+    // process crash before it could durably record mechanism_completed.
+    fs.writeFileSync(
+      path.join(repoPath, "runner-side-effect.txt"),
+      "must not replay\n",
+    );
+    const selection = resolveGoalLoopRoundSelection({ stepConfig: {} });
     envelope.facade.recordCheckpoint(roundId, {
       checkpointId: `${roundId}-checkpoint-0`,
       sequence: 0,
       stage: "round_started",
-      detail: null,
+      detail: goalLoopDispatchBindingDetail(
+        {
+          start: roundStart,
+          selection,
+          hostBindingIdentity: "crashed-native-runner",
+        },
+        selection,
+      ),
     });
     const production = resolveDaemonWorkflowStepDispatch(
       { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
@@ -2074,7 +2247,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     );
     if (!production.ok) throw new Error(production.message);
 
-    const resumed = await runWorkflowSchedulerOnceAsync({
+    const recovered = await runWorkflowSchedulerOnceAsync({
       db,
       workerId: "legacy-null-binding-worker",
       continuationPollIntervalMs: 1,
@@ -2082,7 +2255,17 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: () => NOW + 3,
     });
 
-    expect(resumed.code).toBe("dispatched");
+    expect(recovered.code).toBe("idle");
+    expect(recovered.recovery.recovered).toEqual([
+      expect.objectContaining({
+        action: "flagged_manual_recovery",
+        recoveryStatus: "stale_workflow_lease_manual_recovery_required",
+        runId,
+      }),
+    ]);
+    expect(
+      fs.readFileSync(path.join(repoPath, "runner-side-effect.txt"), "utf8"),
+    ).toBe("must not replay\n");
     expect(
       fs.existsSync(
         path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
@@ -2091,13 +2274,22 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, recovery_code FROM executor_rounds WHERE round_id = ?",
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId),
+    ).toEqual({
+      needs_manual_recovery: 1,
+      manual_recovery_reason: expect.stringContaining(
+        "expired while step implementation remained running without terminal dispatch evidence",
+      ),
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT state, classification FROM executor_rounds WHERE round_id = ?",
         )
         .get(roundId),
-    ).toEqual({
-      state: "manual_recovery_required",
-      recovery_code: "executor_threw",
-    });
+    ).toEqual({ state: "running", classification: null });
     db.close();
   });
 
@@ -2427,7 +2619,10 @@ function writeNativeDispatchProfile(
   return profilePath;
 }
 
-function writeGoalLoopDispatchProfile(profileDir: string): string {
+function writeGoalLoopDispatchProfile(
+  profileDir: string,
+  options: { resultFile?: string; timeoutSec?: number } = {},
+): string {
   const profilePath = path.join(profileDir, "goal-loop-profile.json");
   fs.writeFileSync(
     profilePath,
@@ -2438,9 +2633,9 @@ function writeGoalLoopDispatchProfile(profileDir: string): string {
           command: "/bin/sh",
           args: ["-c", NATIVE_GOAL_LOOP_SCRIPT],
           cwd: "repo",
-          timeout_sec: 5,
+          timeout_sec: options.timeoutSec ?? 5,
           env_allow: [],
-          result_file: "result.json",
+          result_file: options.resultFile ?? "result.json",
         },
       },
     }),

@@ -37,7 +37,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo first", "echo second"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(true);
@@ -59,7 +59,7 @@ describe("runVerification", () => {
       repoPath,
       commands: [],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(true);
@@ -77,7 +77,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hello-world"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     const log = fs.readFileSync(logPath, "utf-8");
@@ -86,7 +86,9 @@ describe("runVerification", () => {
     expect(log).toContain("hello-world");
     expect(log).toContain("[verify]   exit_code: 0");
     expect(log).toContain("[verify]   result: ok");
-    expect(log).toContain("[verify] summary: all 1 verification command(s) passed");
+    expect(log).toContain(
+      "[verify] summary: all 1 verification command(s) passed",
+    );
     expect(log.endsWith("\n")).toBe(true);
   });
 
@@ -98,7 +100,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["cat marker.txt"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(true);
@@ -113,7 +115,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo first", "false", "echo unreached"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);
@@ -140,7 +142,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["sleep 5"],
       timeoutSec: 1,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);
@@ -163,7 +165,7 @@ describe("runVerification", () => {
       repoPath: "",
       commands: ["echo hi"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);
@@ -178,7 +180,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi"],
       timeoutSec: 0,
-      logPath
+      logPath,
     });
     expect(zero.ok).toBe(false);
     if (!zero.ok) expect(zero.code).toBe("invalid_input");
@@ -187,7 +189,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi"],
       timeoutSec: -1,
-      logPath
+      logPath,
     });
     expect(negative.ok).toBe(false);
     if (!negative.ok) expect(negative.code).toBe("invalid_input");
@@ -196,7 +198,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi"],
       timeoutSec: 1.5,
-      logPath
+      logPath,
     });
     expect(fractional.ok).toBe(false);
     if (!fractional.ok) expect(fractional.code).toBe("invalid_input");
@@ -209,7 +211,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi", "   "],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);
@@ -225,7 +227,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi"],
       timeoutSec: 30,
-      logPath: ""
+      logPath: "",
     });
 
     expect(out.ok).toBe(false);
@@ -243,7 +245,7 @@ describe("runVerification", () => {
       repoPath,
       commands: ["echo hi"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);
@@ -251,14 +253,35 @@ describe("runVerification", () => {
     expect(out.code).toBe("log_write_failed");
   });
 
+  it("does not truncate a hard-linked verification log", () => {
+    const { repoPath, logPath } = setup();
+    const sentinelPath = path.join(path.dirname(logPath), "sentinel.txt");
+    fs.writeFileSync(sentinelPath, "sentinel remains private\n", "utf-8");
+    fs.linkSync(sentinelPath, logPath);
+
+    const out = runVerification({
+      repoPath,
+      commands: ["echo should-not-run"],
+      timeoutSec: 30,
+      logPath,
+    });
+
+    expect(out).toMatchObject({ ok: false, code: "log_write_failed" });
+    expect(fs.readFileSync(sentinelPath, "utf-8")).toBe(
+      "sentinel remains private\n",
+    );
+  });
+
   it("captures large output well past the spawnSync 1 MiB default without truncating", () => {
     const { repoPath, logPath } = setup();
 
     const out = runVerification({
       repoPath,
-      commands: ["node -e \"process.stdout.write('x'.repeat(4 * 1024 * 1024))\""],
+      commands: [
+        "node -e \"process.stdout.write('x'.repeat(4 * 1024 * 1024))\"",
+      ],
       timeoutSec: 60,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(true);
@@ -279,7 +302,7 @@ describe("runVerification", () => {
       repoPath: ghost,
       commands: ["echo hi"],
       timeoutSec: 30,
-      logPath
+      logPath,
     });
 
     expect(out.ok).toBe(false);

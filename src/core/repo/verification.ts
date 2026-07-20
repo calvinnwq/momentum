@@ -50,14 +50,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
 
   let logHandle: number;
   try {
-    logHandle = fs.openSync(
-      logPath,
-      fs.constants.O_WRONLY |
-        fs.constants.O_CREAT |
-        fs.constants.O_TRUNC |
-        fs.constants.O_NOFOLLOW,
-      0o600,
-    );
+    logHandle = openVerificationLogFile(logPath);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -227,6 +220,43 @@ export function runVerification(input: VerificationInput): VerificationResult {
     } catch {
       // ignore close failures
     }
+  }
+}
+
+/**
+ * Open a verification log only after proving that its existing inode is a
+ * private regular file.  In particular, never pass O_TRUNC to open: doing so
+ * would mutate a hard-linked target before its link count can be checked.
+ */
+export function openVerificationLogFile(logPath: string): number {
+  const descriptor = fs.openSync(
+    logPath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_NONBLOCK |
+      (fs.constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    const stat = fs.fstatSync(descriptor);
+    const pathStat = fs.lstatSync(logPath);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      pathStat.isSymbolicLink() ||
+      !pathStat.isFile() ||
+      pathStat.nlink !== 1 ||
+      pathStat.dev !== stat.dev ||
+      pathStat.ino !== stat.ino
+    ) {
+      throw new Error("verification log is not a private regular file");
+    }
+    fs.fchmodSync(descriptor, 0o600);
+    fs.ftruncateSync(descriptor, 0);
+    return descriptor;
+  } catch (error) {
+    fs.closeSync(descriptor);
+    throw error;
   }
 }
 

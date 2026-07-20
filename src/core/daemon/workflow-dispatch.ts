@@ -978,7 +978,7 @@ function createLiveStepHostBindingsResolver(
     ) {
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
-          "invalid_input",
+          "host_binding_mismatch",
           "portable goal-loop timeoutMs does not match resolved host timeout",
         ),
       );
@@ -990,7 +990,7 @@ function createLiveStepHostBindingsResolver(
     ) {
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
-          "invalid_input",
+          "host_binding_mismatch",
           "portable goal-loop policyEnvelope does not match resolved host policy",
         ),
       );
@@ -1076,19 +1076,32 @@ function createLiveStepHostBindingsResolver(
           "goal-loop resumable round artifact root does not match its bound round directory",
         );
       }
+      let roundArtifactDirectory: string;
+      try {
+        roundArtifactDirectory = preparePrivateArtifactDirectory(
+          path.dirname(path.resolve(roundRoot, nativeWrapper!.resultFile)),
+          roundRoot,
+        );
+      } catch (error) {
+        repoOwnership.settle(false);
+        throw new RegisteredExecutorHostBindingsError(
+          "runtime_unavailable",
+          `goal-loop result directory unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       const roundResultPath = path.join(
-        roundRoot,
-        path.basename(resolved.exec.resultJsonPath),
+        roundArtifactDirectory,
+        path.basename(nativeWrapper!.resultFile),
       );
       const roundLogPath = path.join(
         roundRoot,
         path.basename(resolved.exec.executorLogPath),
       );
       const roundVerificationPath = path.join(
-        roundRoot,
+        roundArtifactDirectory,
         path.basename(safety.repoSafety.verificationLogPath),
       );
-      const promptPath = path.join(roundRoot, "prompt.md");
+      const promptPath = path.join(roundArtifactDirectory, "prompt.md");
       const objective = loadWorkflowRunObjective(context.db, claim.runId);
       if (objective === null) {
         repoOwnership.settle(false);
@@ -1677,7 +1690,7 @@ function validatePortableAgentBinding(
     const expected = (agent as Record<string, unknown>)[portableField];
     if (expected !== undefined && expected !== selection[resolvedField]) {
       throw new RegisteredExecutorHostBindingsError(
-        "invalid_input",
+        "host_binding_mismatch",
         `portable native agent.${portableField} does not match resolved host identity`,
       );
     }
