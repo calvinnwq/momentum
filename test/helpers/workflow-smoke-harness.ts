@@ -153,7 +153,7 @@ export function driveStepWithFakeExecutor(
     runId,
     stepId: step.stepId,
     kind: step.kind,
-    attempt,
+    attemptNumber: attempt,
     repoPath: runDir,
     runDir,
     resultJsonPath,

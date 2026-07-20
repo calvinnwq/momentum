@@ -18,9 +18,9 @@ import {
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import {
-  noMistakesInvocationId,
+  noMistakesAttemptId,
   noMistakesRoundId,
-  planNoMistakesInvocation,
+  planNoMistakesAttempt,
   planNoMistakesRoundStart,
   type NoMistakesExternalState,
 } from "../src/adapters/no-mistakes-executor.js";
@@ -36,7 +36,7 @@ import {
 // The stateful seam twin of the pure projections (no-mistakes-executor.test.ts)
 // and their durable round-trip (no-mistakes-executor-persistence.test.ts): this
 // drives the orchestrator — `runNoMistakesMirrorRound` (one poll) and
-// `runNoMistakesMirrorStep` (materialize invocation + round + first poll) — that
+// `runNoMistakesMirrorStep` (materialize attempt + round + first poll) — that
 // wires the injected external-state reader -> the brain's classification -> the
 // real M10-03 persistence layer for the single long-lived mirror round. The
 // orchestrator is what a daemon scheduler ticks: each tick reads untrusted
@@ -49,7 +49,7 @@ const STEP_RUN_ID = "step-1";
 const STEP_KEY = "no-mistakes";
 const ATTEMPT = 1;
 const HEAD_SHA = "a".repeat(40);
-const INVOCATION_ID = noMistakesInvocationId(
+const INVOCATION_ID = noMistakesAttemptId(
   WORKFLOW_RUN_ID,
   STEP_RUN_ID,
   ATTEMPT,
@@ -78,9 +78,9 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so the invocation needs a real (workflow_run_id,
+// Foreign keys are enforced, so the attempt needs a real (workflow_run_id,
 // step_run_id) parent. Seed just the parents; `runNoMistakesMirrorStep` mints the
-// invocation + round itself.
+// attempt + round itself.
 function seedParents(db: MomentumDb): void {
   db.prepare(
     "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
@@ -91,22 +91,22 @@ function seedParents(db: MomentumDb): void {
   ).run();
 }
 
-// Seed parents + a durable running invocation + the single mirror round born in
+// Seed parents + a durable running attempt + the single mirror round born in
 // `mirroring_external_state` — the live starting point `runNoMistakesMirrorRound`
 // polls against.
 function openMirrorRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
   seedParents(db);
-  const invocation = planNoMistakesInvocation({
+  const attempt = planNoMistakesAttempt({
     workflowRunId: WORKFLOW_RUN_ID,
     stepRunId: STEP_RUN_ID,
     stepKey: STEP_KEY,
-    attempt: ATTEMPT,
+    attemptNumber: ATTEMPT,
     startedAt: 1,
   });
-  insertExecutorAttempt(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   const round = planNoMistakesRoundStart({
-    invocation,
+    attempt,
     runtime: {
       inputDigest: "sha256:seed",
       artifactRoot: "/artifacts/nm-0",
@@ -1245,7 +1245,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(loadExecutorAttempt(db, INVOCATION_ID)!.finishedAt).toBe(3_000);
   });
 
-  it("recovers a resumed round whose invocation was still waiting_operator", () => {
+  it("recovers a resumed round whose attempt was still waiting_operator", () => {
     const db = openMirrorRoundDb();
 
     runNoMistakesMirrorRound({
@@ -1283,7 +1283,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
   });
 });
 
-describe("runNoMistakesMirrorStep — materialize invocation + round + first poll", () => {
+describe("runNoMistakesMirrorStep — materialize attempt + round + first poll", () => {
   type ExpectedIdentityIsRequired = RunNoMistakesMirrorStepInput extends {
     expectedExternalIdentity: typeof EXPECTED_EXTERNAL_IDENTITY;
   }
@@ -1307,7 +1307,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       workflowRunId: WORKFLOW_RUN_ID,
       stepRunId: STEP_RUN_ID,
       stepKey: STEP_KEY,
-      attempt: ATTEMPT,
+      attemptNumber: ATTEMPT,
       read,
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       resolveRoundInputs,
@@ -1322,12 +1322,12 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     return () => (t += 1_000);
   }
 
-  it("materializes a durable running invocation and a mirror round born in mirroring_external_state with deterministic ids", () => {
+  it("materializes a durable running attempt and a mirror round born in mirroring_external_state with deterministic ids", () => {
     expect(expectedIdentityIsRequired).toBe(true);
     const { db, result } = runStep(okReader({ stepStatus: "running" }));
 
-    expect(result.invocation.attemptId).toBe(INVOCATION_ID);
-    expect(result.invocation.executorFamily).toBe("no-mistakes");
+    expect(result.attempt.attemptId).toBe(INVOCATION_ID);
+    expect(result.attempt.executorFamily).toBe("no-mistakes");
     expect(result.round.round.roundId).toBe(ROUND_ID);
     expect(result.round.round.roundIndex).toBe(0);
     // No-mistakes owns its own pipeline: Momentum resolves no agent/model/effort.
@@ -1336,7 +1336,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(result.round.round.effort).toBeNull();
     // Both rows are durable.
     expect(loadExecutorAttempt(db, INVOCATION_ID)).toEqual(
-      result.invocation,
+      result.attempt,
     );
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(result.round.round);
   });
@@ -1349,27 +1349,27 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     ]);
   });
 
-  it("leaves both the round mirroring and the invocation running on a still-running first poll", () => {
+  it("leaves both the round mirroring and the attempt running on a still-running first poll", () => {
     const { result } = runStep(okReader({ stepStatus: "running" }));
 
     expect(result.round.round.state).toBe("mirroring_external_state");
-    expect(result.invocation.state).toBe("running");
+    expect(result.attempt.state).toBe("running");
     // Neither is terminal — the daemon scheduler ticks the round again later.
-    expect(result.invocation.finishedAt).toBeNull();
+    expect(result.attempt.finishedAt).toBeNull();
     expect(result.round.round.finishedAt).toBeNull();
   });
 
-  it("settles the round succeeded and the invocation succeeded on a corroborated completed first poll", () => {
+  it("settles the round succeeded and the attempt succeeded on a corroborated completed first poll", () => {
     const { result } = runStep(
       okReader({ stepStatus: "completed", ciState: "passed" }),
     );
 
     expect(result.round.round.state).toBe("succeeded");
-    expect(result.invocation.state).toBe("succeeded");
-    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(result.attempt.state).toBe("succeeded");
+    expect(result.attempt.finishedAt).not.toBeNull();
   });
 
-  it("pauses the invocation in a durable non-terminal waiting_operator on an operator-decision first poll", () => {
+  it("pauses the attempt in a durable non-terminal waiting_operator on an operator-decision first poll", () => {
     const { result } = runStep(
       okReader({
         stepStatus: "awaiting_decision",
@@ -1379,41 +1379,41 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       }),
     );
 
-    expect(result.invocation.state).toBe("waiting_operator");
-    expect(result.invocation.finishedAt).toBeNull();
+    expect(result.attempt.state).toBe("waiting_operator");
+    expect(result.attempt.finishedAt).toBeNull();
   });
 
-  it("settles the invocation failed on a failed first poll", () => {
+  it("settles the attempt failed on a failed first poll", () => {
     const { result } = runStep(okReader({ stepStatus: "failed" }));
-    expect(result.invocation.state).toBe("failed");
-    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(result.attempt.state).toBe("failed");
+    expect(result.attempt.finishedAt).not.toBeNull();
   });
 
-  it("settles the invocation blocked on a blocked first poll", () => {
+  it("settles the attempt blocked on a blocked first poll", () => {
     const { db, result } = runStep(okReader({ stepStatus: "blocked" }));
 
     // The blocked branch carries an `attemptState` distinct from `roundState`
-    // in the decision; the step settles the durable invocation into a terminal
+    // in the decision; the step settles the durable attempt into a terminal
     // `blocked`, not the `failed` / `manual_recovery_required` the other terminals
-    // take. No prior test asserted the *invocation* settles blocked (the
+    // take. No prior test asserted the *attempt* settles blocked (the
     // round-level blocked test pins only `roundState`), so a regression of the
     // blocked-branch `attemptState` would otherwise reach the durable row
     // unobserved.
     expect(result.round.round.state).toBe("blocked");
     expect(result.round.decision.attemptState).toBe("blocked");
-    expect(result.invocation.state).toBe("blocked");
-    // `blocked` is a terminal invocation state, so finished_at is stamped.
-    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(result.attempt.state).toBe("blocked");
+    // `blocked` is a terminal attempt state, so finished_at is stamped.
+    expect(result.attempt.finishedAt).not.toBeNull();
     expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("blocked");
   });
 
-  it("settles the invocation manual_recovery_required on an unreadable first poll", () => {
+  it("settles the attempt manual_recovery_required on an unreadable first poll", () => {
     const { result } = runStep(
       failReader(
         "external no-mistakes state is not valid JSON: Unexpected token",
       ),
     );
-    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
     expect(result.round.round.state).toBe("manual_recovery_required");
   });
 
@@ -1427,7 +1427,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
         workflowRunId: WORKFLOW_RUN_ID,
         stepRunId: STEP_RUN_ID,
         stepKey: STEP_KEY,
-        attempt: ATTEMPT,
+        attemptNumber: ATTEMPT,
         read: () => {
           throw new Error("simulated poll crash");
         },
@@ -1465,7 +1465,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(listExecutorDecisionsForRound(db, ROUND_ID)).toHaveLength(1);
   });
 
-  it("mints a fresh invocation and round for a re-run attempt", () => {
+  it("mints a fresh attempt and round for a re-run attempt", () => {
     const db = openDb(makeTempDir());
     seedParents(db);
     const base = {
@@ -1480,26 +1480,26 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
 
     const first = runNoMistakesMirrorStep({
       ...base,
-      attempt: 1,
+      attemptNumber: 1,
       now: stubClock(),
     });
     const second = runNoMistakesMirrorStep({
       ...base,
-      attempt: 2,
+      attemptNumber: 2,
       now: stubClock(),
     });
 
-    // A re-run is a fresh attempt minting a fresh invocation, never mutating the prior one.
-    expect(first.invocation.attemptId).not.toBe(
-      second.invocation.attemptId,
+    // A re-run is a fresh attempt minting a fresh attempt, never mutating the prior one.
+    expect(first.attempt.attemptId).not.toBe(
+      second.attempt.attemptId,
     );
-    expect(second.invocation.attemptId).toBe(
-      noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2),
+    expect(second.attempt.attemptId).toBe(
+      noMistakesAttemptId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2),
     );
   });
 
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
-    // The deterministic invocation id `(workflowRunId, stepRunId, attempt)` is the
+    // The deterministic attempt id `(workflowRunId, stepRunId, attempt)` is the
     // mirror adapter's single-owner key. A daemon that re-dispatches the same
     // claimed step under the same attempt must not mint a second owner: the id
     // collides at the first durable write inside the start savepoint
@@ -1511,7 +1511,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       workflowRunId: WORKFLOW_RUN_ID,
       stepRunId: STEP_RUN_ID,
       stepKey: STEP_KEY,
-      attempt: ATTEMPT,
+      attemptNumber: ATTEMPT,
       read: okReader({ stepStatus: "failed" }),
       expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       resolveRoundInputs,
@@ -1522,9 +1522,9 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     // Snapshot the durable owner + round the first dispatch settled.
     const ownerBefore = loadExecutorAttempt(db, INVOCATION_ID);
     const roundsBefore = listExecutorRoundsForAttempt(db, INVOCATION_ID);
-    expect(ownerBefore).toEqual(first.invocation);
+    expect(ownerBefore).toEqual(first.attempt);
 
-    // A second dispatch under the same attempt collides on the invocation id and
+    // A second dispatch under the same attempt collides on the attempt id and
     // fails closed — never a silent second owner.
     expect(() =>
       runNoMistakesMirrorStep({ ...base, now: stubClock() }),
@@ -1566,7 +1566,7 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
       workflowRunId: WORKFLOW_RUN_ID,
       stepRunId: STEP_RUN_ID,
       stepKey: STEP_KEY,
-      attempt: ATTEMPT,
+      attemptNumber: ATTEMPT,
       read: () => readNoMistakesExternalState({ statePath }),
       expectedExternalIdentity: {
         externalRunId: "nm-run-42",
@@ -1582,7 +1582,7 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
 
     // The full M10-07 stack — reader -> brain -> persistence — composes.
     expect(result.round.round.state).toBe("succeeded");
-    expect(result.invocation.state).toBe("succeeded");
+    expect(result.attempt.state).toBe("succeeded");
     // The durable round fingerprints the exact external bytes it mirrored.
     expect(result.round.round.inputDigest).toMatch(/^sha256:/);
   });
@@ -1596,7 +1596,7 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
       workflowRunId: WORKFLOW_RUN_ID,
       stepRunId: STEP_RUN_ID,
       stepKey: STEP_KEY,
-      attempt: ATTEMPT,
+      attemptNumber: ATTEMPT,
       read: () =>
         readNoMistakesExternalState({
           statePath: path.join(makeTempDir(), "does-not-exist.json"),
@@ -1615,6 +1615,6 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
 
     expect(result.round.round.state).toBe("manual_recovery_required");
     expect(result.round.round.recoveryCode).toBe("external_state_unreadable");
-    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
   });
 });

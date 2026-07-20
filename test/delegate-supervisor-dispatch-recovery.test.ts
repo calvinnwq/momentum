@@ -254,7 +254,7 @@ function reopenInterruptedHandoff(
 ): void {
   const round = db
     .prepare(
-      "SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? AND attempt = 1",
+      "SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? AND attempt_number = 1",
     )
     .get(runId) as { round_id: string };
   db.prepare(
@@ -284,7 +284,7 @@ function reopenCompletedHandoff(
 ): void {
   const round = db
     .prepare(
-      "SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? AND attempt = 1",
+      "SELECT round_id FROM executor_rounds WHERE workflow_run_id = ? AND attempt_number = 1",
     )
     .get(runId) as { round_id: string };
   db.prepare(
@@ -351,7 +351,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId: "outcome-mismatch::no-mistakes::dispatch",
+          handoffCorrelationId: "outcome-mismatch::no-mistakes::dispatch",
           attempt: 1,
           phase: "completed",
           branch,
@@ -375,8 +375,8 @@ describe(
       );
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: "outcome-mismatch::no-mistakes::dispatch",
-        attempt: 2,
+        handoffCorrelationId: "outcome-mismatch::no-mistakes::dispatch",
+        attemptNumber: 2,
         branch,
         headSha,
         statePath,
@@ -404,7 +404,7 @@ describe(
 
       await expect(
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -429,8 +429,8 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: "initial-outcome-mismatch::no-mistakes::dispatch",
-        attempt: 1,
+        handoffCorrelationId: "initial-outcome-mismatch::no-mistakes::dispatch",
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -495,7 +495,7 @@ describe(
 
       await expect(
         adapter.handoff({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -539,7 +539,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId: "failed-preflight::no-mistakes::dispatch",
+          handoffCorrelationId: "failed-preflight::no-mistakes::dispatch",
           attempt: 1,
           phase: "failed",
           branch,
@@ -566,8 +566,8 @@ describe(
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          attemptId: "failed-preflight::no-mistakes::dispatch",
-          attempt: 2,
+          handoffCorrelationId: "failed-preflight::no-mistakes::dispatch",
+          attemptNumber: 2,
           repoPath,
           handoffReceiptPath,
           statePath,
@@ -625,7 +625,7 @@ describe(
 
       expect(
         adapter.readExternalState!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           handoff: {
             externalIdentity: identity,
@@ -656,8 +656,8 @@ describe(
             ? {
                 schemaVersion: 1,
                 tool,
-                attemptId,
-                attempt: 1,
+                handoffCorrelationId: attemptId,
+                attemptNumber: 1,
                 phase: "launched",
                 baseHead: headSha,
                 branch,
@@ -669,8 +669,8 @@ describe(
               }
             : {
                 schemaVersion: 1,
-                attemptId,
-                attempt: 1,
+                handoffCorrelationId: attemptId,
+                attemptNumber: 1,
                 phase: "launched",
                 branch,
                 headSha,
@@ -687,8 +687,8 @@ describe(
         fs.symlinkSync(realReceiptPath, handoffReceiptPath);
         const adapter = createProfileBackedDelegateToolAdapter({
           tool,
-          attemptId,
-          attempt: 1,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 1,
           branch,
           headSha,
           statePath,
@@ -717,7 +717,7 @@ describe(
         await expect(
           Promise.resolve().then(() =>
             adapter.recoverHandoff!({
-              invocation: {} as never,
+              attempt: {} as never,
               config: { tool },
               signal: new AbortController().signal,
             }),
@@ -749,8 +749,8 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId,
-          attempt: 1,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 1,
           phase: "launching",
           branch,
           headSha,
@@ -761,8 +761,8 @@ describe(
       );
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId,
-        attempt: 1,
+        handoffCorrelationId: attemptId,
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -790,7 +790,7 @@ describe(
 
       await expect(
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -811,8 +811,8 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        attemptId: "reset-handoff::implementation::dispatch",
-        attempt: 1,
+        handoffCorrelationId: "reset-handoff::implementation::dispatch",
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -876,7 +876,7 @@ describe(
       });
 
       const handoff = await adapter.handoff({
-        invocation: {} as never,
+        attempt: {} as never,
         config: { tool: "gnhf" },
         signal: new AbortController().signal,
       });
@@ -902,7 +902,7 @@ describe(
       );
       expect(
         await adapter.readExternalState({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
           handoff,
@@ -923,8 +923,8 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        attemptId: "result-race::implementation::dispatch",
-        attempt: 1,
+        handoffCorrelationId: "result-race::implementation::dispatch",
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -976,7 +976,7 @@ describe(
 
       await expect(
         adapter.handoff({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
         }),
@@ -988,7 +988,7 @@ describe(
       await expect(
         Promise.resolve().then(() =>
           adapter.recoverHandoff!({
-            invocation: {} as never,
+            attempt: {} as never,
             config: { tool: "gnhf" },
             signal: new AbortController().signal,
           }),
@@ -1009,8 +1009,8 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        attemptId: "index-only::implementation::dispatch",
-        attempt: 1,
+        handoffCorrelationId: "index-only::implementation::dispatch",
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -1073,7 +1073,7 @@ describe(
 
       await expect(
         adapter.handoff({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
         }),
@@ -1123,7 +1123,7 @@ describe(
           JSON.stringify({
             schemaVersion: 1,
             tool: "gnhf",
-            attemptId: "reset-recovery::implementation::dispatch",
+            handoffCorrelationId: "reset-recovery::implementation::dispatch",
             attempt: 1,
             phase: receiptPhase,
             baseHead: headSha,
@@ -1149,8 +1149,8 @@ describe(
         expect(
           resolvePreparedDelegateCommitEvidence({
             tool: "gnhf",
-            attemptId: "reset-recovery::implementation::dispatch",
-            attempt: 2,
+            handoffCorrelationId: "reset-recovery::implementation::dispatch",
+            attemptNumber: 2,
             repoPath,
             handoffReceiptPath,
             statePath,
@@ -1169,8 +1169,8 @@ describe(
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "gnhf",
-          attemptId: "reset-recovery::implementation::dispatch",
-          attempt: 2,
+          handoffCorrelationId: "reset-recovery::implementation::dispatch",
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -1201,7 +1201,7 @@ describe(
         });
 
         await adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
         });
@@ -1248,7 +1248,7 @@ describe(
         JSON.stringify({
           schemaVersion: 1,
           tool: "gnhf",
-          attemptId: "commit-ownership::implementation::dispatch",
+          handoffCorrelationId: "commit-ownership::implementation::dispatch",
           attempt: 1,
           phase: "finalizing",
           baseHead: headSha,
@@ -1275,8 +1275,8 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        attemptId: "commit-ownership::implementation::dispatch",
-        attempt: 2,
+        handoffCorrelationId: "commit-ownership::implementation::dispatch",
+        attemptNumber: 2,
         branch,
         headSha,
         statePath,
@@ -1308,7 +1308,7 @@ describe(
 
       expect(() =>
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
         }),
@@ -1358,7 +1358,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId: "no-mistakes-ownership::implementation::dispatch",
+          handoffCorrelationId: "no-mistakes-ownership::implementation::dispatch",
           attempt: 1,
           phase: "finalizing",
           branch,
@@ -1387,8 +1387,8 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: "no-mistakes-ownership::implementation::dispatch",
-        attempt: 2,
+        handoffCorrelationId: "no-mistakes-ownership::implementation::dispatch",
+        attemptNumber: 2,
         branch,
         headSha,
         statePath,
@@ -1422,7 +1422,7 @@ describe(
 
       await expect(
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -1484,8 +1484,8 @@ describe(
               JSON.stringify({
                 schemaVersion: 1,
                 tool,
-                attemptId,
-                attempt: 1,
+                handoffCorrelationId: attemptId,
+                attemptNumber: 1,
                 phase: "completed",
                 baseHead: headSha,
                 branch,
@@ -1508,8 +1508,8 @@ describe(
               handoffReceiptPath,
               JSON.stringify({
                 schemaVersion: 1,
-                attemptId,
-                attempt: 1,
+                handoffCorrelationId: attemptId,
+                attemptNumber: 1,
                 phase: "failed",
                 branch,
                 headSha,
@@ -1543,8 +1543,8 @@ printf 'run:\n  id: "${externalRunId}"\n  branch: ${branch}\n  status: running\n
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool,
-          attemptId,
-          attempt: recovery ? 2 : 1,
+          handoffCorrelationId: attemptId,
+          attemptNumber: recovery ? 2 : 1,
           branch,
           headSha,
           statePath,
@@ -1602,7 +1602,7 @@ printf 'run:\n  id: "${externalRunId}"\n  branch: ${branch}\n  status: running\n
           },
         });
         const context = {
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool },
           signal: new AbortController().signal,
         };
@@ -1664,7 +1664,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         JSON.stringify({
           schemaVersion: 1,
           tool: "gnhf",
-          attemptId: "recovery-digest::implementation::dispatch",
+          handoffCorrelationId: "recovery-digest::implementation::dispatch",
           attempt: 1,
           phase: "completed",
           baseHead: headSha,
@@ -1689,8 +1689,8 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        attemptId: "recovery-digest::implementation::dispatch",
-        attempt: 2,
+        handoffCorrelationId: "recovery-digest::implementation::dispatch",
+        attemptNumber: 2,
         branch,
         headSha,
         statePath,
@@ -1722,7 +1722,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
 
       expect(() =>
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "gnhf" },
           signal: new AbortController().signal,
         }),
@@ -1750,8 +1750,8 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         fs.writeFileSync(
           legacyReceiptPath,
           JSON.stringify({
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             externalIdentity: {
               externalRunId: "nm-run-legacy",
               branch,
@@ -1762,8 +1762,8 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         );
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath: path.join(root, "delegate-external-state.json"),
@@ -1788,7 +1788,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
 
         await expect(
           adapter.recoverHandoff!({
-            invocation: {} as never,
+            attempt: {} as never,
             config: { tool: "no-mistakes" },
             signal: new AbortController().signal,
           }),
@@ -1851,8 +1851,8 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
         fs.chmodSync(statusCommand, 0o755);
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 1,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 1,
           branch,
           headSha,
           statePath,
@@ -1912,7 +1912,7 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
         });
 
         const context = {
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         };
@@ -1987,8 +1987,8 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: "changed-verification::no-mistakes::dispatch",
-        attempt: 1,
+        handoffCorrelationId: "changed-verification::no-mistakes::dispatch",
+        attemptNumber: 1,
         branch,
         headSha,
         statePath,
@@ -2056,7 +2056,7 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
 
       await expect(
         adapter.handoff({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -2088,7 +2088,7 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId: "persisted-proof::no-mistakes::dispatch",
+          handoffCorrelationId: "persisted-proof::no-mistakes::dispatch",
           attempt: 1,
           phase: "launched",
           branch,
@@ -2116,7 +2116,7 @@ printf 'run:\n  id: "${identity.externalRunId}"\n  branch: ${branch}\n  status: 
       });
 
       const observed = await adapter.readExternalState({
-        invocation: {} as never,
+        attempt: {} as never,
         config: { tool: "no-mistakes" },
         signal: new AbortController().signal,
         handoff: {
@@ -2182,7 +2182,7 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          attemptId: "retry-digest::no-mistakes::dispatch",
+          handoffCorrelationId: "retry-digest::no-mistakes::dispatch",
           attempt: 1,
           phase: "failed",
           branch,
@@ -2210,8 +2210,8 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: "retry-digest::no-mistakes::dispatch",
-        attempt: 2,
+        handoffCorrelationId: "retry-digest::no-mistakes::dispatch",
+        attemptNumber: 2,
         branch,
         headSha,
         statePath,
@@ -2243,7 +2243,7 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
 
       await expect(
         adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -2278,8 +2278,8 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             phase: "failed",
             branch,
             headSha,
@@ -2313,8 +2313,8 @@ fi
         let launches = 0;
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -2376,7 +2376,7 @@ fi
         });
 
         const handoff = await adapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         });
@@ -2436,8 +2436,8 @@ fi
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             phase: "failed",
             branch,
             headSha,
@@ -2472,8 +2472,8 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
         let launches = 0;
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -2501,7 +2501,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
         });
 
         const context = {
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         };
@@ -2575,8 +2575,8 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             phase,
             branch,
             headSha,
@@ -2619,8 +2619,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -2652,7 +2652,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
 
         await expect(
           adapter.recoverHandoff!({
-            invocation: {} as never,
+            attempt: {} as never,
             config: { tool: "no-mistakes" },
             signal: new AbortController().signal,
           }),
@@ -2753,7 +2753,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -2800,7 +2800,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -2864,7 +2864,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       ) as Record<string, unknown>;
       expect(receipt).toMatchObject({
         phase: "finalized",
-        attemptId: `${runId}::${stepId}::dispatch`,
+        handoffCorrelationId: `${runId}::${stepId}::dispatch`,
       });
       delete receipt["externalState"];
       receipt["phase"] = "finalizing";
@@ -2883,7 +2883,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -2957,7 +2957,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3278,7 +3278,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3378,7 +3378,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3488,7 +3488,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3541,8 +3541,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             phase: "launching",
             branch,
             headSha,
@@ -3561,8 +3561,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         }
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -3590,7 +3590,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
 
         await expect(
           adapter.recoverHandoff!({
-            invocation: {} as never,
+            attempt: {} as never,
             config: { tool: "no-mistakes" },
             signal: new AbortController().signal,
           }),
@@ -3639,8 +3639,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            attemptId,
-            attempt: 1,
+            handoffCorrelationId: attemptId,
+            attemptNumber: 1,
             phase: "launching",
             branch,
             headSha,
@@ -3659,8 +3659,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         ).toBe("");
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          attemptId,
-          attempt: 2,
+          handoffCorrelationId: attemptId,
+          attemptNumber: 2,
           branch,
           headSha,
           statePath,
@@ -3688,7 +3688,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
 
         await expect(
           adapter.recoverHandoff!({
-            invocation: {} as never,
+            attempt: {} as never,
             config: { tool: "no-mistakes" },
             signal: new AbortController().signal,
           }),
@@ -3766,7 +3766,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3843,7 +3843,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3934,7 +3934,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -3966,8 +3966,8 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       );
       const recoveryAdapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        attemptId: `${runId}::${stepId}::dispatch`,
-        attempt: 2,
+        handoffCorrelationId: `${runId}::${stepId}::dispatch`,
+        attemptNumber: 2,
         branch: runGit(repoPath, ["branch", "--show-current"]),
         headSha: runGit(repoPath, ["rev-parse", "HEAD"]),
         statePath: path.join(recoveryStepRoot, "delegate-external-state.json"),
@@ -4003,7 +4003,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
 
       await expect(
         recoveryAdapter.recoverHandoff!({
-          invocation: {} as never,
+          attempt: {} as never,
           config: { tool: "no-mistakes" },
           signal: new AbortController().signal,
         }),
@@ -4137,7 +4137,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "blocked", attempt: 1 });
@@ -4195,7 +4195,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "running", attempt: 2 });
@@ -4242,7 +4242,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -4274,7 +4274,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4400,7 +4400,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4475,8 +4475,8 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          attemptId: String(receipt["attemptId"]),
-          attempt: 2,
+          handoffCorrelationId: String(receipt["attemptId"]),
+          attemptNumber: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
           statePath: path.join(stepRoot, "delegate-external-state.json"),
@@ -4505,8 +4505,8 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          attemptId: String(receipt["attemptId"]),
-          attempt: 2,
+          handoffCorrelationId: String(receipt["attemptId"]),
+          attemptNumber: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
           statePath: path.join(stepRoot, "delegate-external-state.json"),
@@ -4539,7 +4539,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4599,7 +4599,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4674,7 +4674,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -4747,7 +4747,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });

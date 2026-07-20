@@ -347,7 +347,7 @@ function success(
     diagnostics: {
       executor: "fake",
       kind,
-      attempt: input.attempt
+      attempt: input.attemptNumber
     }
   };
 }
@@ -381,7 +381,7 @@ function failure(
     diagnostics: {
       executor: "fake",
       kind,
-      attempt: input.attempt,
+      attempt: input.attemptNumber,
       injected: errorCode
     }
   };

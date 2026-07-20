@@ -50,7 +50,7 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so a round needs a real invocation, which needs a
+// Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows.
 function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
   const db = openDb(makeTempDir());
@@ -61,19 +61,19 @@ function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
   ).run();
-  const invocation: ExecutorAttemptRecord = {
+  const attempt: ExecutorAttemptRecord = {
     attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: family,
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
     finishedAt: null
   };
-  insertExecutorAttempt(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
 }
 
@@ -102,7 +102,7 @@ function startRound(
     stepRunId: "step-1",
     stepKey: "implementation",
     family,
-    attempt: 1,
+    attemptNumber: 1,
     selection,
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-0",
@@ -214,7 +214,7 @@ describe("single-shot round persistence — execution failure round-trip", () =>
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: false, recoveryCode: "command_failed" }
     });
-    // A failed invocation captured nothing; the round transitions directly from
+    // A failed attempt captured nothing; the round transitions directly from
     // running to its terminal state.
     expect(plan.captureUpdate).toBeNull();
     const final = updateExecutorRound(db, ROUND_ID, plan.terminalUpdate, {

@@ -194,13 +194,13 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       expect(countRows(db, "executor_attempts")).toBe(1);
       expect(countRows(db, "executor_rounds")).toBe(1);
 
-      const invocation = db
+      const attempt = db
         .prepare(
           `SELECT workflow_run_id, step_key, executor_family, state, attempt
              FROM executor_attempts WHERE workflow_run_id = ?`
         )
         .get(runId) as Record<string, unknown>;
-      expect(invocation).toEqual({
+      expect(attempt).toEqual({
         workflow_run_id: runId,
         step_key: "preflight",
         executor_family: "one-shot",

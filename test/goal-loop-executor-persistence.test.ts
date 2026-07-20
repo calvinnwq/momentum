@@ -46,7 +46,7 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so a round needs a real invocation, which needs a
+// Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows.
 function openRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
@@ -57,19 +57,19 @@ function openRoundDb(): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
   ).run();
-  const invocation: ExecutorAttemptRecord = {
+  const attempt: ExecutorAttemptRecord = {
     attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
     finishedAt: null
   };
-  insertExecutorAttempt(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
 }
 
@@ -88,7 +88,7 @@ function startRound(db: MomentumDb): void {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     selection,
     inputDigest: "sha256:input",

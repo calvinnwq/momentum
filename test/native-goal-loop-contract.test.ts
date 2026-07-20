@@ -13,20 +13,20 @@ describe("native goal-loop contract docs", () => {
   const dataDirectory = readRepoFile("docs/data-directory.md");
   const workflowCommands = readRepoFile("docs/workflow-commands.md");
 
-  it("defines invocation and round ownership below workflow steps", () => {
+  it("defines attempt and round ownership below workflow steps", () => {
     expect(spec).toContain("## Native Goal-Loop Contract");
     expect(spec).toContain(
       "`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step"
     );
     expect(spec).toContain(
-      "`executor_round` is one durable iteration beneath that invocation"
+      "`executor_round` is one durable iteration beneath that attempt"
     );
     expect(spec).toContain(
       "A completed round is never replayed, renamed, or overwritten to continue the loop"
     );
   });
 
-  it("pins the repo-native invocation and round state vocabulary", () => {
+  it("pins the repo-native attempt and round state vocabulary", () => {
     expect([...EXECUTOR_ATTEMPT_STATES]).toEqual([
       "pending",
       "preparing",

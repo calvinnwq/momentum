@@ -12,16 +12,16 @@ import {
   GOAL_LOOP_GLOBAL_DEFAULT_SELECTION,
   decideGoalLoopRound,
   goalLoopFinalizeEvidenceFromResult,
-  goalLoopInvocationId,
+  goalLoopAttemptId,
   goalLoopRecommendationFromResult,
   goalLoopRoundId,
-  invocationStateForRoundClassification,
-  planGoalLoopInvocation,
+  attemptStateForRoundClassification,
+  planGoalLoopAttempt,
   planGoalLoopRoundArtifacts,
   planGoalLoopRoundCheckpoints,
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
-  planGoalLoopRoundStartForInvocation,
+  planGoalLoopRoundStartForAttempt,
   resolveGoalLoopRoundSelection,
   type DecideGoalLoopRoundInput,
   type GoalLoopFinalizeOutcome,
@@ -212,7 +212,7 @@ describe("decideGoalLoopRound — budget semantics", () => {
   });
 });
 
-describe("invocationStateForRoundClassification", () => {
+describe("attemptStateForRoundClassification", () => {
   it.each<[ExecutorCompletionClassification, string]>([
     ["complete", "succeeded"],
     ["continue", "running"],
@@ -222,15 +222,15 @@ describe("invocationStateForRoundClassification", () => {
     ["blocked", "blocked"],
     ["failed", "failed"],
     ["cancelled", "cancelled"]
-  ])("maps %s to the %s invocation state", (classification, expected) => {
-    const state = invocationStateForRoundClassification(classification);
+  ])("maps %s to the %s attempt state", (classification, expected) => {
+    const state = attemptStateForRoundClassification(classification);
     expect(state).toBe(expected);
     expect(INVOCATION_STATE_SET.has(state)).toBe(true);
   });
 
-  it("maps every completion classification to a known invocation state", () => {
+  it("maps every completion classification to a known attempt state", () => {
     for (const classification of EXECUTOR_COMPLETION_CLASSIFICATIONS) {
-      const state = invocationStateForRoundClassification(classification);
+      const state = attemptStateForRoundClassification(classification);
       expect(INVOCATION_STATE_SET.has(state)).toBe(true);
     }
   });
@@ -941,7 +941,7 @@ function startInput(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     selection: startSelection(),
     inputDigest: "sha256:input",
@@ -963,7 +963,7 @@ describe("planGoalLoopRoundStart", () => {
     expect(record.workflowRunId).toBe("run-1");
     expect(record.stepRunId).toBe("step-1");
     expect(record.stepKey).toBe("implementation");
-    expect(record.attempt).toBe(1);
+    expect(record.attemptNumber).toBe(1);
     expect(record.roundIndex).toBe(0);
   });
 
@@ -1008,7 +1008,7 @@ describe("planGoalLoopRoundStart", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       selection: startSelection(),
       inputDigest: "sha256:input",
@@ -1222,7 +1222,7 @@ describe("planGoalLoopRoundCheckpoints", () => {
 });
 
 // ---------------------------------------------------------------------------
-// goal-loop executor adapter "below StepRun": deterministic invocation / round
+// goal-loop executor adapter "below StepRun": deterministic attempt / round
 // identity materialization. These pure helpers turn a StepRun identity into the
 // durable ExecutorInvocation + per-round ExecutorRound identities, so every
 // caller mints reattachable ids the same way (contract "Heartbeat And Reattach":
@@ -1243,15 +1243,15 @@ function selection(maxRounds = 5): GoalLoopRoundSelection {
   });
 }
 
-describe("goalLoopInvocationId", () => {
+describe("goalLoopAttemptId", () => {
   it("is deterministic for the same StepRun identity and attempt", () => {
-    expect(goalLoopInvocationId(RUN_A, "implementation", 1)).toBe(
-      goalLoopInvocationId(RUN_A, "implementation", 1)
+    expect(goalLoopAttemptId(RUN_A, "implementation", 1)).toBe(
+      goalLoopAttemptId(RUN_A, "implementation", 1)
     );
   });
 
   it("embeds the run, step, family, and attempt so it is globally unique and reattachable", () => {
-    const id = goalLoopInvocationId(RUN_A, "implementation", 2);
+    const id = goalLoopAttemptId(RUN_A, "implementation", 2);
     expect(id).toContain(RUN_A);
     expect(id).toContain("implementation");
     expect(id).toContain("goal-loop");
@@ -1260,43 +1260,43 @@ describe("goalLoopInvocationId", () => {
 
   it("distinguishes different attempts, steps, and runs", () => {
     const ids = new Set([
-      goalLoopInvocationId(RUN_A, "implementation", 1),
-      goalLoopInvocationId(RUN_A, "implementation", 2),
-      goalLoopInvocationId(RUN_A, "review", 1),
-      goalLoopInvocationId(RUN_B, "implementation", 1)
+      goalLoopAttemptId(RUN_A, "implementation", 1),
+      goalLoopAttemptId(RUN_A, "implementation", 2),
+      goalLoopAttemptId(RUN_A, "review", 1),
+      goalLoopAttemptId(RUN_B, "implementation", 1)
     ]);
     expect(ids.size).toBe(4);
   });
 });
 
 describe("goalLoopRoundId", () => {
-  it("is deterministic and embeds the invocation id and round index", () => {
-    const attemptId = goalLoopInvocationId(RUN_A, "implementation", 1);
+  it("is deterministic and embeds the attempt id and round index", () => {
+    const attemptId = goalLoopAttemptId(RUN_A, "implementation", 1);
     expect(goalLoopRoundId(attemptId, 0)).toBe(
       goalLoopRoundId(attemptId, 0)
     );
     expect(goalLoopRoundId(attemptId, 0)).toContain(attemptId);
   });
 
-  it("distinguishes round indices under the same invocation", () => {
-    const attemptId = goalLoopInvocationId(RUN_A, "implementation", 1);
+  it("distinguishes round indices under the same attempt", () => {
+    const attemptId = goalLoopAttemptId(RUN_A, "implementation", 1);
     expect(goalLoopRoundId(attemptId, 0)).not.toBe(
       goalLoopRoundId(attemptId, 1)
     );
   });
 });
 
-describe("planGoalLoopInvocation", () => {
-  it("projects a StepRun identity into a running goal-loop invocation record", () => {
-    const invocation = planGoalLoopInvocation({
+describe("planGoalLoopAttempt", () => {
+  it("projects a StepRun identity into a running goal-loop attempt record", () => {
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000
     });
-    expect(invocation).toEqual({
-      attemptId: goalLoopInvocationId(RUN_A, "implementation", 1),
+    expect(attempt).toEqual({
+      attemptId: goalLoopAttemptId(RUN_A, "implementation", 1),
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
@@ -1310,17 +1310,17 @@ describe("planGoalLoopInvocation", () => {
   });
 });
 
-describe("planGoalLoopRoundStartForInvocation", () => {
-  it("inherits the invocation identity and mints a deterministic round id", () => {
-    const invocation = planGoalLoopInvocation({
+describe("planGoalLoopRoundStartForAttempt", () => {
+  it("inherits the attempt identity and mints a deterministic round id", () => {
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000
     });
-    const start = planGoalLoopRoundStartForInvocation({
-      invocation,
+    const start = planGoalLoopRoundStartForAttempt({
+      attempt,
       selection: selection(),
       roundIndex: 0,
       runtime: {
@@ -1331,13 +1331,13 @@ describe("planGoalLoopRoundStartForInvocation", () => {
       startedAt: 1_100
     });
     expect(start.roundId).toBe(
-      goalLoopRoundId(invocation.attemptId, 0)
+      goalLoopRoundId(attempt.attemptId, 0)
     );
-    expect(start.attemptId).toBe(invocation.attemptId);
+    expect(start.attemptId).toBe(attempt.attemptId);
     expect(start.workflowRunId).toBe(RUN_A);
     expect(start.stepRunId).toBe("implementation");
     expect(start.stepKey).toBe("implementation");
-    expect(start.attempt).toBe(1);
+    expect(start.attemptNumber).toBe(1);
     expect(start.roundIndex).toBe(0);
     expect(start.inputDigest).toBe("sha256:input-0");
     expect(start.artifactRoot).toBe("/artifacts/round-0");
@@ -1347,15 +1347,15 @@ describe("planGoalLoopRoundStartForInvocation", () => {
   });
 
   it("composes into a valid running round record that freezes the resolved selection", () => {
-    const invocation = planGoalLoopInvocation({
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000
     });
-    const start = planGoalLoopRoundStartForInvocation({
-      invocation,
+    const start = planGoalLoopRoundStartForAttempt({
+      attempt,
       selection: selection(),
       roundIndex: 2,
       runtime: { inputDigest: "sha256:input-2", artifactRoot: "/artifacts/round-2" },
@@ -1364,8 +1364,8 @@ describe("planGoalLoopRoundStartForInvocation", () => {
     const round = planGoalLoopRoundStart(start);
     expect(round.state).toBe("running");
     expect(round.executorFamily).toBe("goal-loop");
-    expect(round.roundId).toBe(goalLoopRoundId(invocation.attemptId, 2));
-    expect(round.attemptId).toBe(invocation.attemptId);
+    expect(round.roundId).toBe(goalLoopRoundId(attempt.attemptId, 2));
+    expect(round.attemptId).toBe(attempt.attemptId);
     expect(round.roundIndex).toBe(2);
     // The resolved selection is frozen into the round before any work runs.
     expect(round.agentProvider).toBe("claude");

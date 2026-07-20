@@ -646,7 +646,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: {
           path: repoPath,
@@ -716,7 +716,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -760,7 +760,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -804,7 +804,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -848,7 +848,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -888,7 +888,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -931,7 +931,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -970,7 +970,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1020,7 +1020,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1054,7 +1054,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1089,7 +1089,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1132,7 +1132,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1171,7 +1171,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1217,7 +1217,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
           attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
-          attempt: 1,
+          attemptNumber: 1,
         },
         repo: { path: repoPath, baseHead },
       },
@@ -1235,7 +1235,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
   });
 });
 
-// Foreign keys are enforced, so a round needs a real invocation, which needs a
+// Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows; the driver
 // inserts the round.
 function openRoundDb(): MomentumDb {
@@ -1247,19 +1247,19 @@ function openRoundDb(): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorAttemptRecord = {
+  const attempt: ExecutorAttemptRecord = {
     attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorAttempt(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
 }
 
@@ -1270,7 +1270,7 @@ function buildStart(): PlanGoalLoopRoundStartInput {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     selection: resolveGoalLoopRoundSelection({ stepConfig: { maxRounds: 5 } }),
     inputDigest: "sha256:input",

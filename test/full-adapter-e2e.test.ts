@@ -35,20 +35,20 @@ import {
 } from "../src/core/executors/loop/persist.js";
 import {
   resolveSingleShotRoundSelection,
-  singleShotInvocationId,
+  singleShotAttemptId,
   singleShotRoundId,
   type SingleShotRoundRuntimeInputs,
 } from "../src/core/executors/single-shot/executor.js";
 import { runSingleShotStep } from "../src/core/executors/single-shot/orchestrator.js";
 import {
-  goalLoopInvocationId,
+  goalLoopAttemptId,
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs,
 } from "../src/core/executors/goal-loop/executor.js";
 import { runGoalLoopStep } from "../src/core/executors/goal-loop/orchestrator.js";
 import {
-  noMistakesInvocationId,
+  noMistakesAttemptId,
   noMistakesRoundId,
   type NoMistakesExternalState,
   type NoMistakesRoundRuntimeInputs,
@@ -85,7 +85,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
  *   -> external-write family stays policy-gated closed (scaffold only here)
  *
  * Faithfulness / phase-1 boundary: `executeWorkflowStepDispatch` is the shipped
- * production dispatch path and stops at the start *scaffold* (invocation
+ * production dispatch path and stops at the start *scaffold* (attempt
  * `running`, round `pending`) — driving the bounded mechanism to terminal,
  * running verification/commit finalization, and advancing the `workflow_steps`
  * row are owned by the landed `runSingleShotStep` / `runGoalLoopStep` /
@@ -96,11 +96,11 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
  * terminal finalization via the landed adapters on distinct steps: the one-shot
  * adapter on `postflight`, the goal-loop adapter on `implementation` (the
  * goal-loop family in the real coding workflow definition), which drives a
- * bounded multi-round invocation to terminal `succeeded` with a passing
+ * bounded multi-round attempt to terminal `succeeded` with a passing
  * verification gate, and the no-mistakes mirror adapter on `no-mistakes`, which
  * settles its single long-lived mirror round to terminal `succeeded` on a
  * corroborated `completed` external review gate (the mirror's equivalent of a
- * passing verification gate). Each carries a deliberately distinct invocation id
+ * passing verification gate). Each carries a deliberately distinct attempt id
  * (`...::dispatch` for the scaffold vs each landed adapter's own reattachable
  * id), so composing scaffold + multiple terminal families never mints two owners
  * for one step. With the one-shot, goal-loop, and no-mistakes mirror terminals
@@ -475,7 +475,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflowRunId: runId,
         stepRunId: "postflight",
         stepKey: "postflight",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({
           stepConfig: {
             agentProvider: "claude",
@@ -504,25 +504,25 @@ describe("NGX-372 full adapter E2E proof", () => {
         }),
       });
 
-      // The invocation + round settled terminal with the verification gate passed.
-      expect(finalize.invocation.state).toBe("succeeded");
-      expect(finalize.invocation.finishedAt).not.toBeNull();
+      // The attempt + round settled terminal with the verification gate passed.
+      expect(finalize.attempt.state).toBe("succeeded");
+      expect(finalize.attempt.finishedAt).not.toBeNull();
       expect(finalize.round.round.state).toBe("succeeded");
       expect(finalize.round.round.classification).toBe("complete");
       expect(finalize.round.round.verificationStatus).toBe("passed");
       expect(finalize.round.round.commitSha).toBe(SHA);
       expect(finalize.round.round.changedFiles).toEqual(["src/feature.ts"]);
 
-      // Durable below StepRun: a single reattachable invocation + its one round.
-      const finalizeInvocationId = singleShotInvocationId(
+      // Durable below StepRun: a single reattachable attempt + its one round.
+      const finalizeInvocationId = singleShotAttemptId(
         runId,
         "postflight",
         "one-shot",
         1,
       );
-      expect(finalize.invocation.attemptId).toBe(finalizeInvocationId);
+      expect(finalize.attempt.attemptId).toBe(finalizeInvocationId);
       expect(loadExecutorAttempt(db, finalizeInvocationId)).toEqual(
-        finalize.invocation,
+        finalize.attempt,
       );
       const finalizeRoundId = singleShotRoundId(finalizeInvocationId);
       expect(
@@ -575,7 +575,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
         finalization: {
           attemptId: finalizeInvocationId,
-          attemptState: finalize.invocation.state,
+          attemptState: finalize.attempt.state,
           roundState: finalize.round.round.state,
           verificationStatus: finalize.round.round.verificationStatus,
           commitSha: finalize.round.round.commitSha,
@@ -597,7 +597,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     }
   });
 
-  it("composes the goal-loop landed adapter: the implementation step drives a bounded multi-round invocation to terminal succeeded with a passing verification gate", async () => {
+  it("composes the goal-loop landed adapter: the implementation step drives a bounded multi-round attempt to terminal succeeded with a passing verification gate", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
     const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
@@ -635,10 +635,10 @@ describe("NGX-372 full adapter E2E proof", () => {
       // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
       // `implementation` is the goal-loop family in the real coding workflow
       // definition (src/core/workflow/definition/definition.ts). The landed adapter drives a
-      // bounded multi-round invocation below the StepRun: round 0 commits progress
+      // bounded multi-round attempt below the StepRun: round 0 commits progress
       // but is incomplete (continue); round 1 commits and recommends completion,
       // each round gated by a passing verification finalize. `runGoalLoopStep`
-      // mints its own deterministic, reattachable invocation id, distinct from the
+      // mints its own deterministic, reattachable attempt id, distinct from the
       // one-shot scaffold's `...::dispatch` id and the one-shot adapter's id, so
       // composing the goal-loop terminal alongside them never mints two owners for
       // one step.
@@ -647,7 +647,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflowRunId: runId,
         stepRunId: "implementation",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveGoalLoopRoundSelection({
           stepConfig: {
             agentProvider: "claude",
@@ -680,10 +680,10 @@ describe("NGX-372 full adapter E2E proof", () => {
               },
       });
 
-      // The invocation is the goal-loop family and terminalized succeeded.
-      expect(result.invocation.executorFamily).toBe("goal-loop");
-      expect(result.invocation.state).toBe("succeeded");
-      expect(result.invocation.finishedAt).not.toBeNull();
+      // The attempt is the goal-loop family and terminalized succeeded.
+      expect(result.attempt.executorFamily).toBe("goal-loop");
+      expect(result.attempt.state).toBe("succeeded");
+      expect(result.attempt.finishedAt).not.toBeNull();
 
       // Two durable rounds ran in order: continue then complete.
       expect(result.rounds.map((r) => r.round.roundIndex)).toEqual([0, 1]);
@@ -700,12 +700,12 @@ describe("NGX-372 full adapter E2E proof", () => {
         "test/feature.test.ts",
       ]);
 
-      // Durable + reattachable below the StepRun: a deterministic invocation id
+      // Durable + reattachable below the StepRun: a deterministic attempt id
       // and its ordered rounds, all settled succeeded.
-      const attemptId = goalLoopInvocationId(runId, "implementation", 1);
-      expect(result.invocation.attemptId).toBe(attemptId);
+      const attemptId = goalLoopAttemptId(runId, "implementation", 1);
+      expect(result.attempt.attemptId).toBe(attemptId);
       expect(loadExecutorAttempt(db, attemptId)).toEqual(
-        result.invocation,
+        result.attempt,
       );
       const durableRounds = listExecutorRoundsForAttempt(db, attemptId);
       expect(durableRounds.map((r) => r.roundId)).toEqual([
@@ -742,8 +742,8 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         goalLoopFinalization: {
           attemptId,
-          executorFamily: result.invocation.executorFamily,
-          attemptState: result.invocation.state,
+          executorFamily: result.attempt.executorFamily,
+          attemptState: result.attempt.state,
           rounds: result.rounds.map((r) => r.round.classification),
           lastRoundVerification: lastRound?.verificationStatus ?? null,
           lastRoundCommitSha: lastRound?.commitSha ?? null,
@@ -807,12 +807,12 @@ describe("NGX-372 full adapter E2E proof", () => {
       // definition (src/core/workflow/definition/definition.ts). Unlike the result-bearing
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
-      // adapter materializes the durable invocation + the single long-lived mirror
+      // adapter materializes the durable attempt + the single long-lived mirror
       // round (born in `mirroring_external_state`), pins the expected external
       // identity, then runs the first poll. A corroborated `completed` snapshot with
       // CI passed settles the round straight to terminal `succeeded` — the mirror's
       // equivalent of the other adapters' passing verification gate. Its
-      // deterministic invocation id is distinct from the one-shot scaffold's
+      // deterministic attempt id is distinct from the one-shot scaffold's
       // `...::dispatch` id, the one-shot adapter's id, and the goal-loop adapter's
       // id, so composing a fourth terminal family never mints two owners for one
       // step.
@@ -821,7 +821,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflowRunId: runId,
         stepRunId: "no-mistakes",
         stepKey: "no-mistakes",
-        attempt: 1,
+        attemptNumber: 1,
         read: () => ({
           ok: true,
           value: noMistakesCompletedState(),
@@ -832,10 +832,10 @@ describe("NGX-372 full adapter E2E proof", () => {
         now: monotonicClock(NOW + 100),
       });
 
-      // The invocation is the no-mistakes family and terminalized succeeded.
-      expect(result.invocation.executorFamily).toBe("no-mistakes");
-      expect(result.invocation.state).toBe("succeeded");
-      expect(result.invocation.finishedAt).not.toBeNull();
+      // The attempt is the no-mistakes family and terminalized succeeded.
+      expect(result.attempt.executorFamily).toBe("no-mistakes");
+      expect(result.attempt.state).toBe("succeeded");
+      expect(result.attempt.finishedAt).not.toBeNull();
 
       // The single long-lived mirror round settled succeeded directly from the
       // mirror phase, gated by the corroborated completed + CI-passed snapshot.
@@ -845,14 +845,14 @@ describe("NGX-372 full adapter E2E proof", () => {
       // The mirror fingerprints the exact external bytes it mirrored this poll.
       expect(result.round.round.inputDigest).toBe("sha256:no-mistakes-poll");
 
-      // Durable + reattachable below the StepRun: a deterministic invocation id and
+      // Durable + reattachable below the StepRun: a deterministic attempt id and
       // its single mirror round (index 0), distinct from every other terminal
       // family's id composed in this proof.
-      const attemptId = noMistakesInvocationId(runId, "no-mistakes", 1);
-      expect(result.invocation.attemptId).toBe(attemptId);
+      const attemptId = noMistakesAttemptId(runId, "no-mistakes", 1);
+      expect(result.attempt.attemptId).toBe(attemptId);
       expect(attemptId).not.toBe(`${runId}::no-mistakes::dispatch`);
       expect(loadExecutorAttempt(db, attemptId)).toEqual(
-        result.invocation,
+        result.attempt,
       );
       const roundId = noMistakesRoundId(attemptId);
       expect(result.round.round.roundId).toBe(roundId);
@@ -877,8 +877,8 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         noMistakesFinalization: {
           attemptId,
-          executorFamily: result.invocation.executorFamily,
-          attemptState: result.invocation.state,
+          executorFamily: result.attempt.executorFamily,
+          attemptState: result.attempt.state,
           roundState: result.round.round.state,
           classification: result.round.decision.classification,
           mirroredDigest: result.round.round.inputDigest,

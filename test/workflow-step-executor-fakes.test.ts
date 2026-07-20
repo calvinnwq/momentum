@@ -18,7 +18,7 @@ function makeInput(kind: WorkflowStepExecutorKind): WorkflowStepExecutorInput {
     runId: "cwfp-feedface",
     stepId: `${kind}-step`,
     kind,
-    attempt: 1,
+    attemptNumber: 1,
     repoPath: "/tmp/momentum-repo",
     runDir: "/tmp/momentum-repo/.agent-workflows/cwfp-feedface",
     resultJsonPath:

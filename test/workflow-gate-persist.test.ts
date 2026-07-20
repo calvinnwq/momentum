@@ -189,7 +189,7 @@ describe("insertWorkflowGate", () => {
 
   it("refuses a gate carrying an id deeper than its scope", () => {
     const db = openSeededDb();
-    // workflow scope must not carry a step/invocation/round id
+    // workflow scope must not carry a step/attempt/round id
     expect(() =>
       insertWorkflowGate(
         db,

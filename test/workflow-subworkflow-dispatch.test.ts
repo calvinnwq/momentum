@@ -21,7 +21,7 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
@@ -41,7 +41,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  * These tests pin the factory's composition contract — *not* the producer (that
  * is exhaustively covered in `workflow-dispatch-subworkflow-run.test.ts`):
  *   - it runs the subworkflow producer only for a `subworkflow`-family dispatch
- *     invocation; any other family (the live-wrapper / external-apply lanes own
+ *     attempt; any other family (the live-wrapper / external-apply lanes own
  *     those) is echoed through untouched;
  *   - it only acts on a base dispatch that genuinely started a scaffold
  *     (the shared dispatch-status predicate); a fail-closed base result is echoed
@@ -53,7 +53,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  *   - it returns the base dispatch's result verbatim (finalization is a durable
  *     side effect layered after the dispatch).
  *
- * These factory tests drive a canned base dispatch that re-stamps the invocation
+ * These factory tests drive a canned base dispatch that re-stamps the attempt
  * family to `subworkflow` to isolate the wrapper's branching from the base
  * dispatcher. RC-4b (NGX-498) has since flipped `subworkflow` into
  * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` so the real base dispatch creates that
@@ -118,8 +118,8 @@ function approveAndClaim(
 
 /**
  * A base dispatch that creates the genuine production one-shot scaffold (running
- * invocation + pending round + held lease + running step) and then re-stamps the
- * invocation family to `subworkflow` — standing in for the PHASE1-wired base
+ * attempt + pending round + held lease + running step) and then re-stamps the
+ * attempt family to `subworkflow` — standing in for the PHASE1-wired base
  * dispatch that will create a `subworkflow` scaffold directly once the family
  * flip lands. The factory keys its gate on this family.
  */
@@ -130,7 +130,7 @@ function subworkflowScaffoldBaseDispatch(): AsyncWorkflowStepDispatch {
       .prepare(
         "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
       )
-      .run(deriveDispatchInvocationId(claim.runId, claim.stepId));
+      .run(deriveDispatchAttemptId(claim.runId, claim.stepId, 1));
     return result;
   };
 }
@@ -152,7 +152,7 @@ function stepStateForRun(
 }
 
 function attemptState(db: MomentumDb): string | undefined {
-  return loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+  return loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
     ?.state;
 }
 
@@ -211,7 +211,7 @@ const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
 });
 
 describe("createSubworkflowWorkflowDispatch — family gate", () => {
-  it("echoes a non-subworkflow (one-shot) invocation through without running the producer", async () => {
+  it("echoes a non-subworkflow (one-shot) attempt through without running the producer", async () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db);
     const runner = countingChildRunner(observe("succeeded"));
@@ -239,7 +239,7 @@ describe("createSubworkflowWorkflowDispatch — family gate", () => {
     expect(derives).toBe(0);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.executorFamily,
     ).toBe("one-shot");
   });

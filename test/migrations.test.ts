@@ -530,7 +530,7 @@ describe("applyQueueMigrations", () => {
     }
   });
 
-  it("typed-linkage column upgrade is idempotent across repeated openDb invocations", () => {
+  it("typed-linkage column upgrade is idempotent across repeated openDb attempts", () => {
     const dataDir = makeTempDir();
     const a = openDb(dataDir);
     const beforeCols = getColumns(a, "evidence_records").length;
@@ -544,7 +544,7 @@ describe("applyQueueMigrations", () => {
     }
   });
 
-  it("is idempotent across repeated openDb invocations", () => {
+  it("is idempotent across repeated openDb attempts", () => {
     const dataDir = makeTempDir();
     const a = openDb(dataDir);
     const beforeJobsCols = getColumns(a, "jobs").length;
@@ -1014,7 +1014,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("is idempotent across repeated openDb invocations for workflow tables", () => {
+    it("is idempotent across repeated openDb attempts for workflow tables", () => {
       const dataDir = makeTempDir();
       const a = openDb(dataDir);
       const runCols = getColumns(a, "workflow_runs").length;
@@ -1308,7 +1308,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("identity-column upgrade is idempotent across repeated openDb invocations", () => {
+    it("identity-column upgrade is idempotent across repeated openDb attempts", () => {
       const dataDir = makeTempDir();
       const a = openDb(dataDir);
       const beforeCols = getColumns(a, "workflow_runs").length;
@@ -1522,7 +1522,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("is idempotent across repeated openDb invocations for definition tables", () => {
+    it("is idempotent across repeated openDb attempts for definition tables", () => {
       const dataDir = makeTempDir();
       const a = openDb(dataDir);
       const defCols = getColumns(a, "workflow_definitions").length;
@@ -1805,9 +1805,9 @@ describe("applyQueueMigrations", () => {
                    'goal-loop', 1, ?, 'pending', 1, 1)`,
         );
         insertRound.run("round-a", 0);
-        // the same round_index under one invocation collides
+        // the same round_index under one attempt collides
         expect(() => insertRound.run("round-b", 0)).toThrow(/UNIQUE/i);
-        // a distinct index under the same invocation is fine
+        // a distinct index under the same attempt is fine
         insertRound.run("round-c", 1);
       } finally {
         db.close();
@@ -1841,7 +1841,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("rejects an invocation whose (workflow_run_id, step_run_id) has no workflow_steps row", () => {
+    it("rejects an attempt whose (workflow_run_id, step_run_id) has no workflow_steps row", () => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1905,7 +1905,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("is idempotent across repeated openDb invocations for executor tables", () => {
+    it("is idempotent across repeated openDb attempts for executor tables", () => {
       const dataDir = makeTempDir();
       const a = openDb(dataDir);
       const before = new Map(
@@ -2011,11 +2011,11 @@ describe("applyQueueMigrations", () => {
   });
 });
 
-describe("SDK-05 executor invocation to attempt/round migration", () => {
+describe("SDK-05 executor attempt to attempt/round migration", () => {
   const fixturePath = path.join(
     __dirname,
     "fixtures",
-    "sdk05-legacy-executor-invocations.sql",
+    "sdk05-legacy-executor-attempts.sql",
   );
 
   function seedLegacyDataDir(): string {
@@ -2029,7 +2029,7 @@ describe("SDK-05 executor invocation to attempt/round migration", () => {
     return dataDir;
   }
 
-  it("opens a two-attempt recovered SDK-05 database and splits the invocation into immutable attempts", () => {
+  it("opens a two-attempt recovered SDK-05 database and splits the attempt into immutable attempts", () => {
     const dataDir = seedLegacyDataDir();
     const db = openDb(dataDir);
     try {
@@ -2072,7 +2072,7 @@ describe("SDK-05 executor invocation to attempt/round migration", () => {
         source: "reconstructed_from_round_evidence",
       });
 
-      // Latest group inherits the legacy invocation id and its live
+      // Latest group inherits the legacy attempt id and its live
       // state/timestamps unchanged.
       expect(implLatest.attempt_id).toBe("run-1::implementation::dispatch");
       expect(implLatest.attempt_number).toBe(2);
@@ -2180,7 +2180,7 @@ describe("SDK-05 executor invocation to attempt/round migration", () => {
         .all() as Array<Record<string, unknown>>;
       expect(gates).toEqual([
         {
-          gate_id: "gate-invocation",
+          gate_id: "gate-attempt",
           attempt_id: "run-1::implementation::dispatch",
           round_id: null,
           target_scope: "attempt",

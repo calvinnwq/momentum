@@ -13,7 +13,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
-        attempt: 1
+        attemptNumber: 1
       },
       repo: {
         path: "/repo/momentum",
@@ -188,7 +188,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
-        attempt: 1
+        attemptNumber: 1
       },
       repo: {
         path: "/repo/momentum",
@@ -223,7 +223,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
-        attempt: 1
+        attemptNumber: 1
       },
       repo: {
         path: "/repo/momentum",
@@ -291,7 +291,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         attemptId: "inv-1",
         roundId: "round-7",
         roundIndex: 6,
-        attempt: 1
+        attemptNumber: 1
       },
       repo: {
         path: "/repo/momentum",
@@ -326,7 +326,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         attemptId: "inv-1",
         roundId: "round-7",
         roundIndex: 6,
-        attempt: 1
+        attemptNumber: 1
       },
       repo: {
         path: "/repo/momentum",

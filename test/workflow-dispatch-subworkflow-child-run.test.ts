@@ -26,7 +26,7 @@ import {
   loadExecutorAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
@@ -71,7 +71,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  *   - "Re-running the daemon path ... is idempotent and does not duplicate child
  *     runs or double-finalize the parent step" — the deterministic child run id
  *     makes a re-check attach (via the run-start conflict guard) instead of
- *     starting a second child, and a terminal dispatch invocation is never
+ *     starting a second child, and a terminal dispatch attempt is never
  *     re-run.
  *   - "Missing/unsafe/ambiguous configuration still fails closed" — a real child
  *     run reaching an ambiguous `canceled` terminal parks the parent for manual
@@ -167,7 +167,7 @@ function dispatchStep(db: MomentumDb): void {
   });
   db.prepare(
     "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
-  ).run(deriveDispatchInvocationId(RUN_ID, STEP_ID));
+  ).run(deriveDispatchAttemptId(RUN_ID, STEP_ID, 1));
 }
 
 function stepState(db: MomentumDb): string {
@@ -179,7 +179,7 @@ function stepState(db: MomentumDb): string {
 function dispatchRounds(db: MomentumDb) {
   return listExecutorRoundsForAttempt(
     db,
-    deriveDispatchInvocationId(RUN_ID, STEP_ID),
+    deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
   );
 }
 
@@ -292,10 +292,10 @@ describe("subworkflow producer × real child run — start-or-attach + defer", (
     expect(child?.run.state).toBe("pending");
     expect(child?.steps).toHaveLength(CODING_WORKFLOW_DEFINITION.steps.length);
 
-    // No terminal evidence: the parent dispatch invocation + step stay running and
+    // No terminal evidence: the parent dispatch attempt + step stay running and
     // the dispatch lease stays held for a later tick to re-check the child.
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
@@ -352,11 +352,11 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
     expect(runner.attaches()).toBe(1);
     expect(countRuns(db)).toBe(2);
 
-    const invocation = loadExecutorAttempt(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("succeeded");
+    expect(attempt?.state).toBe("succeeded");
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("succeeded");
     expect(round?.summary).toContain(CHILD_RUN_ID);
@@ -382,7 +382,7 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
 });
 
 describe("subworkflow producer × real child run — idempotent re-entry", () => {
-  it("never re-starts the child run or double-finalizes once the dispatch invocation is terminal", async () => {
+  it("never re-starts the child run or double-finalizes once the dispatch attempt is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
     const evidence = makeWritableEvidence();
@@ -412,7 +412,7 @@ describe("subworkflow producer × real child run — idempotent re-entry", () =>
     expect(runner.starts()).toBe(1);
     expect(runner.attaches()).toBe(1);
 
-    // Re-entry over the already-terminal dispatch invocation: the runner is NOT
+    // Re-entry over the already-terminal dispatch attempt: the runner is NOT
     // consulted again (no duplicate child run), and the step is not re-finalized.
     const reentry = await executeAndReconcileDispatchedSubworkflowStep({
       db,
@@ -481,7 +481,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(childRecoveryReason);
@@ -530,11 +530,11 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
-    const invocation = loadExecutorAttempt(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(attempt?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("manual_recovery_required");
     expect(round?.summary).toContain("canceled");

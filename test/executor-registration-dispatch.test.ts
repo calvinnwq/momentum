@@ -182,7 +182,7 @@ describe("profile-backed built-in registration", () => {
         )
         .get("native-one-shot-run"),
     ).toEqual({
-      round_id: "native-one-shot-run::preflight::dispatch::round::0",
+      round_id: "native-one-shot-run::preflight::attempt-1::round::0",
       state: "succeeded",
       summary: "native one-shot completed",
     });
@@ -191,7 +191,7 @@ describe("profile-backed built-in registration", () => {
         .prepare(
           "SELECT stage FROM executor_checkpoints WHERE round_id = ? ORDER BY sequence",
         )
-        .all("native-one-shot-run::preflight::dispatch::round::0"),
+        .all("native-one-shot-run::preflight::attempt-1::round::0"),
     ).toEqual([
       { stage: "round_started" },
       { stage: "mechanism_completed" },
@@ -269,7 +269,7 @@ describe("profile-backed built-in registration", () => {
     { family: "script", config: { command: "sh" } },
     { family: "goal-loop", config: {} },
   ] as const)(
-    "resumes a roundless native $family invocation through the scheduler",
+    "resumes a roundless native $family attempt through the scheduler",
     async ({ family, config }) => {
       const runId = `roundless-${family}-run`;
       const definition: WorkflowDefinition = {
@@ -293,7 +293,7 @@ describe("profile-backed built-in registration", () => {
         definition,
         runId,
         repoPath: "/repos/fixture",
-        objective: "Resume a native invocation scaffold",
+        objective: "Resume a native attempt scaffold",
         now: NOW,
       });
       db.prepare(
@@ -505,7 +505,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         )
         .get("native-script-run"),
     ).toEqual({
-      round_id: "native-script-run::preflight::dispatch::round::0",
+      round_id: "native-script-run::preflight::attempt-1::round::0",
       state: "succeeded",
       result_digest: null,
     });
@@ -1111,14 +1111,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
       expect(
         db
           .prepare(
-            "SELECT attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+            "SELECT attempt_number AS attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
           )
           .all(runId),
       ).toEqual([
@@ -1220,7 +1220,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .all(runId),
     ).toEqual([
       {
-        round_id: `${runId}::implementation::dispatch::round::0`,
+        round_id: `${runId}::implementation::attempt-1::round::0`,
         round_index: 0,
         classification: "continue",
         recovery_code: null,
@@ -1237,7 +1237,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_rounds WHERE round_id = ?",
         )
-        .get(`${runId}::implementation::dispatch::round::1`),
+        .get(`${runId}::implementation::attempt-1::round::1`),
     ).toEqual({ count: 0 });
     expect(
       fs.readFileSync(
@@ -1331,7 +1331,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_checkpoints WHERE round_id = ? AND stage = 'round_started'",
         )
-        .get(`${runId}::preflight::dispatch::round-1`),
+        .get(`${runId}::preflight::attempt-1::round-1`),
     ).toEqual({ count: 1 });
 
     expect(
@@ -1355,7 +1355,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId),
     ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -1627,14 +1627,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
     expect(
       db
         .prepare(
-          "SELECT attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          "SELECT attempt_number AS attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
         .all(runId),
     ).toEqual([
@@ -1766,14 +1766,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
     expect(
       db
         .prepare(
-          "SELECT attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          "SELECT attempt_number AS attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
         .all(runId),
     ).toEqual([
@@ -1878,14 +1878,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
     expect(
       db
         .prepare(
-          "SELECT attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          "SELECT attempt_number AS attempt, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
         .all(runId),
     ).toEqual([
@@ -1930,7 +1930,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         stepKey: "implementation",
         executorFamily: "goal-loop",
         state: "running",
-        attempt: 1,
+        attemptNumber: 1,
         startedAt: NOW,
         heartbeatAt: NOW,
         finishedAt: null,
@@ -1991,7 +1991,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         workflowRunId: "reattach-goal-loop-run",
         stepRunId: "implementation",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         roundIndex: 0,
         inputDigest: "sha256:reattach",
         artifactRoot,
@@ -2159,7 +2159,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: NOW + 1,
       executorOwnsRounds: true,
     });
-    const attemptId = "native-lock-recovery-run::implementation::dispatch";
+    const attemptId = "native-lock-recovery-run::implementation::attempt-1";
     const artifactRoot = path.join(
       repoPath,
       ".agent-workflows/native-lock-recovery-run/round-1",
@@ -2189,7 +2189,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           workflowRunId: "native-lock-recovery-run",
           stepRunId: "implementation",
           stepKey: "implementation",
-          attempt: 1,
+          attemptNumber: 1,
           roundIndex: 0,
           inputDigest,
           artifactRoot,
@@ -2338,7 +2338,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: NOW + 1,
       executorOwnsRounds: true,
     });
-    const attemptId = `${runId}::implementation::dispatch`;
+    const attemptId = `${runId}::implementation::attempt-1`;
     const artifactRoot = path.join(
       repoPath,
       `.agent-workflows/${runId}/round-1`,
@@ -2361,7 +2361,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       stepRunId: "implementation",
       stepKey: "implementation",
       executorFamily: "goal-loop",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "running" as const,
       agentProvider: null,
@@ -2498,7 +2498,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: NOW + 1,
       executorOwnsRounds: true,
     });
-    const attemptId = `${runId}::implementation::dispatch`;
+    const attemptId = `${runId}::implementation::attempt-1`;
     const roundId = `${attemptId}::round::0`;
     const artifactRoot = path.join(
       repoPath,
@@ -2517,7 +2517,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       stepRunId: "implementation",
       stepKey: "implementation",
       executorFamily: "goal-loop",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -2630,7 +2630,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       now: NOW + 1,
       executorOwnsRounds: true,
     });
-    const attemptId = `${runId}::implementation::dispatch`;
+    const attemptId = `${runId}::implementation::attempt-1`;
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId,
@@ -2643,7 +2643,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       stepRunId: "implementation",
       stepKey: "implementation",
       executorFamily: "goal-loop",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -2846,16 +2846,16 @@ function completeRegisteredExecutorTick(
   context: ExecutorTickContext<Record<string, never>, Record<string, never>>,
   summary: string,
 ) {
-  const invocation = context.state.invocation;
+  const attempt = context.state.attempt;
   const roundIndex = context.state.rounds.length;
   const round = context.envelope.startRound({
-    roundId: `${invocation.attemptId}::round-${roundIndex + 1}`,
-    attemptId: invocation.attemptId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    attempt: invocation.attempt,
+    roundId: `${attempt.attemptId}::round-${roundIndex + 1}`,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "capturing_result",
     agentProvider: null,
@@ -3123,13 +3123,13 @@ describe("executor registration and SDK dispatch", () => {
     insertExecutorAttempt(
       db,
       {
-        attemptId: "live-sdk-invocation",
+        attemptId: "live-sdk-attempt",
         workflowRunId: "live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
         executorFamily: "one-shot",
         state: "running",
-        attempt: 1,
+        attemptNumber: 1,
         startedAt: NOW,
         heartbeatAt: NOW,
         finishedAt: null,
@@ -3165,7 +3165,7 @@ describe("executor registration and SDK dispatch", () => {
     };
     const envelope = createDurableExecutorEnvelope({
       db,
-      attemptId: "live-sdk-invocation",
+      attemptId: "live-sdk-attempt",
       now: () => NOW + 1,
     });
     await executor.tick({
@@ -3179,7 +3179,7 @@ describe("executor registration and SDK dispatch", () => {
     let replaySettledClean: boolean | undefined;
     await driveExecutorTicks({
       db,
-      attemptId: "live-sdk-invocation",
+      attemptId: "live-sdk-attempt",
       executor,
       config: {},
       hostBindings: {
@@ -3197,7 +3197,7 @@ describe("executor registration and SDK dispatch", () => {
         .prepare(
           "SELECT stage FROM executor_checkpoints WHERE round_id = ? ORDER BY sequence",
         )
-        .all("live-sdk-invocation::round-1"),
+        .all("live-sdk-attempt::round-1"),
     ).toEqual([
       { stage: "round_started" },
       { stage: "mechanism_completed" },
@@ -3207,10 +3207,10 @@ describe("executor registration and SDK dispatch", () => {
       `UPDATE executor_attempts
           SET state = 'running', attempt = 2, finished_at = NULL
         WHERE attempt_id = ?`,
-    ).run("live-sdk-invocation");
+    ).run("live-sdk-attempt");
     await driveExecutorTicks({
       db,
-      attemptId: "live-sdk-invocation",
+      attemptId: "live-sdk-attempt",
       executor,
       config: {},
       hostBindings,
@@ -3222,27 +3222,27 @@ describe("executor registration and SDK dispatch", () => {
         .prepare(
           "SELECT attempt FROM executor_rounds WHERE attempt_id = ? ORDER BY round_index",
         )
-        .all("live-sdk-invocation"),
+        .all("live-sdk-attempt"),
     ).toEqual([{ attempt: 1 }, { attempt: 2 }]);
 
     db.prepare(
       `UPDATE executor_attempts
           SET state = 'running', attempt = 3, finished_at = NULL
         WHERE attempt_id = ?`,
-    ).run("live-sdk-invocation");
+    ).run("live-sdk-attempt");
     const incompleteEnvelope = createDurableExecutorEnvelope({
       db,
-      attemptId: "live-sdk-invocation",
+      attemptId: "live-sdk-attempt",
       now: () => NOW + 4,
     });
     incompleteEnvelope.facade.startRound({
-      roundId: "live-sdk-invocation::round-3",
-      attemptId: "live-sdk-invocation",
+      roundId: "live-sdk-attempt::round-3",
+      attemptId: "live-sdk-attempt",
       workflowRunId: "live-sdk-run",
       stepRunId: "preflight",
       stepKey: "preflight",
       executorFamily: "one-shot",
-      attempt: 3,
+      attemptNumber: 3,
       roundIndex: 2,
       state: "running",
       agentProvider: null,
@@ -3281,15 +3281,15 @@ describe("executor registration and SDK dispatch", () => {
       `UPDATE executor_attempts
           SET state = 'running', attempt = 4, finished_at = NULL
         WHERE attempt_id = ?`,
-    ).run("live-sdk-invocation");
+    ).run("live-sdk-attempt");
     await driveExecutorTicks({
       db,
-      attemptId: "live-sdk-invocation",
+      attemptId: "live-sdk-attempt",
       executor: {
         name: "one-shot",
         configSchema: liveStepBuiltInConfigSchema("one-shot"),
         tick: () => ({
-          roundId: "live-sdk-invocation::round-3",
+          roundId: "live-sdk-attempt::round-3",
           recommendation: "complete",
           recommendedRoundState: "succeeded",
           recommendedAttemptState: "succeeded",
@@ -3307,7 +3307,7 @@ describe("executor registration and SDK dispatch", () => {
         .prepare(
           "SELECT attempt, state FROM executor_rounds WHERE attempt_id = ? ORDER BY round_index",
         )
-        .all("live-sdk-invocation"),
+        .all("live-sdk-attempt"),
     ).toEqual([
       { attempt: 1, state: "succeeded" },
       { attempt: 2, state: "succeeded" },
@@ -3319,7 +3319,7 @@ describe("executor registration and SDK dispatch", () => {
         .prepare(
           "SELECT recovery_code FROM executor_rounds WHERE attempt_id = ? AND attempt = 4",
         )
-        .get("live-sdk-invocation"),
+        .get("live-sdk-attempt"),
     ).toEqual({ recovery_code: "executor_contract_invalid" });
     db.close();
   });
@@ -3335,7 +3335,7 @@ describe("executor registration and SDK dispatch", () => {
     async ({ errorCode, expectedRecoveryCode }) => {
       const db = openDb(tempDir());
       const runId = `failed-live-sdk-run-${expectedRecoveryCode}`;
-      const attemptId = `failed-live-sdk-invocation-${expectedRecoveryCode}`;
+      const attemptId = `failed-live-sdk-attempt-${expectedRecoveryCode}`;
       const definition: WorkflowDefinition = {
         key: "failed-live-sdk-workflow",
         title: "Failed Live SDK Workflow",
@@ -3367,7 +3367,7 @@ describe("executor registration and SDK dispatch", () => {
           stepKey: "preflight",
           executorFamily: "one-shot",
           state: "running",
-          attempt: 1,
+          attemptNumber: 1,
           startedAt: NOW,
           heartbeatAt: NOW,
           finishedAt: null,
@@ -3405,7 +3405,7 @@ describe("executor registration and SDK dispatch", () => {
         now: () => NOW + 1,
       });
 
-      expect(result.invocation.state).toBe("failed");
+      expect(result.attempt.state).toBe("failed");
       expect(result.lastRound).toMatchObject({
         state: "failed",
         recoveryCode: expectedRecoveryCode,
@@ -3441,13 +3441,13 @@ describe("executor registration and SDK dispatch", () => {
     insertExecutorAttempt(
       db,
       {
-        attemptId: "checkpoint-failure-invocation",
+        attemptId: "checkpoint-failure-attempt",
         workflowRunId: "checkpoint-failure-run",
         stepRunId: "preflight",
         stepKey: "preflight",
         executorFamily: "one-shot",
         state: "running",
-        attempt: 1,
+        attemptNumber: 1,
         startedAt: NOW,
         heartbeatAt: NOW,
         finishedAt: null,
@@ -3457,7 +3457,7 @@ describe("executor registration and SDK dispatch", () => {
     let writes = 0;
     const envelope = createDurableExecutorEnvelope({
       db,
-      attemptId: "checkpoint-failure-invocation",
+      attemptId: "checkpoint-failure-attempt",
       now: () => NOW + 1,
       authorizeWrite: () => {
         writes += 1;
@@ -3503,7 +3503,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT COUNT(*) AS count FROM executor_checkpoints WHERE stage = 'mechanism_completed' AND round_id LIKE 'checkpoint-failure-invocation%'",
+          "SELECT COUNT(*) AS count FROM executor_checkpoints WHERE stage = 'mechanism_completed' AND round_id LIKE 'checkpoint-failure-attempt%'",
         )
         .get(),
     ).toEqual({ count: 0 });
@@ -4315,7 +4315,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get("unregistered-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4403,13 +4403,13 @@ describe("executor registration and SDK dispatch", () => {
                       summary: `accepted ${chosen.chosenAction}`,
                     })
                   : context.envelope.startRound({
-                      roundId: `${context.state.invocation.attemptId}::round-2`,
-                      attemptId: context.state.invocation.attemptId,
-                      workflowRunId: context.state.invocation.workflowRunId,
-                      stepRunId: context.state.invocation.stepRunId,
-                      stepKey: context.state.invocation.stepKey,
-                      executorFamily: context.state.invocation.executorFamily,
-                      attempt: context.state.invocation.attempt,
+                      roundId: `${context.state.attempt.attemptId}::round-2`,
+                      attemptId: context.state.attempt.attemptId,
+                      workflowRunId: context.state.attempt.workflowRunId,
+                      stepRunId: context.state.attempt.stepRunId,
+                      stepKey: context.state.attempt.stepKey,
+                      executorFamily: context.state.attempt.executorFamily,
+                      attemptNumber: context.state.attempt.attemptNumber,
                       roundIndex: context.state.rounds.length,
                       state: "capturing_result",
                       agentProvider: null,
@@ -4438,15 +4438,15 @@ describe("executor registration and SDK dispatch", () => {
               };
             }
 
-            const invocation = context.state.invocation;
+            const attempt = context.state.attempt;
             const round = context.envelope.startRound({
-              roundId: `${invocation.attemptId}::round-1`,
-              attemptId: invocation.attemptId,
-              workflowRunId: invocation.workflowRunId,
-              stepRunId: invocation.stepRunId,
-              stepKey: invocation.stepKey,
-              executorFamily: invocation.executorFamily,
-              attempt: invocation.attempt,
+              roundId: `${attempt.attemptId}::round-1`,
+              attemptId: attempt.attemptId,
+              workflowRunId: attempt.workflowRunId,
+              stepRunId: attempt.stepRunId,
+              stepKey: attempt.stepKey,
+              executorFamily: attempt.executorFamily,
+              attemptNumber: attempt.attemptNumber,
               roundIndex: context.state.rounds.length,
               state: "mirroring_external_state",
               agentProvider: null,
@@ -4671,15 +4671,15 @@ describe("executor registration and SDK dispatch", () => {
           }
           tickCount += 1;
           if (tickCount > 1) return undefined;
-          const invocation = context.state.invocation;
+          const attempt = context.state.attempt;
           const round = context.envelope.startRound({
-            roundId: `${invocation.attemptId}::round-1`,
-            attemptId: invocation.attemptId,
-            workflowRunId: invocation.workflowRunId,
-            stepRunId: invocation.stepRunId,
-            stepKey: invocation.stepKey,
-            executorFamily: invocation.executorFamily,
-            attempt: invocation.attempt,
+            roundId: `${attempt.attemptId}::round-1`,
+            attemptId: attempt.attemptId,
+            workflowRunId: attempt.workflowRunId,
+            stepRunId: attempt.stepRunId,
+            stepKey: attempt.stepKey,
+            executorFamily: attempt.executorFamily,
+            attemptNumber: attempt.attemptNumber,
             roundIndex: 0,
             state: "capturing_result",
             agentProvider: null,
@@ -4751,7 +4751,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get("malformed-tick-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4759,7 +4759,7 @@ describe("executor registration and SDK dispatch", () => {
   });
 
   it.each(["executor_threw"])(
-    "retries a %s invocation after the registered executor is repaired",
+    "retries a %s attempt after the registered executor is repaired",
     async (recoveryCode) => {
       const definition = fixtureDefinition({});
       const db = openDb(tempDir());
@@ -4856,7 +4856,7 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get("thrown-tick-run"),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4878,13 +4878,13 @@ describe("executor registration and SDK dispatch", () => {
     insertExecutorAttempt(
       db,
       {
-        attemptId: "hostile-tick-invocation",
+        attemptId: "hostile-tick-attempt",
         workflowRunId: "hostile-tick-run",
         stepRunId: "preflight",
         stepKey: "preflight",
         executorFamily: "fixture-executor",
         state: "running",
-        attempt: 1,
+        attemptNumber: 1,
         startedAt: NOW,
         heartbeatAt: NOW,
         finishedAt: null,
@@ -4904,7 +4904,7 @@ describe("executor registration and SDK dispatch", () => {
     );
     const driven = await driveExecutorTicks({
       db,
-      attemptId: "hostile-tick-invocation",
+      attemptId: "hostile-tick-attempt",
       executor: {
         name: "fixture-executor",
         configSchema: {
@@ -4920,7 +4920,7 @@ describe("executor registration and SDK dispatch", () => {
       hostBindings: {},
       now: () => NOW + 1,
     });
-    expect(driven.invocation.state).toBe("manual_recovery_required");
+    expect(driven.attempt.state).toBe("manual_recovery_required");
     expect(driven.lastRound).toMatchObject({
       recoveryCode: "executor_threw",
       summary: expect.stringContaining("uninspectable thrown value"),
@@ -5003,7 +5003,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get("module-load-failure-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });

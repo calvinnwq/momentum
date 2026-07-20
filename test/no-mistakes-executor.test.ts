@@ -18,10 +18,10 @@ import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
   isNoMistakesExecutorFamily,
-  noMistakesInvocationId,
+  noMistakesAttemptId,
   noMistakesRoundId,
   noMistakesRoundUpdate,
-  planNoMistakesInvocation,
+  planNoMistakesAttempt,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
   planNoMistakesRoundPersistence,
@@ -436,7 +436,7 @@ describe("decideNoMistakesMirror — totality", () => {
         decision.roundState,
       );
       expect(roundHop.ok).toBe(true);
-      // The mirror invocation runs; every decided invocation state must be
+      // The mirror attempt runs; every decided attempt state must be
       // reachable from running.
       const invocationHop = transitionExecutorAttempt(
         "running",
@@ -456,24 +456,24 @@ describe("decideNoMistakesMirror — totality", () => {
   });
 });
 
-describe("noMistakesInvocationId / noMistakesRoundId", () => {
+describe("noMistakesAttemptId / noMistakesRoundId", () => {
   it("embeds the step-run identity, the family, and the attempt", () => {
-    expect(noMistakesInvocationId("run1", "step1", 0)).toBe(
+    expect(noMistakesAttemptId("run1", "step1", 0)).toBe(
       "run1::step1::no-mistakes::0",
     );
-    expect(noMistakesInvocationId("run1", "step1", 2)).toBe(
+    expect(noMistakesAttemptId("run1", "step1", 2)).toBe(
       "run1::step1::no-mistakes::2",
     );
   });
 
   it("distinguishes attempts so re-runs never collide", () => {
-    const a = noMistakesInvocationId("run1", "step1", 0);
-    const b = noMistakesInvocationId("run1", "step1", 1);
+    const a = noMistakesAttemptId("run1", "step1", 0);
+    const b = noMistakesAttemptId("run1", "step1", 1);
     expect(a).not.toBe(b);
   });
 
-  it("mints a single deterministic round id under an invocation", () => {
-    const attemptId = noMistakesInvocationId("run1", "step1", 0);
+  it("mints a single deterministic round id under an attempt", () => {
+    const attemptId = noMistakesAttemptId("run1", "step1", 0);
     const roundId = noMistakesRoundId(attemptId);
     expect(roundId).toContain(attemptId);
     expect(noMistakesRoundId(attemptId)).toBe(roundId);
@@ -579,61 +579,61 @@ describe("planNoMistakesRoundDecisions", () => {
   });
 });
 
-describe("planNoMistakesInvocation", () => {
-  it("projects a step-run identity into a running no-mistakes invocation record", () => {
-    const invocation = planNoMistakesInvocation({
+describe("planNoMistakesAttempt", () => {
+  it("projects a step-run identity into a running no-mistakes attempt record", () => {
+    const attempt = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1000,
     });
-    expect(invocation.attemptId).toBe(
-      noMistakesInvocationId("run1", "step1", 0),
+    expect(attempt.attemptId).toBe(
+      noMistakesAttemptId("run1", "step1", 0),
     );
-    expect(invocation.workflowRunId).toBe("run1");
-    expect(invocation.stepRunId).toBe("step1");
-    expect(invocation.stepKey).toBe("no-mistakes");
-    expect(invocation.executorFamily).toBe("no-mistakes");
-    expect(invocation.attempt).toBe(0);
-    expect(invocation.state).toBe("running");
-    expect(invocation.startedAt).toBe(1000);
-    expect(invocation.heartbeatAt).toBe(1000);
-    expect(invocation.finishedAt).toBeNull();
+    expect(attempt.workflowRunId).toBe("run1");
+    expect(attempt.stepRunId).toBe("step1");
+    expect(attempt.stepKey).toBe("no-mistakes");
+    expect(attempt.executorFamily).toBe("no-mistakes");
+    expect(attempt.attemptNumber).toBe(0);
+    expect(attempt.state).toBe("running");
+    expect(attempt.startedAt).toBe(1000);
+    expect(attempt.heartbeatAt).toBe(1000);
+    expect(attempt.finishedAt).toBeNull();
   });
 
-  it("mints a fresh invocation per attempt so a re-mirror never collides", () => {
-    const first = planNoMistakesInvocation({
+  it("mints a fresh attempt per attempt so a re-mirror never collides", () => {
+    const first = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1,
     });
-    const second = planNoMistakesInvocation({
+    const second = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 2,
     });
     expect(first.attemptId).not.toBe(second.attemptId);
-    expect(second.attempt).toBe(1);
+    expect(second.attemptNumber).toBe(1);
   });
 
-  it("starts a running invocation that can legally settle to a terminal state", () => {
-    const invocation = planNoMistakesInvocation({
+  it("starts a running attempt that can legally settle to a terminal state", () => {
+    const attempt = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1,
     });
     const decision = decideNoMistakesMirror(
       externalState({ stepStatus: "failed" }),
     );
     const transition = transitionExecutorAttempt(
-      invocation.state,
+      attempt.state,
       decision.attemptState,
     );
     expect(transition.ok).toBe(true);
@@ -642,19 +642,19 @@ describe("planNoMistakesInvocation", () => {
 });
 
 describe("planNoMistakesRoundStart", () => {
-  function invocation() {
-    return planNoMistakesInvocation({
+  function attempt() {
+    return planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1000,
     });
   }
 
   it("projects a single mirror round born in mirroring_external_state at index 0", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: {
         inputDigest: "sha256:abc",
         artifactRoot: "/tmp/run1/step1",
@@ -663,13 +663,13 @@ describe("planNoMistakesRoundStart", () => {
       startedAt: 2000,
     });
 
-    expect(round.roundId).toBe(noMistakesRoundId(invocation().attemptId));
-    expect(round.attemptId).toBe(invocation().attemptId);
+    expect(round.roundId).toBe(noMistakesRoundId(attempt().attemptId));
+    expect(round.attemptId).toBe(attempt().attemptId);
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("no-mistakes");
     expect(round.executorFamily).toBe("no-mistakes");
-    expect(round.attempt).toBe(0);
+    expect(round.attemptNumber).toBe(0);
     // The mirror is one long-lived round.
     expect(round.roundIndex).toBe(0);
     expect(round.state).toBe("mirroring_external_state");
@@ -692,7 +692,7 @@ describe("planNoMistakesRoundStart", () => {
 
   it("resolves no Momentum agent/model/effort — no-mistakes owns its own pipeline", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: { inputDigest: null, artifactRoot: null },
       startedAt: 2000,
     });
@@ -702,11 +702,11 @@ describe("planNoMistakesRoundStart", () => {
     expect(round.logPaths).toEqual([]);
   });
 
-  it("refuses to mirror a round under a non-no-mistakes invocation", () => {
-    const foreign = { ...invocation(), executorFamily: "goal-loop" as const };
+  it("refuses to mirror a round under a non-no-mistakes attempt", () => {
+    const foreign = { ...attempt(), executorFamily: "goal-loop" as const };
     expect(() =>
       planNoMistakesRoundStart({
-        invocation: foreign,
+        attempt: foreign,
         runtime: { inputDigest: null, artifactRoot: null },
         startedAt: 2000,
       }),
@@ -715,7 +715,7 @@ describe("planNoMistakesRoundStart", () => {
 
   it("is born in a state from which every decided round state is reachable", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: { inputDigest: null, artifactRoot: null },
       startedAt: 2000,
     });
@@ -759,11 +759,11 @@ describe("planNoMistakesRoundPersistence", () => {
 
   it("re-mirroring a still-running round is a legal same-state heartbeat", () => {
     const round = planNoMistakesRoundStart({
-      invocation: planNoMistakesInvocation({
+      attempt: planNoMistakesAttempt({
         workflowRunId: "run1",
         stepRunId: "step1",
         stepKey: "no-mistakes",
-        attempt: 0,
+        attemptNumber: 0,
         startedAt: 1,
       }),
       runtime: { inputDigest: null, artifactRoot: null },

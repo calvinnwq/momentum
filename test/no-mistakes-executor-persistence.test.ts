@@ -15,9 +15,9 @@ import {
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import {
-  noMistakesInvocationId,
+  noMistakesAttemptId,
   noMistakesRoundId,
-  planNoMistakesInvocation,
+  planNoMistakesAttempt,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
   planNoMistakesRoundPersistence,
@@ -26,7 +26,7 @@ import {
 } from "../src/adapters/no-mistakes-executor.js";
 
 // Integration twin of the pure projections in no-mistakes-executor.test.ts: this
-// drives the mirror's durable invocation + round-start records and the per-poll
+// drives the mirror's durable attempt + round-start records and the per-poll
 // round persistence plan through the *real* M10-03 executor-loop persistence layer
 // and round transition graph, and round-trips the findings / decisions projections
 // through real SQLite. The pure tests assert the decision/projection *shape*; this
@@ -59,7 +59,7 @@ const STEP_RUN_ID = "step-1";
 const STEP_KEY = "no-mistakes";
 const ATTEMPT = 1;
 const HEAD_SHA = "a".repeat(40);
-const INVOCATION_ID = noMistakesInvocationId(
+const INVOCATION_ID = noMistakesAttemptId(
   WORKFLOW_RUN_ID,
   STEP_RUN_ID,
   ATTEMPT,
@@ -83,9 +83,9 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so the invocation needs a real (workflow_run_id,
-// step_run_id) and the round needs a real invocation. Seed the minimal parent rows,
-// the durable `running` mirror invocation, and the single mirror round born in
+// Foreign keys are enforced, so the attempt needs a real (workflow_run_id,
+// step_run_id) and the round needs a real attempt. Seed the minimal parent rows,
+// the durable `running` mirror attempt, and the single mirror round born in
 // `mirroring_external_state` — the live starting point every poll updates.
 function openMirrorRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
@@ -96,16 +96,16 @@ function openMirrorRoundDb(): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
   ).run();
-  const invocation = planNoMistakesInvocation({
+  const attempt = planNoMistakesAttempt({
     workflowRunId: WORKFLOW_RUN_ID,
     stepRunId: STEP_RUN_ID,
     stepKey: STEP_KEY,
-    attempt: ATTEMPT,
+    attemptNumber: ATTEMPT,
     startedAt: 1,
   });
-  insertExecutorAttempt(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   const round = planNoMistakesRoundStart({
-    invocation,
+    attempt,
     runtime: {
       inputDigest: "sha256:poll-0",
       artifactRoot: "/artifacts/nm-0",

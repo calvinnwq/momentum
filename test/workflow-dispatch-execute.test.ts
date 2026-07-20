@@ -220,13 +220,13 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-    const invocation = db
+    const attempt = db
       .prepare(
         `SELECT executor_family
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
-    expect(invocation.executor_family).toBe("one-shot");
+    expect(attempt.executor_family).toBe("one-shot");
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
 
@@ -252,16 +252,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-    const invocation = db
+    const attempt = db
       .prepare(
         `SELECT executor_family
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
-    expect(invocation.executor_family).toBe("one-shot");
+    expect(attempt.executor_family).toBe("one-shot");
   });
 
-  it("creates the executor invocation + round scaffold and advances the step", () => {
+  it("creates the executor attempt + round scaffold and advances the step", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
 
@@ -273,9 +273,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
-    // A durable invocation row proves the bounded unit started through the
+    // A durable attempt row proves the bounded unit started through the
     // production path (preflight resolves to the one-shot family).
-    const invocation = db
+    const attempt = db
       .prepare(
         `SELECT attempt_id, step_run_id, step_key, executor_family, state, attempt
            FROM executor_attempts WHERE workflow_run_id = ?`,
@@ -288,7 +288,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       state: string;
       attempt: number;
     };
-    expect(invocation).toMatchObject({
+    expect(attempt).toMatchObject({
       step_run_id: "preflight",
       step_key: "preflight",
       executor_family: "one-shot",
@@ -308,7 +308,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       state: string;
       executor_family: string;
     };
-    expect(round.attempt_id).toBe(invocation.attempt_id);
+    expect(round.attempt_id).toBe(attempt.attempt_id);
     expect(round.executor_family).toBe("one-shot");
     expect(round.state).toBe("pending");
 
@@ -328,18 +328,18 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: NOW + 1 });
 
-    // The invocation id is the deterministic `<run>::<step>::dispatch` triple,
+    // The attempt id is the deterministic `<run>::<step>::dispatch` triple,
     // not a random handle: it is recomputable from durable state (so idempotent
     // re-entry finds the same row) and the `::dispatch` namespace keeps it
-    // distinct from a future landed adapter's reattachable invocation id.
-    const invocation = db
+    // distinct from a future landed adapter's reattachable attempt id.
+    const attempt = db
       .prepare(
         "SELECT attempt_id FROM executor_attempts WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { attempt_id: string };
-    expect(invocation.attempt_id).toBe(`${RUN_ID}::preflight::dispatch`);
+    expect(attempt.attempt_id).toBe(`${RUN_ID}::preflight::dispatch`);
 
-    // The first round id is the invocation id suffixed with `::round-1`, equally
+    // The first round id is the attempt id suffixed with `::round-1`, equally
     // recomputable so re-entry never forks a second round.
     const round = db
       .prepare(

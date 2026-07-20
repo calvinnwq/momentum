@@ -694,7 +694,7 @@ describe("workflow run events", () => {
     db.prepare(
       `INSERT INTO executor_attempts
          (attempt_id, workflow_run_id, step_run_id, step_key,
-          executor_family, state, attempt, started_at, created_at, updated_at)
+          executor_family, state, attempt_number, started_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       attemptId,
@@ -711,7 +711,7 @@ describe("workflow run events", () => {
     db.prepare(
       `INSERT INTO executor_rounds
          (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-          executor_family, attempt, round_index, state, recovery_code,
+          executor_family, attempt_number, round_index, state, recovery_code,
           created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(

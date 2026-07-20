@@ -20,7 +20,7 @@ import {
   loadExecutorAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
@@ -61,7 +61,7 @@ import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
  *     records durable executor terminal evidence" — the spy proves M6 reached
  *     the (mocked) Linear write; the dispatch scaffold carries succeeded
  *     evidence and the real intent transitions `pending -> applied`.
- *   - "Re-running the daemon path for an already-terminal dispatch invocation
+ *   - "Re-running the daemon path for an already-terminal dispatch attempt
  *     does not duplicate the external write" — re-entry never re-issues the
  *     real M6 write (the spy is called exactly once across two ticks).
  *   - "Missing/unsafe configuration still fails closed with operator-visible
@@ -119,7 +119,7 @@ function openSeededDb(): MomentumDb {
 
 /**
  * Drive a dispatchable step through the production base dispatch so it lands
- * `running` with a `<run>::<step>::dispatch` invocation (`running`) + scaffold
+ * `running` with a `<run>::<step>::dispatch` attempt (`running`) + scaffold
  * round (`pending`) and a held dispatch lease — the exact substrate the
  * external-apply producer runs against.
  */
@@ -165,7 +165,7 @@ function stepState(db: MomentumDb): string {
 function dispatchRounds(db: MomentumDb) {
   return listExecutorRoundsForAttempt(
     db,
-    deriveDispatchInvocationId(RUN_ID, STEP_ID),
+    deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
   );
 }
 
@@ -359,11 +359,11 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(getUpdateIntentById(db, INTENT_ID)?.status).toBe("applied");
 
     // The dispatch scaffold carries the real M6 outcome as terminal evidence.
-    const invocation = loadExecutorAttempt(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("succeeded");
+    expect(attempt?.state).toBe("succeeded");
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("succeeded");
     expect(round?.summary).toContain(INTENT_ID);
@@ -380,7 +380,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
-  it("never re-issues the real external write once the dispatch invocation is terminal", async () => {
+  it("never re-issues the real external write once the dispatch attempt is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
     const repoPath = makeRepo(externalApplyAllowedPolicy());
@@ -402,7 +402,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     );
     expect(spy.calls).toHaveLength(1);
 
-    // A re-entered tick recognises the already-terminal invocation and NEVER
+    // A re-entered tick recognises the already-terminal attempt and NEVER
     // re-runs the real M6 write (no second mock-Linear mutation).
     const second = await executeAndReconcileDispatchedExternalApplyStep({
       db,
@@ -458,11 +458,11 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
 
     // The scaffold carries terminal manual-recovery evidence with the precise
     // M6 cause preserved for the operator — not a fabricated clean terminal.
-    const invocation = loadExecutorAttempt(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(attempt?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("manual_recovery_required");
     expect(round?.summary).toContain("policy_denied");

@@ -54,11 +54,11 @@ describe("workflow-gate vocabulary", () => {
     expect([...WORKFLOW_GATE_TYPES]).toEqual([...EXECUTOR_HUMAN_GATE_TYPES]);
   });
 
-  it("exposes the four gate target scopes (workflow -> step -> invocation -> round)", () => {
+  it("exposes the four gate target scopes (workflow -> step -> attempt -> round)", () => {
     expect([...WORKFLOW_GATE_SCOPES]).toEqual([
       "workflow",
       "step",
-      "invocation",
+      "attempt",
       "round"
     ]);
   });

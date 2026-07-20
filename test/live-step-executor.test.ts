@@ -98,7 +98,7 @@ function makeExecutorInput(
     runId: "wfrun-deadbeef",
     stepId: "implementation-step",
     kind: "implementation",
-    attempt: 1,
+    attemptNumber: 1,
     repoPath: "/tmp/momentum-repo",
     runDir: "/tmp/momentum-repo/.agent-workflows/wfrun-deadbeef",
     resultJsonPath:

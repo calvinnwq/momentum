@@ -612,7 +612,7 @@ function assertSingleShotRoundMatchesHost(
     stepRunId: host.stepRunId,
     stepKey: host.stepKey,
     executorFamily: family,
-    attempt: host.attemptNumber,
+    attemptNumber: host.attemptNumber,
     inputDigest: host.inputDigest,
     artifactRoot: host.artifactRoot,
   } as const;
@@ -685,8 +685,11 @@ export function singleShotDispatchBindingDetail(
     selection: selection ?? singleShotSelectionFromSdkConfig(config),
     hostBindingIdentity: hostBindingIdentity ?? null,
     start: {
+      // Frozen digest schema: the payload keys keep their pre-attempt-model
+      // wire names so binding digests recorded before the migration keep
+      // verifying. The keys never leave this hash.
       roundId: start.roundId,
-      attemptId: start.attemptId,
+      invocationId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
@@ -709,8 +712,11 @@ function legacySingleShotDispatchBindingDetail(
     family,
     config,
     start: {
+      // Frozen digest schema: the payload keys keep their pre-attempt-model
+      // wire names so binding digests recorded before the migration keep
+      // verifying. The keys never leave this hash.
       roundId: start.roundId,
-      attemptId: start.attemptId,
+      invocationId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,

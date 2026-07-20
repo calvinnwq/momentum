@@ -406,7 +406,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
     }
   });
 
-  it("is idempotent across repeated invocations", () => {
+  it("is idempotent across repeated attempts", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -754,7 +754,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
     }
   });
 
-  it("is idempotent across repeated invocations", () => {
+  it("is idempotent across repeated attempts", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -1598,7 +1598,7 @@ describe("runStartupRecovery", () => {
     }
   });
 
-  it("is idempotent across repeated invocations", () => {
+  it("is idempotent across repeated attempts", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -2213,7 +2213,7 @@ describe("recoverStaleDaemonRuns", () => {
     }
   });
 
-  it("is idempotent across repeated invocations", () => {
+  it("is idempotent across repeated attempts", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -2237,7 +2237,7 @@ describe("recoverStaleDaemonRuns", () => {
         DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
       );
       // recovery_status / finished_at were set on the first pass and not
-      // overwritten by the second invocation (no row matches state guard).
+      // overwritten by the second attempt (no row matches state guard).
       expect(stored?.finished_at).toBe(100_000);
     } finally {
       db.close();

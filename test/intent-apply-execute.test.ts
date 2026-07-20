@@ -1401,7 +1401,7 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
-    if (!firstCall) throw new Error("expected fetch invocation");
+    if (!firstCall) throw new Error("expected fetch attempt");
     expect(firstCall[0]).toBe(overrideEndpoint);
   });
 
@@ -1424,7 +1424,7 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
-    if (!firstCall) throw new Error("expected fetch invocation");
+    if (!firstCall) throw new Error("expected fetch attempt");
     expect(firstCall[0]).toBe(overrideEndpoint);
   });
 
@@ -1461,7 +1461,7 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
-    if (!firstCall) throw new Error("expected fetch invocation");
+    if (!firstCall) throw new Error("expected fetch attempt");
     expect(firstCall[0]).toBe("https://api.linear.app/graphql");
   });
 });

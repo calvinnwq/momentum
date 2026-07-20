@@ -724,7 +724,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         throw new Error("failed to park prior-attempt repo lock");
       }
       const otherInvocation = acquireRepoLock(db, {
-        repoRoot: "/repos/other-invocation-recovery",
+        repoRoot: "/repos/other-attempt-recovery",
         holder: "other-worker",
         goalId: runId,
         iteration: 2,
@@ -739,7 +739,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           now: at + 1,
         }).ok
       ) {
-        throw new Error("failed to park other-invocation repo lock");
+        throw new Error("failed to park other-attempt repo lock");
       }
 
       expect(

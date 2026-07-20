@@ -132,7 +132,7 @@ function round(
     stepRunId: "step-1",
     stepKey: "preflight",
     executorFamily: "one-shot",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "running",
     classification: null,

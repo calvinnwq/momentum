@@ -52,7 +52,7 @@ function makeInput(
     runId: "wfrun-real-0001",
     stepId: rest.stepId ?? `${kind}-step`,
     kind,
-    attempt: 1,
+    attemptNumber: 1,
     repoPath: "/tmp/momentum-repo",
     runDir: "/tmp/momentum-repo/.agent-workflows/wfrun-real-0001",
     resultJsonPath:

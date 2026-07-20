@@ -16,7 +16,7 @@ import {
  * ({@link WorkflowRunState}) into either a "defer" signal (the child is still in
  * flight, so the parent step must NOT finalize) or the
  * `WorkflowStepExecutorDispatchResult` evidence the existing terminalize bridge
- * (`terminalizeDispatchedExecutorInvocation`) consumes, so a dispatched
+ * (`terminalizeDispatchedExecutorAttempt`) consumes, so a dispatched
  * `subworkflow` step can record durable terminal executor evidence the RC-2
  * reconciliation seam finalizes exactly once — reusing the workflow-owned run
  * substrate rather than inventing a parallel runtime.

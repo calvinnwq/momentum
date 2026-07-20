@@ -34,7 +34,12 @@ import {
   type WorkflowRunDetail
 } from "./status.js";
 
-export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 1;
+/**
+ * Version 2 replaced the legacy `invocations` array (mutable reopened rows with
+ * an `attempt` counter) with immutable `attempts` (`attemptId` /
+ * `attemptNumber`), and re-keyed rounds by `attemptId` / `attemptNumber`.
+ */
+export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 2;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;

@@ -285,7 +285,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       // The adapter IS the durable owner of these: they must be populated.
       expect(countRows(db, "source_items")).toBe(2); // issue-a, issue-b (issue-c was dry-run only)
       expect(countRows(db, "source_snapshots")).toBe(3); // 2 creates + 1 update
-      expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per invocation, incl. dry-run
+      expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per attempt, incl. dry-run
 
       for (const table of FORBIDDEN_TABLES) {
         expect(

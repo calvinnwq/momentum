@@ -1095,7 +1095,7 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { state: string };
       expect(step.state).toBe("succeeded");
-      const invocation = after
+      const attempt = after
         .prepare(
           `SELECT state
            FROM executor_attempts
@@ -1103,7 +1103,7 @@ describe("momentum workflow run watch", () => {
               AND step_run_id = 'implementation'`,
         )
         .get(runId) as { state: string } | undefined;
-      expect(invocation?.state).toBe("succeeded");
+      expect(attempt?.state).toBe("succeeded");
       const lease = after
         .prepare(
           "SELECT released_at AS releasedAt FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
@@ -1138,7 +1138,7 @@ describe("momentum workflow run watch", () => {
         `CREATE TRIGGER fail_watch_invocation_insert
            BEFORE INSERT ON executor_attempts
            BEGIN
-             SELECT RAISE(ABORT, 'watch invocation insert failed');
+             SELECT RAISE(ABORT, 'watch attempt insert failed');
            END`,
       );
     } finally {
@@ -1163,7 +1163,7 @@ describe("momentum workflow run watch", () => {
     };
     expect(payload).toMatchObject({
       code: "data_dir_failed",
-      message: "watch invocation insert failed",
+      message: "watch attempt insert failed",
     });
 
     const after = openDb(dataDir);

@@ -63,8 +63,8 @@ function openTempDb(): MomentumDb {
 }
 
 // Foreign keys are enforced (node:sqlite defaults PRAGMA foreign_keys = ON), so
-// an invocation needs a real (workflow_run_id, step_run_id) and a round needs a
-// real invocation. Seed the minimal parent rows the fixtures point at.
+// an attempt needs a real (workflow_run_id, step_run_id) and a round needs a
+// real attempt. Seed the minimal parent rows the fixtures point at.
 function seedRunAndStep(
   db: MomentumDb,
   runId = "run-1",
@@ -79,14 +79,14 @@ function seedRunAndStep(
   ).run(runId, stepId);
 }
 
-// A seeded db with run-1 / step-1 present, ready for invocation inserts.
+// A seeded db with run-1 / step-1 present, ready for attempt inserts.
 function openSeededDb(): MomentumDb {
   const db = openTempDb();
   seedRunAndStep(db);
   return db;
 }
 
-// A seeded db with run-1 / step-1 and the inv-1 invocation present, ready for
+// A seeded db with run-1 / step-1 and the inv-1 attempt present, ready for
 // round inserts.
 function openRoundDb(): MomentumDb {
   const db = openSeededDb();
@@ -167,7 +167,7 @@ function makeInvocation(
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "pending",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: null,
     heartbeatAt: null,
     finishedAt: null,
@@ -185,7 +185,7 @@ function makeRound(
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: "goal-loop",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "pending",
     classification: null,
@@ -364,8 +364,8 @@ describe("persistExecutorDefinition", () => {
   });
 });
 
-describe("executor invocations", () => {
-  it("round-trips an invocation", () => {
+describe("executor attempts", () => {
+  it("round-trips an attempt", () => {
     const db = openSeededDb();
     try {
       const record = makeInvocation({
@@ -380,7 +380,7 @@ describe("executor invocations", () => {
     }
   });
 
-  it("refuses a duplicate invocation id and leaves the original untouched", () => {
+  it("refuses a duplicate attempt id and leaves the original untouched", () => {
     const db = openSeededDb();
     try {
       insertExecutorAttempt(db, makeInvocation({ state: "preparing" }), {
@@ -397,7 +397,7 @@ describe("executor invocations", () => {
     }
   });
 
-  it("rejects an unknown invocation state before writing", () => {
+  it("rejects an unknown attempt state before writing", () => {
     const db = openSeededDb();
     try {
       const bad = makeInvocation({
@@ -428,7 +428,7 @@ describe("executor invocations", () => {
     }
   });
 
-  it("does not clobber a concurrently changed invocation heartbeat", () => {
+  it("does not clobber a concurrently changed attempt heartbeat", () => {
     const db = openSeededDb();
     try {
       insertExecutorAttempt(db, makeInvocation({ state: "running" }), {
@@ -464,7 +464,7 @@ describe("executor invocations", () => {
     }
   });
 
-  it("throws when updating a missing invocation", () => {
+  it("throws when updating a missing attempt", () => {
     const db = openSeededDb();
     try {
       expect(() =>
@@ -520,7 +520,7 @@ describe("executor rounds", () => {
     }
   });
 
-  it("refuses two rounds with the same index in one invocation", () => {
+  it("refuses two rounds with the same index in one attempt", () => {
     const db = openRoundDb();
     try {
       insertExecutorRound(
@@ -542,7 +542,7 @@ describe("executor rounds", () => {
     }
   });
 
-  it("lists rounds for an invocation ordered by round index", () => {
+  it("lists rounds for an attempt ordered by round index", () => {
     const db = openRoundDb();
     try {
       insertExecutorRound(
@@ -571,11 +571,11 @@ describe("executor rounds", () => {
     }
   });
 
-  it("lists every round for a run across invocations ordered by step key then attempt and round index", () => {
+  it("lists every round for a run across attempts ordered by step key then attempt and round index", () => {
     const db = openRoundDb();
     try {
-      // A second step + invocation under the same run so the run-scoped reader
-      // has to aggregate rounds the invocation-scoped reader would never join.
+      // A second step + attempt under the same run so the run-scoped reader
+      // has to aggregate rounds the attempt-scoped reader would never join.
       db.prepare(
         `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
            VALUES ('run-1', 'step-2', 'preflight', 1, 1, 1)`,
@@ -624,14 +624,14 @@ describe("executor rounds", () => {
     }
   });
 
-  it("lists retry rounds in invocation order before round index", () => {
+  it("lists retry rounds in attempt order before round index", () => {
     const db = openRoundDb();
     try {
       insertExecutorAttempt(
         db,
         makeInvocation({
           attemptId: "inv-2",
-          attempt: 2,
+          attemptNumber: 2,
         }),
         { now: 2000 },
       );
@@ -650,7 +650,7 @@ describe("executor rounds", () => {
         makeRound({
           roundId: "attempt-2-round-0",
           attemptId: "inv-2",
-          attempt: 2,
+          attemptNumber: 2,
           roundIndex: 0,
         }),
         { now: 2100 },
@@ -660,7 +660,7 @@ describe("executor rounds", () => {
         makeRound({
           roundId: "attempt-2-round-1",
           attemptId: "inv-2",
-          attempt: 2,
+          attemptNumber: 2,
           roundIndex: 1,
         }),
         { now: 2200 },

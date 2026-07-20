@@ -20,7 +20,7 @@ import {
 } from "../src/core/executors/loop/reducer.js";
 
 describe("executor-loop-reducer vocabulary", () => {
-  it("exposes the invocation states pinned by the executor-loop contract", () => {
+  it("exposes the attempt states pinned by the executor-loop contract", () => {
     expect([...EXECUTOR_ATTEMPT_STATES].sort()).toEqual(
       [
         "pending",
@@ -55,7 +55,7 @@ describe("executor-loop-reducer vocabulary", () => {
     );
   });
 
-  it("flags the same terminal set for invocations and rounds", () => {
+  it("flags the same terminal set for attempts and rounds", () => {
     const expected = [
       "manual_recovery_required",
       "blocked",
@@ -175,7 +175,7 @@ describe("transitionExecutorAttempt", () => {
     }
   });
 
-  it("refuses to transition out of a terminal invocation state", () => {
+  it("refuses to transition out of a terminal attempt state", () => {
     for (const from of EXECUTOR_ATTEMPT_TERMINAL_STATES) {
       const result = transitionExecutorAttempt(from, "running");
       expect(result.ok, `${from} -> running`).toBe(false);
@@ -331,20 +331,20 @@ describe("executor-loop record shapes", () => {
   });
 
   it("models an ExecutorInvocation nested below a StepRun", () => {
-    const invocation: ExecutorAttemptRecord = {
+    const attempt: ExecutorAttemptRecord = {
       attemptId: "inv-1",
       workflowRunId: "run-1",
       stepRunId: "step-impl",
       stepKey: "implementation",
       executorFamily: "goal-loop",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000,
       heartbeatAt: 1_500,
       finishedAt: null,
     };
-    expect(invocation.state).toBe("running");
-    expect(invocation.executorFamily).toBe("goal-loop");
+    expect(attempt.state).toBe("running");
+    expect(attempt.executorFamily).toBe("goal-loop");
   });
 
   it("models an ExecutorRound carrying the common result schema fields", () => {
@@ -355,7 +355,7 @@ describe("executor-loop record shapes", () => {
       stepRunId: "step-impl",
       stepKey: "implementation",
       executorFamily: "goal-loop",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "succeeded",
       classification: "complete",

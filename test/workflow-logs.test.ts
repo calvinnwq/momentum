@@ -64,7 +64,7 @@ function makeInvocation(
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 10,
     heartbeatAt: 10,
     finishedAt: null,
@@ -82,7 +82,7 @@ function makeRound(
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
     classification: "complete",
@@ -245,7 +245,7 @@ describe("loadWorkflowRunLogs", () => {
     }
   });
 
-  it("orders rounds across invocations by step key then attempt and round index", () => {
+  it("orders rounds across attempts by step key then attempt and round index", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");

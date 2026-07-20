@@ -17,7 +17,7 @@ import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dis
  * NGX-496 (RC-3) — the pure half of the daemon-dispatchable external-apply
  * adapter: translate an M6 `executeExternalApply` outcome into the
  * `WorkflowStepExecutorDispatchResult` evidence the existing terminalize bridge
- * (`terminalizeDispatchedExecutorInvocation`) consumes, so a dispatched
+ * (`terminalizeDispatchedExecutorAttempt`) consumes, so a dispatched
  * external-apply step can record durable terminal executor evidence the RC-2
  * reconciliation seam finalizes exactly once — reusing the M6 write path rather
  * than inventing a second one.

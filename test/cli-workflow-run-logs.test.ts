@@ -73,7 +73,7 @@ function makeInvocation(runId: string): ExecutorAttemptRecord {
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 10,
     heartbeatAt: 10,
     finishedAt: null,
@@ -91,7 +91,7 @@ function makeRound(
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
     classification: "complete",
@@ -354,7 +354,7 @@ describe("momentum workflow run logs", () => {
           risk: string;
         };
       }>;
-      invocations: Array<{
+      attempts: Array<{
         attemptId: string;
         stepKey: string;
         executorFamily: string;
@@ -408,7 +408,7 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(1);
+    expect(payload.schemaVersion).toBe(2);
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-logs01");
     expect(payload.steps.map((s) => s.stepId)).toEqual(["implementation"]);
@@ -436,7 +436,7 @@ describe("momentum workflow run logs", () => {
         }),
       }),
     ]);
-    expect(payload.invocations).toEqual([
+    expect(payload.attempts).toEqual([
       expect.objectContaining({
         attemptId: "inv-1",
         stepKey: "implementation",
@@ -849,7 +849,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 1");
+    expect(result.stdout).toContain("Schema version: 2");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -864,7 +864,7 @@ describe("momentum workflow run logs", () => {
     );
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
-    expect(result.stdout).toContain("Executor invocations: 1");
+    expect(result.stdout).toContain("Executor attempts: 1");
     expect(result.stdout).toContain(
       "- inv-1 [implementation/running] attempt=1",
     );

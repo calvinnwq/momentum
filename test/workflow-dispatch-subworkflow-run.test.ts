@@ -20,7 +20,7 @@ import {
   listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
@@ -50,7 +50,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  *   - an ambiguous `canceled` / stuck `blocked` child parks the parent for manual
  *     recovery with operator-visible evidence (the fail-closed default for a
  *     recursive run);
- *   - re-entry over an already-terminal dispatch invocation NEVER re-runs the
+ *   - re-entry over an already-terminal dispatch attempt NEVER re-runs the
  *     child runner (no duplicate child run, no second terminalization);
  *   - the defer→mirror progression across ticks finalizes only once the child is
  *     terminal;
@@ -119,7 +119,7 @@ function approveAndClaim(
 
 /**
  * Drive a (dispatchable) step through the production base dispatch so it lands
- * `running` with a `<run>::<step>::dispatch` invocation (`running`) + scaffold
+ * `running` with a `<run>::<step>::dispatch` attempt (`running`) + scaffold
  * round (`pending`) and a held dispatch lease — the exact substrate the
  * subworkflow producer runs against. The base dispatcher is still standing in for
  * the family flip, so tests re-stamp the scaffold to `subworkflow` unless they
@@ -139,7 +139,7 @@ function dispatchStep(
   if (family === "subworkflow") {
     db.prepare(
       "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
-    ).run(deriveDispatchInvocationId(RUN_ID, stepId));
+    ).run(deriveDispatchAttemptId(RUN_ID, stepId, 1));
   }
 }
 
@@ -152,7 +152,7 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
   return listExecutorRoundsForAttempt(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId),
+    deriveDispatchAttemptId(RUN_ID, stepId, 1),
   );
 }
 
@@ -173,7 +173,7 @@ const EVIDENCE = {
 /**
  * A child runner whose call is counted so a test can prove the child run was
  * started/attached exactly once (or never), and never re-started after the
- * dispatch invocation is terminal. It returns a canned observation rather than
+ * dispatch attempt is terminal. It returns a canned observation rather than
  * driving a real child workflow runtime.
  */
 function countingChildRunner(observation: SubworkflowChildObservation): {
@@ -239,10 +239,10 @@ describe("executeAndReconcileDispatchedSubworkflowStep — defer (child in fligh
 
       expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.childDeferred);
       expect(runner.calls()).toBe(1);
-      // No terminal evidence: the dispatch invocation + step stay running and the
+      // No terminal evidence: the dispatch attempt + step stay running and the
       // dispatch lease stays held for a later tick to re-check the child.
       expect(
-        loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
           ?.state,
       ).toBe("running");
       expect(stepState(db)).toBe("running");
@@ -279,11 +279,11 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
       WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
-    const invocation = loadExecutorAttempt(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("succeeded");
+    expect(attempt?.state).toBe("succeeded");
     const rounds = dispatchRounds(db);
     expect(rounds).toHaveLength(1);
     expect(rounds[0]?.state).toBe("succeeded");
@@ -323,7 +323,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
     );
 
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("failed");
     expect(dispatchRounds(db)[0]?.state).toBe("failed");
@@ -392,7 +392,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(
@@ -432,11 +432,11 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
         WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
       );
 
-      const invocation = loadExecutorAttempt(
+      const attempt = loadExecutorAttempt(
         db,
-        deriveDispatchInvocationId(RUN_ID, STEP_ID),
+        deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
       );
-      expect(invocation?.state).toBe("manual_recovery_required");
+      expect(attempt?.state).toBe("manual_recovery_required");
       const round = dispatchRounds(db)[0];
       expect(round?.state).toBe("manual_recovery_required");
       expect(round?.summary).toContain(marker);
@@ -458,7 +458,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
 });
 
 describe("executeAndReconcileDispatchedSubworkflowStep — idempotent re-entry", () => {
-  it("never re-starts the child run once the dispatch invocation is terminal", async () => {
+  it("never re-starts the child run once the dispatch attempt is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
     const evidence = makeWritableEvidence();
@@ -579,7 +579,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — reconcile deferral", 
     // The child terminal is recorded as evidence; the step stays running with the
     // lease held so a later tick re-drives only the reconciliation.
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
@@ -588,10 +588,10 @@ describe("executeAndReconcileDispatchedSubworkflowStep — reconcile deferral", 
 });
 
 describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", () => {
-  it("refuses a step with no dispatch invocation and never starts a child run", async () => {
+  it("refuses a step with no dispatch attempt and never starts a child run", async () => {
     const db = openSeededDb();
     // No dispatch: an M9 direct-finalize / never-dispatched step writes no
-    // executor invocation, so the producer must refuse it untouched.
+    // executor attempt, so the producer must refuse it untouched.
     const runner = countingChildRunner(observe("succeeded"));
 
     const out = await executeAndReconcileDispatchedSubworkflowStep({
@@ -606,7 +606,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1)),
     ).toBeUndefined();
     expect(stepState(db)).toBe("pending");
   });
@@ -629,7 +629,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     expect(out.detail).toContain("one-shot");
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
