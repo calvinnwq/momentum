@@ -34,7 +34,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const INVOCATION_STATE_SET = new Set<string>(EXECUTOR_ATTEMPT_STATES);
+const ATTEMPT_STATE_SET = new Set<string>(EXECUTOR_ATTEMPT_STATES);
 
 function decide(
   overrides: Partial<DecideGoalLoopRoundInput> = {},
@@ -225,13 +225,13 @@ describe("attemptStateForRoundClassification", () => {
   ])("maps %s to the %s attempt state", (classification, expected) => {
     const state = attemptStateForRoundClassification(classification);
     expect(state).toBe(expected);
-    expect(INVOCATION_STATE_SET.has(state)).toBe(true);
+    expect(ATTEMPT_STATE_SET.has(state)).toBe(true);
   });
 
   it("maps every completion classification to a known attempt state", () => {
     for (const classification of EXECUTOR_COMPLETION_CLASSIFICATIONS) {
       const state = attemptStateForRoundClassification(classification);
-      expect(INVOCATION_STATE_SET.has(state)).toBe(true);
+      expect(ATTEMPT_STATE_SET.has(state)).toBe(true);
     }
   });
 });
@@ -1229,7 +1229,7 @@ describe("planGoalLoopRoundCheckpoints", () => {
 // ---------------------------------------------------------------------------
 // goal-loop executor adapter "below StepRun": deterministic attempt / round
 // identity materialization. These pure helpers turn a StepRun identity into the
-// durable ExecutorInvocation + per-round ExecutorRound identities, so every
+// durable ExecutorAttempt + per-round ExecutorRound identities, so every
 // caller mints reattachable ids the same way (contract "Heartbeat And Reattach":
 // "The daemon must be able to reattach using durable state alone.").
 // ---------------------------------------------------------------------------

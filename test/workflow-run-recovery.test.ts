@@ -723,7 +723,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       ) {
         throw new Error("failed to park prior-attempt repo lock");
       }
-      const otherInvocation = acquireRepoLock(db, {
+      const otherOwnerLock = acquireRepoLock(db, {
         repoRoot: "/repos/other-attempt-recovery",
         holder: "other-worker",
         goalId: runId,
@@ -732,10 +732,10 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         leaseExpiresAt: at + 30_000,
         now: at,
       });
-      if (!otherInvocation.ok) throw new Error(otherInvocation.reason);
+      if (!otherOwnerLock.ok) throw new Error(otherOwnerLock.reason);
       if (
         !markRepoLockNeedsManualRecovery(db, {
-          lockId: otherInvocation.lockId,
+          lockId: otherOwnerLock.lockId,
           now: at + 1,
         }).ok
       ) {
@@ -765,7 +765,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       expect(
         db
           .prepare("SELECT state FROM repo_locks WHERE id = ?")
-          .get(otherInvocation.lockId),
+          .get(otherOwnerLock.lockId),
       ).toEqual({ state: "needs_manual_recovery" });
       expect(
         acquireRepoLock(db, {
