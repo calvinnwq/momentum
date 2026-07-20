@@ -1102,6 +1102,24 @@ function createLiveStepHostBindingsResolver(
         path.basename(safety.repoSafety.verificationLogPath),
       );
       const promptPath = path.join(roundArtifactDirectory, "prompt.md");
+      // Profiles must be safe on case-insensitive filesystems too.
+      const resultPathIdentity = path.normalize(roundResultPath).toLowerCase();
+      const collidingArtifact = Object.entries({
+        executorLog: roundLogPath,
+        verificationLog: roundVerificationPath,
+        finalizationEvidence: `${roundVerificationPath}.finalization.json`,
+        prompt: promptPath,
+      }).find(
+        ([, artifactPath]) =>
+          path.normalize(artifactPath).toLowerCase() === resultPathIdentity,
+      );
+      if (collidingArtifact !== undefined) {
+        repoOwnership.settle(false);
+        throw new RegisteredExecutorHostBindingsError(
+          "invalid_input",
+          `goal-loop result_file collides with daemon-owned artifact path: ${collidingArtifact[0]}`,
+        );
+      }
       const objective = loadWorkflowRunObjective(context.db, claim.runId);
       if (objective === null) {
         repoOwnership.settle(false);

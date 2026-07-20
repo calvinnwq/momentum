@@ -985,6 +985,97 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   }, 15_000);
 
+  it.each([
+    "executor.log",
+    "prompt.md",
+    "Prompt.md",
+    "verification.log",
+    "verification.log.finalization.json",
+  ] as const)(
+    "refuses a native goal-loop result file that collides with daemon artifact %s",
+    async (resultFile) => {
+      const repoPath = initNativeDispatchRepo();
+      const baseCommitCount = execFileSync(
+        "git",
+        ["-C", repoPath, "rev-list", "--count", "HEAD"],
+        { encoding: "utf8" },
+      ).trim();
+      const runId = `native-goal-loop-artifact-collision-${resultFile.replaceAll(".", "-")}`;
+      const profilePath = writeGoalLoopDispatchProfile(tempDir(), {
+        resultFile,
+      });
+      const definition: WorkflowDefinition = {
+        key: "native-goal-loop-artifact-collision-workflow",
+        title: "Native Goal-loop Artifact Collision Workflow",
+        version: 1,
+        steps: [
+          {
+            key: "implementation",
+            kind: "implementation",
+            executor: "goal-loop",
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+      const db = openDb(tempDir());
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath,
+        objective:
+          "Reject colliding daemon artifacts before the native runner launches",
+        now: NOW,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+      ).run(runId);
+      const claim = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "implementation",
+        holder: "native-goal-loop-artifact-collision-worker",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+      });
+      if (!claim.ok) throw new Error(claim.reason);
+      const production = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!production.ok) throw new Error(production.message);
+
+      await production.dispatch(claim.claim, {
+        db,
+        workerId: "native-goal-loop-artifact-collision-worker",
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({
+        state: "manual_recovery_required",
+        recovery_code: "invalid_input",
+      });
+      expect(
+        fs.existsSync(
+          path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        ),
+      ).toBe(false);
+      expect(
+        execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
+          encoding: "utf8",
+        }).trim(),
+      ).toBe(baseCommitCount);
+      db.close();
+    },
+  );
+
   it("rolls back a second native goal-loop round when its binding cannot be persisted", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeGoalLoopDispatchProfile(tempDir());
