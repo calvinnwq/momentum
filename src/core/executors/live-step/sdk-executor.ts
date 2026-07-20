@@ -254,8 +254,21 @@ function decisionForResult(
 }
 
 function parseDurableDecision(detail: string): DurableLiveStepDecision {
-  const parsed = JSON.parse(detail) as DurableLiveStepDecision;
-  return parsed;
+  const parsed = JSON.parse(detail) as DurableLiveStepDecision & {
+    recommendedInvocationState?: DurableLiveStepDecision["recommendedAttemptState"];
+  };
+  // Legacy reader: completion checkpoints recorded before the attempt/round
+  // migration serialized the decision with `recommendedInvocationState`, and
+  // the migration preserves checkpoint payloads verbatim.
+  return {
+    recommendation: parsed.recommendation,
+    recommendedRoundState: parsed.recommendedRoundState,
+    recommendedAttemptState:
+      parsed.recommendedAttemptState ?? parsed.recommendedInvocationState,
+    recoveryCode: parsed.recoveryCode,
+    humanGate: parsed.humanGate,
+    reason: parsed.reason,
+  };
 }
 
 /**

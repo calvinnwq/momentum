@@ -3088,6 +3088,110 @@ describe("executor registration and SDK dispatch", () => {
     });
   });
 
+  it("replays a pre-migration mechanism_completed decision keyed by the legacy attempt state", async () => {
+    // SDK-05 serialized the durable decision with `recommendedInvocationState`
+    // and the migration preserves checkpoint payloads verbatim, so the replay
+    // reader must normalize the legacy key instead of stranding the round.
+    const db = openDb(tempDir());
+    const definition: WorkflowDefinition = {
+      key: "legacy-live-sdk-workflow",
+      title: "Legacy Live SDK Workflow",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "legacy-live-sdk-run",
+      repoPath: "/repos/fixture",
+      objective: "Replay pre-migration completion evidence",
+      now: NOW,
+    });
+    insertExecutorAttempt(
+      db,
+      {
+        attemptId: "legacy-live-sdk-attempt",
+        workflowRunId: "legacy-live-sdk-run",
+        stepRunId: "preflight",
+        stepKey: "preflight",
+        executorFamily: "one-shot",
+        state: "running",
+        attemptNumber: 1,
+        startedAt: NOW,
+        heartbeatAt: NOW,
+        finishedAt: null,
+      },
+      { now: NOW },
+    );
+    const executor = new LiveStepSdkExecutor(
+      "one-shot",
+      liveStepBuiltInConfigSchema("one-shot"),
+    );
+    let runs = 0;
+    const hostBindings = {
+      repoPath: "/repos/fixture",
+      run: () => {
+        runs += 1;
+        return {
+          ok: true as const,
+          result: {
+            state: "succeeded" as const,
+            summary: "bounded work completed",
+            checkpoints: [],
+            artifacts: [],
+            resultDigest: "sha256:result",
+            errorCode: null,
+            errorMessage: null,
+            retryHint: null,
+            recoveryHint: null,
+          },
+          executorLogPath: "/tmp/executor.log",
+          resultJsonPath: "/tmp/result.json",
+        };
+      },
+    };
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: "legacy-live-sdk-attempt",
+      now: () => NOW + 1,
+    });
+    await executor.tick({
+      state: envelope.snapshot(),
+      config: {},
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+    expect(runs).toBe(1);
+    db.prepare(
+      `UPDATE executor_checkpoints
+          SET detail = REPLACE(detail, 'recommendedAttemptState', 'recommendedInvocationState')
+        WHERE round_id = ? AND stage = 'mechanism_completed'`,
+    ).run("legacy-live-sdk-attempt::round-1");
+
+    const replayed = await driveExecutorTicks({
+      db,
+      attemptId: "legacy-live-sdk-attempt",
+      executor,
+      config: {},
+      hostBindings,
+      now: () => NOW + 2,
+    });
+    expect(runs).toBe(1);
+    expect(replayed.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "complete",
+    });
+  });
+
   it("reattaches a profile-backed built-in from mechanism_completed without rerunning", async () => {
     const db = openDb(tempDir());
     const definition: WorkflowDefinition = {
