@@ -277,7 +277,8 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // production path (preflight resolves to the one-shot family).
     const attempt = db
       .prepare(
-        `SELECT attempt_id, step_run_id, step_key, executor_family, state, attempt
+        `SELECT attempt_id, step_run_id, step_key, executor_family, state,
+                attempt_number AS attempt
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
@@ -328,16 +329,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: NOW + 1 });
 
-    // The attempt id is the deterministic `<run>::<step>::dispatch` triple,
+    // The attempt id is the deterministic `<run>::<step>::attempt-1` triple,
     // not a random handle: it is recomputable from durable state (so idempotent
-    // re-entry finds the same row) and the `::dispatch` namespace keeps it
-    // distinct from a future landed adapter's reattachable attempt id.
+    // re-entry finds the same row) and each retry derives the next immutable
+    // attempt number instead of reopening this row.
     const attempt = db
       .prepare(
         "SELECT attempt_id FROM executor_attempts WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { attempt_id: string };
-    expect(attempt.attempt_id).toBe(`${RUN_ID}::preflight::dispatch`);
+    expect(attempt.attempt_id).toBe(`${RUN_ID}::preflight::attempt-1`);
 
     // The first round id is the attempt id suffixed with `::round-1`, equally
     // recomputable so re-entry never forks a second round.
@@ -346,7 +347,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         "SELECT round_id, round_index FROM executor_rounds WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { round_id: string; round_index: number };
-    expect(round.round_id).toBe(`${RUN_ID}::preflight::dispatch::round-1`);
+    expect(round.round_id).toBe(`${RUN_ID}::preflight::attempt-1::round-1`);
     expect(round.round_index).toBe(1);
   });
 

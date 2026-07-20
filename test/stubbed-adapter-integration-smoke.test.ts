@@ -208,7 +208,8 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
 
       const attempt = db
         .prepare(
-          `SELECT workflow_run_id, step_key, executor_family, state, attempt
+          `SELECT workflow_run_id, step_key, executor_family, state,
+                  attempt_number AS attempt
              FROM executor_attempts WHERE workflow_run_id = ?`,
         )
         .get(runId) as Record<string, unknown>;
