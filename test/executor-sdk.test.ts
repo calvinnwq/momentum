@@ -808,7 +808,7 @@ describe("executor SDK core contract", () => {
     const round = emptyRound(attempt, "mirroring_external_state");
     envelope.facade.startRound(roundStartForSdk(round));
     db.exec(`
-      CREATE TRIGGER fail_invocation_settlement
+      CREATE TRIGGER fail_attempt_settlement
       BEFORE UPDATE ON executor_attempts
       BEGIN
         SELECT RAISE(ABORT, 'forced attempt settlement failure');

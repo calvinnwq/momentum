@@ -160,7 +160,7 @@ function approveAndClaim(
   return claim.claim;
 }
 
-function countInvocations(db: MomentumDb, runId: string): number {
+function countAttempts(db: MomentumDb, runId: string): number {
   const row = db
     .prepare(
       "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
@@ -464,7 +464,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
@@ -493,7 +493,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(second.status).toBe(
       WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
-    expect(countInvocations(db, RUN_ID)).toBe(1);
+    expect(countAttempts(db, RUN_ID)).toBe(1);
     const rounds = db
       .prepare(
         "SELECT COUNT(*) AS n FROM executor_rounds WHERE workflow_run_id = ?",
@@ -535,7 +535,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     const lease = getWorkflowLease(db, RUN_ID, "dispatch");
     expect(lease?.releasedAt).toBeNull();
 
-    expect(countInvocations(db, RUN_ID)).toBe(1);
+    expect(countAttempts(db, RUN_ID)).toBe(1);
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
 
@@ -563,7 +563,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
   });
 
   it("routes an invalid executor name (corrupt step definition) to manual recovery", () => {
@@ -607,7 +607,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
@@ -646,7 +646,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
@@ -679,7 +679,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
@@ -712,7 +712,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     // The dispatch lease is still released so the run is not held busy on a no-op,
     // no executor scaffold was created, and the orphaned step was not advanced.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 });
@@ -736,7 +736,7 @@ describe("executeWorkflowStepDispatch — safety", () => {
     expect(result.status).toBe(
       WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
     );
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     // The dispatch lease is released so the run is not held busy on a no-op.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });

@@ -450,16 +450,16 @@ describe("NGX-372 full adapter E2E proof", () => {
       });
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
-      const scaffoldInvocationId = `${runId}::preflight::dispatch`;
-      const scaffoldInvocation = loadExecutorAttempt(
+      const scaffoldAttemptId = `${runId}::preflight::attempt-1`;
+      const scaffoldAttempt = loadExecutorAttempt(
         db,
-        scaffoldInvocationId,
+        scaffoldAttemptId,
       );
-      expect(scaffoldInvocation?.executorFamily).toBe("one-shot");
-      expect(scaffoldInvocation?.state).toBe("running");
+      expect(scaffoldAttempt?.executorFamily).toBe("one-shot");
+      expect(scaffoldAttempt?.state).toBe("running");
       const scaffoldRound = loadExecutorRound(
         db,
-        `${scaffoldInvocationId}::round-1`,
+        `${scaffoldAttemptId}::round-1`,
       );
       expect(scaffoldRound?.state).toBe("pending");
       // The scaffold carries no fabricated evidence before the mechanism runs.
@@ -514,19 +514,19 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(finalize.round.round.changedFiles).toEqual(["src/feature.ts"]);
 
       // Durable below StepRun: a single reattachable attempt + its one round.
-      const finalizeInvocationId = singleShotAttemptId(
+      const finalizeAttemptId = singleShotAttemptId(
         runId,
         "postflight",
         "one-shot",
         1,
       );
-      expect(finalize.attempt.attemptId).toBe(finalizeInvocationId);
-      expect(loadExecutorAttempt(db, finalizeInvocationId)).toEqual(
+      expect(finalize.attempt.attemptId).toBe(finalizeAttemptId);
+      expect(loadExecutorAttempt(db, finalizeAttemptId)).toEqual(
         finalize.attempt,
       );
-      const finalizeRoundId = singleShotRoundId(finalizeInvocationId);
+      const finalizeRoundId = singleShotRoundId(finalizeAttemptId);
       expect(
-        listExecutorRoundsForAttempt(db, finalizeInvocationId).map(
+        listExecutorRoundsForAttempt(db, finalizeAttemptId).map(
           (r) => r.state,
         ),
       ).toEqual(["succeeded"]);
@@ -568,13 +568,13 @@ describe("NGX-372 full adapter E2E proof", () => {
           definition: CODING_WORKFLOW_DEFINITION.key,
         },
         dispatchScaffold: {
-          attemptId: scaffoldInvocationId,
-          executorFamily: scaffoldInvocation?.executorFamily ?? null,
-          attemptState: scaffoldInvocation?.state ?? null,
+          attemptId: scaffoldAttemptId,
+          executorFamily: scaffoldAttempt?.executorFamily ?? null,
+          attemptState: scaffoldAttempt?.state ?? null,
           roundState: scaffoldRound?.state ?? null,
         },
         finalization: {
-          attemptId: finalizeInvocationId,
+          attemptId: finalizeAttemptId,
           attemptState: finalize.attempt.state,
           roundState: finalize.round.round.state,
           verificationStatus: finalize.round.round.verificationStatus,

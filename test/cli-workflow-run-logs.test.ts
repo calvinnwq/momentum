@@ -65,7 +65,7 @@ async function run(argv: string[]): Promise<RunResult> {
   return { code, stdout, stderr };
 }
 
-function makeInvocation(runId: string): ExecutorAttemptRecord {
+function makeAttempt(runId: string): ExecutorAttemptRecord {
   return {
     attemptId: "inv-1",
     workflowRunId: runId,
@@ -184,7 +184,7 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
        VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
   ).run(runId);
-  insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
+  insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
   insertExecutorRound(db, makeRound(runId), { now: 1 });
   insertExecutorArtifact(db, makeArtifact(runId), { now: 5 });
   insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -522,7 +522,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
 
       const cases: Array<
         [
@@ -717,7 +717,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {
@@ -785,7 +785,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {

@@ -555,12 +555,12 @@ describe("momentum workflow run watch", () => {
         { stepId: "merge-cleanup", state: "pending" },
         { stepId: "linear-refresh", state: "pending" },
       ]);
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(1);
+      expect(attemptCount.count).toBe(1);
     } finally {
       after.close();
     }
@@ -616,12 +616,12 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { state: string };
       expect(step.state).toBe("approved");
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(0);
+      expect(attemptCount.count).toBe(0);
       const leaseCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
@@ -689,12 +689,12 @@ describe("momentum workflow run watch", () => {
           )
           .get(runId, target.stepId) as { state: string };
         expect(step.state).toBe("approved");
-        const invocationCount = after
+        const attemptCount = after
           .prepare(
             "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId) as { count: number };
-        expect(invocationCount.count).toBe(0);
+        expect(attemptCount.count).toBe(0);
         const leaseCount = after
           .prepare(
             "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'",
@@ -855,12 +855,12 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { count: number };
       expect(leaseCount.count).toBe(0);
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(0);
+      expect(attemptCount.count).toBe(0);
     } finally {
       after.close();
     }
@@ -931,12 +931,12 @@ describe("momentum workflow run watch", () => {
 
     const after = openDb(dataDir);
     try {
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(0);
+      expect(attemptCount.count).toBe(0);
     } finally {
       after.close();
     }
@@ -1033,12 +1033,12 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { state: string };
       expect(step.state).toBe("approved");
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(0);
+      expect(attemptCount.count).toBe(0);
     } finally {
       after.close();
     }
@@ -1135,7 +1135,7 @@ describe("momentum workflow run watch", () => {
         "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'",
       ).run(runId);
       db.exec(
-        `CREATE TRIGGER fail_watch_invocation_insert
+        `CREATE TRIGGER fail_watch_attempt_insert
            BEFORE INSERT ON executor_attempts
            BEGIN
              SELECT RAISE(ABORT, 'watch attempt insert failed');
@@ -1266,12 +1266,12 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { state: string };
       expect(step.state).toBe("approved");
-      const invocationCount = after
+      const attemptCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { count: number };
-      expect(invocationCount.count).toBe(0);
+      expect(attemptCount.count).toBe(0);
     } finally {
       after.close();
     }

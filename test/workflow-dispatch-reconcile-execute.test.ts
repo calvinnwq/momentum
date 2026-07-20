@@ -169,7 +169,7 @@ function insertRetryAttemptRow(
 }
 
 /** Drive the dispatch attempt to a terminal executor-attempt state. */
-function driveInvocationTerminal(
+function driveAttemptTerminal(
   db: MomentumDb,
   stepId: string,
   state: ExecutorAttemptState,
@@ -200,7 +200,7 @@ function stepRow(
   };
 }
 
-function countInvocations(db: MomentumDb, runId: string = RUN_ID): number {
+function countAttempts(db: MomentumDb, runId: string = RUN_ID): number {
   const row = db
     .prepare(
       "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
@@ -227,7 +227,7 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
     it(`finalizes the step ${stepState} from a terminal ${attemptState} attempt`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", attemptState);
+      driveAttemptTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -255,7 +255,7 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
 
       // The seam reads executor evidence but never writes executor rows — the
       // dispatch attempt is left in its terminal state, unchanged.
-      expect(countInvocations(db)).toBe(1);
+      expect(countAttempts(db)).toBe(1);
       expect(
         loadExecutorAttempt(db, dispatchAttemptId("preflight"))?.state,
       ).toBe(attemptState);
@@ -296,7 +296,7 @@ describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual
     it(`parks the run for manual recovery on a terminal ${attemptState} attempt`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", attemptState);
+      driveAttemptTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -339,7 +339,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not double-finalize or duplicate writes on re-entry", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
 
     const first = reconcileDispatchedWorkflowStep({
       db,
@@ -373,7 +373,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     db.prepare(
       "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
     ).run(dispatchAttemptId("preflight"));
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
     if (!oldLease) throw new Error("test setup: missing dispatch lease");
     releaseWorkflowLease(db, {
@@ -411,7 +411,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     db.prepare(
       "UPDATE executor_attempts SET executor_family = 'fixture-executor' WHERE attempt_id = ?",
     ).run(dispatchAttemptId("preflight"));
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
     if (!oldLease) throw new Error("test setup: missing dispatch lease");
     releaseWorkflowLease(db, {
@@ -450,7 +450,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not release a newer dispatch lease while reconciling old terminal evidence", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
     finishWorkflowStep(db, {
       runId: RUN_ID,
       stepId: "preflight",
@@ -492,7 +492,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not open a duplicate manual-recovery gate on re-entry", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "blocked");
+    driveAttemptTerminal(db, "preflight", "blocked");
 
     reconcileDispatchedWorkflowStep({
       db,
@@ -514,7 +514,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("reuses an unresolved legacy recovery gate from a later attempt", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
+    driveAttemptTerminal(db, "preflight", "manual_recovery_required");
     insertRetryAttemptRow(
       db,
       "preflight",
@@ -554,7 +554,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("opens a new gate when a retry reaches the same recovery state", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
+    driveAttemptTerminal(db, "preflight", "manual_recovery_required");
     reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
@@ -605,7 +605,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not park manual recovery over an already-terminal step", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "blocked");
+    driveAttemptTerminal(db, "preflight", "blocked");
     finishWorkflowStep(db, {
       runId: RUN_ID,
       stepId: "preflight",
@@ -647,7 +647,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
       state: "succeeded",
       now: NOW + 2,
     });
-    expect(countInvocations(db)).toBe(0);
+    expect(countAttempts(db)).toBe(0);
 
     const result = reconcileDispatchedWorkflowStep({
       db,
@@ -662,7 +662,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     // both finalize the same step.
     expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.notDispatched);
     expect(stepRow(db, "preflight").state).toBe("succeeded");
-    expect(countInvocations(db)).toBe(0);
+    expect(countAttempts(db)).toBe(0);
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
@@ -672,7 +672,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     // The dispatch attempt reports a clean `succeeded`...
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
     // ...but the step was already moved to a DIFFERENT terminal (e.g. an operator
     // cancel) out of band before reconciliation runs.
     finishWorkflowStep(db, {

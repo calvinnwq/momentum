@@ -80,7 +80,7 @@ describe("repo internal docs boundary", () => {
     const spec = readDoc("SPEC.md");
     for (const phrase of [
       "WorkflowDefinition",
-      "ExecutorInvocation",
+      "ExecutorAttempt",
       "external-apply",
       "subworkflow",
       "coding workflow runtime",

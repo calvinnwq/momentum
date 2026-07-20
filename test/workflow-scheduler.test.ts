@@ -2660,13 +2660,12 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "delegate-prior-attempt-handoff";
       const stepId = "implementation";
-      const { envelope, attemptId, roundId } =
-        seedCheckpointedDelegateHandoff(
-          db,
-          runId,
-          stepId,
-          DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
-        );
+      const { attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "complete",
@@ -2675,14 +2674,35 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         humanGate: null,
         finishedAt: NOW,
       });
-      db.prepare(
-        `UPDATE executor_attempts
-            SET attempt = 2, state = 'running', finished_at = NULL
-          WHERE attempt_id = ?`,
-      ).run(attemptId);
-      envelope.facade.startRound({
-        roundId: `${attemptId}::round-2`,
-        attemptId,
+      updateExecutorAttemptState(db, attemptId, "succeeded", {
+        finishedAt: NOW,
+        now: NOW,
+      });
+      const retryAttemptId = deriveDispatchAttemptId(runId, stepId, 2);
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: retryAttemptId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executorFamily: "delegate-supervisor",
+          state: "running",
+          attemptNumber: 2,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      const retryEnvelope = createDurableExecutorEnvelope({
+        db,
+        attemptId: retryAttemptId,
+        now: () => NOW,
+      });
+      retryEnvelope.facade.startRound({
+        roundId: `${retryAttemptId}::round-2`,
+        attemptId: retryAttemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
@@ -2771,8 +2791,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "unclassified-delegate-gate";
       const stepId = "implementation";
-      const { envelope, attemptId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       envelope.applyDaemonDecision(
         {
           roundId,
@@ -2999,8 +3022,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "waiting-operator-gate-recovery";
       const stepId = "implementation";
-      const { envelope, attemptId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       const decisionId = `${roundId}::decision`;
       envelope.facade.recordDecision(roundId, {
         decisionId,
@@ -3082,8 +3108,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "interrupted-delegate-poll";
       const stepId = "implementation";
-      const { envelope, attemptId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "continue",
@@ -3191,8 +3220,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "completed-delegate-poll";
       const stepId = "implementation";
-      const { envelope, attemptId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "continue",

@@ -330,7 +330,7 @@ describe("executor-loop record shapes", () => {
     expect(def.maxRounds).toBe(8);
   });
 
-  it("models an ExecutorInvocation nested below a StepRun", () => {
+  it("models an ExecutorAttempt nested below a StepRun", () => {
     const attempt: ExecutorAttemptRecord = {
       attemptId: "inv-1",
       workflowRunId: "run-1",

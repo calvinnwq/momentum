@@ -2291,14 +2291,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     const db = openDb(dataDir);
     try {
-      const invocationCount = (
+      const attemptCount = (
         db
           .prepare(
             "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId) as { count: number }
       ).count;
-      expect(invocationCount).toBe(0);
+      expect(attemptCount).toBe(0);
 
       const preflight = db
         .prepare(

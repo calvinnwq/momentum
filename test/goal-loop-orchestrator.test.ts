@@ -597,7 +597,7 @@ describe("runGoalLoopRound — checkpoint stream", () => {
 
 // Like openRoundDb, but does NOT pre-seed the attempt: the attempt driver
 // inserts it itself. Seeds only the FK parent run/step rows.
-function openInvocationDb(): MomentumDb {
+function openAttemptDb(): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
     "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
@@ -609,7 +609,7 @@ function openInvocationDb(): MomentumDb {
   return db;
 }
 
-function buildInvocation(): ExecutorAttemptRecord {
+function buildAttempt(): ExecutorAttemptRecord {
   return {
     attemptId: "inv-1",
     workflowRunId: "run-1",
@@ -661,10 +661,10 @@ function planRoundFor(
 
 describe("runGoalLoopAttempt — multi-round completion", () => {
   it("runs rounds until one recommends completion, then terminalizes the attempt succeeded", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 3),
       // Rounds 0 and 1 commit but are not complete (continue); round 2 completes.
       runRound: (round) =>
@@ -701,10 +701,10 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
   });
 
   it("persists distinct learning evidence for every completed round", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 2),
       runRound: (round) => ({
         result: runnerResult({
@@ -726,11 +726,11 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
   });
 
   it("inserts the durable running attempt before the first round runs", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     let stateDuringFirstRound: string | undefined;
     runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 3),
       runRound: (round) => {
         if (round.roundIndex === 0) {
@@ -748,10 +748,10 @@ describe("runGoalLoopAttempt — multi-round completion", () => {
 
 describe("runGoalLoopAttempt — quota pause", () => {
   it("pauses the attempt at waiting_operator when the round budget exhausts without completion", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 2),
       // Every round commits progress but never recommends completion.
       runRound: () => ({
@@ -778,10 +778,10 @@ describe("runGoalLoopAttempt — quota pause", () => {
 
 describe("runGoalLoopAttempt — repo-safety boundaries", () => {
   it("terminalizes the attempt manual_recovery_required after a missing-result round", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 3),
       runRound: () => ({ result: null, finalize: RESULT_MISSING })
     });
@@ -798,10 +798,10 @@ describe("runGoalLoopAttempt — repo-safety boundaries", () => {
   });
 
   it("keeps looping after a verification-failure reset while budget remains, then completes", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopAttempt({
       db,
-      attempt: buildInvocation(),
+      attempt: buildAttempt(),
       planRound: (roundIndex) => planRoundFor(roundIndex, 3),
       // Round 0 is reset by a verification failure (continue, not complete);
       // round 1 commits and recommends completion.
@@ -831,11 +831,11 @@ describe("runGoalLoopAttempt — repo-safety boundaries", () => {
 
 describe("runGoalLoopAttempt — planner contract", () => {
   it("throws when the planner returns a round whose index does not match the loop index", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     expect(() =>
       runGoalLoopAttempt({
         db,
-        attempt: buildInvocation(),
+        attempt: buildAttempt(),
         // Always returns the round-0 plan, so the second iteration's index (1)
         // would disagree with the start's roundIndex (0).
         planRound: () => planRoundFor(0, 3),
@@ -853,7 +853,7 @@ describe("runGoalLoopAttempt — planner contract", () => {
 // ---------------------------------------------------------------------------
 //
 // The single entrypoint a daemon/scheduler calls with a StepRun identity: it
-// materializes the durable goal-loop ExecutorInvocation (deterministic id) and
+// materializes the durable goal-loop ExecutorAttempt (deterministic id) and
 // the per-round ExecutorRound identities from that StepRun + the resolved
 // selection, then drives the whole attempt through runGoalLoopAttempt. It
 // owns the deterministic, reattachable id scheme so callers never reinvent it.
@@ -885,7 +885,7 @@ function roundInputsFor(roundIndex: number): GoalLoopRoundRuntimeInputs {
 
 describe("runGoalLoopStep — attempt/round materialization", () => {
   it("materializes the attempt + rounds from a StepRun identity and drives to completion", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopStep({
       db,
       workflowRunId: "run-1",
@@ -931,7 +931,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
   });
 
   it("mints deterministic, reattachable attempt and round ids and freezes the resolved selection + runtime inputs", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopStep({
       db,
       workflowRunId: "run-1",
@@ -965,7 +965,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
   });
 
   it("passes prior durable rounds to the next input resolver so learnings can shape resume input", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const observedPriorLearnings: string[][] = [];
     const result = runGoalLoopStep({
       db,
@@ -1008,7 +1008,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
   });
 
   it("inserts the materialized attempt before the first round runs", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const attemptId = goalLoopAttemptId("run-1", "step-1", 1);
     let stateDuringFirstRound: string | undefined;
     runGoalLoopStep({
@@ -1034,7 +1034,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
   });
 
   it("routes a missing-result round straight to manual recovery and terminalizes the attempt", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const result = runGoalLoopStep({
       db,
       workflowRunId: "run-1",
@@ -1085,7 +1085,7 @@ describe("runGoalLoopStep — single-owner enforcement", () => {
   }
 
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const first = dispatch(db, 1);
     const attemptId = goalLoopAttemptId("run-1", "step-1", 1);
 
@@ -1107,7 +1107,7 @@ describe("runGoalLoopStep — single-owner enforcement", () => {
   });
 
   it("mints a distinct, independent attempt for a fresh re-run attempt", () => {
-    const db = openInvocationDb();
+    const db = openAttemptDb();
     const first = dispatch(db, 1);
     const second = dispatch(db, 2);
 

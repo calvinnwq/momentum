@@ -199,12 +199,12 @@ function seedForbiddenTables(db: MomentumDb): void {
     INSERT INTO executor_attempts
       (attempt_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
       VALUES
-      ('invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
+      ('attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
 
     INSERT INTO executor_rounds
       (round_id, attempt_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
       VALUES
-      ('round_existing', 'invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
+      ('round_existing', 'attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
 
     INSERT INTO executor_artifacts
       (artifact_id, round_id, artifact_class, path, digest, created_at)
@@ -229,7 +229,7 @@ function seedForbiddenTables(db: MomentumDb): void {
     INSERT INTO workflow_gates
       (gate_id, workflow_run_id, step_run_id, attempt_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
       VALUES
-      ('gate_existing', 'workflow_run_existing', 'step_existing', 'invocation_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
+      ('gate_existing', 'workflow_run_existing', 'step_existing', 'attempt_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
 
     INSERT INTO evidence_records
       (id, source, type, occurred_at, summary, goal_id, ingest_key, created_at, updated_at)

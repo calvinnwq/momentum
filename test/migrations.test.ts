@@ -1644,7 +1644,7 @@ describe("applyQueueMigrations", () => {
       ).run(runId, stepId);
     }
 
-    function seedInvocation(db: DatabaseSync): void {
+    function seedAttempt(db: DatabaseSync): void {
       seedRunAndStep(db);
       db.prepare(
         `INSERT INTO executor_attempts
@@ -1704,7 +1704,7 @@ describe("applyQueueMigrations", () => {
           );
         }
 
-        const invocationCols = getColumns(db, "executor_attempts").map(
+        const attemptCols = getColumns(db, "executor_attempts").map(
           (row) => row.name,
         );
         for (const col of [
@@ -1722,7 +1722,7 @@ describe("applyQueueMigrations", () => {
           "updated_at",
         ]) {
           expect(
-            invocationCols,
+            attemptCols,
             `missing executor_attempts column: ${col}`,
           ).toContain(col);
         }
@@ -1795,7 +1795,7 @@ describe("applyQueueMigrations", () => {
       const db = openDb(dataDir);
       try {
         db.exec("PRAGMA foreign_keys = ON");
-        seedInvocation(db);
+        seedAttempt(db);
         const insertRound = db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
@@ -1819,7 +1819,7 @@ describe("applyQueueMigrations", () => {
       const db = openDb(dataDir);
       try {
         db.exec("PRAGMA foreign_keys = ON");
-        seedInvocation(db);
+        seedAttempt(db);
         db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
@@ -2011,11 +2011,11 @@ describe("applyQueueMigrations", () => {
   });
 });
 
-describe("SDK-05 executor attempt to attempt/round migration", () => {
+describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
   const fixturePath = path.join(
     __dirname,
     "fixtures",
-    "sdk05-legacy-executor-attempts.sql",
+    "sdk05-legacy-executor-invocations.sql",
   );
 
   function seedLegacyDataDir(): string {
@@ -2029,7 +2029,7 @@ describe("SDK-05 executor attempt to attempt/round migration", () => {
     return dataDir;
   }
 
-  it("opens a two-attempt recovered SDK-05 database and splits the attempt into immutable attempts", () => {
+  it("opens a two-attempt recovered SDK-05 database and splits the legacy invocation into immutable attempts", () => {
     const dataDir = seedLegacyDataDir();
     const db = openDb(dataDir);
     try {
@@ -2180,7 +2180,7 @@ describe("SDK-05 executor attempt to attempt/round migration", () => {
         .all() as Array<Record<string, unknown>>;
       expect(gates).toEqual([
         {
-          gate_id: "gate-attempt",
+          gate_id: "gate-invocation",
           attempt_id: "run-1::implementation::dispatch",
           round_id: null,
           target_scope: "attempt",

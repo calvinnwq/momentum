@@ -31,7 +31,7 @@ import {
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const INVOCATION_TERMINAL_SET = new Set<string>(
+const ATTEMPT_TERMINAL_SET = new Set<string>(
   EXECUTOR_ATTEMPT_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
@@ -438,11 +438,11 @@ describe("decideNoMistakesMirror — totality", () => {
       expect(roundHop.ok).toBe(true);
       // The mirror attempt runs; every decided attempt state must be
       // reachable from running.
-      const invocationHop = transitionExecutorAttempt(
+      const attemptHop = transitionExecutorAttempt(
         "running",
         decision.attemptState,
       );
-      expect(invocationHop.ok).toBe(true);
+      expect(attemptHop.ok).toBe(true);
       expect(decision.reason.length).toBeGreaterThan(0);
     }
   });
@@ -452,7 +452,7 @@ describe("decideNoMistakesMirror — totality", () => {
       externalState({ stepStatus: "failed" }),
     );
     expect(ROUND_TERMINAL_SET.has(terminal.roundState)).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(terminal.attemptState)).toBe(true);
+    expect(ATTEMPT_TERMINAL_SET.has(terminal.attemptState)).toBe(true);
   });
 });
 
@@ -637,7 +637,7 @@ describe("planNoMistakesAttempt", () => {
       decision.attemptState,
     );
     expect(transition.ok).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(decision.attemptState)).toBe(true);
+    expect(ATTEMPT_TERMINAL_SET.has(decision.attemptState)).toBe(true);
   });
 });
 

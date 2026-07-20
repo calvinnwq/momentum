@@ -42,7 +42,7 @@ import {
  * RC-2 reconciliation seam to finalize the workflow step exactly once.
  *
  * Before this, the only code that terminalized a dispatch attempt was the
- * test helper `driveInvocationTerminal` (and the dogfood stand-in). These tests
+ * test helper `driveAttemptTerminal` (and the dogfood stand-in). These tests
  * prove the production mapping: a clean executor terminal lets RC-2 finalize the
  * step; an unconfigured / process-level executor failure parks the run for
  * manual recovery instead of fabricating a fake success.

@@ -90,7 +90,7 @@ function openSeededDb(): MomentumDb {
 // round inserts.
 function openRoundDb(): MomentumDb {
   const db = openSeededDb();
-  insertExecutorAttempt(db, makeInvocation(), { now: 1 });
+  insertExecutorAttempt(db, makeAttempt(), { now: 1 });
   return db;
 }
 
@@ -157,7 +157,7 @@ function makeDefinition(
   };
 }
 
-function makeInvocation(
+function makeAttempt(
   overrides: Partial<ExecutorAttemptRecord> = {},
 ): ExecutorAttemptRecord {
   return {
@@ -368,7 +368,7 @@ describe("executor attempts", () => {
   it("round-trips an attempt", () => {
     const db = openSeededDb();
     try {
-      const record = makeInvocation({
+      const record = makeAttempt({
         state: "running",
         startedAt: 500,
         heartbeatAt: 600,
@@ -383,11 +383,11 @@ describe("executor attempts", () => {
   it("refuses a duplicate attempt id and leaves the original untouched", () => {
     const db = openSeededDb();
     try {
-      insertExecutorAttempt(db, makeInvocation({ state: "preparing" }), {
+      insertExecutorAttempt(db, makeAttempt({ state: "preparing" }), {
         now: 1000,
       });
       expect(() =>
-        insertExecutorAttempt(db, makeInvocation({ state: "running" }), {
+        insertExecutorAttempt(db, makeAttempt({ state: "running" }), {
           now: 2000,
         }),
       ).toThrow(ExecutorAttemptConflictError);
@@ -400,7 +400,7 @@ describe("executor attempts", () => {
   it("rejects an unknown attempt state before writing", () => {
     const db = openSeededDb();
     try {
-      const bad = makeInvocation({
+      const bad = makeAttempt({
         state: "bogus" as ExecutorAttemptRecord["state"],
       });
       expect(() => insertExecutorAttempt(db, bad)).toThrow(
@@ -415,7 +415,7 @@ describe("executor attempts", () => {
   it("advances state through a valid transition", () => {
     const db = openSeededDb();
     try {
-      insertExecutorAttempt(db, makeInvocation(), { now: 1000 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1000 });
       updateExecutorAttemptState(db, "inv-1", "preparing", {
         now: 1100,
         heartbeatAt: 1100,
@@ -431,7 +431,7 @@ describe("executor attempts", () => {
   it("does not clobber a concurrently changed attempt heartbeat", () => {
     const db = openSeededDb();
     try {
-      insertExecutorAttempt(db, makeInvocation({ state: "running" }), {
+      insertExecutorAttempt(db, makeAttempt({ state: "running" }), {
         now: 1000,
       });
       const guardedDb = interceptNextUpdate(db, "executor_attempts", () => {
@@ -454,7 +454,7 @@ describe("executor attempts", () => {
   it("refuses an invalid transition and leaves state unchanged", () => {
     const db = openSeededDb();
     try {
-      insertExecutorAttempt(db, makeInvocation(), { now: 1000 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1000 });
       expect(() =>
         updateExecutorAttemptState(db, "inv-1", "succeeded", { now: 1100 }),
       ).toThrow(ExecutorAttemptTransitionError);
@@ -582,7 +582,7 @@ describe("executor rounds", () => {
       ).run();
       insertExecutorAttempt(
         db,
-        makeInvocation({
+        makeAttempt({
           attemptId: "inv-2",
           stepRunId: "step-2",
           stepKey: "preflight",
@@ -629,7 +629,7 @@ describe("executor rounds", () => {
     try {
       insertExecutorAttempt(
         db,
-        makeInvocation({
+        makeAttempt({
           attemptId: "inv-2",
           attemptNumber: 2,
         }),

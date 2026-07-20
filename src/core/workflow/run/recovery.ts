@@ -767,14 +767,19 @@ function loadCurrentNoMistakesCheckpointIdentity(
 ): NoMistakesCheckpointIdentity | null {
   const rows = db
     .prepare(
-      `SELECT r.attempt AS attempt, r.round_index AS roundIndex,
+      `SELECT r.attempt_number AS attempt, r.round_index AS roundIndex,
               c.stage AS stage, c.detail AS detail, c.sequence AS sequence
          FROM executor_rounds AS r
          JOIN executor_attempts AS i ON i.attempt_id = r.attempt_id
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
         WHERE r.workflow_run_id = ?
           AND r.step_run_id = ?
-          AND r.attempt = i.attempt
+          AND i.attempt_number = (
+            SELECT MAX(latest.attempt_number)
+              FROM executor_attempts AS latest
+             WHERE latest.workflow_run_id = r.workflow_run_id
+               AND latest.step_run_id = r.step_run_id
+          )
           AND r.executor_family IN ('no-mistakes', 'delegate-supervisor')
           AND (
             r.executor_family = 'no-mistakes'
@@ -784,7 +789,7 @@ function loadCurrentNoMistakesCheckpointIdentity(
                 JOIN executor_checkpoints AS intent
                   ON intent.round_id = intent_round.round_id
                WHERE intent_round.attempt_id = r.attempt_id
-                 AND intent_round.attempt = r.attempt
+                 AND intent_round.attempt_number = r.attempt_number
                  AND intent.stage = 'delegate_handoff_intent'
                  AND json_extract(
                    CASE WHEN json_valid(intent.detail) THEN intent.detail ELSE '{}'
@@ -799,7 +804,7 @@ function loadCurrentNoMistakesCheckpointIdentity(
             'external_state_mirrored',
             'expected_external_identity'
           )
-        ORDER BY r.attempt DESC, r.round_index DESC,
+        ORDER BY r.attempt_number DESC, r.round_index DESC,
                  CASE c.stage
                    WHEN 'delegate_external_state_mirrored' THEN 0
                    WHEN 'external_state_mirrored' THEN 1

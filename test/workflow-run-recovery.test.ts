@@ -128,7 +128,7 @@ function seedRetryableDelegateRecovery(
   db.prepare(
     `INSERT INTO executor_attempts (
        attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, state, attempt, started_at, created_at, updated_at
+       executor_family, state, attempt_number, started_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     attemptId,
@@ -145,7 +145,7 @@ function seedRetryableDelegateRecovery(
   db.prepare(
     `INSERT INTO executor_rounds (
        round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt, round_index, state, recovery_code,
+       executor_family, attempt_number, round_index, state, recovery_code,
        created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -254,7 +254,7 @@ function seedNoMistakesCheckpoint(
   db.prepare(
     `INSERT INTO executor_attempts (
        attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
-       state, attempt, started_at, heartbeat_at, created_at, updated_at
+       state, attempt_number, started_at, heartbeat_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     attemptId,
@@ -272,7 +272,7 @@ function seedNoMistakesCheckpoint(
   db.prepare(
     `INSERT INTO executor_rounds (
        round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt, round_index, state, created_at, updated_at
+       executor_family, attempt_number, round_index, state, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     roundId,
@@ -1274,8 +1274,8 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       const runId = "run-ngx-561";
       const stepId = "no-mistakes";
-      const attemptId = `${runId}::${stepId}::dispatch`;
-      const roundId = `${attemptId}::round-1`;
+      const retryAttemptId = `${runId}::${stepId}::attempt-2`;
+      const roundId = `${retryAttemptId}::round-2`;
       seedRunWithState(db, runId, "failed", {
         finishedAt: 1_730_000_800_000,
         issueScope: { identifiers: ["NGX-561"] },
@@ -1289,18 +1289,33 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         delegateCheckpoint: "mirrored",
       });
       db.prepare(
-        `UPDATE executor_attempts
-            SET attempt = 2, updated_at = ?
-          WHERE attempt_id = ?`,
-      ).run(1_730_000_100_000, attemptId);
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+           state, attempt_number, started_at, heartbeat_at, created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        retryAttemptId,
+        runId,
+        stepId,
+        stepId,
+        "delegate-supervisor",
+        "running",
+        2,
+        1_730_000_100_000,
+        1_730_000_100_000,
+        1_730_000_100_000,
+        1_730_000_100_000,
+      );
       db.prepare(
         `INSERT INTO executor_rounds (
            round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-           executor_family, attempt, round_index, state, created_at, updated_at
+           executor_family, attempt_number, round_index, state, created_at,
+           updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         roundId,
-        attemptId,
+        retryAttemptId,
         runId,
         stepId,
         stepId,
@@ -1320,7 +1335,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         roundId,
         0,
         "delegate_handoff_intent",
-        JSON.stringify({ tool: "no-mistakes", attemptId, attempt: 2 }),
+        JSON.stringify({
+          tool: "no-mistakes",
+          attemptId: retryAttemptId,
+          attempt: 2,
+        }),
         1_730_000_100_000,
       );
       const evidence = JSON.parse(

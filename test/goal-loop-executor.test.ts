@@ -1302,7 +1302,7 @@ describe("planGoalLoopAttempt", () => {
       stepKey: "implementation",
       executorFamily: "goal-loop",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000,
       heartbeatAt: 1_000,
       finishedAt: null

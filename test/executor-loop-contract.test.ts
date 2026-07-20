@@ -16,7 +16,7 @@ describe("executor loop contract", () => {
 
   it("keeps an executor layer anchor below workflow steps", () => {
     expectSpecSection(spec, "Runtime Model");
-    expect(spec).toContain("ExecutorInvocation");
+    expect(spec).toContain("ExecutorAttempt");
     expect(spec).toContain("ExecutorRound");
   });
 

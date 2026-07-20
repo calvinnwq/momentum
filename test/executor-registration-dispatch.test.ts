@@ -3203,14 +3203,25 @@ describe("executor registration and SDK dispatch", () => {
       { stage: "mechanism_completed" },
       { stage: "classified" },
     ]);
-    db.prepare(
-      `UPDATE executor_attempts
-          SET state = 'running', attempt = 2, finished_at = NULL
-        WHERE attempt_id = ?`,
-    ).run("live-sdk-attempt");
+    insertExecutorAttempt(
+      db,
+      {
+        attemptId: "live-sdk-attempt::attempt-2",
+        workflowRunId: "live-sdk-run",
+        stepRunId: "preflight",
+        stepKey: "preflight",
+        executorFamily: "one-shot",
+        state: "running",
+        attemptNumber: 2,
+        startedAt: NOW + 3,
+        heartbeatAt: NOW + 3,
+        finishedAt: null,
+      },
+      { now: NOW + 3 },
+    );
     await driveExecutorTicks({
       db,
-      attemptId: "live-sdk-attempt",
+      attemptId: "live-sdk-attempt::attempt-2",
       executor,
       config: {},
       hostBindings,
@@ -3220,24 +3231,35 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT attempt FROM executor_rounds WHERE attempt_id = ? ORDER BY round_index",
+          "SELECT attempt_number AS attempt FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
-        .all("live-sdk-attempt"),
+        .all("live-sdk-run"),
     ).toEqual([{ attempt: 1 }, { attempt: 2 }]);
 
-    db.prepare(
-      `UPDATE executor_attempts
-          SET state = 'running', attempt = 3, finished_at = NULL
-        WHERE attempt_id = ?`,
-    ).run("live-sdk-attempt");
+    insertExecutorAttempt(
+      db,
+      {
+        attemptId: "live-sdk-attempt::attempt-3",
+        workflowRunId: "live-sdk-run",
+        stepRunId: "preflight",
+        stepKey: "preflight",
+        executorFamily: "one-shot",
+        state: "running",
+        attemptNumber: 3,
+        startedAt: NOW + 4,
+        heartbeatAt: NOW + 4,
+        finishedAt: null,
+      },
+      { now: NOW + 4 },
+    );
     const incompleteEnvelope = createDurableExecutorEnvelope({
       db,
-      attemptId: "live-sdk-attempt",
+      attemptId: "live-sdk-attempt::attempt-3",
       now: () => NOW + 4,
     });
     incompleteEnvelope.facade.startRound({
       roundId: "live-sdk-attempt::round-3",
-      attemptId: "live-sdk-attempt",
+      attemptId: "live-sdk-attempt::attempt-3",
       workflowRunId: "live-sdk-run",
       stepRunId: "preflight",
       stepKey: "preflight",
@@ -3277,14 +3299,25 @@ describe("executor registration and SDK dispatch", () => {
     ).rejects.toThrow("no durable mechanism_completed outcome");
     expect(settledClean).toBe(false);
 
-    db.prepare(
-      `UPDATE executor_attempts
-          SET state = 'running', attempt = 4, finished_at = NULL
-        WHERE attempt_id = ?`,
-    ).run("live-sdk-attempt");
+    insertExecutorAttempt(
+      db,
+      {
+        attemptId: "live-sdk-attempt::attempt-4",
+        workflowRunId: "live-sdk-run",
+        stepRunId: "preflight",
+        stepKey: "preflight",
+        executorFamily: "one-shot",
+        state: "running",
+        attemptNumber: 4,
+        startedAt: NOW + 5,
+        heartbeatAt: NOW + 5,
+        finishedAt: null,
+      },
+      { now: NOW + 5 },
+    );
     await driveExecutorTicks({
       db,
-      attemptId: "live-sdk-attempt",
+      attemptId: "live-sdk-attempt::attempt-4",
       executor: {
         name: "one-shot",
         configSchema: liveStepBuiltInConfigSchema("one-shot"),
@@ -3305,9 +3338,9 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT attempt, state FROM executor_rounds WHERE attempt_id = ? ORDER BY round_index",
+          "SELECT attempt_number AS attempt, state FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
-        .all("live-sdk-attempt"),
+        .all("live-sdk-run"),
     ).toEqual([
       { attempt: 1, state: "succeeded" },
       { attempt: 2, state: "succeeded" },
@@ -3317,9 +3350,9 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT recovery_code FROM executor_rounds WHERE attempt_id = ? AND attempt = 4",
+          "SELECT recovery_code FROM executor_rounds WHERE workflow_run_id = ? AND attempt_number = 4",
         )
-        .get("live-sdk-attempt"),
+        .get("live-sdk-run"),
     ).toEqual({ recovery_code: "executor_contract_invalid" });
     db.close();
   });

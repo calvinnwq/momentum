@@ -38,7 +38,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const INVOCATION_TERMINAL_SET = new Set<string>(
+const ATTEMPT_TERMINAL_SET = new Set<string>(
   EXECUTOR_ATTEMPT_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
@@ -188,7 +188,7 @@ describe("decideSingleShotAttempt — totality", () => {
       const decision = decideSingleShotAttempt({ ok: false, recoveryCode });
       expect(COMPLETION_SET.has(decision.classification)).toBe(true);
       expect(ROUND_TERMINAL_SET.has(decision.roundState)).toBe(true);
-      expect(INVOCATION_TERMINAL_SET.has(decision.attemptState)).toBe(true);
+      expect(ATTEMPT_TERMINAL_SET.has(decision.attemptState)).toBe(true);
       // A failed attempt can never be classified complete or continue.
       expect(decision.classification).not.toBe("complete");
       expect(decision.classification).not.toBe("continue");

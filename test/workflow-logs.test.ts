@@ -54,7 +54,7 @@ function seedRun(db: MomentumDb, runId: string): void {
   ).run(runId);
 }
 
-function makeInvocation(
+function makeAttempt(
   overrides: Partial<ExecutorAttemptRecord> = {}
 ): ExecutorAttemptRecord {
   return {
@@ -181,7 +181,7 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
 
       const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
@@ -219,7 +219,7 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
       insertExecutorArtifact(db, makeArtifact(), { now: 5 });
       insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -254,10 +254,10 @@ describe("loadWorkflowRunLogs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES ('run-logs-1', 'preflight', 'preflight', 'succeeded', 0, 1, 1, 1)`
       ).run();
-      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
       insertExecutorAttempt(
         db,
-        makeInvocation({
+        makeAttempt({
           attemptId: "inv-2",
           stepRunId: "preflight",
           stepKey: "preflight"

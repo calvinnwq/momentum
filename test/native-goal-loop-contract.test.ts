@@ -16,10 +16,10 @@ describe("native goal-loop contract docs", () => {
   it("defines attempt and round ownership below workflow steps", () => {
     expect(spec).toContain("## Native Goal-Loop Contract");
     expect(spec).toContain(
-      "`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step"
+      "`executor_invocation` is the whole autonomous goal-loop attempt for one workflow step"
     );
     expect(spec).toContain(
-      "`executor_round` is one durable iteration beneath that attempt"
+      "`executor_round` is one durable iteration beneath that invocation"
     );
     expect(spec).toContain(
       "A completed round is never replayed, renamed, or overwritten to continue the loop"
@@ -150,7 +150,7 @@ describe("native goal-loop contract docs", () => {
     for (const expected of [
       "Successful rounds commit exactly once after verification evidence is captured",
       "Failed, invalid, stale, unsafe, canceled, or no-op rounds do not create commits",
-      "Momentum resumes from durable executor_attempts, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings",
+      "Momentum resumes from durable executor_invocations, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings",
       "Resume never depends on terminal scrollback",
       "no duplicate completed rounds",
       "no duplicate commits"
@@ -159,7 +159,7 @@ describe("native goal-loop contract docs", () => {
     }
 
     expect(dataDirectory).toContain(
-      "For native goal-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration"
+      "For native goal-loop, `executor_invocations` own the autonomous attempt and `executor_rounds` own each durable iteration"
     );
     expect(workflowCommands).toContain(
       "Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth"
