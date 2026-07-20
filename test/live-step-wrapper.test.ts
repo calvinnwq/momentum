@@ -941,7 +941,9 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     10_000,
   );
 
-  it.skipIf(process.platform === "win32")(
+  // The delayed `ps eww` responses below exercise the macOS fallback query
+  // path. Linux discovers token-owned processes through /proc instead.
+  it.skipIf(process.platform !== "darwin")(
     "allows verified fallback cleanup to use its full cleanup budget",
     async () => {
       const root = makeTempDir("momentum-live-step-fallback-budget-");
