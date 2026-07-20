@@ -10,17 +10,17 @@ import {
   resolveGoalLoopRoundSelection,
 } from "../src/core/executors/goal-loop/executor.js";
 import {
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
-  loadExecutorInvocation,
+  loadExecutorAttempt,
   loadExecutorRound,
-  updateExecutorInvocationState,
+  updateExecutorAttemptState,
 } from "../src/core/executors/loop/persist.js";
 import type {
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
@@ -50,9 +50,9 @@ afterEach(() => {
   }
 });
 
-function openExecutorDb(family: ExecutorInvocationRecord["executorFamily"]): {
+function openExecutorDb(family: ExecutorAttemptRecord["executorFamily"]): {
   db: MomentumDb;
-  invocation: ExecutorInvocationRecord;
+  invocation: ExecutorAttemptRecord;
 } {
   const root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "momentum-executor-sdk-")),
@@ -66,8 +66,8 @@ function openExecutorDb(family: ExecutorInvocationRecord["executorFamily"]): {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: `inv-${family}`,
+  const invocation: ExecutorAttemptRecord = {
+    attemptId: `inv-${family}`,
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -78,17 +78,17 @@ function openExecutorDb(family: ExecutorInvocationRecord["executorFamily"]): {
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   return { db, invocation };
 }
 
 function emptyRound(
-  invocation: ExecutorInvocationRecord,
+  invocation: ExecutorAttemptRecord,
   state: ExecutorRoundRecord["state"],
 ): ExecutorRoundRecord {
   return {
-    roundId: `${invocation.invocationId}::round::0`,
-    invocationId: invocation.invocationId,
+    roundId: `${invocation.attemptId}::round::0`,
+    attemptId: invocation.attemptId,
     workflowRunId: invocation.workflowRunId,
     stepRunId: invocation.stepRunId,
     stepKey: invocation.stepKey,
@@ -143,7 +143,7 @@ class PollingSupervisor implements Executor<
     >,
   ): ExecutorTickResult {
     const round = emptyRound(
-      context.state.invocation as ExecutorInvocationRecord,
+      context.state.invocation as ExecutorAttemptRecord,
       "mirroring_external_state",
     );
     context.envelope.startRound(roundStartForSdk(round));
@@ -181,7 +181,7 @@ class PollingSupervisor implements Executor<
       roundId: round.roundId,
       recommendation: "operator_decision_required",
       recommendedRoundState: "waiting_operator",
-      recommendedInvocationState: "waiting_operator",
+      recommendedAttemptState: "waiting_operator",
       recoveryCode: null,
       humanGate: "operator_decision_required",
       reason: "the mirrored tool state requires an operator choice",
@@ -207,7 +207,7 @@ describe("executor SDK core contract", () => {
       const { db, invocation } = openExecutorDb("one-shot");
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor: {
           name: "one-shot",
           configSchema: {
@@ -231,7 +231,7 @@ describe("executor SDK core contract", () => {
               roundId: round.roundId,
               recommendation: "operator_decision_required",
               recommendedRoundState: "waiting_operator",
-              recommendedInvocationState: "waiting_operator",
+              recommendedAttemptState: "waiting_operator",
               recoveryCode: null,
               humanGate: "operator_decision_required",
               reason: "An operator decision is required.",
@@ -255,7 +255,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("no-mistakes");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 20,
     });
     const executor: Executor<
@@ -278,7 +278,7 @@ describe("executor SDK core contract", () => {
     expect(beforeDecision?.state).toBe("mirroring_external_state");
     expect(beforeDecision?.classification).toBeNull();
     expect(beforeDecision?.executorRecommendation).toBeNull();
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "running",
     );
 
@@ -288,7 +288,7 @@ describe("executor SDK core contract", () => {
         classification: tick.recommendation,
         executorRecommendation: tick.recommendation,
         roundState: tick.recommendedRoundState,
-        invocationState: tick.recommendedInvocationState,
+        attemptState: tick.recommendedAttemptState,
         recoveryCode: tick.recoveryCode,
         humanGate: tick.humanGate,
       },
@@ -312,7 +312,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     });
 
     expect(Object.isFrozen(envelope.facade)).toBe(true);
@@ -338,7 +338,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 25,
     });
     const round = emptyRound(invocation, "running");
@@ -349,7 +349,7 @@ describe("executor SDK core contract", () => {
         classification: "operator_decision_required",
         executorRecommendation: "operator_decision_required",
         roundState: "waiting_operator",
-        invocationState: "waiting_operator",
+        attemptState: "waiting_operator",
         recoveryCode: null,
         humanGate: "operator_decision_required",
       },
@@ -379,7 +379,7 @@ describe("executor SDK core contract", () => {
     for (const write of writes) {
       expect(write).toThrow("not executor-writable (waiting_operator)");
     }
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "waiting_operator",
     );
     expect(loadExecutorRound(db, round.roundId)?.state).toBe(
@@ -391,7 +391,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 25,
     });
     const round = emptyRound(invocation, "running");
@@ -441,7 +441,7 @@ describe("executor SDK core contract", () => {
     let clockCalls = 0;
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => {
         clockCalls += 1;
         return 25;
@@ -468,7 +468,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 25,
     });
     const round = emptyRound(invocation, "running");
@@ -494,7 +494,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 25,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
@@ -563,7 +563,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 25,
     });
     const round = emptyRound(invocation, "running");
@@ -611,14 +611,14 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     });
     envelope.facade.startRound(
       roundStartForSdk(emptyRound(invocation, "running")),
     );
     const second = {
       ...emptyRound(invocation, "running"),
-      roundId: `${invocation.invocationId}::round::1`,
+      roundId: `${invocation.attemptId}::round::1`,
       roundIndex: 1,
     };
 
@@ -632,7 +632,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     });
     const gapped = {
       ...emptyRound(invocation, "running"),
@@ -656,7 +656,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
@@ -667,7 +667,7 @@ describe("executor SDK core contract", () => {
         classification: "continue",
         executorRecommendation: "continue",
         roundState: "succeeded",
-        invocationState: "running",
+        attemptState: "running",
         recoveryCode: null,
         humanGate: null,
       },
@@ -721,12 +721,12 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
     const round = emptyRound(invocation, "running");
     envelope.facade.startRound(roundStartForSdk(round));
-    updateExecutorInvocationState(db, invocation.invocationId, "succeeded", {
+    updateExecutorAttemptState(db, invocation.attemptId, "succeeded", {
       finishedAt: 25,
       now: 25,
     });
@@ -736,7 +736,7 @@ describe("executor SDK core contract", () => {
         envelope.facade.startRound(
           roundStartForSdk({
             ...round,
-            roundId: `${invocation.invocationId}::round::1`,
+            roundId: `${invocation.attemptId}::round::1`,
             roundIndex: 1,
           }),
         ),
@@ -782,7 +782,7 @@ describe("executor SDK core contract", () => {
             classification: "complete",
             executorRecommendation: "complete",
             roundState: "succeeded",
-            invocationState: "succeeded",
+            attemptState: "succeeded",
             recoveryCode: null,
             humanGate: null,
           },
@@ -802,14 +802,14 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
     envelope.facade.startRound(roundStartForSdk(round));
     db.exec(`
       CREATE TRIGGER fail_invocation_settlement
-      BEFORE UPDATE ON executor_invocations
+      BEFORE UPDATE ON executor_attempts
       BEGIN
         SELECT RAISE(ABORT, 'forced invocation settlement failure');
       END
@@ -822,7 +822,7 @@ describe("executor SDK core contract", () => {
           classification: "complete",
           executorRecommendation: "complete",
           roundState: "succeeded",
-          invocationState: "succeeded",
+          attemptState: "succeeded",
           recoveryCode: null,
           humanGate: null,
         },
@@ -837,7 +837,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("forced invocation settlement failure");
 
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "running",
     );
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
@@ -851,7 +851,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
@@ -864,7 +864,7 @@ describe("executor SDK core contract", () => {
           classification: "continue",
           executorRecommendation: "continue",
           roundState: "succeeded",
-          invocationState: "succeeded",
+          attemptState: "succeeded",
           recoveryCode: null,
           humanGate: null,
         },
@@ -872,7 +872,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("expected invocation state running, got succeeded");
 
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "running",
     );
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
@@ -886,7 +886,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
@@ -899,7 +899,7 @@ describe("executor SDK core contract", () => {
           classification: "complete",
           executorRecommendation: "complete",
           roundState: "failed",
-          invocationState: "succeeded",
+          attemptState: "succeeded",
           recoveryCode: null,
           humanGate: null,
         },
@@ -907,7 +907,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("incompatible round state failed");
 
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "running",
     );
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
@@ -921,7 +921,7 @@ describe("executor SDK core contract", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
     const round = emptyRound(invocation, "mirroring_external_state");
@@ -930,56 +930,56 @@ describe("executor SDK core contract", () => {
       {
         classification: "complete",
         roundState: "succeeded",
-        invocationState: "succeeded",
+        attemptState: "succeeded",
         recoveryCode: "auth_unavailable",
         humanGate: null,
       },
       {
         classification: "complete",
         roundState: "succeeded",
-        invocationState: "succeeded",
+        attemptState: "succeeded",
         recoveryCode: null,
         humanGate: "credential_required",
       },
       {
         classification: "failed",
         roundState: "failed",
-        invocationState: "failed",
+        attemptState: "failed",
         recoveryCode: null,
         humanGate: null,
       },
       {
         classification: "blocked",
         roundState: "blocked",
-        invocationState: "blocked",
+        attemptState: "blocked",
         recoveryCode: null,
         humanGate: null,
       },
       {
         classification: "manual_recovery_required",
         roundState: "manual_recovery_required",
-        invocationState: "manual_recovery_required",
+        attemptState: "manual_recovery_required",
         recoveryCode: "reset_failed",
         humanGate: "credential_required",
       },
       {
         classification: "approval_required",
         roundState: "waiting_operator",
-        invocationState: "waiting_operator",
+        attemptState: "waiting_operator",
         recoveryCode: null,
         humanGate: null,
       },
       {
         classification: "operator_decision_required",
         roundState: "waiting_operator",
-        invocationState: "waiting_operator",
+        attemptState: "waiting_operator",
         recoveryCode: null,
         humanGate: null,
       },
       {
         classification: "cancelled",
         roundState: "cancelled",
-        invocationState: "cancelled",
+        attemptState: "cancelled",
         recoveryCode: "cancelled",
         humanGate: null,
       },
@@ -998,7 +998,7 @@ describe("executor SDK core contract", () => {
       ).toThrow(/incompatible (recovery code|human gate)/);
     }
 
-    expect(loadExecutorInvocation(db, invocation.invocationId)?.state).toBe(
+    expect(loadExecutorAttempt(db, invocation.attemptId)?.state).toBe(
       "running",
     );
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
@@ -1044,7 +1044,7 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
     const result: RunnerResult = {
@@ -1079,8 +1079,8 @@ describe("single-shot built-in SDK proof", () => {
       config: { agent: { harness: "codex", model: "gpt-5" } },
       hostBindings: {
         start: {
-          roundId: `${invocation.invocationId}::round::0`,
-          invocationId: invocation.invocationId,
+          roundId: `${invocation.attemptId}::round::0`,
+          attemptId: invocation.attemptId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
           stepKey: invocation.stepKey,
@@ -1110,7 +1110,7 @@ describe("single-shot built-in SDK proof", () => {
         classification: tick.recommendation,
         executorRecommendation: tick.recommendation,
         roundState: tick.recommendedRoundState,
-        invocationState: tick.recommendedInvocationState,
+        attemptState: tick.recommendedAttemptState,
         recoveryCode: tick.recoveryCode,
         humanGate: tick.humanGate,
       },
@@ -1130,10 +1130,10 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
-    const roundId = `${invocation.invocationId}::round::0`;
+    const roundId = `${invocation.attemptId}::round::0`;
     const executor = new SingleShotExecutor("one-shot", () => ({
       outcome: { ok: true },
       result: { success: true } as RunnerResult,
@@ -1150,7 +1150,7 @@ describe("single-shot built-in SDK proof", () => {
         hostBindings: {
           start: {
             roundId,
-            invocationId: invocation.invocationId,
+            attemptId: invocation.attemptId,
             workflowRunId: invocation.workflowRunId,
             stepRunId: invocation.stepRunId,
             stepKey: invocation.stepKey,
@@ -1220,10 +1220,10 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
-    const roundId = `${invocation.invocationId}::round::0`;
+    const roundId = `${invocation.attemptId}::round::0`;
     const executor = new SingleShotExecutor(
       "one-shot",
       () => mechanism as never,
@@ -1236,7 +1236,7 @@ describe("single-shot built-in SDK proof", () => {
         hostBindings: {
           start: {
             roundId,
-            invocationId: invocation.invocationId,
+            attemptId: invocation.attemptId,
             workflowRunId: invocation.workflowRunId,
             stepRunId: invocation.stepRunId,
             stepKey: invocation.stepKey,
@@ -1262,7 +1262,7 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("script");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 30,
     });
     const abort = new AbortController();
@@ -1278,7 +1278,7 @@ describe("single-shot built-in SDK proof", () => {
         throw abort.signal.reason;
       },
     );
-    const roundId = `${invocation.invocationId}::round::0`;
+    const roundId = `${invocation.attemptId}::round::0`;
 
     await expect(
       executor.tick({
@@ -1287,7 +1287,7 @@ describe("single-shot built-in SDK proof", () => {
         hostBindings: {
           start: {
             roundId,
-            invocationId: invocation.invocationId,
+            attemptId: invocation.attemptId,
             workflowRunId: invocation.workflowRunId,
             stepRunId: invocation.stepRunId,
             stepKey: invocation.stepKey,
@@ -1313,15 +1313,15 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
-    const roundId = `${invocation.invocationId}::round::0`;
+    const roundId = `${invocation.attemptId}::round::0`;
     const config = { agent: { harness: "codex", model: "gpt-5" } };
     const hostBindings = {
       start: {
         roundId,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         workflowRunId: invocation.workflowRunId,
         stepRunId: invocation.stepRunId,
         stepKey: invocation.stepKey,
@@ -1389,14 +1389,14 @@ describe("single-shot built-in SDK proof", () => {
     const { db, invocation } = openExecutorDb("one-shot");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 40,
     });
-    const roundId = `${invocation.invocationId}::round::0`;
+    const roundId = `${invocation.attemptId}::round::0`;
     const hostBindings = {
       start: {
         roundId,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         workflowRunId: invocation.workflowRunId,
         stepRunId: invocation.stepRunId,
         stepKey: invocation.stepKey,
@@ -1471,7 +1471,7 @@ describe("single-shot built-in SDK proof", () => {
         classification: tick.recommendation,
         executorRecommendation: tick.recommendation,
         roundState: tick.recommendedRoundState,
-        invocationState: tick.recommendedInvocationState,
+        attemptState: tick.recommendedAttemptState,
         recoveryCode: tick.recoveryCode,
         humanGate: tick.humanGate,
       },

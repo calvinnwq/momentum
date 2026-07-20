@@ -28,7 +28,7 @@ import {
 } from "../sdk/types.js";
 import {
   SINGLE_SHOT_RECOVERY_CODES,
-  decideSingleShotInvocation,
+  decideSingleShotAttempt,
   planSingleShotRoundArtifacts,
   planSingleShotRoundCheckpoints,
   planSingleShotRoundPersistence,
@@ -38,7 +38,7 @@ import {
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
   type SingleShotExecutorFamily,
-  type SingleShotInvocationOutcome,
+  type SingleShotAttemptOutcome,
   type SingleShotRoundArtifacts,
   type SingleShotRoundEvidence,
   type SingleShotRoundSelection,
@@ -169,7 +169,7 @@ export type SingleShotExecutorHostBindings = {
 
 /** Normalized output of one bounded runner-adapter call. */
 export type SingleShotRoundMechanismResult = {
-  readonly outcome: SingleShotInvocationOutcome;
+  readonly outcome: SingleShotAttemptOutcome;
   readonly summary?: string;
   readonly result?: RunnerResult | null;
   readonly resultDigest?: string | null;
@@ -299,10 +299,10 @@ export class SingleShotExecutor implements Executor<
       SingleShotExecutorHostBindings
     >,
   ): Promise<SingleShotExecutorTickResult> {
-    const invocation = context.state.invocation;
-    if (invocation.executorFamily !== this.name) {
+    const attempt = context.state.attempt;
+    if (attempt.executorFamily !== this.name) {
       throw new Error(
-        `SingleShotExecutor ${this.name} cannot run invocation ${invocation.invocationId} for ${invocation.executorFamily}.`,
+        `SingleShotExecutor ${this.name} cannot run attempt ${attempt.attemptId} for ${attempt.executorFamily}.`,
       );
     }
     const configError = singleShotExecutorConfigError(
@@ -313,7 +313,7 @@ export class SingleShotExecutor implements Executor<
     const config = immutableSingleShotConfig(context.config);
     const hostBindings = immutableSingleShotHostBindings(context.hostBindings);
     const currentAttemptRounds = context.state.rounds.filter(
-      (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+      (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
     );
     if (
       currentAttemptRounds.length > 0 &&
@@ -446,7 +446,7 @@ export class SingleShotExecutor implements Executor<
         roundId: start.roundId,
         recommendation: plan.decision.classification,
         recommendedRoundState: plan.decision.roundState,
-        recommendedInvocationState: plan.decision.invocationState,
+        recommendedAttemptState: plan.decision.attemptState,
         recoveryCode: plan.decision.recoveryCode,
         humanGate: plan.decision.humanGate,
         reason: plan.decision.reason,
@@ -470,7 +470,7 @@ function loadMaterializedSingleShotRound(
   >,
 ): { round: ExecutorRoundView; checkpoint: ExecutorCheckpointRecord } {
   const currentAttemptRounds = context.state.rounds.filter(
-    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+    (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(
@@ -531,11 +531,11 @@ function resumeCompletedSingleShotRound(
   >,
 ): SingleShotExecutorTickResult {
   const currentAttemptRounds = context.state.rounds.filter(
-    (snapshot) => snapshot.round.attempt === context.state.invocation.attempt,
+    (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(
-      `SingleShotExecutor ${family} invocation ${context.state.invocation.invocationId} must own exactly one resumable round.`,
+      `SingleShotExecutor ${family} attempt ${context.state.attempt.attemptId} must own exactly one resumable round.`,
     );
   }
   const snapshot = currentAttemptRounds[0];
@@ -572,14 +572,14 @@ function resumeCompletedSingleShotRound(
       `Single-shot successful round ${round.roundId} has not durably captured its result.`,
     );
   }
-  const decision = decideSingleShotInvocation(outcome);
+  const decision = decideSingleShotAttempt(outcome);
   const sequence =
     Math.max(-1, ...snapshot.checkpoints.map((item) => item.sequence)) + 1;
   return {
     roundId: round.roundId,
     recommendation: decision.classification,
     recommendedRoundState: decision.roundState,
-    recommendedInvocationState: decision.invocationState,
+    recommendedAttemptState: decision.attemptState,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
     reason: decision.reason,
@@ -607,12 +607,12 @@ function assertSingleShotRoundMatchesHost(
   const host = context.hostBindings.start;
   const mismatches: string[] = [];
   const expected = {
-    invocationId: host.invocationId,
+    attemptId: host.attemptId,
     workflowRunId: host.workflowRunId,
     stepRunId: host.stepRunId,
     stepKey: host.stepKey,
     executorFamily: family,
-    attempt: host.attempt,
+    attempt: host.attemptNumber,
     inputDigest: host.inputDigest,
     artifactRoot: host.artifactRoot,
   } as const;
@@ -686,12 +686,12 @@ export function singleShotDispatchBindingDetail(
     hostBindingIdentity: hostBindingIdentity ?? null,
     start: {
       roundId: start.roundId,
-      invocationId: start.invocationId,
+      attemptId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
       family: start.family,
-      attempt: start.attempt,
+      attempt: start.attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
       logPaths: start.logPaths ?? [],
@@ -710,12 +710,12 @@ function legacySingleShotDispatchBindingDetail(
     config,
     start: {
       roundId: start.roundId,
-      invocationId: start.invocationId,
+      attemptId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
       family: start.family,
-      attempt: start.attempt,
+      attempt: start.attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
       logPaths: start.logPaths ?? [],
@@ -792,8 +792,8 @@ function immutableSingleShotHostBindings(
 
 function singleShotOutcomeFromCheckpoint(
   detail: string,
-): SingleShotInvocationOutcome {
-  const prefix = "invocation outcome: ";
+): SingleShotAttemptOutcome {
+  const prefix = "attempt outcome: ";
   if (!detail.startsWith(prefix)) {
     throw new Error(`Invalid mechanism_completed checkpoint detail: ${detail}`);
   }
@@ -882,7 +882,7 @@ function normalizeSingleShotMechanismResult(
       `Invalid ${family} mechanism output: successful outcomes must not carry recoveryCode.`,
     );
   }
-  const normalizedOutcome: SingleShotInvocationOutcome =
+  const normalizedOutcome: SingleShotAttemptOutcome =
     outcome["ok"] === true
       ? { ok: true }
       : {

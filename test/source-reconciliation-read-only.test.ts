@@ -118,7 +118,7 @@ const FORBIDDEN_TABLES = [
   "workflow_gates",
   // Executor-loop state.
   "executor_definitions",
-  "executor_invocations",
+  "executor_attempts",
   "executor_rounds",
   "executor_artifacts",
   "executor_checkpoints",
@@ -196,13 +196,13 @@ function seedForbiddenTables(db: MomentumDb): void {
       VALUES
       ('executor_existing', 'manual', 'operator', 'none', 1011, 1011);
 
-    INSERT INTO executor_invocations
-      (invocation_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
+    INSERT INTO executor_attempts
+      (attempt_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
       VALUES
       ('invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
 
     INSERT INTO executor_rounds
-      (round_id, invocation_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
+      (round_id, attempt_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
       VALUES
       ('round_existing', 'invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
 
@@ -227,7 +227,7 @@ function seedForbiddenTables(db: MomentumDb): void {
       ('decision_existing', 'round_existing', 'Existing decision', '["continue"]', 'continue', 1017);
 
     INSERT INTO workflow_gates
-      (gate_id, workflow_run_id, step_run_id, invocation_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
+      (gate_id, workflow_run_id, step_run_id, attempt_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
       VALUES
       ('gate_existing', 'workflow_run_existing', 'step_existing', 'invocation_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
 

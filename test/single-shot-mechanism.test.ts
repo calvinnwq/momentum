@@ -127,7 +127,7 @@ function round(
   const artifactRoot = overrides.artifactRoot ?? makeTempDir();
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "preflight",

@@ -163,7 +163,7 @@ function approveAndClaim(
 function countInvocations(db: MomentumDb, runId: string): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
+      "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -223,7 +223,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const invocation = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
     expect(invocation.executor_family).toBe("one-shot");
@@ -255,7 +255,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     const invocation = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
     expect(invocation.executor_family).toBe("one-shot");
@@ -277,11 +277,11 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // production path (preflight resolves to the one-shot family).
     const invocation = db
       .prepare(
-        `SELECT invocation_id, step_run_id, step_key, executor_family, state, attempt
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+        `SELECT attempt_id, step_run_id, step_key, executor_family, state, attempt
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
-      invocation_id: string;
+      attempt_id: string;
       step_run_id: string;
       step_key: string;
       executor_family: string;
@@ -299,16 +299,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // The first round scaffold exists, created before external work runs.
     const round = db
       .prepare(
-        `SELECT invocation_id, round_index, state, executor_family
+        `SELECT attempt_id, round_index, state, executor_family
            FROM executor_rounds WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
-      invocation_id: string;
+      attempt_id: string;
       round_index: number;
       state: string;
       executor_family: string;
     };
-    expect(round.invocation_id).toBe(invocation.invocation_id);
+    expect(round.attempt_id).toBe(invocation.attempt_id);
     expect(round.executor_family).toBe("one-shot");
     expect(round.state).toBe("pending");
 
@@ -334,10 +334,10 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // distinct from a future landed adapter's reattachable invocation id.
     const invocation = db
       .prepare(
-        "SELECT invocation_id FROM executor_invocations WHERE workflow_run_id = ?",
+        "SELECT attempt_id FROM executor_attempts WHERE workflow_run_id = ?",
       )
-      .get(RUN_ID) as { invocation_id: string };
-    expect(invocation.invocation_id).toBe(`${RUN_ID}::preflight::dispatch`);
+      .get(RUN_ID) as { attempt_id: string };
+    expect(invocation.attempt_id).toBe(`${RUN_ID}::preflight::dispatch`);
 
     // The first round id is the invocation id suffixed with `::round-1`, equally
     // recomputable so re-entry never forks a second round.

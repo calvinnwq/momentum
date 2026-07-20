@@ -16,8 +16,8 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  listExecutorRoundsForInvocation,
+  loadExecutorAttempt,
+  listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
@@ -138,7 +138,7 @@ function dispatchStep(
   });
   if (family === "subworkflow") {
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
+      "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
     ).run(deriveDispatchInvocationId(RUN_ID, stepId));
   }
 }
@@ -150,7 +150,7 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 }
 
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
-  return listExecutorRoundsForInvocation(
+  return listExecutorRoundsForAttempt(
     db,
     deriveDispatchInvocationId(RUN_ID, stepId),
   );
@@ -242,7 +242,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — defer (child in fligh
       // No terminal evidence: the dispatch invocation + step stay running and the
       // dispatch lease stays held for a later tick to re-check the child.
       expect(
-        loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
           ?.state,
       ).toBe("running");
       expect(stepState(db)).toBe("running");
@@ -279,7 +279,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
       WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -323,7 +323,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
     );
 
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("failed");
     expect(dispatchRounds(db)[0]?.state).toBe("failed");
@@ -392,7 +392,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(
@@ -432,7 +432,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child ter
         WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
       );
 
-      const invocation = loadExecutorInvocation(
+      const invocation = loadExecutorAttempt(
         db,
         deriveDispatchInvocationId(RUN_ID, STEP_ID),
       );
@@ -579,7 +579,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — reconcile deferral", 
     // The child terminal is recorded as evidence; the step stays running with the
     // lease held so a later tick re-drives only the reconciliation.
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
@@ -606,7 +606,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
     ).toBeUndefined();
     expect(stepState(db)).toBe("pending");
   });
@@ -629,7 +629,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     expect(out.detail).toContain("one-shot");
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");

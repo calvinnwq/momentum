@@ -11,10 +11,10 @@ import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForStep,
+  loadExecutorAttempt,
   loadExecutorRound,
-  updateExecutorInvocationState,
+  updateExecutorAttemptState,
   updateExecutorRound,
   type ExecutorRoundUpdate,
 } from "../loop/persist.js";
@@ -22,19 +22,19 @@ import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
-  executorInvocationStateForClassification,
+  executorAttemptStateForClassification,
   isExecutorHumanGateCompatibleWithClassification,
   isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorDecisionRecord,
   type ExecutorFindingRecord,
-  type ExecutorInvocationRecord,
+  type ExecutorAttemptRecord,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import { EXECUTOR_OBSERVATION_PHASES } from "./types.js";
@@ -63,7 +63,7 @@ export class ExecutorEnvelopeAccessError extends Error {
 
 export type CreateDurableExecutorEnvelopeInput = {
   db: MomentumDb;
-  invocationId: string;
+  attemptId: string;
   now?: () => number;
   /** Optional daemon-owned fencing check run inside every write transaction. */
   authorizeWrite?: () => void;
@@ -86,28 +86,28 @@ export type ApplyExecutorDaemonDecisionOptions =
 
 export type AppliedExecutorDaemonDecision = {
   round: ExecutorRoundRecord;
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   classificationCheckpoint: Readonly<ExecutorCheckpointRecord>;
 };
 
 /**
- * SQLite-backed controller bound to one invocation. Executor code receives the
+ * SQLite-backed controller bound to one attempt. Executor code receives the
  * separate capability-limited {@link facade}; daemon code retains this controller
  * to apply its own decision after the tick returns.
  */
 export class DurableExecutorEnvelope {
   readonly #db: MomentumDb;
-  readonly #invocationId: string;
+  readonly #attemptId: string;
   readonly #now: () => number;
   readonly #authorizeWrite: () => void;
   readonly facade: ExecutorEnvelope;
 
   constructor(input: CreateDurableExecutorEnvelopeInput) {
     this.#db = input.db;
-    this.#invocationId = input.invocationId;
+    this.#attemptId = input.attemptId;
     this.#now = input.now ?? Date.now;
     this.#authorizeWrite = input.authorizeWrite ?? (() => undefined);
-    this.#loadInvocation();
+    this.#loadAttempt();
     const facade: ExecutorEnvelope = {
       snapshot: () => this.snapshot(),
       startRound: (record, initialCheckpoints) =>
@@ -135,16 +135,27 @@ export class DurableExecutorEnvelope {
   }
 
   #snapshotUnlocked(): ExecutorEnvelopeSnapshot {
-    const invocation = cloneInvocation(this.#loadInvocation());
-    const rounds = listExecutorRoundsForInvocation(
-      this.#db,
-      this.#invocationId,
-    ).map((round) => this.#roundSnapshot(round));
+    const attempt = cloneAttempt(this.#loadAttempt());
+    // The read model deliberately spans every attempt of the step (ordered by
+    // attempt number, then round index): retry evidence such as delegate
+    // handoffs and prior-round learnings must stay visible to the executor.
+    // Writes below stay bound to this envelope's single attempt.
+    const rounds = this.#listStepRounds(attempt).map((round) =>
+      this.#roundSnapshot(round),
+    );
     return {
-      invocation,
+      attempt,
       rounds,
       currentRound: rounds.at(-1) ?? null,
     };
+  }
+
+  #listStepRounds(attempt: ExecutorAttemptRecord) {
+    return listExecutorRoundsForStep(
+      this.#db,
+      attempt.workflowRunId,
+      attempt.stepRunId,
+    );
   }
 
   startRound(
@@ -154,18 +165,15 @@ export class DurableExecutorEnvelope {
     return withSqliteTransaction(this.#db, "write", () => {
       assertRoundStartInput(record);
       initialCheckpoints.forEach(assertCheckpointInput);
-      const invocation = this.#loadInvocation();
+      const attempt = this.#loadAttempt();
       assertObservationPhase(record.state, `start round ${record.roundId}`);
-      this.#assertRoundIdentity(record, invocation);
-      this.#assertExecutorWritable(invocation, `start round ${record.roundId}`);
-      const rounds = listExecutorRoundsForInvocation(
-        this.#db,
-        this.#invocationId,
-      );
+      this.#assertRoundIdentity(record, attempt);
+      this.#assertExecutorWritable(attempt, `start round ${record.roundId}`);
+      const rounds = this.#listStepRounds(attempt);
       const previous = rounds.at(-1);
       if (
         previous !== undefined &&
-        previous.attempt === record.attempt &&
+        previous.attemptNumber === record.attemptNumber &&
         !isTerminalExecutorRoundState(previous.state)
       ) {
         throw new ExecutorEnvelopeAccessError(
@@ -199,8 +207,8 @@ export class DurableExecutorEnvelope {
     return withSqliteTransaction(this.#db, "write", () => {
       assertNonEmptyString(roundId, "round id");
       assertRoundObservationInput(observation);
-      const invocation = this.#loadInvocation();
-      this.#assertExecutorWritable(invocation, `observe round ${roundId}`);
+      const attempt = this.#loadAttempt();
+      this.#assertExecutorWritable(attempt, `observe round ${roundId}`);
       const current = this.#loadOwnedRound(roundId);
       if (isTerminalExecutorRoundState(current.state)) {
         throw new ExecutorEnvelopeAccessError(
@@ -241,20 +249,18 @@ export class DurableExecutorEnvelope {
   heartbeat(): ExecutorEnvelopeSnapshot {
     return withSqliteTransaction(this.#db, "write", () => {
       const now = this.#now();
-      const invocation = this.#loadInvocation();
-      this.#assertExecutorWritable(invocation, "heartbeat invocation");
-      updateExecutorInvocationState(
+      const attempt = this.#loadAttempt();
+      this.#assertExecutorWritable(attempt, "heartbeat attempt");
+      updateExecutorAttemptState(
         this.#db,
-        this.#invocationId,
-        invocation.state,
+        this.#attemptId,
+        attempt.state,
         { heartbeatAt: now, now },
       );
-      const current = listExecutorRoundsForInvocation(
-        this.#db,
-        this.#invocationId,
-      ).at(-1);
+      const current = this.#listStepRounds(attempt).at(-1);
       if (
         current !== undefined &&
+        current.attemptId === this.#attemptId &&
         !isTerminalExecutorRoundState(current.state)
       ) {
         updateExecutorRound(
@@ -348,8 +354,8 @@ export class DurableExecutorEnvelope {
     return withSqliteTransaction(this.#db, "write", () => {
       this.#authorizeWrite();
       assertDaemonDecisionInput(decision);
-      const currentInvocation = this.#loadInvocation();
-      this.#assertInvocationUnsettled(
+      const currentInvocation = this.#loadAttempt();
+      this.#assertAttemptUnsettled(
         currentInvocation,
         `classify round ${decision.roundId}`,
       );
@@ -359,12 +365,12 @@ export class DurableExecutorEnvelope {
           `Cannot reclassify terminal round ${decision.roundId} (${currentRound.state}).`,
         );
       }
-      const expectedInvocationState = executorInvocationStateForClassification(
+      const expectedInvocationState = executorAttemptStateForClassification(
         decision.classification,
       );
-      if (decision.invocationState !== expectedInvocationState) {
+      if (decision.attemptState !== expectedInvocationState) {
         throw new ExecutorEnvelopeAccessError(
-          `Cannot classify round ${decision.roundId} as ${decision.classification}: expected invocation state ${expectedInvocationState}, got ${decision.invocationState}.`,
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: expected attempt state ${expectedInvocationState}, got ${decision.attemptState}.`,
         );
       }
       if (
@@ -415,14 +421,14 @@ export class DurableExecutorEnvelope {
         { now },
       );
 
-      const invocation = updateExecutorInvocationState(
+      const attempt = updateExecutorAttemptState(
         this.#db,
-        this.#invocationId,
-        decision.invocationState,
+        this.#attemptId,
+        decision.attemptState,
         {
           heartbeatAt: now,
-          finishedAt: isTerminalExecutorInvocationState(
-            decision.invocationState,
+          finishedAt: isTerminalExecutorAttemptState(
+            decision.attemptState,
           )
             ? now
             : null,
@@ -447,20 +453,20 @@ export class DurableExecutorEnvelope {
       };
       return {
         round: cloneRound(round),
-        invocation: cloneInvocation(invocation),
+        attempt: cloneAttempt(attempt),
         classificationCheckpoint,
       };
     });
   }
 
-  #loadInvocation(): ExecutorInvocationRecord {
-    const invocation = loadExecutorInvocation(this.#db, this.#invocationId);
-    if (invocation === undefined) {
+  #loadAttempt(): ExecutorAttemptRecord {
+    const attempt = loadExecutorAttempt(this.#db, this.#attemptId);
+    if (attempt === undefined) {
       throw new ExecutorEnvelopeAccessError(
-        `Executor invocation not found: ${this.#invocationId}`,
+        `Executor attempt not found: ${this.#attemptId}`,
       );
     }
-    return invocation;
+    return attempt;
   }
 
   #loadOwnedRound(roundId: string): ExecutorRoundRecord {
@@ -470,18 +476,18 @@ export class DurableExecutorEnvelope {
         `Executor round not found: ${roundId}`,
       );
     }
-    if (round.invocationId !== this.#invocationId) {
+    if (round.attemptId !== this.#attemptId) {
       throw new ExecutorEnvelopeAccessError(
-        `Round ${roundId} belongs to invocation ${round.invocationId}, not ${this.#invocationId}.`,
+        `Round ${roundId} belongs to attempt ${round.attemptId}, not ${this.#attemptId}.`,
       );
     }
     return round;
   }
 
   #assertEvidenceWritable(roundId: string): void {
-    const invocation = this.#loadInvocation();
+    const attempt = this.#loadAttempt();
     this.#assertExecutorWritable(
-      invocation,
+      attempt,
       `append evidence to round ${roundId}`,
     );
     const round = this.#loadOwnedRound(roundId);
@@ -493,53 +499,53 @@ export class DurableExecutorEnvelope {
   }
 
   #assertExecutorWritable(
-    invocation: ExecutorInvocationRecord,
+    attempt: ExecutorAttemptRecord,
     operation: string,
   ): void {
     this.#authorizeWrite();
-    if (isTerminalExecutorInvocationState(invocation.state)) {
+    if (isTerminalExecutorAttemptState(attempt.state)) {
       throw new ExecutorEnvelopeAccessError(
-        `Cannot ${operation}: invocation ${this.#invocationId} is terminal (${invocation.state}).`,
+        `Cannot ${operation}: attempt ${this.#attemptId} is terminal (${attempt.state}).`,
       );
     }
-    if (invocation.state !== "running") {
+    if (attempt.state !== "running") {
       throw new ExecutorEnvelopeAccessError(
-        `Cannot ${operation}: invocation ${this.#invocationId} is not executor-writable (${invocation.state}).`,
+        `Cannot ${operation}: attempt ${this.#attemptId} is not executor-writable (${attempt.state}).`,
       );
     }
   }
 
-  #assertInvocationUnsettled(
-    invocation: ExecutorInvocationRecord,
+  #assertAttemptUnsettled(
+    attempt: ExecutorAttemptRecord,
     operation: string,
   ): void {
-    if (isTerminalExecutorInvocationState(invocation.state)) {
+    if (isTerminalExecutorAttemptState(attempt.state)) {
       throw new ExecutorEnvelopeAccessError(
-        `Cannot ${operation}: invocation ${this.#invocationId} is terminal (${invocation.state}).`,
+        `Cannot ${operation}: attempt ${this.#attemptId} is terminal (${attempt.state}).`,
       );
     }
   }
 
   #assertRoundIdentity(
     round: ExecutorRoundStart,
-    invocation: ExecutorInvocationRecord,
+    attempt: ExecutorAttemptRecord,
   ): void {
     const mismatches: string[] = [];
-    if (round.invocationId !== invocation.invocationId) {
-      mismatches.push("invocationId");
+    if (round.attemptId !== attempt.attemptId) {
+      mismatches.push("attemptId");
     }
-    if (round.workflowRunId !== invocation.workflowRunId) {
+    if (round.workflowRunId !== attempt.workflowRunId) {
       mismatches.push("workflowRunId");
     }
-    if (round.stepRunId !== invocation.stepRunId) mismatches.push("stepRunId");
-    if (round.stepKey !== invocation.stepKey) mismatches.push("stepKey");
-    if (round.executorFamily !== invocation.executorFamily) {
+    if (round.stepRunId !== attempt.stepRunId) mismatches.push("stepRunId");
+    if (round.stepKey !== attempt.stepKey) mismatches.push("stepKey");
+    if (round.executorFamily !== attempt.executorFamily) {
       mismatches.push("executorFamily");
     }
-    if (round.attempt !== invocation.attempt) mismatches.push("attempt");
+    if (round.attemptNumber !== attempt.attemptNumber) mismatches.push("attemptNumber");
     if (mismatches.length > 0) {
       throw new ExecutorEnvelopeAccessError(
-        `Round ${round.roundId} does not match its bound invocation: ${mismatches.join(", ")}.`,
+        `Round ${round.roundId} does not match its bound attempt: ${mismatches.join(", ")}.`,
       );
     }
   }
@@ -672,8 +678,8 @@ const COMPLETION_CLASSIFICATIONS: ReadonlySet<string> = new Set(
 const HUMAN_GATE_TYPES: ReadonlySet<string> = new Set(
   EXECUTOR_HUMAN_GATE_TYPES,
 );
-const INVOCATION_STATES: ReadonlySet<string> = new Set(
-  EXECUTOR_INVOCATION_STATES,
+const ATTEMPT_STATES: ReadonlySet<string> = new Set(
+  EXECUTOR_ATTEMPT_STATES,
 );
 const ROUND_STATES: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
 
@@ -754,7 +760,7 @@ function assertRoundStartInput(
   assertRecord(value, "round start");
   for (const field of [
     "roundId",
-    "invocationId",
+    "attemptId",
     "workflowRunId",
     "stepRunId",
     "stepKey",
@@ -762,8 +768,11 @@ function assertRoundStartInput(
   ]) {
     assertNonEmptyString(value[field], `round start ${field}`);
   }
-  if (!Number.isInteger(value["attempt"]) || (value["attempt"] as number) < 1) {
-    invalidInput("round start attempt must be a positive integer");
+  if (
+    !Number.isInteger(value["attemptNumber"]) ||
+    (value["attemptNumber"] as number) < 1
+  ) {
+    invalidInput("round start attemptNumber must be a positive integer");
   }
   assertNonNegativeInteger(value["roundIndex"], "round start roundIndex");
   assertObservationPhase(value["state"], "start round");
@@ -920,10 +929,10 @@ function assertDaemonDecisionInput(value: unknown): void {
     invalidInput("daemon decision roundState is unknown");
   }
   if (
-    typeof value["invocationState"] !== "string" ||
-    !INVOCATION_STATES.has(value["invocationState"])
+    typeof value["attemptState"] !== "string" ||
+    !ATTEMPT_STATES.has(value["attemptState"])
   ) {
-    invalidInput("daemon decision invocationState is unknown");
+    invalidInput("daemon decision attemptState is unknown");
   }
   assertNullableString(value["recoveryCode"], "daemon decision recoveryCode");
   if (
@@ -972,10 +981,10 @@ function checkpointIdExists(db: MomentumDb, checkpointId: string): boolean {
   );
 }
 
-function cloneInvocation(
-  invocation: ExecutorInvocationRecord,
-): ExecutorInvocationRecord {
-  return { ...invocation };
+function cloneAttempt(
+  attempt: ExecutorAttemptRecord,
+): ExecutorAttemptRecord {
+  return { ...attempt };
 }
 
 function cloneRound(round: ExecutorRoundRecord): ExecutorRoundRecord {

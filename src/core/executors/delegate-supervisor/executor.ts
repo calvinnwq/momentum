@@ -10,9 +10,9 @@ import type {
 import {
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
-  executorInvocationStateForClassification,
+  executorAttemptStateForClassification,
   isExecutorHumanGateCompatibleWithClassification,
   isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
@@ -75,7 +75,7 @@ type LegacyLiveStepDecision = Pick<
   ExecutorTickResult,
   | "recommendation"
   | "recommendedRoundState"
-  | "recommendedInvocationState"
+  | "recommendedAttemptState"
   | "recoveryCode"
   | "humanGate"
   | "reason"
@@ -108,7 +108,7 @@ type DurableDelegateHandoff = {
 
 type DurableDelegateHandoffIntent = {
   tool: string;
-  invocationId: string;
+  attemptId: string;
   attempt: number;
 };
 
@@ -131,10 +131,10 @@ export class DelegateSupervisorExecutor implements Executor<
       context.config.tool,
     );
     const attemptRounds = context.state.rounds.filter(
-      ({ round }) => round.attempt === context.state.invocation.attempt,
+      ({ round }) => round.attemptNumber === context.state.attempt.attemptNumber,
     );
     const priorRounds = context.state.rounds.filter(
-      ({ round }) => round.attempt < context.state.invocation.attempt,
+      ({ round }) => round.attemptNumber < context.state.attempt.attemptNumber,
     );
     const legacyCompletion = findLegacyLiveStepCompletion(context.state.rounds);
     const interruptedLegacyReplay = findDurableCheckpoint(
@@ -227,8 +227,11 @@ export class DelegateSupervisorExecutor implements Executor<
       if (
         intent.status === "absent" ||
         intent.value.tool !== context.config.tool ||
-        intent.value.invocationId !== context.state.invocation.invocationId ||
-        intent.value.attempt !== unresolvedPriorIntent.round.attempt
+        !intentMatchesAttemptIdentity(
+          intent.value.attemptId,
+          unresolvedPriorIntent.round.attemptId,
+        ) ||
+        intent.value.attempt !== unresolvedPriorIntent.round.attemptNumber
       ) {
         return adapterIdentityMismatchResult(
           context,
@@ -238,7 +241,7 @@ export class DelegateSupervisorExecutor implements Executor<
       return this.handoff(
         context,
         adapter,
-        unresolvedPriorIntent.round.attempt,
+        unresolvedPriorIntent.round.attemptNumber,
       );
     }
     if (attemptRounds.length === 0 && priorHandoff.status === "invalid") {
@@ -253,7 +256,7 @@ export class DelegateSupervisorExecutor implements Executor<
       }
       const priorHandoffAttempt = priorRounds.find(
         ({ round }) => round.roundId === priorHandoff.roundId,
-      )?.round.attempt;
+      )?.round.attemptNumber;
       if (priorHandoffAttempt === undefined) {
         throw new Error("prior delegate handoff round is missing");
       }
@@ -281,7 +284,7 @@ export class DelegateSupervisorExecutor implements Executor<
         roundId: handoffRecord.roundId,
         recommendation: "continue",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "running",
+        recommendedAttemptState: "running",
         recoveryCode: null,
         humanGate: null,
         reason: handoffRecord.value.handoff.summary,
@@ -307,7 +310,7 @@ export class DelegateSupervisorExecutor implements Executor<
     const active = context.state.currentRound;
     const roundId =
       active !== null &&
-      active.round.attempt === context.state.invocation.attempt &&
+      active.round.attemptNumber === context.state.attempt.attemptNumber &&
       !isTerminalExecutorRoundState(active.round.state)
         ? active.round.roundId
         : startRound(context, "running", "Handing work to delegated tool.");
@@ -327,8 +330,11 @@ export class DelegateSupervisorExecutor implements Executor<
       if (
         intent.status === "absent" ||
         intent.value.tool !== context.config.tool ||
-        intent.value.invocationId !== context.state.invocation.invocationId ||
-        intent.value.attempt !== roundBeforeHandoff.round.attempt
+        !intentMatchesAttemptIdentity(
+          intent.value.attemptId,
+          roundBeforeHandoff.round.attemptId,
+        ) ||
+        intent.value.attempt !== roundBeforeHandoff.round.attemptNumber
       ) {
         return adapterIdentityMismatchResult(
           context,
@@ -354,8 +360,8 @@ export class DelegateSupervisorExecutor implements Executor<
         stage: DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
         detail: JSON.stringify({
           tool: context.config.tool,
-          invocationId: context.state.invocation.invocationId,
-          attempt: context.state.invocation.attempt,
+          attemptId: context.state.attempt.attemptId,
+          attempt: context.state.attempt.attemptNumber,
           ...(recoveringAttempt !== undefined ? { recoveringAttempt } : {}),
         }),
       });
@@ -372,7 +378,7 @@ export class DelegateSupervisorExecutor implements Executor<
         );
       }
       handoff = await handoffOperation.call(adapter, {
-        invocation: context.state.invocation,
+        attempt: context.state.attempt,
         config: context.config,
         signal: context.signal,
       });
@@ -398,7 +404,7 @@ export class DelegateSupervisorExecutor implements Executor<
       roundId,
       recommendation: "continue",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: "running",
+      recommendedAttemptState: "running",
       recoveryCode: null,
       humanGate: null,
       reason: handoff.summary,
@@ -419,7 +425,7 @@ export class DelegateSupervisorExecutor implements Executor<
     const active = context.state.currentRound;
     const roundId =
       active !== null &&
-      active.round.attempt === context.state.invocation.attempt &&
+      active.round.attemptNumber === context.state.attempt.attemptNumber &&
       !isTerminalExecutorRoundState(active.round.state)
         ? active.round.roundId
         : startRound(
@@ -450,7 +456,7 @@ export class DelegateSupervisorExecutor implements Executor<
     let rawRead: unknown;
     try {
       rawRead = await adapter.readExternalState({
-        invocation: context.state.invocation,
+        attempt: context.state.attempt,
         config: context.config,
         signal: context.signal,
         handoff,
@@ -638,16 +644,16 @@ function startRound(
   state: "running" | "mirroring_external_state",
   summary: string,
 ): string {
-  const invocation = context.state.invocation;
-  const roundId = `${invocation.invocationId}::round-${context.state.rounds.length + 1}`;
+  const attempt = context.state.attempt;
+  const roundId = `${attempt.attemptId}::round-${context.state.rounds.length + 1}`;
   context.envelope.startRound({
     roundId,
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    attempt: invocation.attempt,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    attemptNumber: attempt.attemptNumber,
     roundIndex: context.state.rounds.length,
     state,
     agentProvider: null,
@@ -872,7 +878,7 @@ function tickResult(
       decision.classification === "continue"
         ? "succeeded"
         : decision.roundState,
-    recommendedInvocationState: decision.invocationState,
+    recommendedAttemptState: decision.attemptState,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
     ...(humanGateDecisionId !== undefined ? { humanGateDecisionId } : {}),
@@ -889,7 +895,7 @@ function recoveryResult(
     roundId,
     recommendation: "manual_recovery_required",
     recommendedRoundState: "manual_recovery_required",
-    recommendedInvocationState: "manual_recovery_required",
+    recommendedAttemptState: "manual_recovery_required",
     recoveryCode,
     humanGate: "manual_recovery_required",
     reason,
@@ -967,6 +973,23 @@ function findHandoff(
   return { status: "absent" };
 }
 
+/**
+ * An intent checkpoint must identify the attempt that owns its round. Migrated
+ * legacy evidence needs one narrow tolerance: intents recorded before the
+ * attempt/round migration carry the shared legacy invocation id, while their
+ * reconstructed historical attempt rows derive ids as
+ * `<legacyInvocationId>::attempt-<n>`.
+ */
+function intentMatchesAttemptIdentity(
+  intentAttemptId: string,
+  roundAttemptId: string,
+): boolean {
+  return (
+    roundAttemptId === intentAttemptId ||
+    roundAttemptId.startsWith(`${intentAttemptId}::attempt-`)
+  );
+}
+
 function findHandoffIntent(
   snapshot: ExecutorRoundEnvelopeSnapshot,
 ): DurableCheckpointRead<DurableDelegateHandoffIntent> {
@@ -991,25 +1014,34 @@ function findHandoffIntent(
   }
   try {
     const parsed: unknown = JSON.parse(checkpoint.detail);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("durable delegated handoff intent is invalid");
+    }
+    const record = parsed as Record<string, unknown>;
+    // Legacy reader: intents recorded before the attempt/round migration carry
+    // the attempt identity under the historical `invocationId` field name.
+    const attemptId = record["attemptId"] ?? record["invocationId"];
     if (
-      parsed === null ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      typeof (parsed as { tool?: unknown }).tool !== "string" ||
-      (parsed as { tool: string }).tool.trim().length === 0 ||
-      typeof (parsed as { invocationId?: unknown }).invocationId !== "string" ||
-      (parsed as { invocationId: string }).invocationId.trim().length === 0 ||
-      typeof (parsed as { attempt?: unknown }).attempt !== "number" ||
-      !Number.isInteger((parsed as { attempt: number }).attempt) ||
-      (parsed as { attempt: number }).attempt < 1
+      typeof record["tool"] !== "string" ||
+      record["tool"].trim().length === 0 ||
+      typeof attemptId !== "string" ||
+      attemptId.trim().length === 0 ||
+      typeof record["attempt"] !== "number" ||
+      !Number.isInteger(record["attempt"]) ||
+      record["attempt"] < 1
     ) {
       throw new Error("durable delegated handoff intent is invalid");
     }
+    const value: DurableDelegateHandoffIntent = {
+      tool: record["tool"],
+      attemptId,
+      attempt: record["attempt"],
+    };
     return {
       status: "valid",
       roundId: snapshot.round.roundId,
       position,
-      value: parsed as DurableDelegateHandoffIntent,
+      value,
     };
   } catch (error) {
     return {
@@ -1082,7 +1114,7 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
   const record = parsed as Record<string, unknown>;
   const recommendation = record["recommendation"];
   const roundState = record["recommendedRoundState"];
-  const invocationState = record["recommendedInvocationState"];
+  const attemptState = record["recommendedAttemptState"];
   const recoveryCode = record["recoveryCode"];
   const humanGate = record["humanGate"];
   if (!includes(EXECUTOR_COMPLETION_CLASSIFICATIONS, recommendation)) {
@@ -1091,8 +1123,8 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
   if (!includes(EXECUTOR_ROUND_STATES, roundState)) {
     throw new Error("legacy mechanism completion round state is invalid");
   }
-  if (!includes(EXECUTOR_INVOCATION_STATES, invocationState)) {
-    throw new Error("legacy mechanism completion invocation state is invalid");
+  if (!includes(EXECUTOR_ATTEMPT_STATES, attemptState)) {
+    throw new Error("legacy mechanism completion attempt state is invalid");
   }
   if (recoveryCode !== null && typeof recoveryCode !== "string") {
     throw new Error("legacy mechanism completion recovery code is invalid");
@@ -1104,8 +1136,8 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
     throw new Error("legacy mechanism completion reason is invalid");
   }
   if (
-    invocationState !==
-      executorInvocationStateForClassification(recommendation) ||
+    attemptState !==
+      executorAttemptStateForClassification(recommendation) ||
     !isExecutorRoundStateCompatibleWithClassification(
       recommendation,
       roundState,
@@ -1241,7 +1273,7 @@ function replayLegacyCompletion(
   const reusableActiveRound =
     fromPriorAttempt &&
     active !== null &&
-    active.round.attempt === context.state.invocation.attempt &&
+    active.round.attemptNumber === context.state.attempt.attemptNumber &&
     (active.round.state === "running" ||
       active.round.state === "capturing_result")
       ? active.round
@@ -1249,7 +1281,7 @@ function replayLegacyCompletion(
   if (
     fromPriorAttempt &&
     active !== null &&
-    active.round.attempt === context.state.invocation.attempt &&
+    active.round.attemptNumber === context.state.attempt.attemptNumber &&
     !isTerminalExecutorRoundState(active.round.state) &&
     reusableActiveRound === null
   ) {

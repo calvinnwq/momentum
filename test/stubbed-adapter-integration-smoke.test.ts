@@ -191,13 +191,13 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       expect(countRows(db, "source_items")).toBe(1);
       expect(countRows(db, "source_snapshots")).toBe(1);
       expect(countRows(db, "source_reconciliation_runs")).toBe(1);
-      expect(countRows(db, "executor_invocations")).toBe(1);
+      expect(countRows(db, "executor_attempts")).toBe(1);
       expect(countRows(db, "executor_rounds")).toBe(1);
 
       const invocation = db
         .prepare(
           `SELECT workflow_run_id, step_key, executor_family, state, attempt
-             FROM executor_invocations WHERE workflow_run_id = ?`
+             FROM executor_attempts WHERE workflow_run_id = ?`
         )
         .get(runId) as Record<string, unknown>;
       expect(invocation).toEqual({
@@ -283,7 +283,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       });
 
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-      expect(countRows(db, "executor_invocations")).toBe(1);
+      expect(countRows(db, "executor_attempts")).toBe(1);
       expect(countRows(db, "executor_rounds")).toBe(1);
 
       const gates = listWorkflowGatesForRun(db, runId);

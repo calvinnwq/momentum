@@ -16,8 +16,8 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  listExecutorRoundsForInvocation,
+  loadExecutorAttempt,
+  listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
@@ -183,7 +183,7 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 }
 
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
-  return listExecutorRoundsForInvocation(
+  return listExecutorRoundsForAttempt(
     db,
     deriveDispatchInvocationId(RUN_ID, stepId),
   );
@@ -371,7 +371,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
 
     expect(runner.calls()).toBe(1);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.executorFamily,
     ).toBe("external-apply");
     expect(stepState(db)).toBe("succeeded");
@@ -392,7 +392,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     await dispatchStepThroughExternalApplyWrapper(db, runner);
 
     expect(runner.calls()).toBe(1);
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -431,7 +431,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     );
 
     // The dispatch invocation + round carry the captured terminal evidence.
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -535,7 +535,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
 
     // The invocation carries terminal manual-recovery evidence — not a fake clean
     // terminal — and the precise M6 cause is preserved for the operator.
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -619,7 +619,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
     expect(runner.calls()).toBe(1);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("succeeded");
 
@@ -732,7 +732,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
     // The external write is recorded as terminal evidence; the step stays running
     // with the lease held so a later tick re-drives only the reconciliation.
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
@@ -758,7 +758,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
@@ -782,7 +782,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
     ).toBeUndefined();
     // The step is left exactly as it was; nothing was finalized.
     expect(stepState(db)).toBe("pending");

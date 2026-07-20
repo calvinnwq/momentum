@@ -293,7 +293,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       expect(invocation).toEqual({ state: "succeeded" });
@@ -1865,7 +1865,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
       expect(invocation).toEqual({ state: "manual_recovery_required" });
@@ -1990,13 +1990,13 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(loop["workflowStepsDispatched"]).toBe(1);
     expect(loop["lastWorkflowCode"]).toBe("dispatched");
 
-    // The dispatched step created durable executor_invocations / executor_rounds
+    // The dispatched step created durable executor_attempts / executor_rounds
     // rows through the production path, observable after the daemon exits.
     const db = openDb(dataDir);
     try {
       const invocations = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
@@ -2159,7 +2159,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
       const invocations = finalDb
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{
         step_key: string;
@@ -2211,7 +2211,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { state: string } | undefined;
       expect(invocation?.state).toBe("manual_recovery_required");
@@ -2259,7 +2259,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     try {
       const invocation = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { state: string } | undefined;
       expect(invocation?.state).toBe("manual_recovery_required");
@@ -2294,7 +2294,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       const invocationCount = (
         db
           .prepare(
-            "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId) as { count: number }
       ).count;

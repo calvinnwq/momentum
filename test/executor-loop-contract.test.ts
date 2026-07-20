@@ -4,9 +4,9 @@ import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   transitionExecutorRound
 } from "../src/core/executors/loop/reducer.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
@@ -36,7 +36,7 @@ describe("executor loop contract", () => {
   });
 
   it("keeps terminal state and artifact vocabularies executable", () => {
-    expect([...EXECUTOR_INVOCATION_TERMINAL_STATES]).toEqual([
+    expect([...EXECUTOR_ATTEMPT_TERMINAL_STATES]).toEqual([
       "manual_recovery_required",
       "blocked",
       "failed",
@@ -61,13 +61,13 @@ describe("executor loop contract", () => {
   });
 
   it("enforces reducer transitions instead of relying on prose", () => {
-    expect(transitionExecutorInvocation("pending", "preparing")).toEqual({
+    expect(transitionExecutorAttempt("pending", "preparing")).toEqual({
       ok: true,
       state: "preparing",
     });
-    expect(transitionExecutorInvocation("succeeded", "running")).toMatchObject({
+    expect(transitionExecutorAttempt("succeeded", "running")).toMatchObject({
       ok: false,
-      errorCode: "executor_invocation_terminal",
+      errorCode: "executor_attempt_terminal",
     });
     expect(transitionExecutorRound("running", "mirroring_external_state")).toEqual({
       ok: true,

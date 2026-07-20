@@ -22,8 +22,8 @@ import {
 } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
@@ -166,7 +166,7 @@ function dispatchStep(db: MomentumDb): void {
     now: DISPATCH_AT,
   });
   db.prepare(
-    "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
+    "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
   ).run(deriveDispatchInvocationId(RUN_ID, STEP_ID));
 }
 
@@ -177,7 +177,7 @@ function stepState(db: MomentumDb): string {
 }
 
 function dispatchRounds(db: MomentumDb) {
-  return listExecutorRoundsForInvocation(
+  return listExecutorRoundsForAttempt(
     db,
     deriveDispatchInvocationId(RUN_ID, STEP_ID),
   );
@@ -295,7 +295,7 @@ describe("subworkflow producer × real child run — start-or-attach + defer", (
     // No terminal evidence: the parent dispatch invocation + step stay running and
     // the dispatch lease stays held for a later tick to re-check the child.
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
@@ -352,7 +352,7 @@ describe("subworkflow producer × real child run — clean terminal mirror", () 
     expect(runner.attaches()).toBe(1);
     expect(countRuns(db)).toBe(2);
 
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -481,7 +481,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.state,
     ).toBe("manual_recovery_required");
     expect(dispatchRounds(db)[0]?.summary).toContain(childRecoveryReason);
@@ -530,7 +530,7 @@ describe("subworkflow producer × real child run — fail-closed ambiguous termi
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );

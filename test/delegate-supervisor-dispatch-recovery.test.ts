@@ -261,7 +261,7 @@ function reopenInterruptedHandoff(
     "DELETE FROM executor_checkpoints WHERE round_id = ? AND stage <> 'delegate_handoff_intent'",
   ).run(round.round_id);
   db.prepare(
-    `UPDATE executor_invocations
+    `UPDATE executor_attempts
         SET state = 'running', attempt = 2, finished_at = NULL
       WHERE workflow_run_id = ?`,
   ).run(runId);
@@ -297,7 +297,7 @@ function reopenCompletedHandoff(
       WHERE round_id = ?`,
   ).run(round.round_id);
   db.prepare(
-    `UPDATE executor_invocations
+    `UPDATE executor_attempts
         SET state = 'running', finished_at = NULL
       WHERE workflow_run_id = ?`,
   ).run(runId);
@@ -351,7 +351,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId: "outcome-mismatch::no-mistakes::dispatch",
+          attemptId: "outcome-mismatch::no-mistakes::dispatch",
           attempt: 1,
           phase: "completed",
           branch,
@@ -375,7 +375,7 @@ describe(
       );
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: "outcome-mismatch::no-mistakes::dispatch",
+        attemptId: "outcome-mismatch::no-mistakes::dispatch",
         attempt: 2,
         branch,
         headSha,
@@ -429,7 +429,7 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: "initial-outcome-mismatch::no-mistakes::dispatch",
+        attemptId: "initial-outcome-mismatch::no-mistakes::dispatch",
         attempt: 1,
         branch,
         headSha,
@@ -539,7 +539,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId: "failed-preflight::no-mistakes::dispatch",
+          attemptId: "failed-preflight::no-mistakes::dispatch",
           attempt: 1,
           phase: "failed",
           branch,
@@ -566,7 +566,7 @@ describe(
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          invocationId: "failed-preflight::no-mistakes::dispatch",
+          attemptId: "failed-preflight::no-mistakes::dispatch",
           attempt: 2,
           repoPath,
           handoffReceiptPath,
@@ -650,13 +650,13 @@ describe(
         const resultJsonPath = path.join(root, "result.json");
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
-        const invocationId = "symlink-receipt::step::dispatch";
+        const attemptId = "symlink-receipt::step::dispatch";
         const receipt =
           tool === "gnhf"
             ? {
                 schemaVersion: 1,
                 tool,
-                invocationId,
+                attemptId,
                 attempt: 1,
                 phase: "launched",
                 baseHead: headSha,
@@ -669,7 +669,7 @@ describe(
               }
             : {
                 schemaVersion: 1,
-                invocationId,
+                attemptId,
                 attempt: 1,
                 phase: "launched",
                 branch,
@@ -687,7 +687,7 @@ describe(
         fs.symlinkSync(realReceiptPath, handoffReceiptPath);
         const adapter = createProfileBackedDelegateToolAdapter({
           tool,
-          invocationId,
+          attemptId,
           attempt: 1,
           branch,
           headSha,
@@ -742,14 +742,14 @@ describe(
       const executorLogPath = path.join(root, "executor.log");
       const realExecutorLogPath = path.join(root, "real-executor.log");
       const verificationLogPath = path.join(root, "verification.log");
-      const invocationId = "symlink-launch-log::step::dispatch";
+      const attemptId = "symlink-launch-log::step::dispatch";
       fs.writeFileSync(realExecutorLogPath, 'run:\n  id: "nm-run-1"\n');
       fs.symlinkSync(realExecutorLogPath, executorLogPath);
       fs.writeFileSync(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId,
+          attemptId,
           attempt: 1,
           phase: "launching",
           branch,
@@ -761,7 +761,7 @@ describe(
       );
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId,
+        attemptId,
         attempt: 1,
         branch,
         headSha,
@@ -811,7 +811,7 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        invocationId: "reset-handoff::implementation::dispatch",
+        attemptId: "reset-handoff::implementation::dispatch",
         attempt: 1,
         branch,
         headSha,
@@ -923,7 +923,7 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        invocationId: "result-race::implementation::dispatch",
+        attemptId: "result-race::implementation::dispatch",
         attempt: 1,
         branch,
         headSha,
@@ -1009,7 +1009,7 @@ describe(
       const verificationLogPath = path.join(root, "verification.log");
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        invocationId: "index-only::implementation::dispatch",
+        attemptId: "index-only::implementation::dispatch",
         attempt: 1,
         branch,
         headSha,
@@ -1123,7 +1123,7 @@ describe(
           JSON.stringify({
             schemaVersion: 1,
             tool: "gnhf",
-            invocationId: "reset-recovery::implementation::dispatch",
+            attemptId: "reset-recovery::implementation::dispatch",
             attempt: 1,
             phase: receiptPhase,
             baseHead: headSha,
@@ -1149,7 +1149,7 @@ describe(
         expect(
           resolvePreparedDelegateCommitEvidence({
             tool: "gnhf",
-            invocationId: "reset-recovery::implementation::dispatch",
+            attemptId: "reset-recovery::implementation::dispatch",
             attempt: 2,
             repoPath,
             handoffReceiptPath,
@@ -1169,7 +1169,7 @@ describe(
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "gnhf",
-          invocationId: "reset-recovery::implementation::dispatch",
+          attemptId: "reset-recovery::implementation::dispatch",
           attempt: 2,
           branch,
           headSha,
@@ -1248,7 +1248,7 @@ describe(
         JSON.stringify({
           schemaVersion: 1,
           tool: "gnhf",
-          invocationId: "commit-ownership::implementation::dispatch",
+          attemptId: "commit-ownership::implementation::dispatch",
           attempt: 1,
           phase: "finalizing",
           baseHead: headSha,
@@ -1275,7 +1275,7 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        invocationId: "commit-ownership::implementation::dispatch",
+        attemptId: "commit-ownership::implementation::dispatch",
         attempt: 2,
         branch,
         headSha,
@@ -1358,7 +1358,7 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId: "no-mistakes-ownership::implementation::dispatch",
+          attemptId: "no-mistakes-ownership::implementation::dispatch",
           attempt: 1,
           phase: "finalizing",
           branch,
@@ -1387,7 +1387,7 @@ describe(
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: "no-mistakes-ownership::implementation::dispatch",
+        attemptId: "no-mistakes-ownership::implementation::dispatch",
         attempt: 2,
         branch,
         headSha,
@@ -1451,7 +1451,7 @@ describe(
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
         const statusCommand = path.join(root, "status.sh");
-        const invocationId = `${label}::implementation::dispatch`;
+        const attemptId = `${label}::implementation::dispatch`;
         const externalRunId = `nm-run-${label}`;
         const resultContent = JSON.stringify({
           success: true,
@@ -1484,7 +1484,7 @@ describe(
               JSON.stringify({
                 schemaVersion: 1,
                 tool,
-                invocationId,
+                attemptId,
                 attempt: 1,
                 phase: "completed",
                 baseHead: headSha,
@@ -1508,7 +1508,7 @@ describe(
               handoffReceiptPath,
               JSON.stringify({
                 schemaVersion: 1,
-                invocationId,
+                attemptId,
                 attempt: 1,
                 phase: "failed",
                 branch,
@@ -1543,7 +1543,7 @@ printf 'run:\n  id: "${externalRunId}"\n  branch: ${branch}\n  status: running\n
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool,
-          invocationId,
+          attemptId,
           attempt: recovery ? 2 : 1,
           branch,
           headSha,
@@ -1664,7 +1664,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         JSON.stringify({
           schemaVersion: 1,
           tool: "gnhf",
-          invocationId: "recovery-digest::implementation::dispatch",
+          attemptId: "recovery-digest::implementation::dispatch",
           attempt: 1,
           phase: "completed",
           baseHead: headSha,
@@ -1689,7 +1689,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "gnhf",
-        invocationId: "recovery-digest::implementation::dispatch",
+        attemptId: "recovery-digest::implementation::dispatch",
         attempt: 2,
         branch,
         headSha,
@@ -1746,11 +1746,11 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         fs.mkdirSync(root, { recursive: true });
         const handoffReceiptPath = path.join(root, "delegate-handoff.json");
         const legacyReceiptPath = path.join(root, "legacy-handoff.json");
-        const invocationId = "legacy-outcome::no-mistakes::dispatch";
+        const attemptId = "legacy-outcome::no-mistakes::dispatch";
         fs.writeFileSync(
           legacyReceiptPath,
           JSON.stringify({
-            invocationId,
+            attemptId,
             attempt: 1,
             externalIdentity: {
               externalRunId: "nm-run-legacy",
@@ -1762,7 +1762,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
         );
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -1841,7 +1841,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
           fs.chmodSync(effectiveVerificationCommand, 0o755);
         }
         const statusCommand = path.join(root, "status.sh");
-        const invocationId = `clean-handoff-${expectedOutcome}::no-mistakes::dispatch`;
+        const attemptId = `clean-handoff-${expectedOutcome}::no-mistakes::dispatch`;
         fs.writeFileSync(
           statusCommand,
           `#!/bin/sh
@@ -1851,7 +1851,7 @@ printf 'run:\n  id: "nm-run-clean"\n  branch: ${branch}\n  status: completed\n  
         fs.chmodSync(statusCommand, 0o755);
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 1,
           branch,
           headSha,
@@ -1987,7 +1987,7 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: "changed-verification::no-mistakes::dispatch",
+        attemptId: "changed-verification::no-mistakes::dispatch",
         attempt: 1,
         branch,
         headSha,
@@ -2088,7 +2088,7 @@ printf 'run:\n  id: "nm-run-changed-verification"\n  branch: ${branch}\n  status
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId: "persisted-proof::no-mistakes::dispatch",
+          attemptId: "persisted-proof::no-mistakes::dispatch",
           attempt: 1,
           phase: "launched",
           branch,
@@ -2182,7 +2182,7 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          invocationId: "retry-digest::no-mistakes::dispatch",
+          attemptId: "retry-digest::no-mistakes::dispatch",
           attempt: 1,
           phase: "failed",
           branch,
@@ -2210,7 +2210,7 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
       const mutations: Array<"commit" | "reset"> = [];
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: "retry-digest::no-mistakes::dispatch",
+        attemptId: "retry-digest::no-mistakes::dispatch",
         attempt: 2,
         branch,
         headSha,
@@ -2273,12 +2273,12 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
         const verificationLogPath = path.join(root, "verification.log");
         const statusCountPath = path.join(root, "status-count");
         const statusCommand = path.join(root, "status.sh");
-        const invocationId = `terminal-${terminalStatus}-retry::no-mistakes::dispatch`;
+        const attemptId = `terminal-${terminalStatus}-retry::no-mistakes::dispatch`;
         fs.writeFileSync(
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            invocationId,
+            attemptId,
             attempt: 1,
             phase: "failed",
             branch,
@@ -2313,7 +2313,7 @@ fi
         let launches = 0;
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -2416,7 +2416,7 @@ fi
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
         const statusCommand = path.join(root, "status.sh");
-        const invocationId =
+        const attemptId =
           "failed-finalization-active-run::no-mistakes::dispatch";
         const resultContent = JSON.stringify({
           success: true,
@@ -2436,7 +2436,7 @@ fi
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            invocationId,
+            attemptId,
             attempt: 1,
             phase: "failed",
             branch,
@@ -2472,7 +2472,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
         let launches = 0;
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -2551,7 +2551,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
         const statusCommand = path.join(root, "status.sh");
-        const invocationId = `changed-result-${phase}::no-mistakes::dispatch`;
+        const attemptId = `changed-result-${phase}::no-mistakes::dispatch`;
         const originalResult = JSON.stringify({
           success: true,
           summary: "no-mistakes completed",
@@ -2575,7 +2575,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            invocationId,
+            attemptId,
             attempt: 1,
             phase,
             branch,
@@ -2619,7 +2619,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         const mutations: Array<"commit" | "reset"> = [];
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -2753,7 +2753,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -2800,7 +2800,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -2864,7 +2864,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       ) as Record<string, unknown>;
       expect(receipt).toMatchObject({
         phase: "finalized",
-        invocationId: `${runId}::${stepId}::dispatch`,
+        attemptId: `${runId}::${stepId}::dispatch`,
       });
       delete receipt["externalState"];
       receipt["phase"] = "finalizing";
@@ -2883,7 +2883,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -2957,7 +2957,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3034,7 +3034,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           WHERE round_id = ?`,
       ).run(intentRound.roundId);
       db.prepare(
-        `UPDATE executor_invocations
+        `UPDATE executor_attempts
             SET state = 'running', attempt = 3, finished_at = NULL
           WHERE workflow_run_id = ?`,
       ).run(runId);
@@ -3073,7 +3073,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded" });
@@ -3137,7 +3137,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required" });
@@ -3200,7 +3200,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded" });
@@ -3278,7 +3278,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3378,7 +3378,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+              "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3459,7 +3459,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+              "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
             )
             .get(runId),
         ).toEqual({ state: "succeeded" });
@@ -3488,7 +3488,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+              "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3535,13 +3535,13 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         const resultJsonPath = path.join(root, "result.json");
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
-        const invocationId = `no-mistakes-launching-${worktreeState}::no-mistakes::dispatch`;
+        const attemptId = `no-mistakes-launching-${worktreeState}::no-mistakes::dispatch`;
         fs.writeFileSync(executorLogPath, 'run:\n  id: "nm-run-1"\n');
         fs.writeFileSync(
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            invocationId,
+            attemptId,
             attempt: 1,
             phase: "launching",
             branch,
@@ -3561,7 +3561,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         }
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -3632,14 +3632,14 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         const resultJsonPath = path.join(root, "result.json");
         const executorLogPath = path.join(root, "executor.log");
         const verificationLogPath = path.join(root, "verification.log");
-        const invocationId =
+        const attemptId =
           "no-mistakes-launching-advanced-head::no-mistakes::dispatch";
         fs.writeFileSync(executorLogPath, 'run:\n  id: "nm-run-1"\n');
         fs.writeFileSync(
           handoffReceiptPath,
           JSON.stringify({
             schemaVersion: 1,
-            invocationId,
+            attemptId,
             attempt: 1,
             phase: "launching",
             branch,
@@ -3659,7 +3659,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         ).toBe("");
         const adapter = createProfileBackedDelegateToolAdapter({
           tool: "no-mistakes",
-          invocationId,
+          attemptId,
           attempt: 2,
           branch,
           headSha,
@@ -3748,7 +3748,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded" });
@@ -3766,7 +3766,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3843,7 +3843,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3897,7 +3897,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required" });
@@ -3934,7 +3934,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -3966,7 +3966,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       );
       const recoveryAdapter = createProfileBackedDelegateToolAdapter({
         tool: "no-mistakes",
-        invocationId: `${runId}::${stepId}::dispatch`,
+        attemptId: `${runId}::${stepId}::dispatch`,
         attempt: 2,
         branch: runGit(repoPath, ["branch", "--show-current"]),
         headSha: runGit(repoPath, ["rev-parse", "HEAD"]),
@@ -4085,7 +4085,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded" });
@@ -4137,7 +4137,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "blocked", attempt: 1 });
@@ -4195,7 +4195,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "running", attempt: 2 });
@@ -4242,7 +4242,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -4274,7 +4274,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4400,7 +4400,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4475,7 +4475,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          invocationId: String(receipt["invocationId"]),
+          attemptId: String(receipt["attemptId"]),
           attempt: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
@@ -4505,7 +4505,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          invocationId: String(receipt["invocationId"]),
+          attemptId: String(receipt["attemptId"]),
           attempt: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
@@ -4539,7 +4539,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4599,7 +4599,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4674,7 +4674,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -4747,7 +4747,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT state, attempt FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });

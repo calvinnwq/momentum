@@ -18,7 +18,7 @@ import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workflow/dispatch/subworkflow-run.js";
@@ -189,7 +189,7 @@ describe("subworkflow production flip — configured step dispatches through dae
       const parentStep = getWorkflowStep(db, runId, PARENT_STEP_ID);
       expect(parentStep?.state).toBe("running");
 
-      const invocation = loadExecutorInvocation(
+      const invocation = loadExecutorAttempt(
         db,
         deriveDispatchInvocationId(runId, PARENT_STEP_ID),
       );
@@ -266,7 +266,7 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         now: NOW + 1,
       });
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
           deriveDispatchInvocationId(runId, PARENT_STEP_ID),
         )?.executorFamily,
@@ -327,7 +327,7 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         "succeeded",
       );
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
           deriveDispatchInvocationId(runId, PARENT_STEP_ID),
         )?.state,

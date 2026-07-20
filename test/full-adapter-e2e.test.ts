@@ -29,8 +29,8 @@ import {
 import {
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
   loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import {
@@ -451,7 +451,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
       const scaffoldInvocationId = `${runId}::preflight::dispatch`;
-      const scaffoldInvocation = loadExecutorInvocation(
+      const scaffoldInvocation = loadExecutorAttempt(
         db,
         scaffoldInvocationId,
       );
@@ -520,13 +520,13 @@ describe("NGX-372 full adapter E2E proof", () => {
         "one-shot",
         1,
       );
-      expect(finalize.invocation.invocationId).toBe(finalizeInvocationId);
-      expect(loadExecutorInvocation(db, finalizeInvocationId)).toEqual(
+      expect(finalize.invocation.attemptId).toBe(finalizeInvocationId);
+      expect(loadExecutorAttempt(db, finalizeInvocationId)).toEqual(
         finalize.invocation,
       );
       const finalizeRoundId = singleShotRoundId(finalizeInvocationId);
       expect(
-        listExecutorRoundsForInvocation(db, finalizeInvocationId).map(
+        listExecutorRoundsForAttempt(db, finalizeInvocationId).map(
           (r) => r.state,
         ),
       ).toEqual(["succeeded"]);
@@ -568,14 +568,14 @@ describe("NGX-372 full adapter E2E proof", () => {
           definition: CODING_WORKFLOW_DEFINITION.key,
         },
         dispatchScaffold: {
-          invocationId: scaffoldInvocationId,
+          attemptId: scaffoldInvocationId,
           executorFamily: scaffoldInvocation?.executorFamily ?? null,
-          invocationState: scaffoldInvocation?.state ?? null,
+          attemptState: scaffoldInvocation?.state ?? null,
           roundState: scaffoldRound?.state ?? null,
         },
         finalization: {
-          invocationId: finalizeInvocationId,
-          invocationState: finalize.invocation.state,
+          attemptId: finalizeInvocationId,
+          attemptState: finalize.invocation.state,
           roundState: finalize.round.round.state,
           verificationStatus: finalize.round.round.verificationStatus,
           commitSha: finalize.round.round.commitSha,
@@ -702,15 +702,15 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // Durable + reattachable below the StepRun: a deterministic invocation id
       // and its ordered rounds, all settled succeeded.
-      const invocationId = goalLoopInvocationId(runId, "implementation", 1);
-      expect(result.invocation.invocationId).toBe(invocationId);
-      expect(loadExecutorInvocation(db, invocationId)).toEqual(
+      const attemptId = goalLoopInvocationId(runId, "implementation", 1);
+      expect(result.invocation.attemptId).toBe(attemptId);
+      expect(loadExecutorAttempt(db, attemptId)).toEqual(
         result.invocation,
       );
-      const durableRounds = listExecutorRoundsForInvocation(db, invocationId);
+      const durableRounds = listExecutorRoundsForAttempt(db, attemptId);
       expect(durableRounds.map((r) => r.roundId)).toEqual([
-        goalLoopRoundId(invocationId, 0),
-        goalLoopRoundId(invocationId, 1),
+        goalLoopRoundId(attemptId, 0),
+        goalLoopRoundId(attemptId, 1),
       ]);
       expect(durableRounds.map((r) => r.state)).toEqual([
         "succeeded",
@@ -722,7 +722,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(
         listExecutorCheckpointsForRound(
           db,
-          goalLoopRoundId(invocationId, 1),
+          goalLoopRoundId(attemptId, 1),
         ).map((c) => c.stage),
       ).toEqual([
         "round_started",
@@ -741,9 +741,9 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         goalLoopFinalization: {
-          invocationId,
+          attemptId,
           executorFamily: result.invocation.executorFamily,
-          invocationState: result.invocation.state,
+          attemptState: result.invocation.state,
           rounds: result.rounds.map((r) => r.round.classification),
           lastRoundVerification: lastRound?.verificationStatus ?? null,
           lastRoundCommitSha: lastRound?.commitSha ?? null,
@@ -755,9 +755,9 @@ describe("NGX-372 full adapter E2E proof", () => {
         evidence,
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
-        goalLoopFinalization: { invocationState: string; rounds: string[] };
+        goalLoopFinalization: { attemptState: string; rounds: string[] };
       };
-      expect(recorded.goalLoopFinalization.invocationState).toBe("succeeded");
+      expect(recorded.goalLoopFinalization.attemptState).toBe("succeeded");
       expect(recorded.goalLoopFinalization.rounds).toEqual([
         "continue",
         "complete",
@@ -848,16 +848,16 @@ describe("NGX-372 full adapter E2E proof", () => {
       // Durable + reattachable below the StepRun: a deterministic invocation id and
       // its single mirror round (index 0), distinct from every other terminal
       // family's id composed in this proof.
-      const invocationId = noMistakesInvocationId(runId, "no-mistakes", 1);
-      expect(result.invocation.invocationId).toBe(invocationId);
-      expect(invocationId).not.toBe(`${runId}::no-mistakes::dispatch`);
-      expect(loadExecutorInvocation(db, invocationId)).toEqual(
+      const attemptId = noMistakesInvocationId(runId, "no-mistakes", 1);
+      expect(result.invocation.attemptId).toBe(attemptId);
+      expect(attemptId).not.toBe(`${runId}::no-mistakes::dispatch`);
+      expect(loadExecutorAttempt(db, attemptId)).toEqual(
         result.invocation,
       );
-      const roundId = noMistakesRoundId(invocationId);
+      const roundId = noMistakesRoundId(attemptId);
       expect(result.round.round.roundId).toBe(roundId);
       expect(
-        listExecutorRoundsForInvocation(db, invocationId).map((r) => r.state),
+        listExecutorRoundsForAttempt(db, attemptId).map((r) => r.state),
       ).toEqual(["succeeded"]);
 
       // The mirror's durable evidence: the expected identity pinned at start, then
@@ -876,9 +876,9 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         noMistakesFinalization: {
-          invocationId,
+          attemptId,
           executorFamily: result.invocation.executorFamily,
-          invocationState: result.invocation.state,
+          attemptState: result.invocation.state,
           roundState: result.round.round.state,
           classification: result.round.decision.classification,
           mirroredDigest: result.round.round.inputDigest,
@@ -891,11 +891,11 @@ describe("NGX-372 full adapter E2E proof", () => {
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         noMistakesFinalization: {
-          invocationState: string;
+          attemptState: string;
           classification: string;
         };
       };
-      expect(recorded.noMistakesFinalization.invocationState).toBe("succeeded");
+      expect(recorded.noMistakesFinalization.attemptState).toBe("succeeded");
       expect(recorded.noMistakesFinalization.classification).toBe("complete");
     } finally {
       db.close();
@@ -950,7 +950,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // no policy-gated adapter execution runs here, so only the empty scaffold
       // exists and the dispatch lease remains held for the adapter lane.
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-      expect(countRows(db, "executor_invocations")).toBe(1);
+      expect(countRows(db, "executor_attempts")).toBe(1);
       expect(countRows(db, "executor_rounds")).toBe(1);
 
       const gates = listWorkflowGatesForRun(db, runId);
@@ -969,7 +969,7 @@ describe("NGX-372 full adapter E2E proof", () => {
           executorFamily: "external-apply",
           dispatchStatus: dispatch.status,
           executorRows:
-            countRows(db, "executor_invocations") +
+            countRows(db, "executor_attempts") +
             countRows(db, "executor_rounds"),
           gateType: gates[0]?.gateType ?? null,
           needsManualRecovery:

@@ -9,10 +9,10 @@ export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_ROUNDS = 5;
 export type GoalLoopRoundPromptRound = {
   workflowRunId: string;
   stepRunId: string;
-  invocationId: string;
+  attemptId: string;
   roundId: string;
   roundIndex: number;
-  attempt: number;
+  attemptNumber: number;
 };
 
 /** Repository context rendered into one native goal-loop round prompt. */
@@ -96,11 +96,11 @@ export function renderGoalLoopRoundPrompt(
   lines.push("## Round identity");
   lines.push(`- workflow_run_id: ${input.round.workflowRunId}`);
   lines.push(`- step_run_id: ${input.round.stepRunId}`);
-  lines.push(`- invocation_id: ${input.round.invocationId}`);
+  lines.push(`- attempt_id: ${input.round.attemptId}`);
   lines.push(`- round_id: ${input.round.roundId}`);
   lines.push(`- round_index: ${input.round.roundIndex}`);
   lines.push(`- iteration: ${input.round.roundIndex + 1}`);
-  lines.push(`- attempt: ${input.round.attempt}`);
+  lines.push(`- attempt: ${input.round.attemptNumber}`);
   lines.push(`- result_path: ${input.resultPath}`);
   lines.push("");
 
@@ -143,7 +143,7 @@ function validatePromptInput(input: GoalLoopRoundPromptInput): void {
   if (!Number.isInteger(input.round.roundIndex) || input.round.roundIndex < 0) {
     throw new Error("roundIndex must be a non-negative integer");
   }
-  if (!Number.isInteger(input.round.attempt) || input.round.attempt < 1) {
+  if (!Number.isInteger(input.round.attemptNumber) || input.round.attemptNumber < 1) {
     throw new Error("attempt must be a positive integer");
   }
   if (!/^[0-9a-f]{40}$/.test(input.repo.baseHead)) {

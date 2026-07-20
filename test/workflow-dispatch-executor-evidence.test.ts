@@ -16,8 +16,8 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  listExecutorRoundsForInvocation,
+  loadExecutorAttempt,
+  listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
@@ -178,7 +178,7 @@ function unconfiguredResult(): WorkflowStepExecutorDispatchResult {
 }
 
 function dispatchRound(db: MomentumDb, stepId: string) {
-  const rounds = listExecutorRoundsForInvocation(
+  const rounds = listExecutorRoundsForAttempt(
     db,
     deriveDispatchInvocationId(RUN_ID, stepId),
   );
@@ -200,7 +200,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
   it("maps a succeeded executor result to a clean succeeded terminal", () => {
     expect(planDispatchedExecutorTerminalization(successResult())).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -209,7 +209,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
   it("maps a failed (runner success=false) executor result to a clean failed terminal", () => {
     expect(planDispatchedExecutorTerminalization(failedResult())).toEqual({
       outcome: "clean_terminal",
-      invocationState: "failed",
+      attemptState: "failed",
       roundState: "failed",
       classification: "failed",
     });
@@ -219,7 +219,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
     expect(planDispatchedExecutorTerminalization(unconfiguredResult())).toEqual(
       {
         outcome: "manual_recovery",
-        invocationState: "manual_recovery_required",
+        attemptState: "manual_recovery_required",
         roundState: "manual_recovery_required",
         classification: "manual_recovery_required",
         recoveryCode: "runtime_unavailable",
@@ -259,7 +259,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
       resultJsonPath: RESULT_JSON,
     });
     expect(plan.outcome).toBe("manual_recovery");
-    expect(plan.invocationState).toBe("manual_recovery_required");
+    expect(plan.attemptState).toBe("manual_recovery_required");
   });
 });
 
@@ -280,7 +280,7 @@ describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
     );
 
     // The dispatch invocation is now a clean terminal the RC-2 decider maps.
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
@@ -326,7 +326,7 @@ describe("terminalizeDispatchedExecutorInvocation — failed", () => {
     });
 
     expect(
-      loadExecutorInvocation(
+      loadExecutorAttempt(
         db,
         deriveDispatchInvocationId(RUN_ID, "preflight"),
       )?.state,
@@ -359,7 +359,7 @@ describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestl
       now: TERMINALIZE_AT,
     });
 
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
@@ -420,7 +420,7 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
     );
 
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, "preflight"),
     );
@@ -456,7 +456,7 @@ describe("terminalizeDispatchedExecutorInvocation — boundary", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
     );
     expect(
-      loadExecutorInvocation(
+      loadExecutorAttempt(
         db,
         deriveDispatchInvocationId(RUN_ID, "preflight"),
       ),

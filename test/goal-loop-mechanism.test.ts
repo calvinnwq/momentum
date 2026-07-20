@@ -8,11 +8,11 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../src/adapters/live-step-wrapper.js";
 import {
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   listExecutorArtifactsForRound,
   loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import {
   resolveGoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput,
@@ -643,7 +643,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -713,7 +713,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -757,7 +757,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -801,7 +801,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -845,7 +845,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -885,7 +885,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -928,7 +928,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -967,7 +967,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1017,7 +1017,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1051,7 +1051,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1086,7 +1086,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1129,7 +1129,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1168,7 +1168,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1214,7 +1214,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
         round: {
           workflowRunId: "run-1",
           stepRunId: "step-1",
-          invocationId: "inv-1",
+          attemptId: "inv-1",
           roundId: "round-1",
           roundIndex: 0,
           attempt: 1,
@@ -1247,8 +1247,8 @@ function openRoundDb(): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "inv-1",
+  const invocation: ExecutorAttemptRecord = {
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -1259,14 +1259,14 @@ function openRoundDb(): MomentumDb {
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   return db;
 }
 
 function buildStart(): PlanGoalLoopRoundStartInput {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",

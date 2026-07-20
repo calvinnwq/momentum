@@ -273,7 +273,7 @@ describe("mapExternalApplyResultToExecutorResult — composes with the terminali
     );
     expect(planDispatchedExecutorTerminalization(mapped)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -286,6 +286,6 @@ describe("mapExternalApplyResultToExecutorResult — composes with the terminali
     );
     const plan = planDispatchedExecutorTerminalization(mapped);
     expect(plan.outcome).toBe("manual_recovery");
-    expect(plan.invocationState).toBe("manual_recovery_required");
+    expect(plan.attemptState).toBe("manual_recovery_required");
   });
 });

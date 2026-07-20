@@ -1,7 +1,7 @@
 /**
  * Public executor SDK contract.
  *
- * Executors receive durable invocation/round snapshots plus a mediated envelope
+ * Executors receive durable attempt/round snapshots plus a mediated envelope
  * facade. They never receive a database handle. One `tick` performs at most one
  * bounded turn, records observations and evidence through the facade, and
  * returns a recommendation. The daemon remains the only owner of terminal
@@ -15,8 +15,8 @@ import type {
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
   ExecutorHumanGateType,
-  ExecutorInvocationRecord,
-  ExecutorInvocationState,
+  ExecutorAttemptRecord,
+  ExecutorAttemptState,
   ExecutorRoundRecord,
   ExecutorRoundState,
   ExecutorRoundVerificationResult,
@@ -105,9 +105,9 @@ export type ExecutorRoundEnvelopeSnapshot = {
 
 /** Stable, read-only state presented at the start of a tick. */
 export type ExecutorEnvelopeSnapshot = {
-  readonly invocation: Readonly<ExecutorInvocationRecord>;
+  readonly attempt: Readonly<ExecutorAttemptRecord>;
   readonly rounds: readonly ExecutorRoundEnvelopeSnapshot[];
-  /** The highest-index round, or null before the invocation has started one. */
+  /** The highest-index round, or null before the attempt has started one. */
   readonly currentRound: ExecutorRoundEnvelopeSnapshot | null;
 };
 
@@ -197,8 +197,8 @@ export type ExecutorRoundProgressResult = {
 
 /**
  * The only durable-state API passed to executor code. Implementations are bound
- * to one invocation and automatically bind child evidence to the named round.
- * Write methods are available only while the invocation state is `running`.
+ * to one attempt and automatically bind child evidence to the named round.
+ * Write methods are available only while the attempt state is `running`.
  */
 export interface ExecutorEnvelope {
   snapshot(): ExecutorEnvelopeSnapshot;
@@ -243,7 +243,7 @@ export type ExecutorTickContext<Config = unknown, HostBindings = unknown> = {
   readonly config: Readonly<Config>;
   /** Machine-local executable/env/credential resolution, never workflow data. */
   readonly hostBindings: Readonly<HostBindings>;
-  /** Durable facade bound to `state.invocation`. */
+  /** Durable facade bound to `state.attempt`. */
   readonly envelope: ExecutorEnvelope;
   /** Daemon cancellation signal for the bounded turn. */
   readonly signal: AbortSignal;
@@ -257,7 +257,7 @@ export type ExecutorTickResult = {
   readonly roundId: string;
   readonly recommendation: ExecutorCompletionClassification;
   readonly recommendedRoundState: ExecutorRoundState;
-  readonly recommendedInvocationState: ExecutorInvocationState;
+  readonly recommendedAttemptState: ExecutorAttemptState;
   readonly recoveryCode: string | null;
   readonly humanGate: ExecutorHumanGateType | null;
   /**
@@ -286,7 +286,7 @@ export interface Executor<Config = unknown, HostBindings = unknown> {
 
 /**
  * Host-side decision applied after inspecting an executor recommendation.
- * The durable controller rejects classification, invocation-state, and
+ * The durable controller rejects classification, attempt-state, and
  * round-state combinations that violate the executor-loop classification map.
  */
 export type ExecutorDaemonDecision = {
@@ -294,7 +294,7 @@ export type ExecutorDaemonDecision = {
   readonly classification: ExecutorCompletionClassification;
   readonly executorRecommendation: ExecutorCompletionClassification | null;
   readonly roundState: ExecutorRoundState;
-  readonly invocationState: ExecutorInvocationState;
+  readonly attemptState: ExecutorAttemptState;
   readonly recoveryCode: string | null;
   readonly humanGate: ExecutorHumanGateType | null;
 };

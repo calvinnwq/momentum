@@ -31,11 +31,11 @@ import type {
   DelegateSupervisorToolAdapter,
 } from "../src/core/executors/delegate-supervisor/types.js";
 import {
-  insertExecutorInvocation,
-  updateExecutorInvocationState,
+  insertExecutorAttempt,
+  updateExecutorAttemptState,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../src/core/workflow/dispatch/executor-gate.js";
@@ -52,7 +52,7 @@ afterEach(() => {
 
 function openDelegateDb(): {
   db: MomentumDb;
-  invocation: ExecutorInvocationRecord;
+  invocation: ExecutorAttemptRecord;
   root: string;
 } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "delegate-supervisor-"));
@@ -65,8 +65,8 @@ function openDelegateDb(): {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
      VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "run-1::step-1::dispatch",
+  const invocation: ExecutorAttemptRecord = {
+    attemptId: "run-1::step-1::dispatch",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "no-mistakes",
@@ -77,7 +77,7 @@ function openDelegateDb(): {
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   return { db, invocation, root };
 }
 
@@ -105,14 +105,14 @@ function writeState(statePath: string, value: DelegateSupervisorExternalState) {
 
 function seedCurrentRoundCheckpoint(
   db: MomentumDb,
-  invocation: ExecutorInvocationRecord,
+  invocation: ExecutorAttemptRecord,
   stage: string,
   detail: string | null,
 ): string {
   const roundId = seedRound(db, invocation, 0);
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId: invocation.invocationId,
+    attemptId: invocation.attemptId,
     now: () => 5,
   });
   envelope.facade.recordCheckpoint(roundId, {
@@ -126,18 +126,18 @@ function seedCurrentRoundCheckpoint(
 
 function seedRound(
   db: MomentumDb,
-  invocation: ExecutorInvocationRecord,
+  invocation: ExecutorAttemptRecord,
   roundIndex: number,
 ): string {
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId: invocation.invocationId,
+    attemptId: invocation.attemptId,
     now: () => 5,
   });
-  const roundId = `${invocation.invocationId}::round-${roundIndex + 1}`;
+  const roundId = `${invocation.attemptId}::round-${roundIndex + 1}`;
   envelope.facade.startRound({
     roundId,
-    invocationId: invocation.invocationId,
+    attemptId: invocation.attemptId,
     workflowRunId: invocation.workflowRunId,
     stepRunId: invocation.stepRunId,
     stepKey: invocation.stepKey,
@@ -168,13 +168,13 @@ describe("delegate-supervisor SDK executor", () => {
     const { db, invocation } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${invocation.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       workflowRunId: invocation.workflowRunId,
       stepRunId: invocation.stepRunId,
       stepKey: invocation.stepKey,
@@ -210,7 +210,7 @@ describe("delegate-supervisor SDK executor", () => {
           detail: JSON.stringify({
             recommendation: "complete",
             recommendedRoundState: "succeeded",
-            recommendedInvocationState: "succeeded",
+            recommendedAttemptState: "succeeded",
             recoveryCode: null,
             humanGate: null,
             reason: "legacy wrapper completed cleanly",
@@ -222,7 +222,7 @@ describe("delegate-supervisor SDK executor", () => {
     let settled: boolean | undefined;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -264,7 +264,7 @@ describe("delegate-supervisor SDK executor", () => {
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper completed cleanly",
@@ -280,15 +280,15 @@ describe("delegate-supervisor SDK executor", () => {
       finishedAt: 5,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const activeReplayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -319,7 +319,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
       }).snapshot().rounds,
     ).toHaveLength(2);
     db.close();
@@ -334,7 +334,7 @@ describe("delegate-supervisor SDK executor", () => {
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper completed cleanly",
@@ -350,14 +350,14 @@ describe("delegate-supervisor SDK executor", () => {
       finishedAt: 5,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const replayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 6,
     });
     envelope.facade.recordCheckpoint(replayRoundId, {
@@ -370,7 +370,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -408,7 +408,7 @@ describe("delegate-supervisor SDK executor", () => {
       JSON.stringify({
         recommendation: "continue",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "running",
+        recommendedAttemptState: "running",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper requested another round",
@@ -424,14 +424,14 @@ describe("delegate-supervisor SDK executor", () => {
       finishedAt: 5,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -466,7 +466,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const rounds = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     }).snapshot().rounds;
     expect(rounds).toHaveLength(3);
     expect(
@@ -487,7 +487,7 @@ describe("delegate-supervisor SDK executor", () => {
       JSON.stringify({
         recommendation: "manual_recovery_required",
         recommendedRoundState: "manual_recovery_required",
-        recommendedInvocationState: "manual_recovery_required",
+        recommendedAttemptState: "manual_recovery_required",
         recoveryCode: "external_state_unreadable",
         humanGate: "manual_recovery_required",
         reason: "legacy state could not be read",
@@ -503,10 +503,10 @@ describe("delegate-supervisor SDK executor", () => {
       finishedAt: 5,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     let repaired = false;
     let handoffs = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -530,7 +530,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const replayed = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -541,13 +541,13 @@ describe("delegate-supervisor SDK executor", () => {
 
     repaired = true;
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 3, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -570,7 +570,7 @@ describe("delegate-supervisor SDK executor", () => {
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "stale legacy completion",
@@ -588,7 +588,7 @@ describe("delegate-supervisor SDK executor", () => {
     const handoffRoundId = seedRound(db, invocation, 1);
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 6,
     });
     envelope.facade.recordCheckpoint(handoffRoundId, {
@@ -597,7 +597,7 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         attempt: invocation.attempt,
       }),
     });
@@ -626,7 +626,7 @@ describe("delegate-supervisor SDK executor", () => {
     let reads = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -669,7 +669,7 @@ describe("delegate-supervisor SDK executor", () => {
       let settled: boolean | undefined;
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: {
@@ -727,7 +727,7 @@ describe("delegate-supervisor SDK executor", () => {
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -762,13 +762,13 @@ describe("delegate-supervisor SDK executor", () => {
     const recoveredEvidencePath = path.join(root, "recovered.log");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${invocation.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       workflowRunId: invocation.workflowRunId,
       stepRunId: invocation.stepRunId,
       stepKey: invocation.stepKey,
@@ -797,7 +797,7 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         attempt: invocation.attempt,
       }),
     });
@@ -834,7 +834,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -849,7 +849,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const resumed = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     }).snapshot();
     expect(resumed.rounds).toHaveLength(1);
     expect(resumed.currentRound?.artifacts).toHaveLength(2);
@@ -874,14 +874,14 @@ describe("delegate-supervisor SDK executor", () => {
       DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
       JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         attempt: invocation.attempt,
       }),
     );
     let recoveries = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: {
@@ -917,7 +917,7 @@ describe("delegate-supervisor SDK executor", () => {
       let settled: boolean | undefined;
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: {
@@ -958,7 +958,7 @@ describe("delegate-supervisor SDK executor", () => {
       expect(
         createDurableExecutorEnvelope({
           db,
-          invocationId: invocation.invocationId,
+          attemptId: invocation.attemptId,
         })
           .snapshot()
           .currentRound?.checkpoints.some(
@@ -1015,7 +1015,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1030,13 +1030,13 @@ describe("delegate-supervisor SDK executor", () => {
       inputDigest: expect.stringMatching(/^sha256:/),
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: {} },
@@ -1056,7 +1056,7 @@ describe("delegate-supervisor SDK executor", () => {
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1101,7 +1101,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": handoff } },
@@ -1121,7 +1121,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: { tools: { gnhf: replacement } },
@@ -1140,7 +1140,7 @@ describe("delegate-supervisor SDK executor", () => {
     const { db, invocation } = openDelegateDb();
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1164,14 +1164,14 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     let recoveries = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: {
@@ -1234,7 +1234,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1283,7 +1283,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1337,7 +1337,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1358,13 +1358,13 @@ describe("delegate-supervisor SDK executor", () => {
     const { db, invocation } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 5,
     });
-    const priorRoundId = `${invocation.invocationId}::round-1`;
+    const priorRoundId = `${invocation.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId: priorRoundId,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       workflowRunId: invocation.workflowRunId,
       stepRunId: invocation.stepRunId,
       stepKey: invocation.stepKey,
@@ -1393,7 +1393,7 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         attempt: 1,
       }),
     });
@@ -1403,7 +1403,7 @@ describe("delegate-supervisor SDK executor", () => {
         classification: "manual_recovery_required",
         executorRecommendation: "manual_recovery_required",
         roundState: "manual_recovery_required",
-        invocationState: "manual_recovery_required",
+        attemptState: "manual_recovery_required",
         recoveryCode: "executor_threw",
         humanGate: "manual_recovery_required",
       },
@@ -1417,10 +1417,10 @@ describe("delegate-supervisor SDK executor", () => {
       },
     );
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     let handoffs = 0;
     let recoveries = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -1448,7 +1448,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1464,7 +1464,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
       })
         .snapshot()
         .currentRound?.checkpoints.map(({ stage }) => stage),
@@ -1474,13 +1474,13 @@ describe("delegate-supervisor SDK executor", () => {
       "classified",
     ]);
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 3, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1533,7 +1533,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1546,10 +1546,10 @@ describe("delegate-supervisor SDK executor", () => {
     });
 
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const recovered = await driveExecutorTicks(input);
 
     expect(handoffs).toBe(1);
@@ -1596,7 +1596,7 @@ describe("delegate-supervisor SDK executor", () => {
     const executor = new DelegateSupervisorExecutor();
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter }, now: () => 1 },
@@ -1604,22 +1604,22 @@ describe("delegate-supervisor SDK executor", () => {
     });
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter }, now: () => 2 },
       now: () => 2,
     });
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     const retriedAt = DELEGATE_SUPERVISOR_STALL_AFTER_MS + 10;
 
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1678,7 +1678,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1688,10 +1688,10 @@ describe("delegate-supervisor SDK executor", () => {
     const gated = await driveExecutorTicks(input);
     expect(gated.invocation.state).toBe("waiting_operator");
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     external = state({
       activeStep: null,
       stepStatus: "completed",
@@ -1752,7 +1752,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1763,10 +1763,10 @@ describe("delegate-supervisor SDK executor", () => {
       "waiting_operator",
     );
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+        WHERE attempt_id = ?`,
+    ).run(invocation.attemptId);
     external = state({
       externalRunId: "nm-run-2",
       activeStep: null,
@@ -1790,13 +1790,13 @@ describe("delegate-supervisor SDK executor", () => {
     const { db, invocation } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${invocation.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       workflowRunId: invocation.workflowRunId,
       stepRunId: invocation.stepRunId,
       stepKey: invocation.stepKey,
@@ -1863,7 +1863,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1907,7 +1907,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const handedOff = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -1922,7 +1922,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const mirrored = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { ...bindings, now: () => 20 },
@@ -1947,7 +1947,7 @@ describe("delegate-supervisor SDK executor", () => {
     );
     const completed = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { ...bindings, now: () => 30 },
@@ -2002,7 +2002,7 @@ describe("delegate-supervisor SDK executor", () => {
       };
       const input = {
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2013,7 +2013,7 @@ describe("delegate-supervisor SDK executor", () => {
       expect(gated.invocation.state).toBe("waiting_operator");
       const approval = createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
       })
         .snapshot()
         .currentRound?.decisions.find(
@@ -2028,7 +2028,7 @@ describe("delegate-supervisor SDK executor", () => {
           gateId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
-          invocationId: invocation.invocationId,
+          attemptId: invocation.attemptId,
           roundId: gated.lastRound!.roundId,
           targetScope: "round",
           gateType: "approval_required",
@@ -2089,7 +2089,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2104,7 +2104,7 @@ describe("delegate-supervisor SDK executor", () => {
     ) => {
       const snapshot = createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
       }).snapshot();
       const round = snapshot.currentRound!;
       const approval = [...round.decisions]
@@ -2121,7 +2121,7 @@ describe("delegate-supervisor SDK executor", () => {
           gateId,
           workflowRunId: invocation.workflowRunId,
           stepRunId: invocation.stepRunId,
-          invocationId: invocation.invocationId,
+          attemptId: invocation.attemptId,
           roundId: round.round.roundId,
           targetScope: "round",
           gateType: "approval_required",
@@ -2164,7 +2164,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(completed.invocation.state).toBe("succeeded");
     const approvalActions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     })
       .snapshot()
       .rounds.flatMap(({ decisions }) =>
@@ -2215,7 +2215,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2227,7 +2227,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(gated.invocation.state).toBe("waiting_operator");
     const decisions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     }).snapshot().currentRound?.decisions;
     expect(decisions).toEqual(
       expect.arrayContaining([
@@ -2278,7 +2278,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2290,7 +2290,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(gated.invocation.state).toBe("waiting_operator");
     const unresolved = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     })
       .snapshot()
       .currentRound?.decisions.filter(
@@ -2345,7 +2345,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2377,14 +2377,14 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: null,
     });
-    updateExecutorInvocationState(db, invocation.invocationId, "running", {
+    updateExecutorAttemptState(db, invocation.attemptId, "running", {
       finishedAt: null,
     });
     const completed = await driveExecutorTicks(input);
     expect(completed.invocation.state).toBe("succeeded");
     const decisions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     }).snapshot().currentRound?.decisions;
     expect(decisions).toHaveLength(2);
     expect(decisions?.at(-1)).toMatchObject({
@@ -2450,7 +2450,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => 10 },
@@ -2458,7 +2458,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => 20 },
@@ -2506,7 +2506,7 @@ describe("delegate-supervisor SDK executor", () => {
     const stalledAt = 20 + DELEGATE_SUPERVISOR_STALL_AFTER_MS;
     const stalled = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => stalledAt },
@@ -2544,7 +2544,7 @@ describe("delegate-supervisor SDK executor", () => {
     const bindings = { tools: { "no-mistakes": adapter }, now: () => 20 };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2552,7 +2552,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2588,7 +2588,7 @@ describe("delegate-supervisor SDK executor", () => {
     const bindings = { tools: new Map([[adapter.name, adapter]]) };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2596,7 +2596,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2651,7 +2651,7 @@ describe("delegate-supervisor SDK executor", () => {
       const bindings = { tools: new Map([[adapter.name, adapter]]) };
       await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor,
         config: { tool: "no-mistakes" },
         hostBindings: bindings,
@@ -2659,7 +2659,7 @@ describe("delegate-supervisor SDK executor", () => {
       });
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor,
         config: { tool: "no-mistakes" },
         hostBindings: bindings,
@@ -2696,7 +2696,7 @@ describe("delegate-supervisor SDK executor", () => {
     const executor = new DelegateSupervisorExecutor();
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: new Map([[adapter.name, adapter]]) },
@@ -2708,7 +2708,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
       }).snapshot().invocation.state,
     ).toBe("running");
     db.close();
@@ -2741,7 +2741,7 @@ describe("delegate-supervisor SDK executor", () => {
     const hostBindings = { tools: new Map([[ciAdapter.name, ciAdapter]]) };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "ci-run" },
       hostBindings,
@@ -2749,7 +2749,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor,
       config: { tool: "ci-run" },
       hostBindings,
@@ -2803,7 +2803,7 @@ describe("delegate-supervisor SDK executor", () => {
       };
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: invocation.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "ci-run" },
         hostBindings: { tools: { "ci-run": adapter } },
@@ -2836,7 +2836,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "ci-run" },
       hostBindings: { tools: { "ci-run": adapter } },
@@ -2853,7 +2853,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const currentRound = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: invocation.attemptId,
     }).snapshot().currentRound;
     expect(
       currentRound?.checkpoints.some(

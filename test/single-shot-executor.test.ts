@@ -4,11 +4,11 @@ import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   type WorkflowExecutorFamily,
 } from "../src/core/executors/loop/reducer.js";
 import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
@@ -39,7 +39,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
 const INVOCATION_TERMINAL_SET = new Set<string>(
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
@@ -111,7 +111,7 @@ describe("decideSingleShotInvocation — success", () => {
     const decision = decideSingleShotInvocation({ ok: true });
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
-    expect(decision.invocationState).toBe("succeeded");
+    expect(decision.attemptState).toBe("succeeded");
     expect(decision.recoveryCode).toBeNull();
     expect(decision.humanGate).toBeNull();
     expect(decision.reason).toMatch(/succeeded|complete/i);
@@ -126,7 +126,7 @@ describe("decideSingleShotInvocation — blocked outcomes", () => {
     });
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
-    expect(decision.invocationState).toBe("blocked");
+    expect(decision.attemptState).toBe("blocked");
     expect(decision.recoveryCode).toBe("runtime_unavailable");
     expect(decision.humanGate).toBeNull();
   });
@@ -154,7 +154,7 @@ describe("decideSingleShotInvocation — execution failures", () => {
     const decision = decideSingleShotInvocation({ ok: false, recoveryCode });
     expect(decision.classification).toBe("failed");
     expect(decision.roundState).toBe("failed");
-    expect(decision.invocationState).toBe("failed");
+    expect(decision.attemptState).toBe("failed");
     expect(decision.recoveryCode).toBe(recoveryCode);
     expect(decision.humanGate).toBeNull();
   });
@@ -175,7 +175,7 @@ describe("decideSingleShotInvocation — manual recovery", () => {
       const decision = decideSingleShotInvocation({ ok: false, recoveryCode });
       expect(decision.classification).toBe("manual_recovery_required");
       expect(decision.roundState).toBe("manual_recovery_required");
-      expect(decision.invocationState).toBe("manual_recovery_required");
+      expect(decision.attemptState).toBe("manual_recovery_required");
       expect(decision.recoveryCode).toBe(recoveryCode);
       expect(decision.humanGate).toBe("manual_recovery_required");
     },
@@ -188,7 +188,7 @@ describe("decideSingleShotInvocation — totality", () => {
       const decision = decideSingleShotInvocation({ ok: false, recoveryCode });
       expect(COMPLETION_SET.has(decision.classification)).toBe(true);
       expect(ROUND_TERMINAL_SET.has(decision.roundState)).toBe(true);
-      expect(INVOCATION_TERMINAL_SET.has(decision.invocationState)).toBe(true);
+      expect(INVOCATION_TERMINAL_SET.has(decision.attemptState)).toBe(true);
       // A failed invocation can never be classified complete or continue.
       expect(decision.classification).not.toBe("complete");
       expect(decision.classification).not.toBe("continue");
@@ -229,11 +229,11 @@ describe("singleShotInvocationId / singleShotRoundId", () => {
   });
 
   it("mints a single deterministic round id under an invocation", () => {
-    const invocationId = singleShotInvocationId("run1", "step1", "one-shot", 0);
-    const roundId = singleShotRoundId(invocationId);
-    expect(roundId).toContain(invocationId);
+    const attemptId = singleShotInvocationId("run1", "step1", "one-shot", 0);
+    const roundId = singleShotRoundId(attemptId);
+    expect(roundId).toContain(attemptId);
     // Stable: the same invocation always yields the same single round id.
-    expect(singleShotRoundId(invocationId)).toBe(roundId);
+    expect(singleShotRoundId(attemptId)).toBe(roundId);
   });
 });
 
@@ -247,7 +247,7 @@ describe("planSingleShotInvocation", () => {
       attempt: 0,
       startedAt: 1000,
     });
-    expect(invocation.invocationId).toBe(
+    expect(invocation.attemptId).toBe(
       singleShotInvocationId("run1", "step1", "one-shot", 0),
     );
     expect(invocation.workflowRunId).toBe("run1");
@@ -272,7 +272,7 @@ describe("planSingleShotInvocation", () => {
     });
     expect(invocation.executorFamily).toBe("script");
     expect(invocation.attempt).toBe(3);
-    expect(invocation.invocationId).toBe(
+    expect(invocation.attemptId).toBe(
       singleShotInvocationId("run9", "step9", "script", 3),
     );
   });
@@ -287,12 +287,12 @@ describe("planSingleShotInvocation", () => {
       startedAt: 1,
     });
     const decision = decideSingleShotInvocation({ ok: true });
-    const transition = transitionExecutorInvocation(
+    const transition = transitionExecutorAttempt(
       invocation.state,
-      decision.invocationState,
+      decision.attemptState,
     );
     expect(transition.ok).toBe(true);
-    expect(isTerminalExecutorInvocationState(decision.invocationState)).toBe(
+    expect(isTerminalExecutorAttemptState(decision.attemptState)).toBe(
       true,
     );
     expect(isTerminalExecutorRoundState(decision.roundState)).toBe(true);
@@ -333,7 +333,7 @@ describe("planSingleShotRoundStart", () => {
   it("projects a running single round at index 0 carrying the chosen family", () => {
     const round = planSingleShotRoundStart({
       roundId: "r0",
-      invocationId: "inv0",
+      attemptId: "inv0",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",
@@ -347,7 +347,7 @@ describe("planSingleShotRoundStart", () => {
     });
 
     expect(round.roundId).toBe("r0");
-    expect(round.invocationId).toBe("inv0");
+    expect(round.attemptId).toBe("inv0");
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("preflight");
@@ -382,7 +382,7 @@ describe("planSingleShotRoundStart", () => {
   it("carries the script family with its null agent selection and a later attempt", () => {
     const round = planSingleShotRoundStart({
       roundId: "r0",
-      invocationId: "inv0",
+      attemptId: "inv0",
       workflowRunId: "run9",
       stepRunId: "step9",
       stepKey: "merge-cleanup",
@@ -429,8 +429,8 @@ describe("planSingleShotRoundStartForInvocation", () => {
       startedAt: 2000,
     });
 
-    expect(start.roundId).toBe(singleShotRoundId(invocation.invocationId));
-    expect(start.invocationId).toBe(invocation.invocationId);
+    expect(start.roundId).toBe(singleShotRoundId(invocation.attemptId));
+    expect(start.attemptId).toBe(invocation.attemptId);
     expect(start.workflowRunId).toBe("run1");
     expect(start.stepRunId).toBe("step1");
     expect(start.stepKey).toBe("preflight");
@@ -461,8 +461,8 @@ describe("planSingleShotRoundStartForInvocation", () => {
     });
     const round = planSingleShotRoundStart(start);
 
-    expect(round.roundId).toBe(singleShotRoundId(invocation.invocationId));
-    expect(round.invocationId).toBe(invocation.invocationId);
+    expect(round.roundId).toBe(singleShotRoundId(invocation.attemptId));
+    expect(round.attemptId).toBe(invocation.attemptId);
     expect(round.executorFamily).toBe("script");
     expect(round.attempt).toBe(1);
     expect(round.roundIndex).toBe(0);
@@ -655,7 +655,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
     });
     const round = planSingleShotRoundStart({
       roundId: "r0",
-      invocationId: "inv0",
+      attemptId: "inv0",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",

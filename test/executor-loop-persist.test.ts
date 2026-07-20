@@ -10,14 +10,14 @@ import type {
   ExecutorDecisionRecord,
   ExecutorDefinitionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import {
   ExecutorEvidenceConflictError,
-  ExecutorInvocationConflictError,
-  ExecutorInvocationNotFoundError,
-  ExecutorInvocationTransitionError,
+  ExecutorAttemptConflictError,
+  ExecutorAttemptNotFoundError,
+  ExecutorAttemptTransitionError,
   ExecutorRoundConflictError,
   ExecutorRoundNotFoundError,
   ExecutorRoundTransitionError,
@@ -26,20 +26,20 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   listIncompleteExecutorRoundsForRun,
-  listExecutorRoundsForInvocation,
+  listExecutorRoundsForAttempt,
   listExecutorRoundsForRun,
   loadExecutorDefinition,
-  loadExecutorInvocation,
+  loadExecutorAttempt,
   loadExecutorRound,
   persistExecutorDefinition,
-  updateExecutorInvocationState,
+  updateExecutorAttemptState,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 
@@ -90,7 +90,7 @@ function openSeededDb(): MomentumDb {
 // round inserts.
 function openRoundDb(): MomentumDb {
   const db = openSeededDb();
-  insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+  insertExecutorAttempt(db, makeInvocation(), { now: 1 });
   return db;
 }
 
@@ -158,10 +158,10 @@ function makeDefinition(
 }
 
 function makeInvocation(
-  overrides: Partial<ExecutorInvocationRecord> = {},
-): ExecutorInvocationRecord {
+  overrides: Partial<ExecutorAttemptRecord> = {},
+): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -180,7 +180,7 @@ function makeRound(
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -373,8 +373,8 @@ describe("executor invocations", () => {
         startedAt: 500,
         heartbeatAt: 600,
       });
-      insertExecutorInvocation(db, record, { now: 1000 });
-      expect(loadExecutorInvocation(db, "inv-1")).toEqual(record);
+      insertExecutorAttempt(db, record, { now: 1000 });
+      expect(loadExecutorAttempt(db, "inv-1")).toEqual(record);
     } finally {
       db.close();
     }
@@ -383,15 +383,15 @@ describe("executor invocations", () => {
   it("refuses a duplicate invocation id and leaves the original untouched", () => {
     const db = openSeededDb();
     try {
-      insertExecutorInvocation(db, makeInvocation({ state: "preparing" }), {
+      insertExecutorAttempt(db, makeInvocation({ state: "preparing" }), {
         now: 1000,
       });
       expect(() =>
-        insertExecutorInvocation(db, makeInvocation({ state: "running" }), {
+        insertExecutorAttempt(db, makeInvocation({ state: "running" }), {
           now: 2000,
         }),
-      ).toThrow(ExecutorInvocationConflictError);
-      expect(loadExecutorInvocation(db, "inv-1")?.state).toBe("preparing");
+      ).toThrow(ExecutorAttemptConflictError);
+      expect(loadExecutorAttempt(db, "inv-1")?.state).toBe("preparing");
     } finally {
       db.close();
     }
@@ -401,12 +401,12 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       const bad = makeInvocation({
-        state: "bogus" as ExecutorInvocationRecord["state"],
+        state: "bogus" as ExecutorAttemptRecord["state"],
       });
-      expect(() => insertExecutorInvocation(db, bad)).toThrow(
+      expect(() => insertExecutorAttempt(db, bad)).toThrow(
         InvalidExecutorRecordError,
       );
-      expect(loadExecutorInvocation(db, "inv-1")).toBeUndefined();
+      expect(loadExecutorAttempt(db, "inv-1")).toBeUndefined();
     } finally {
       db.close();
     }
@@ -415,12 +415,12 @@ describe("executor invocations", () => {
   it("advances state through a valid transition", () => {
     const db = openSeededDb();
     try {
-      insertExecutorInvocation(db, makeInvocation(), { now: 1000 });
-      updateExecutorInvocationState(db, "inv-1", "preparing", {
+      insertExecutorAttempt(db, makeInvocation(), { now: 1000 });
+      updateExecutorAttemptState(db, "inv-1", "preparing", {
         now: 1100,
         heartbeatAt: 1100,
       });
-      const loaded = loadExecutorInvocation(db, "inv-1");
+      const loaded = loadExecutorAttempt(db, "inv-1");
       expect(loaded?.state).toBe("preparing");
       expect(loaded?.heartbeatAt).toBe(1100);
     } finally {
@@ -431,21 +431,21 @@ describe("executor invocations", () => {
   it("does not clobber a concurrently changed invocation heartbeat", () => {
     const db = openSeededDb();
     try {
-      insertExecutorInvocation(db, makeInvocation({ state: "running" }), {
+      insertExecutorAttempt(db, makeInvocation({ state: "running" }), {
         now: 1000,
       });
-      const guardedDb = interceptNextUpdate(db, "executor_invocations", () => {
+      const guardedDb = interceptNextUpdate(db, "executor_attempts", () => {
         db.prepare(
-          "UPDATE executor_invocations SET heartbeat_at = 1099, updated_at = 1099 WHERE invocation_id = 'inv-1'",
+          "UPDATE executor_attempts SET heartbeat_at = 1099, updated_at = 1099 WHERE attempt_id = 'inv-1'",
         ).run();
       });
       expect(() =>
-        updateExecutorInvocationState(guardedDb, "inv-1", "running", {
+        updateExecutorAttemptState(guardedDb, "inv-1", "running", {
           now: 1100,
           heartbeatAt: 1100,
         }),
-      ).toThrow(ExecutorInvocationTransitionError);
-      expect(loadExecutorInvocation(db, "inv-1")?.heartbeatAt).toBe(1099);
+      ).toThrow(ExecutorAttemptTransitionError);
+      expect(loadExecutorAttempt(db, "inv-1")?.heartbeatAt).toBe(1099);
     } finally {
       db.close();
     }
@@ -454,11 +454,11 @@ describe("executor invocations", () => {
   it("refuses an invalid transition and leaves state unchanged", () => {
     const db = openSeededDb();
     try {
-      insertExecutorInvocation(db, makeInvocation(), { now: 1000 });
+      insertExecutorAttempt(db, makeInvocation(), { now: 1000 });
       expect(() =>
-        updateExecutorInvocationState(db, "inv-1", "succeeded", { now: 1100 }),
-      ).toThrow(ExecutorInvocationTransitionError);
-      expect(loadExecutorInvocation(db, "inv-1")?.state).toBe("pending");
+        updateExecutorAttemptState(db, "inv-1", "succeeded", { now: 1100 }),
+      ).toThrow(ExecutorAttemptTransitionError);
+      expect(loadExecutorAttempt(db, "inv-1")?.state).toBe("pending");
     } finally {
       db.close();
     }
@@ -468,8 +468,8 @@ describe("executor invocations", () => {
     const db = openSeededDb();
     try {
       expect(() =>
-        updateExecutorInvocationState(db, "ghost", "preparing"),
-      ).toThrow(ExecutorInvocationNotFoundError);
+        updateExecutorAttemptState(db, "ghost", "preparing"),
+      ).toThrow(ExecutorAttemptNotFoundError);
     } finally {
       db.close();
     }
@@ -560,7 +560,7 @@ describe("executor rounds", () => {
         makeRound({ roundId: "round-1", roundIndex: 1 }),
         { now: 1000 },
       );
-      const rounds = listExecutorRoundsForInvocation(db, "inv-1");
+      const rounds = listExecutorRoundsForAttempt(db, "inv-1");
       expect(rounds.map((r) => r.roundId)).toEqual([
         "round-0",
         "round-1",
@@ -580,10 +580,10 @@ describe("executor rounds", () => {
         `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
            VALUES ('run-1', 'step-2', 'preflight', 1, 1, 1)`,
       ).run();
-      insertExecutorInvocation(
+      insertExecutorAttempt(
         db,
         makeInvocation({
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           stepRunId: "step-2",
           stepKey: "preflight",
         }),
@@ -604,7 +604,7 @@ describe("executor rounds", () => {
         makeRound({
           roundId: "round-pre",
           roundIndex: 0,
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           stepRunId: "step-2",
           stepKey: "preflight",
         }),
@@ -627,10 +627,10 @@ describe("executor rounds", () => {
   it("lists retry rounds in invocation order before round index", () => {
     const db = openRoundDb();
     try {
-      insertExecutorInvocation(
+      insertExecutorAttempt(
         db,
         makeInvocation({
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           attempt: 2,
         }),
         { now: 2000 },
@@ -649,7 +649,7 @@ describe("executor rounds", () => {
         db,
         makeRound({
           roundId: "attempt-2-round-0",
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           attempt: 2,
           roundIndex: 0,
         }),
@@ -659,7 +659,7 @@ describe("executor rounds", () => {
         db,
         makeRound({
           roundId: "attempt-2-round-1",
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           attempt: 2,
           roundIndex: 1,
         }),

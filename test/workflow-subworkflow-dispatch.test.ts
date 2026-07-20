@@ -19,7 +19,7 @@ import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
@@ -128,7 +128,7 @@ function subworkflowScaffoldBaseDispatch(): AsyncWorkflowStepDispatch {
     const result = executeWorkflowStepDispatch(claim, context);
     context.db
       .prepare(
-        "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
+        "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
       )
       .run(deriveDispatchInvocationId(claim.runId, claim.stepId));
     return result;
@@ -151,8 +151,8 @@ function stepStateForRun(
   return row.state;
 }
 
-function invocationState(db: MomentumDb): string | undefined {
-  return loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+function attemptState(db: MomentumDb): string | undefined {
+  return loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
     ?.state;
 }
 
@@ -239,7 +239,7 @@ describe("createSubworkflowWorkflowDispatch — family gate", () => {
     expect(derives).toBe(0);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
         ?.executorFamily,
     ).toBe("one-shot");
   });
@@ -267,7 +267,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     // durable side effect layered after it.
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     expect(runner.calls()).toBe(1);
-    expect(invocationState(db)).toBe("succeeded");
+    expect(attemptState(db)).toBe("succeeded");
     expect(stepState(db)).toBe("succeeded");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
@@ -290,7 +290,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     await dispatch(claim, context(db));
 
     expect(runner.calls()).toBe(1);
-    expect(invocationState(db)).toBe("running");
+    expect(attemptState(db)).toBe("running");
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
   });
@@ -353,7 +353,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     });
     expect(tick3.code).toBe("dispatched");
     expect(runner.calls()).toBe(3);
-    expect(invocationState(db)).toBe("succeeded");
+    expect(attemptState(db)).toBe("succeeded");
     expect(stepState(db)).toBe("succeeded");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
@@ -487,7 +487,7 @@ describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
 
     await dispatch(claim, context(db));
 
-    expect(invocationState(db)).toBe("manual_recovery_required");
+    expect(attemptState(db)).toBe("manual_recovery_required");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
@@ -516,7 +516,7 @@ describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
 
     await dispatch(claim, context(db));
 
-    expect(invocationState(db)).toBe("manual_recovery_required");
+    expect(attemptState(db)).toBe("manual_recovery_required");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);

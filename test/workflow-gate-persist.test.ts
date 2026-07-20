@@ -61,7 +61,7 @@ function roundGate(overrides: Partial<NewWorkflowGate> = {}): NewWorkflowGate {
     gateId: "gate-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     roundId: "round-1",
     targetScope: "round",
     gateType: "operator_decision_required",
@@ -104,7 +104,7 @@ describe("insertWorkflowGate", () => {
       gateId: "gate-1",
       workflowRunId: "run-1",
       stepRunId: "step-1",
-      invocationId: "inv-1",
+      attemptId: "inv-1",
       roundId: "round-1",
       targetScope: "round",
       gateType: "operator_decision_required",
@@ -127,7 +127,7 @@ describe("insertWorkflowGate", () => {
     const loaded = loadWorkflowGate(db, "gate-wf");
     expect(loaded?.targetScope).toBe("workflow");
     expect(loaded?.stepRunId).toBeNull();
-    expect(loaded?.invocationId).toBeNull();
+    expect(loaded?.attemptId).toBeNull();
     expect(loaded?.roundId).toBeNull();
   });
 

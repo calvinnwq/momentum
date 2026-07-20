@@ -60,7 +60,7 @@ function gate(
     gateId: "gate-1",
     workflowRunId: RUN_ID,
     stepRunId: null,
-    invocationId: null,
+    attemptId: null,
     roundId: null,
     targetScope: "workflow",
     gateType: "approval_required",

@@ -9,7 +9,7 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound
 } from "../src/core/executors/loop/persist.js";
 import type {
@@ -17,7 +17,7 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord
 } from "../src/core/executors/loop/reducer.js";
 import {
@@ -55,10 +55,10 @@ function seedRun(db: MomentumDb, runId: string): void {
 }
 
 function makeInvocation(
-  overrides: Partial<ExecutorInvocationRecord> = {}
-): ExecutorInvocationRecord {
+  overrides: Partial<ExecutorAttemptRecord> = {}
+): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-logs-1",
     stepRunId: "implementation",
     stepKey: "implementation",
@@ -77,7 +77,7 @@ function makeRound(
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-logs-1",
     stepRunId: "implementation",
     stepKey: "implementation",
@@ -181,7 +181,7 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
 
       const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
@@ -219,7 +219,7 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
       insertExecutorArtifact(db, makeArtifact(), { now: 5 });
       insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -254,11 +254,11 @@ describe("loadWorkflowRunLogs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES ('run-logs-1', 'preflight', 'preflight', 'succeeded', 0, 1, 1, 1)`
       ).run();
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
-      insertExecutorInvocation(
+      insertExecutorAttempt(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(
         db,
         makeInvocation({
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           stepRunId: "preflight",
           stepKey: "preflight"
         }),
@@ -275,7 +275,7 @@ describe("loadWorkflowRunLogs", () => {
         makeRound({
           roundId: "pre-a",
           roundIndex: 0,
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           stepRunId: "preflight",
           stepKey: "preflight"
         }),

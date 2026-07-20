@@ -157,7 +157,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     expect(planDispatchedExecutorTerminalization(plan.result)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -168,7 +168,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     expect(planDispatchedExecutorTerminalization(plan.result)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "failed",
+      attemptState: "failed",
       roundState: "failed",
       classification: "failed",
     });
@@ -179,7 +179,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     const terminalize = planDispatchedExecutorTerminalization(plan.result);
     expect(terminalize.outcome).toBe("manual_recovery");
-    expect(terminalize.invocationState).toBe("manual_recovery_required");
+    expect(terminalize.attemptState).toBe("manual_recovery_required");
   });
 
   it("produces evidence the terminalize decider routes to manual recovery for a blocked child", () => {
@@ -187,7 +187,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     const terminalize = planDispatchedExecutorTerminalization(plan.result);
     expect(terminalize.outcome).toBe("manual_recovery");
-    expect(terminalize.invocationState).toBe("manual_recovery_required");
+    expect(terminalize.attemptState).toBe("manual_recovery_required");
   });
 });
 

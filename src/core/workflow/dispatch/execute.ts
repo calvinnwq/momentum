@@ -18,7 +18,7 @@
  *
  *   - **dispatch** (a phase-1 dispatchable family): atomically advance the step
  *     `approved -> running` (so the lane stops re-offering it) and create the
- *     durable `executor_invocations` + first `executor_rounds` start scaffold —
+ *     durable `executor_attempts` + first `executor_rounds` start scaffold —
  *     the contract's Round Lifecycle "create the round row before external work
  *     runs", proof through the production path that a bounded executor session
  *     started. The dispatch lease is *held* (the executor session is in progress,
@@ -34,7 +34,7 @@
  *     orphaning evidence, so the orphaned dispatch lease is still released.
  *
  * Both paths are wrapped in a single `BEGIN IMMEDIATE` transaction so a mid-write
- * failure can never leave a half-dispatched step, an orphaned invocation, or a
+ * failure can never leave a half-dispatched step, an orphaned attempt, or a
  * gate without its recovery flag; on any throw the transaction rolls back and the
  * error propagates to the lane, which then releases the just-acquired lease.
  *
@@ -44,10 +44,10 @@
  * `pending -> running -> terminal`, run verification / commit finalization, or
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
- * `executor_invocations` / `executor_rounds` evidence only; the reconciliation seam
+ * `executor_attempts` / `executor_rounds` evidence only; the reconciliation seam
  * reconciliation seam (`dispatch/reconcile-execute.ts`) is now the
  * single owner that converts terminal executor evidence into the workflow step's
- * terminal transition. The phase-1 invocation /
+ * terminal transition. The phase-1 attempt /
  * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
  * reconciling the scaffold with the adapters' own reattachable ids rather than
  * silently colliding with them.
@@ -56,12 +56,13 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   insertExecutorCheckpoint,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
-  loadExecutorInvocation,
+  loadExecutorAttempt,
+  loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
 import type {
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorName,
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
@@ -84,7 +85,13 @@ import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
 import { resolveWorkflowStepDispatchPlan } from "./persist.js";
 import type { WorkflowDispatchFailClosedCode } from "./dispatch.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../run/start.js";
-import { reopenRetryableDispatchInvocationForAttempt } from "./retry.js";
+import { startRetryableDispatchAttempt } from "./retry.js";
+import {
+  deriveDispatchAttemptId,
+  deriveDispatchCorrelationId,
+} from "./attempt-ids.js";
+
+export { deriveDispatchAttemptId, deriveDispatchCorrelationId };
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import {
   startWorkflowStep,
@@ -182,7 +189,7 @@ export function executeWorkflowStepDispatch(
 
 /**
  * Advance the step and create the executor start scaffold for a dispatchable
- * family, atomically. Idempotent: a re-entry whose invocation already exists
+ * family, atomically. Idempotent: a re-entry whose attempt already exists
  * returns without duplicating rows.
  */
 function dispatchExecutorScaffold(
@@ -194,9 +201,9 @@ function dispatchExecutorScaffold(
   executorOwnsRounds: boolean,
   materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): WorkflowStepDispatchResult {
-  const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
-  if (loadExecutorInvocation(db, invocationId) !== undefined) {
-    const reopened = dispatchRetryScaffold(
+  const latest = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
+  if (latest !== undefined) {
+    const retried = dispatchRetryScaffold(
       db,
       claim,
       now,
@@ -204,17 +211,18 @@ function dispatchExecutorScaffold(
       executorOwnsRounds,
       materializeOwnedRound,
     );
-    if (reopened.reopened) {
+    if (retried.started) {
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-        detail: `${family} ${reopened.invocationId} attempt ${reopened.attempt}`,
+        detail: `${family} ${retried.attemptId} attempt ${retried.attemptNumber}`,
       };
     }
     return {
       status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
-      detail: invocationId,
+      detail: latest.attemptId,
     };
   }
+  const attemptId = deriveDispatchAttemptId(claim.runId, claim.stepId, 1);
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -235,24 +243,24 @@ function dispatchExecutorScaffold(
       };
     }
 
-    const invocation = buildInvocationScaffold(
+    const attempt = buildAttemptScaffold(
       claim,
       family,
-      invocationId,
+      attemptId,
       now,
     );
-    insertExecutorInvocation(db, invocation, { now });
+    insertExecutorAttempt(db, attempt, { now });
     if (!executorOwnsRounds) {
       insertExecutorRound(
         db,
-        buildRoundScaffold(claim, family, invocationId, now, selection),
+        buildRoundScaffold(claim, family, attemptId, now, selection),
         { now },
       );
     } else if (materializeOwnedRound !== undefined) {
       let materialized;
       try {
         materialized = materializeOwnedRound({
-          invocation,
+          attempt,
           selection,
           now,
         });
@@ -271,7 +279,7 @@ function dispatchExecutorScaffold(
 
   return {
     status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-    detail: `${family} ${invocationId}`,
+    detail: `${family} ${attemptId}`,
   };
 }
 
@@ -282,7 +290,7 @@ function dispatchRetryScaffold(
   selection: CodingStepExecutorSelection,
   executorOwnsRounds: boolean,
   materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
-): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
+): ReturnType<typeof startRetryableDispatchAttempt> {
   db.exec("BEGIN IMMEDIATE");
   try {
     const started = startWorkflowStep(db, {
@@ -292,9 +300,9 @@ function dispatchRetryScaffold(
     });
     if (!started.ok) {
       db.exec("ROLLBACK");
-      return { reopened: false };
+      return { started: false };
     }
-    const reopened = reopenRetryableDispatchInvocationForAttempt(db, {
+    const retried = startRetryableDispatchAttempt(db, {
       runId: claim.runId,
       stepId: claim.stepId,
       now,
@@ -302,21 +310,21 @@ function dispatchRetryScaffold(
       selection,
       executorOwnsRounds,
     });
-    if (!reopened.reopened) {
+    if (!retried.started) {
       db.exec("ROLLBACK");
-      return reopened;
+      return retried;
     }
     if (materializeOwnedRound !== undefined) {
-      const invocation = loadExecutorInvocation(db, reopened.invocationId);
-      if (invocation === undefined) {
+      const attempt = loadExecutorAttempt(db, retried.attemptId);
+      if (attempt === undefined) {
         throw new ExecutorOwnedRoundMaterializationError(
-          new Error("reopened executor invocation is unavailable"),
+          new Error("freshly started retry attempt is unavailable"),
         );
       }
       let materialized;
       try {
         materialized = materializeOwnedRound({
-          invocation,
+          attempt,
           selection,
           now,
         });
@@ -328,7 +336,7 @@ function dispatchRetryScaffold(
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
-    return reopened;
+    return retried;
   } catch (error) {
     safeRollback(db);
     throw error;
@@ -396,20 +404,20 @@ function failClosedDispatch(
   };
 }
 
-function buildInvocationScaffold(
+function buildAttemptScaffold(
   claim: ClaimedWorkflowStep,
   family: ExecutorName,
-  invocationId: string,
+  attemptId: string,
   now: number,
-): ExecutorInvocationRecord {
+): ExecutorAttemptRecord {
   return {
-    invocationId,
+    attemptId,
     workflowRunId: claim.runId,
     stepRunId: claim.stepId,
     stepKey: claim.stepId,
     executorFamily: family,
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: now,
     heartbeatAt: now,
     finishedAt: null,
@@ -419,18 +427,18 @@ function buildInvocationScaffold(
 function buildRoundScaffold(
   claim: ClaimedWorkflowStep,
   family: ExecutorName,
-  invocationId: string,
+  attemptId: string,
   _now: number,
   selection: CodingStepExecutorSelection,
 ): ExecutorRoundRecord {
   return {
-    roundId: deriveDispatchRoundId(invocationId),
-    invocationId,
+    roundId: deriveDispatchRoundId(attemptId),
+    attemptId,
     workflowRunId: claim.runId,
     stepRunId: claim.stepId,
     stepKey: claim.stepId,
     executorFamily: family,
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 1,
     // The contract's Round Lifecycle creates the round row before external work
     // runs; the bounded mechanism that drives it `running -> terminal` is the
@@ -585,26 +593,8 @@ function parseRouteJson(
   return { ok: true, route: parsed as Record<string, unknown> };
 }
 
-/**
- * The phase-1 dispatch scaffold's deterministic invocation id. Namespaced with
- * `::dispatch` so it is recomputable from durable state (idempotent re-entry) yet
- * unmistakably the phase-1 dispatcher's row, not a landed adapter's reattachable
- * id (see the module doc's phase-1 boundary note).
- *
- * Exported as the single source of truth for this id: the reconciliation
- * seam (`dispatch/reconcile-execute.ts`) recomputes the same id to find the
- * dispatched step's terminal executor evidence, so the two halves can never drift
- * apart on the namespacing convention.
- */
-export function deriveDispatchInvocationId(
-  runId: string,
-  stepId: string,
-): string {
-  return `${runId}::${stepId}::dispatch`;
-}
-
-function deriveDispatchRoundId(invocationId: string): string {
-  return `${invocationId}::round-1`;
+function deriveDispatchRoundId(attemptId: string): string {
+  return `${attemptId}::round-1`;
 }
 
 /** Deterministic, idempotent id for the fail-closed manual-recovery gate. */

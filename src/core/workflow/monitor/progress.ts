@@ -222,7 +222,7 @@ function computeDigest(
       .map((gate) => ({
         gateId: gate.gateId,
         stepRunId: gate.stepRunId,
-        invocationId: gate.invocationId,
+        attemptId: gate.attemptId,
         roundId: gate.roundId,
         targetScope: gate.targetScope,
         gateType: gate.gateType,

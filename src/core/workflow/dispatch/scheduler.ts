@@ -46,7 +46,7 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import type {
   ExecutorCheckpointRecord,
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import type { CodingStepExecutorSelection } from "../route/coding.js";
@@ -59,14 +59,16 @@ import {
 } from "../leases.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   selectExecutorDecisionForHumanGate,
 } from "../../executors/loop/reducer.js";
 import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  listExecutorRoundsForStep,
+  loadExecutorAttempt,
+  loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
 import {
   DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
@@ -74,7 +76,6 @@ import {
   DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
   DELEGATE_SUPERVISOR_MIRRORED_STAGE,
 } from "../../executors/delegate-supervisor/executor.js";
-import { deriveDispatchInvocationId } from "./execute.js";
 import {
   reconcileDispatchedWorkflowStep,
   WORKFLOW_RECONCILE_RESULT_STATUS,
@@ -614,16 +615,16 @@ function tryRecoverWaitingOperatorDispatchGate(
     (step) => step.state === "running",
   );
   if (runningStep === undefined) return undefined;
-  const invocationId = deriveDispatchInvocationId(
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
     candidate.runId,
     runningStep.stepId,
   );
-  const invocation = loadExecutorInvocation(db, invocationId);
   const rounds =
-    invocation === undefined
+    attempt === undefined
       ? []
-      : listExecutorRoundsForInvocation(db, invocationId);
-  if (invocation?.state !== "waiting_operator" || rounds[0]?.roundIndex !== 0) {
+      : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
+  if (attempt?.state !== "waiting_operator" || rounds[0]?.roundIndex !== 0) {
     return undefined;
   }
   const run = db
@@ -646,7 +647,7 @@ function tryRecoverWaitingOperatorDispatchGate(
         runState: deriveWorkflowRunState(steps, { leases, now, graceMs }),
         lease: live,
       },
-      invocationId,
+      attemptId: attempt.attemptId,
       now,
       requireStaleLeaseAt: { now, graceMs },
     });
@@ -690,13 +691,10 @@ function tryRecoverTerminalDispatchEvidence(
   );
   if (runningStep === undefined) return undefined;
 
-  const invocation = loadExecutorInvocation(
-    db,
-    deriveDispatchInvocationId(candidate.runId, runningStep.stepId),
-  );
+  const attempt = loadLatestExecutorAttemptForStep(db, candidate.runId, runningStep.stepId);
   if (
-    invocation === undefined ||
-    !isTerminalExecutorInvocationState(invocation.state)
+    attempt === undefined ||
+    !isTerminalExecutorAttemptState(attempt.state)
   ) {
     return undefined;
   }
@@ -759,32 +757,29 @@ function tryParkStaleRunningDispatchLease(
       return undefined;
     }
 
-    const invocation = loadExecutorInvocation(
-      db,
-      deriveDispatchInvocationId(candidate.runId, runningStep.stepId),
-    );
-    const invocationRounds =
-      invocation === undefined
+    const attempt = loadLatestExecutorAttemptForStep(db, candidate.runId, runningStep.stepId);
+    const attemptRounds =
+      attempt === undefined
         ? []
-        : listExecutorRoundsForInvocation(db, invocation.invocationId);
+        : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
     if (
-      invocation !== undefined &&
-      invocation.executorFamily === "subworkflow" &&
-      !isTerminalExecutorInvocationState(invocation.state)
+      attempt !== undefined &&
+      attempt.executorFamily === "subworkflow" &&
+      !isTerminalExecutorAttemptState(attempt.state)
     ) {
       db.exec("ROLLBACK");
       return undefined;
     }
     if (
-      invocation !== undefined &&
-      isResumableRegisteredSdkTick(db, invocation, invocationRounds)
+      attempt !== undefined &&
+      isResumableRegisteredSdkTick(db, attempt, attemptRounds)
     ) {
       db.exec("ROLLBACK");
       return undefined;
     }
     if (
-      invocation !== undefined &&
-      isTerminalExecutorInvocationState(invocation.state)
+      attempt !== undefined &&
+      isTerminalExecutorAttemptState(attempt.state)
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1158,9 +1153,9 @@ export type WorkflowStepDispatchContext = {
   now: number;
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
-  /** Optional SDK hook that binds the invocation and first round atomically. */
+  /** Optional SDK hook that binds the attempt and first round atomically. */
   materializeOwnedRound?: (input: {
-    invocation: ExecutorInvocationRecord;
+    attempt: ExecutorAttemptRecord;
     selection: CodingStepExecutorSelection;
     now: number;
   }) => {
@@ -1188,7 +1183,7 @@ export type WorkflowStepDispatchResult = {
 /**
  * The executor-dispatch seam. {@link runWorkflowSchedulerOnce} claims the next
  * runnable step and hands the claim to this callback. The production dispatcher
- * starts durable executor invocation / round scaffolds for supported families
+ * starts durable executor attempt / round scaffolds for supported families
  * and fail-closes unsupported or unresolvable steps to manual recovery when the
  * run row still exists, or releases only the lease when the run has vanished.
  * On a normal return the dispatcher owns the dispatch lease's lifecycle (refresh
@@ -1372,39 +1367,36 @@ function isRegisteredSdkContinuation(
   db: MomentumDb,
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
 ): boolean {
-  const invocation = loadExecutorInvocation(
-    db,
-    deriveDispatchInvocationId(claim.runId, claim.stepId),
-  );
+  const attempt = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
   const rounds =
-    invocation === undefined
+    attempt === undefined
       ? []
-      : listExecutorRoundsForInvocation(db, invocation.invocationId);
+      : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
   return (
-    invocation !== undefined &&
+    attempt !== undefined &&
     // Registry-owned dispatches defer first-round materialization to the SDK
     // executor, whose sequential envelope starts at roundIndex 0. The legacy
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
-    isResumableRegisteredSdkTick(db, invocation, rounds)
+    isResumableRegisteredSdkTick(db, attempt, rounds)
   );
 }
 
 function isResumableRegisteredSdkTick(
   db: MomentumDb,
-  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
-  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  attempt: NonNullable<ReturnType<typeof loadExecutorAttempt>>,
+  rounds: ReturnType<typeof listExecutorRoundsForAttempt>,
 ): boolean {
-  if (invocation.state !== "running") return false;
+  if (attempt.state !== "running") return false;
   const currentAttemptRounds = rounds.filter(
-    (round) => round.attempt === invocation.attempt,
+    (round) => round.attemptNumber === attempt.attemptNumber,
   );
   if (rounds.length > 0 && rounds[0]?.roundIndex !== 0) return false;
-  // Legacy dispatch inserts its invocation and first round in one transaction.
-  // Only an SDK-owned dispatch can durably expose a roundless invocation.
+  // Legacy dispatch inserts its attempt and first round in one transaction.
+  // Only an SDK-owned dispatch can durably expose a roundless attempt.
   if (
-    (invocation.executorFamily === "delegate-supervisor" ||
-      NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily)) &&
+    (attempt.executorFamily === "delegate-supervisor" ||
+      NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executorFamily)) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1412,7 +1404,7 @@ function isResumableRegisteredSdkTick(
   const round = currentAttemptRounds.at(-1);
   if (round === undefined) return false;
   if (
-    invocation.executorFamily === "delegate-supervisor" &&
+    attempt.executorFamily === "delegate-supervisor" &&
     currentAttemptRounds.length === 1 &&
     round.classification === null &&
     round.state === "running" &&
@@ -1426,7 +1418,7 @@ function isResumableRegisteredSdkTick(
   }
   if (round.classification === "continue") return true;
   if (
-    NATIVE_RESUMABLE_SDK_EXECUTORS.has(invocation.executorFamily) &&
+    NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executorFamily) &&
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(
@@ -1436,7 +1428,7 @@ function isResumableRegisteredSdkTick(
     return true;
   }
   if (
-    hasResumableDelegateCheckpoint(db, invocation, currentAttemptRounds, rounds)
+    hasResumableDelegateCheckpoint(db, attempt, currentAttemptRounds, rounds)
   ) {
     return true;
   }
@@ -1455,14 +1447,14 @@ function isResumableRegisteredSdkTick(
 
 function hasResumableDelegateCheckpoint(
   db: MomentumDb,
-  invocation: NonNullable<ReturnType<typeof loadExecutorInvocation>>,
-  currentAttemptRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
-  invocationRounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  attempt: NonNullable<ReturnType<typeof loadExecutorAttempt>>,
+  currentAttemptRounds: ReturnType<typeof listExecutorRoundsForAttempt>,
+  attemptRounds: ReturnType<typeof listExecutorRoundsForAttempt>,
 ): boolean {
   const activeRound = currentAttemptRounds.at(-1);
   if (
-    invocation.state !== "running" ||
-    invocation.executorFamily !== "delegate-supervisor" ||
+    attempt.state !== "running" ||
+    attempt.executorFamily !== "delegate-supervisor" ||
     activeRound === undefined
   ) {
     return false;
@@ -1492,7 +1484,7 @@ function hasResumableDelegateCheckpoint(
     hasResumableLegacyCompletionReplay(
       db,
       activeRound.roundId,
-      invocationRounds,
+      attemptRounds,
     )
   ) {
     return true;
@@ -1502,7 +1494,7 @@ function hasResumableDelegateCheckpoint(
     hasResumablePreMarkerLegacyCompletionReplay(
       db,
       activeRound,
-      invocationRounds,
+      attemptRounds,
     )
   ) {
     return true;
@@ -1525,7 +1517,7 @@ function hasResumableDelegateCheckpoint(
 function hasResumableLegacyCompletionReplay(
   db: MomentumDb,
   activeRoundId: string,
-  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  rounds: ReturnType<typeof listExecutorRoundsForAttempt>,
 ): boolean {
   const replay = [...listExecutorCheckpointsForRound(db, activeRoundId)]
     .reverse()
@@ -1557,8 +1549,8 @@ function hasResumableLegacyCompletionReplay(
 
 function hasResumablePreMarkerLegacyCompletionReplay(
   db: MomentumDb,
-  activeRound: ReturnType<typeof listExecutorRoundsForInvocation>[number],
-  rounds: ReturnType<typeof listExecutorRoundsForInvocation>,
+  activeRound: ReturnType<typeof listExecutorRoundsForAttempt>[number],
+  rounds: ReturnType<typeof listExecutorRoundsForAttempt>,
 ): boolean {
   if (
     activeRound.state !== "capturing_result" ||
@@ -1568,7 +1560,7 @@ function hasResumablePreMarkerLegacyCompletionReplay(
   }
   let latestCompletion: { roundIndex: number; sequence: number } | undefined;
   for (const round of rounds) {
-    if (round.attempt >= activeRound.attempt) continue;
+    if (round.attemptNumber >= activeRound.attemptNumber) continue;
     for (const checkpoint of listExecutorCheckpointsForRound(
       db,
       round.roundId,
@@ -1628,21 +1620,18 @@ function buildActiveSubworkflowClaim(
   const runningStep = steps.find((step) => step.state === "running");
   if (runningStep === undefined) return undefined;
 
-  const invocation = loadExecutorInvocation(
-    db,
-    deriveDispatchInvocationId(run.id, runningStep.stepId),
-  );
-  const invocationRounds =
-    invocation === undefined
+  const attempt = loadLatestExecutorAttemptForStep(db, run.id, runningStep.stepId);
+  const attemptRounds =
+    attempt === undefined
       ? []
-      : listExecutorRoundsForInvocation(db, invocation.invocationId);
+      : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
   const resumableSdkTick =
-    invocation !== undefined &&
-    isResumableRegisteredSdkTick(db, invocation, invocationRounds);
+    attempt !== undefined &&
+    isResumableRegisteredSdkTick(db, attempt, attemptRounds);
   if (
-    invocation === undefined ||
-    (invocation.executorFamily !== "subworkflow" && !resumableSdkTick) ||
-    isTerminalExecutorInvocationState(invocation.state)
+    attempt === undefined ||
+    (attempt.executorFamily !== "subworkflow" && !resumableSdkTick) ||
+    isTerminalExecutorAttemptState(attempt.state)
   ) {
     return undefined;
   }
@@ -1864,10 +1853,7 @@ function dispatchClaim(
           ),
         });
         if (!heartbeat.ok) {
-          const invocation = loadExecutorInvocation(
-            db,
-            deriveDispatchInvocationId(claim.runId, claim.stepId),
-          );
+          const attempt = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
           const step = db
             .prepare(
               "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
@@ -1879,8 +1865,8 @@ function dispatchClaim(
               liveLease.holder === claim.lease.holder &&
               liveLease.acquiredAt === claim.lease.acquiredAt &&
               liveLease.releasedAt !== null) ||
-            (invocation !== undefined &&
-              isTerminalExecutorInvocationState(invocation.state)) ||
+            (attempt !== undefined &&
+              isTerminalExecutorAttemptState(attempt.state)) ||
             (step !== undefined && isTerminalStepState(step.state));
           if (completedDispatch) {
             return false;

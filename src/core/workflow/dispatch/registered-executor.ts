@@ -6,6 +6,7 @@ import {
   resolveRegisteredExecutor,
   type ExecutorRegistry,
 } from "../../executors/sdk/registry.js";
+import type { ExecutorAttemptRecord } from "../../executors/loop/reducer.js";
 import type {
   Executor,
   ExecutorEnvelopeSnapshot,
@@ -15,11 +16,12 @@ import type {
   ExecutorTickResult,
 } from "../../executors/sdk/types.js";
 import {
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
+  loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   type ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import { classifyWorkflowLease } from "../run/reducer.js";
@@ -27,7 +29,6 @@ import { getWorkflowLease, heartbeatWorkflowLease } from "../leases.js";
 import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
 import {
-  deriveDispatchInvocationId,
   ExecutorOwnedRoundMaterializationError,
 } from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
@@ -64,10 +65,10 @@ export type RegisteredExecutorWorkflowDispatchOptions = {
     config: Readonly<Record<string, unknown>>;
   }) => WorkflowStepDispatchContext["materializeOwnedRound"];
   maxTicks?: number;
-  /** Resolve a per-invocation bounded tick cap, overriding `maxTicks`. */
+  /** Resolve a per-attempt bounded tick cap, overriding `maxTicks`. */
   resolveMaxTicks?: (input: {
     executorName: string;
-    invocation: Readonly<{ invocationId: string; attempt: number }>;
+    attempt: Readonly<ExecutorAttemptRecord>;
     context: WorkflowStepDispatchContext;
   }) => number;
   signal?: AbortSignal;
@@ -194,17 +195,17 @@ export function createRegisteredExecutorWorkflowDispatch(
       result = baseDispatch(claim, {
         ...context,
         executorOwnsRounds: true,
-        materializeOwnedRound: ({ invocation, now }) => {
+        materializeOwnedRound: ({ attempt, now }) => {
           const roundIndex =
-            listExecutorRoundsForInvocation(
+            listExecutorRoundsForAttempt(
               context.db,
-              invocation.invocationId,
+              attempt.attemptId,
             ).reduce(
               (highestRoundIndex, round) =>
                 Math.max(highestRoundIndex, round.roundIndex),
               -1,
             ) + 1;
-          const round = genericRoundRecord(invocation, roundIndex, now);
+          const round = genericRoundRecord(attempt, roundIndex, now);
           return {
             round,
             checkpoint: {
@@ -220,10 +221,14 @@ export function createRegisteredExecutorWorkflowDispatch(
     }
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
-    const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
-    const before = loadExecutorInvocation(context.db, invocationId);
+    const before = loadLatestExecutorAttemptForStep(
+      context.db,
+      claim.runId,
+      claim.stepId,
+    );
     if (before === undefined) return result;
-    if (!isTerminalExecutorInvocationState(before.state)) {
+    const attemptId = before.attemptId;
+    if (!isTerminalExecutorAttemptState(before.state)) {
       let hostBindings: Readonly<unknown> = {};
       try {
         const leaseGuard = createDispatchLeaseGuard(claim, context);
@@ -250,14 +255,14 @@ export function createRegisteredExecutorWorkflowDispatch(
               : AbortSignal.any([options.signal, leaseGuard.signal]);
           await driveExecutorTicks({
             db: context.db,
-            invocationId,
+            attemptId,
             executor,
             config,
             hostBindings,
             maxTicks:
               options.resolveMaxTicks?.({
                 executorName: runtime.executorName,
-                invocation: before,
+                attempt: before,
                 context,
               }) ??
               options.maxTicks ??
@@ -294,8 +299,8 @@ export function createRegisteredExecutorWorkflowDispatch(
         return result;
       }
     }
-    const after = loadExecutorInvocation(context.db, invocationId);
-    if (after !== undefined && isTerminalExecutorInvocationState(after.state)) {
+    const after = loadExecutorAttempt(context.db, attemptId);
+    if (after !== undefined && isTerminalExecutorAttemptState(after.state)) {
       reconcileDispatchedWorkflowStep({
         db: context.db,
         runId: claim.runId,
@@ -310,7 +315,7 @@ export function createRegisteredExecutorWorkflowDispatch(
       parkRegisteredExecutorAtHumanGate({
         db: context.db,
         claim,
-        invocationId,
+        attemptId,
         now: logicalNow(),
       });
     }
@@ -567,7 +572,7 @@ function createHostBindingsUnavailableExecutor(
         roundId: round.roundId,
         recommendation: "manual_recovery_required",
         recommendedRoundState: "manual_recovery_required",
-        recommendedInvocationState: "manual_recovery_required",
+        recommendedAttemptState: "manual_recovery_required",
         recoveryCode,
         humanGate: "manual_recovery_required",
         reason,
@@ -581,7 +586,7 @@ function resumableBoundRound(
 ): ExecutorRoundView | undefined {
   const current = state.currentRound;
   return current !== null &&
-    current.round.attempt === state.invocation.attempt &&
+    current.round.attemptNumber === state.attempt.attemptNumber &&
     current.round.classification === null &&
     current.checkpoints.some(
       (checkpoint) =>
@@ -604,7 +609,7 @@ function runtimeUnavailableTick(
     roundId: round.roundId,
     recommendation: "manual_recovery_required",
     recommendedRoundState: "manual_recovery_required",
-    recommendedInvocationState: "manual_recovery_required",
+    recommendedAttemptState: "manual_recovery_required",
     recoveryCode: "runtime_unavailable",
     humanGate: "manual_recovery_required",
     reason,
@@ -615,24 +620,24 @@ function startGenericRound(
   state: ExecutorEnvelopeSnapshot,
   context: ExecutorTickContext<Record<string, never>, Record<string, never>>,
 ) {
-  const invocation = state.invocation;
+  const attempt = state.attempt;
   return context.envelope.startRound(
-    genericRoundStart(invocation, state.rounds.length),
+    genericRoundStart(attempt, state.rounds.length),
   );
 }
 
 function genericRoundStart(
-  invocation: ExecutorEnvelopeSnapshot["invocation"],
+  attempt: ExecutorEnvelopeSnapshot["attempt"],
   roundIndex: number,
 ): ExecutorRoundStart {
   return {
-    roundId: `${invocation.invocationId}::round-${roundIndex + 1}`,
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    attempt: invocation.attempt,
+    roundId: `${attempt.attemptId}::round-${roundIndex + 1}`,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "running",
     agentProvider: null,
@@ -653,11 +658,11 @@ function genericRoundStart(
 }
 
 function genericRoundRecord(
-  invocation: ExecutorEnvelopeSnapshot["invocation"],
+  attempt: ExecutorEnvelopeSnapshot["attempt"],
   roundIndex: number,
   now: number,
 ): ExecutorRoundRecord {
-  const start = genericRoundStart(invocation, roundIndex);
+  const start = genericRoundStart(attempt, roundIndex);
   return {
     ...start,
     logPaths: [...start.logPaths],

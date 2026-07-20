@@ -2,7 +2,7 @@
  * Single-shot executor adapter — decision brain and identity.
  *
  * The executor-loop contract (SPEC.md) pins two
- * single-invocation executor families that this module serves together:
+ * single-attempt executor families that this module serves together:
  *
  *   - `one-shot` "runs a single result-bearing command or agent wrapper.
  *     It may retry under policy, but it does not own an open-ended loop, and
@@ -19,16 +19,16 @@
  * `goal-loop/mechanism.ts` / `goal-loop/orchestrator.ts` layer on
  * `goal-loop/executor.ts`. This module owns the *pure* half both
  * families share: the recovery taxonomy, the daemon classification of a single
- * invocation, and the deterministic, reattachable invocation / round identity.
+ * attempt, and the deterministic, reattachable attempt / round identity.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation — exactly the discipline `goal-loop/executor.ts` and
+ * executor attempt — exactly the discipline `goal-loop/executor.ts` and
  * `loop/reducer.ts` follow.
  *
  * Classification, grounded in the contract's "Completion Classification"
  * definitions:
  *
- *   - A successful invocation is `complete`. A single shot has no further round,
+ *   - A successful attempt is `complete`. A single shot has no further round,
  *     so success terminates the step toward success directly (subject to final
  *     workflow checks the daemon still owns).
  *   - `unsupported_platform` / `runtime_unavailable` / `auth_unavailable` are
@@ -36,7 +36,7 @@
  *     non-terminal blockage that may be resolved by changing input, policy,
  *     credentials, or external state." A missing runtime or failed credential
  *     check is fixed by changing the environment, not by failing the step; the
- *     workflow can recover by starting a fresh invocation once it clears or
+ *     workflow can recover by starting a fresh attempt once it clears or
  *     moves to a supported host.
  *     `auth_unavailable` additionally raises a durable `credential_required`
  *     gate so the operator surface names the blocker.
@@ -67,8 +67,8 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorCompletionClassification,
   ExecutorHumanGateType,
-  ExecutorInvocationRecord,
-  ExecutorInvocationState,
+  ExecutorAttemptRecord,
+  ExecutorAttemptState,
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily,
@@ -78,7 +78,7 @@ import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../../adapters/live-step-wr
 import type { RunnerResult } from "../runner/types.js";
 
 /**
- * The executor families this adapter serves: the single-invocation families from
+ * The executor families this adapter serves: the single-attempt families from
  * the contract's "Executor Families" list. Pinned as the canonical set so the
  * mechanism / orchestrator twins and the family guard stay in sync.
  */
@@ -149,7 +149,7 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
 ] as const;
 
 /**
- * The full single-shot recovery taxonomy: every code a single invocation can
+ * The full single-shot recovery taxonomy: every code a single attempt can
  * record, partitioned by classification bucket. The execution-time codes
  * (`blocked` + `failed` buckets) are exactly the live-wrapper
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}; the manual-recovery codes are the
@@ -192,31 +192,31 @@ const _wrapperCodesCovered: _AssertWrapperCodesCovered = true;
 void _wrapperCodesCovered;
 
 /**
- * The outcome of one single-shot invocation, normalized for classification.
+ * The outcome of one single-shot attempt, normalized for classification.
  * `ok: true` is a successful command/agent/script run (with any repo
  * finalization already proven safe by the mechanism); `ok: false` carries the
  * precise recovery code the mechanism reported.
  */
-export type SingleShotInvocationOutcome =
+export type SingleShotAttemptOutcome =
   { ok: true } | { ok: false; recoveryCode: SingleShotRecoveryCode };
 
 /**
- * The daemon's decision for one completed single-shot invocation. There is no
+ * The daemon's decision for one completed single-shot attempt. There is no
  * `continueLoop`: a single shot never recommends another round. `roundState` and
- * `invocationState` are equal in spirit — one round *is* the invocation — and
+ * `attemptState` are equal in spirit — one round *is* the attempt — and
  * are always terminal.
  */
 export type SingleShotDecision = {
   classification: ExecutorCompletionClassification;
   roundState: ExecutorRoundState;
-  invocationState: ExecutorInvocationState;
+  attemptState: ExecutorAttemptState;
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
   reason: string;
 };
 
 /**
- * Classify one completed single-shot invocation. See the module doc for the
+ * Classify one completed single-shot attempt. See the module doc for the
  * classification boundaries. Pure: the same outcome always yields the same
  * decision.
  *
@@ -224,17 +224,17 @@ export type SingleShotDecision = {
  * {@link SingleShotRecoveryCode}; an unrecognized code is a programming error,
  * never a silent default to a guessed classification.
  */
-export function decideSingleShotInvocation(
-  outcome: SingleShotInvocationOutcome,
+export function decideSingleShotAttempt(
+  outcome: SingleShotAttemptOutcome,
 ): SingleShotDecision {
   if (outcome.ok) {
     return {
       classification: "complete",
       roundState: "succeeded",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       recoveryCode: null,
       humanGate: null,
-      reason: "single-shot invocation succeeded",
+      reason: "single-shot attempt succeeded",
     };
   }
 
@@ -249,10 +249,10 @@ export function decideSingleShotInvocation(
     return {
       classification: "blocked",
       roundState: "blocked",
-      invocationState: "blocked",
+      attemptState: "blocked",
       recoveryCode,
       humanGate,
-      reason: `single-shot invocation blocked (${recoveryCode}); resolve the environment or credentials and re-run`,
+      reason: `single-shot attempt blocked (${recoveryCode}); resolve the environment or credentials and re-run`,
     };
   }
 
@@ -260,10 +260,10 @@ export function decideSingleShotInvocation(
     return {
       classification: "failed",
       roundState: "failed",
-      invocationState: "failed",
+      attemptState: "failed",
       recoveryCode,
       humanGate: null,
-      reason: `single-shot invocation failed (${recoveryCode})`,
+      reason: `single-shot attempt failed (${recoveryCode})`,
     };
   }
 
@@ -271,86 +271,86 @@ export function decideSingleShotInvocation(
     return {
       classification: "manual_recovery_required",
       roundState: "manual_recovery_required",
-      invocationState: "manual_recovery_required",
+      attemptState: "manual_recovery_required",
       recoveryCode,
       humanGate: "manual_recovery_required",
-      reason: `single-shot invocation finalize outcome ${recoveryCode} requires manual recovery before any retry`,
+      reason: `single-shot attempt finalize outcome ${recoveryCode} requires manual recovery before any retry`,
     };
   }
 
   throw new Error(
-    `decideSingleShotInvocation: unknown recovery code ${String(recoveryCode)}`,
+    `decideSingleShotAttempt: unknown recovery code ${String(recoveryCode)}`,
   );
 }
 
 /**
- * Mint the deterministic, reattachable executor-invocation id for a single-shot
+ * Mint the deterministic, reattachable executor-attempt id for a single-shot
  * step run. The id embeds the `(workflowRunId, stepRunId)` step-run identity, the
  * executor `family`, and the `attempt`, so it is globally unique (the
- * `executor_invocations` primary key) yet recomputable from durable state alone
+ * `executor_attempts` primary key) yet recomputable from durable state alone
  * (contract "Heartbeat And Reattach"). Embedding the family keeps `one-shot` and
  * `script` ids distinct; a re-run of the same step is a fresh `attempt`, so it
- * never collides with the prior invocation.
+ * never collides with the prior attempt.
  */
-export function singleShotInvocationId(
+export function singleShotAttemptId(
   workflowRunId: string,
   stepRunId: string,
   family: SingleShotExecutorFamily,
-  attempt: number,
+  attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${family}::${attempt}`;
+  return `${workflowRunId}::${stepRunId}::${family}::${attemptNumber}`;
 }
 
 /**
  * Mint the deterministic, reattachable round id for the single round under a
- * single-shot invocation. A single shot has exactly one round (index 0), so the
- * id is fixed by the invocation id alone — consistent with the
- * `(invocation_id, round_index)` uniqueness the persistence layer enforces.
+ * single-shot attempt. A single shot has exactly one round (index 0), so the
+ * id is fixed by the attempt id alone — consistent with the
+ * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
-export function singleShotRoundId(invocationId: string): string {
-  return `${invocationId}::round::0`;
+export function singleShotRoundId(attemptId: string): string {
+  return `${attemptId}::round::0`;
 }
 
 /**
- * The StepRun identity {@link planSingleShotInvocation} projects into a durable
- * single-shot {@link ExecutorInvocationRecord}: the `(workflowRunId, stepRunId)`
+ * The StepRun identity {@link planSingleShotAttempt} projects into a durable
+ * single-shot {@link ExecutorAttemptRecord}: the `(workflowRunId, stepRunId)`
  * step run, the chosen single-shot `family`, the step key, the re-run `attempt`,
  * and the start clock the orchestrator owns.
  */
-export type PlanSingleShotInvocationInput = {
+export type PlanSingleShotAttemptInput = {
   family: SingleShotExecutorFamily;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  attempt: number;
-  /** Invocation start clock; stamped as `started_at` and the initial `heartbeat_at`. */
+  attemptNumber: number;
+  /** Attempt start clock; stamped as `started_at` and the initial `heartbeat_at`. */
   startedAt: number;
 };
 
 /**
  * Project a `StepRun` identity into the durable single-shot
- * {@link ExecutorInvocationRecord} the orchestrator inserts before the round runs
+ * {@link ExecutorAttemptRecord} the orchestrator inserts before the round runs
  * (contract "State Model": `StepRun -> ExecutorInvocation -> ExecutorRound[]`).
  * One configured executor session for the step, materialized at `running` with a
  * deterministic id and the start clock copied in. Pure: no ids or clocks are
  * invented beyond the supplied `startedAt`.
  */
-export function planSingleShotInvocation(
-  input: PlanSingleShotInvocationInput,
-): ExecutorInvocationRecord {
+export function planSingleShotAttempt(
+  input: PlanSingleShotAttemptInput,
+): ExecutorAttemptRecord {
   return {
-    invocationId: singleShotInvocationId(
+    attemptId: singleShotAttemptId(
       input.workflowRunId,
       input.stepRunId,
       input.family,
-      input.attempt,
+      input.attemptNumber,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     executorFamily: input.family,
     state: "running",
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
     finishedAt: null,
@@ -401,9 +401,9 @@ export type SingleShotSelectionFieldSources = {
  * each field. A single shot owns no round budget, so — unlike
  * {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the `script` family
  * every field is naturally `null` (a deterministic local command has no agent); for
- * `one-shot` they carry the resolved agent invocation. The round-start record
+ * `one-shot` they carry the resolved agent attempt. The round-start record
  * freezes `agentProvider` / `model` / `effort` before the shot runs; `timeoutMs` /
- * `policyEnvelope` configure the owning invocation and its gates and are carried for
+ * `policyEnvelope` configure the owning attempt and its gates and are carried for
  * the mechanism / orchestrator twins. {@link resolveSingleShotRoundSelection}
  * produces this selection; {@link planSingleShotRoundStart} consumes it, exactly as
  * `planGoalLoopRoundStart` consumes a resolved `GoalLoopRoundSelection`.
@@ -521,12 +521,12 @@ export function resolveSingleShotRoundSelection(
  */
 export type PlanSingleShotRoundStartInput = {
   roundId: string;
-  invocationId: string;
+  attemptId: string;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
   family: SingleShotExecutorFamily;
-  attempt: number;
+  attemptNumber: number;
   roundIndex?: number;
   selection: SingleShotRoundSelection;
   inputDigest: string | null;
@@ -552,12 +552,12 @@ export function planSingleShotRoundStart(
 ): ExecutorRoundRecord {
   return {
     roundId: input.roundId,
-    invocationId: input.invocationId,
+    attemptId: input.attemptId,
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     executorFamily: input.family,
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     roundIndex: input.roundIndex ?? 0,
     state: "running",
     classification: null,
@@ -588,7 +588,7 @@ export function planSingleShotRoundStart(
  * input digest, its daemon-provided artifact directory, and its bounded log paths
  * (contract "Round Lifecycle" steps 4-5). These are the filesystem / content
  * concerns the pure adapter never invents — the caller resolves them and
- * {@link planSingleShotRoundStartForInvocation} freezes them into the round-start
+ * {@link planSingleShotRoundStartForAttempt} freezes them into the round-start
  * record.
  */
 export type SingleShotRoundRuntimeInputs = {
@@ -598,22 +598,22 @@ export type SingleShotRoundRuntimeInputs = {
 };
 
 /**
- * The inputs to {@link planSingleShotRoundStartForInvocation}: the materialized
- * single-shot invocation (whose identity and family the round inherits), the
+ * The inputs to {@link planSingleShotRoundStartForAttempt}: the materialized
+ * single-shot attempt (whose identity and family the round inherits), the
  * resolved selection frozen into the round, the per-round runtime inputs, and the
  * round start clock. There is no round index — the single round is always index 0.
  */
 export type PlanSingleShotRoundStartForInvocationInput = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   selection: SingleShotRoundSelection;
   runtime: SingleShotRoundRuntimeInputs;
   startedAt: number;
 };
 
 /**
- * Project a materialized invocation + resolved selection + per-round runtime inputs
+ * Project a materialized attempt + resolved selection + per-round runtime inputs
  * into the {@link PlanSingleShotRoundStartInput} for the single round. The round
- * inherits the invocation's `(workflowRunId, stepRunId, stepKey, attempt)` identity
+ * inherits the attempt's `(workflowRunId, stepRunId, stepKey, attempt)` identity
  * and its single-shot family, takes the deterministic {@link singleShotRoundId}
  * (index 0), freezes the resolved selection, and copies in the round's input
  * digest / artifact root / log paths. Feed the result to
@@ -621,28 +621,28 @@ export type PlanSingleShotRoundStartForInvocationInput = {
  * caller owns the clock and the runtime inputs; this only wires identity. This is
  * the round-identity half of the adapter "below `StepRun`".
  *
- * @throws {Error} if the invocation's family is not a single-shot family — the round
+ * @throws {Error} if the attempt's family is not a single-shot family — the round
  * must inherit a concrete `one-shot` / `script` family, never a foreign one (the
- * invariant {@link planSingleShotInvocation} establishes).
+ * invariant {@link planSingleShotAttempt} establishes).
  */
-export function planSingleShotRoundStartForInvocation(
+export function planSingleShotRoundStartForAttempt(
   input: PlanSingleShotRoundStartForInvocationInput,
 ): PlanSingleShotRoundStartInput {
-  const { invocation, runtime } = input;
-  const family = invocation.executorFamily;
+  const { attempt, runtime } = input;
+  const family = attempt.executorFamily;
   if (!isSingleShotExecutorFamily(family)) {
     throw new Error(
-      `planSingleShotRoundStartForInvocation: invocation ${invocation.invocationId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`,
+      `planSingleShotRoundStartForAttempt: attempt ${attempt.attemptId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`,
     );
   }
   return {
-    roundId: singleShotRoundId(invocation.invocationId),
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
+    roundId: singleShotRoundId(attempt.attemptId),
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
     family,
-    attempt: invocation.attempt,
+    attemptNumber: attempt.attemptNumber,
     selection: input.selection,
     inputDigest: runtime.inputDigest,
     artifactRoot: runtime.artifactRoot,
@@ -795,7 +795,7 @@ function singleShotArtifactRecord(
 
 /**
  * The inputs to {@link planSingleShotRoundCheckpoints}: the round id the checkpoints
- * hang below, the {@link SingleShotInvocationOutcome} the bounded mechanism reported,
+ * hang below, the {@link SingleShotAttemptOutcome} the bounded mechanism reported,
  * whether a normalized result was captured, and the daemon classification the round
  * settled into. These are the coarse round-lifecycle stages Momentum itself owns and
  * needs no product decision to derive; the mechanism's own fine-grained checkpoint
@@ -804,7 +804,7 @@ function singleShotArtifactRecord(
  */
 export type PlanSingleShotRoundCheckpointsInput = {
   roundId: string;
-  outcome: SingleShotInvocationOutcome;
+  outcome: SingleShotAttemptOutcome;
   /**
    * Whether the round captured a normalized result document (the `one-shot` family
    * does on success; the exit-code-based `script` family never does), so the
@@ -834,7 +834,7 @@ export function planSingleShotRoundStartedCheckpoint(
  * "Capture ... checkpoints ..." for the single-shot families. These are the coarse
  * stages Momentum itself drives around the bounded mechanism, so they are derived
  * mechanically (no product decision, no invented vocabulary): the round started, the
- * bounded mechanism finished (carrying its invocation outcome — `ok` or the precise
+ * bounded mechanism finished (carrying its attempt outcome — `ok` or the precise
  * recovery code), the normalized result was captured (only when one was produced —
  * the `one-shot` family on success, never the exit-code-based `script` family), and
  * the daemon classified the round (carrying its classification). The mechanism's own
@@ -870,8 +870,8 @@ export function planSingleShotRoundCheckpoints(
   // the mechanism stage carries that outcome the way the goal-loop stream carries
   // its finalize outcome.
   const outcomeDetail = input.outcome.ok
-    ? "invocation outcome: ok"
-    : `invocation outcome: ${input.outcome.recoveryCode}`;
+    ? "attempt outcome: ok"
+    : `attempt outcome: ${input.outcome.recoveryCode}`;
 
   // Contract Round Lifecycle stages, in order: round created before external work,
   // bounded mechanism + normalized result, classification. A round that produced no
@@ -915,14 +915,14 @@ const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 
 /**
  * The inputs to {@link planSingleShotRoundPersistence}: the normalized
- * {@link SingleShotInvocationOutcome} the bounded mechanism reported, the one-shot
+ * {@link SingleShotAttemptOutcome} the bounded mechanism reported, the one-shot
  * family's captured {@link RunnerResult} (omitted for the exit-code-based `script`
  * family and for any non-success outcome), the captured result's content digest,
  * and the verification / commit {@link SingleShotRoundEvidence} for the terminal
  * patch.
  */
 export type PlanSingleShotRoundPersistenceInput = {
-  outcome: SingleShotInvocationOutcome;
+  outcome: SingleShotAttemptOutcome;
   /**
    * The normalized result document a one-shot success captured. The `script`
    * family is exit-code based and captures no result document, so it omits this
@@ -945,7 +945,7 @@ export type PlanSingleShotRoundPersistenceInput = {
  * A pure, durable persistence plan for one finished single-shot round. The
  * orchestrator applies {@link captureUpdate} (when present) then
  * {@link terminalUpdate} through `updateExecutorRound`, in that lifecycle order.
- * The decision and both patches are derived from the single invocation outcome, so
+ * The decision and both patches are derived from the single attempt outcome, so
  * the classification, recovery code, verification status, and commit SHA can never
  * disagree.
  */
@@ -971,8 +971,8 @@ export type SingleShotRoundPersistencePlan = {
 
 /**
  * Build the durable persistence plan for one finished single-shot round. Composes
- * {@link decideSingleShotInvocation} into the two round patches the orchestrator
- * applies, so the daemon decision and both patches derive from the same invocation
+ * {@link decideSingleShotAttempt} into the two round patches the orchestrator
+ * applies, so the daemon decision and both patches derive from the same attempt
  * outcome (contract "Round Lifecycle" steps 7-10 for the single-shot families).
  *
  * The structural difference from `planGoalLoopRoundPersistence` is the capture
@@ -987,12 +987,12 @@ export type SingleShotRoundPersistencePlan = {
  * no SQLite, no file system; the same outcome + evidence always yields the same plan.
  *
  * @throws {Error} if the outcome carries an unknown recovery code (via
- * {@link decideSingleShotInvocation}).
+ * {@link decideSingleShotAttempt}).
  */
 export function planSingleShotRoundPersistence(
   input: PlanSingleShotRoundPersistenceInput,
 ): SingleShotRoundPersistencePlan {
-  const decision = decideSingleShotInvocation(input.outcome);
+  const decision = decideSingleShotAttempt(input.outcome);
   if (
     input.outcome.ok &&
     input.result != null &&

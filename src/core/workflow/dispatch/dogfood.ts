@@ -3,12 +3,12 @@
  *
  * The production workflow-lane dispatcher (`dispatch/execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
- * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
+ * running`, creates the durable `executor_attempts` / `executor_rounds` rows,
  * and *holds* the dispatch lease while an executor lane drives the round to terminal
  * out of band. Before the daemon-default live-wrapper lane landed, nothing
  * terminalized the step inside a single managed loop, so the scheduler could only
  * dispatch the *first* runnable step per process — the dogfood proof needed three
- * separate `daemon start` invocations plus a manual `update-step` to advance past
+ * separate `daemon start` attempts plus a manual `update-step` to advance past
  * preflight.
  *
  * This module supplies the controlled fixture: a {@link WorkflowStepDispatch}
@@ -18,7 +18,7 @@
  * runnable step. It is the dogfood stand-in for "the bounded executor session
  * started and finished cleanly", not a real executor: it never spawns an agent,
  * runs verification, or writes anything external. It composes the production
- * dispatch (so the real `executor_invocations` scaffold is exercised) with three
+ * dispatch (so the real `executor_attempts` scaffold is exercised) with three
  * shipped operations, atomically:
  *
  *   1. `finishWorkflowStep(... succeeded)` — the live `running -> succeeded`
@@ -64,8 +64,9 @@ import type {
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
 } from "./scheduler.js";
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
+import {
+  loadLatestExecutorAttemptForStep,
+} from "../../executors/loop/persist.js";
 
 /**
  * `result_digest` stamped on a step this fixture terminalizes, so durable state
@@ -164,10 +165,7 @@ export function createTerminalizingWorkflowDispatch(
     context: WorkflowStepDispatchContext
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
-    const executorFamily = loadExecutorInvocation(
-      context.db,
-      deriveDispatchInvocationId(claim.runId, claim.stepId)
-    )?.executorFamily;
+    const executorFamily = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId)?.executorFamily;
     if (
       shouldTerminalizeAfterDispatch(result.status) &&
       !DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES.has(

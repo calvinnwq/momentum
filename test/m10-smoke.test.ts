@@ -101,7 +101,7 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     try {
       const invocations = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;

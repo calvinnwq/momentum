@@ -9,7 +9,7 @@ export type DispatchedStepExecutorContext = {
   resultJsonPath: string;
   executorLogPath: string;
   repoSafety?: DispatchedStepRepoSafetyContext;
-  attempt?: number;
+  attemptNumber?: number;
   promptPath?: string;
   ledgerPath?: string;
   env?: NodeJS.ProcessEnv;
@@ -49,7 +49,7 @@ export function buildDispatchedStepExecutorInput(
     runId,
     stepId,
     kind,
-    attempt: exec.attempt ?? 1,
+    attemptNumber: exec.attemptNumber ?? 1,
     agentProvider: selection.agentProvider,
     model: selection.model,
     effort: selection.effort,

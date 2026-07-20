@@ -33,8 +33,8 @@ import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/reco
 import { deriveWorkflowRunState } from "../src/core/workflow/run/reducer.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  insertExecutorInvocation,
-  loadExecutorInvocation,
+  insertExecutorAttempt,
+  loadExecutorAttempt,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
@@ -682,7 +682,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
           deriveDispatchInvocationId("run-a", "preflight"),
         )?.state,
@@ -752,7 +752,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
           deriveDispatchInvocationId("run-a", "preflight"),
         )?.state,
@@ -1686,11 +1686,11 @@ function seedCheckpointedDelegateHandoff(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
@@ -1705,13 +1705,13 @@ function seedCheckpointedDelegateHandoff(
   );
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
@@ -1742,7 +1742,7 @@ function seedCheckpointedDelegateHandoff(
       stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE
         ? {
             tool: "no-mistakes",
-            invocationId,
+            attemptId,
             attempt: 1,
           }
         : {
@@ -1755,7 +1755,7 @@ function seedCheckpointedDelegateHandoff(
           },
     ),
   });
-  return { envelope, invocationId, roundId };
+  return { envelope, attemptId, roundId };
 }
 
 function seedDelegateBeforeCurrentAttemptRound(
@@ -1772,11 +1772,11 @@ function seedDelegateBeforeCurrentAttemptRound(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
@@ -1792,13 +1792,13 @@ function seedDelegateBeforeCurrentAttemptRound(
   if (attempt === 1) return;
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
@@ -1830,10 +1830,10 @@ function seedDelegateBeforeCurrentAttemptRound(
     finishedAt: NOW,
   });
   db.prepare(
-    `UPDATE executor_invocations
+    `UPDATE executor_attempts
         SET attempt = 2, state = 'running', finished_at = NULL
-      WHERE invocation_id = ?`,
-  ).run(invocationId);
+      WHERE attempt_id = ?`,
+  ).run(attemptId);
 }
 
 function seedRegisteredSdkContinuation(
@@ -1849,11 +1849,11 @@ function seedRegisteredSdkContinuation(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchInvocationId(runId, stepId);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
@@ -1868,13 +1868,13 @@ function seedRegisteredSdkContinuation(
   );
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
@@ -1906,7 +1906,7 @@ function seedRegisteredSdkContinuation(
       classification: "continue",
       executorRecommendation: "continue",
       roundState: "succeeded",
-      invocationState: "running",
+      attemptState: "running",
       recoveryCode: null,
       humanGate: null,
     },
@@ -1918,7 +1918,7 @@ function seedRegisteredSdkContinuation(
       },
     },
   );
-  return { invocationId, roundId };
+  return { attemptId, roundId };
 }
 
 describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
@@ -2478,11 +2478,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           state: "running",
           order: 0,
         });
-        const invocationId = deriveDispatchInvocationId(runId, stepId);
-        insertExecutorInvocation(
+        const attemptId = deriveDispatchInvocationId(runId, stepId);
+        insertExecutorAttempt(
           db,
           {
-            invocationId,
+            attemptId,
             workflowRunId: runId,
             stepRunId: stepId,
             stepKey: stepId,
@@ -2497,13 +2497,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         );
         const envelope = createDurableExecutorEnvelope({
           db,
-          invocationId,
+          attemptId,
           now: () => NOW,
         });
-        const sourceRoundId = `${invocationId}::round-1`;
+        const sourceRoundId = `${attemptId}::round-1`;
         envelope.facade.startRound({
           roundId: sourceRoundId,
-          invocationId,
+          attemptId,
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
@@ -2533,7 +2533,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           detail: JSON.stringify({
             recommendation: "complete",
             recommendedRoundState: "succeeded",
-            recommendedInvocationState: "succeeded",
+            recommendedAttemptState: "succeeded",
             recoveryCode: null,
             humanGate: null,
             reason: "legacy wrapper completed cleanly",
@@ -2551,14 +2551,14 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           finishedAt: NOW,
         });
         db.prepare(
-          `UPDATE executor_invocations
+          `UPDATE executor_attempts
             SET attempt = 2, state = 'running', finished_at = NULL
-          WHERE invocation_id = ?`,
-        ).run(invocationId);
-        const replayRoundId = `${invocationId}::round-2`;
+          WHERE attempt_id = ?`,
+        ).run(attemptId);
+        const replayRoundId = `${attemptId}::round-2`;
         envelope.facade.startRound({
           roundId: replayRoundId,
-          invocationId,
+          attemptId,
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
@@ -2623,7 +2623,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "delegate-prior-attempt-handoff";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
+      const { envelope, attemptId, roundId } =
         seedCheckpointedDelegateHandoff(
           db,
           runId,
@@ -2639,13 +2639,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         finishedAt: NOW,
       });
       db.prepare(
-        `UPDATE executor_invocations
+        `UPDATE executor_attempts
             SET attempt = 2, state = 'running', finished_at = NULL
-          WHERE invocation_id = ?`,
-      ).run(invocationId);
+          WHERE attempt_id = ?`,
+      ).run(attemptId);
       envelope.facade.startRound({
-        roundId: `${invocationId}::round-2`,
-        invocationId,
+        roundId: `${attemptId}::round-2`,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
@@ -2734,7 +2734,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "unclassified-delegate-gate";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
+      const { envelope, attemptId, roundId } =
         seedCheckpointedDelegateHandoff(db, runId, stepId);
       envelope.applyDaemonDecision(
         {
@@ -2742,7 +2742,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           classification: "continue",
           executorRecommendation: "continue",
           roundState: "succeeded",
-          invocationState: "running",
+          attemptState: "running",
           recoveryCode: null,
           humanGate: null,
         },
@@ -2754,10 +2754,10 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           },
         },
       );
-      const gateRoundId = `${invocationId}::round-2`;
+      const gateRoundId = `${attemptId}::round-2`;
       envelope.facade.startRound({
         roundId: gateRoundId,
-        invocationId,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
@@ -2962,7 +2962,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "waiting-operator-gate-recovery";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
+      const { envelope, attemptId, roundId } =
         seedCheckpointedDelegateHandoff(db, runId, stepId);
       const decisionId = `${roundId}::decision`;
       envelope.facade.recordDecision(roundId, {
@@ -2986,7 +2986,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           classification: "approval_required",
           executorRecommendation: "approval_required",
           roundState: "waiting_operator",
-          invocationState: "waiting_operator",
+          attemptState: "waiting_operator",
           recoveryCode: null,
           humanGate: "approval_required",
         },
@@ -3020,11 +3020,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(
         db
           .prepare(
-            "SELECT invocation_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+            "SELECT attempt_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({
-        invocation_id: invocationId,
+        attempt_id: attemptId,
         round_id: roundId,
         evidence: decisionId,
         resolved_at: null,
@@ -3045,7 +3045,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "interrupted-delegate-poll";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
+      const { envelope, attemptId, roundId } =
         seedCheckpointedDelegateHandoff(db, runId, stepId);
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
@@ -3054,8 +3054,8 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         finishedAt: NOW,
       });
       envelope.facade.startRound({
-        roundId: `${invocationId}::round-2`,
-        invocationId,
+        roundId: `${attemptId}::round-2`,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
@@ -3154,7 +3154,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "completed-delegate-poll";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
+      const { envelope, attemptId, roundId } =
         seedCheckpointedDelegateHandoff(db, runId, stepId);
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
@@ -3162,10 +3162,10 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         executorRecommendation: "continue",
         finishedAt: NOW,
       });
-      const pollRoundId = `${invocationId}::round-2`;
+      const pollRoundId = `${attemptId}::round-2`;
       envelope.facade.startRound({
         roundId: pollRoundId,
-        invocationId,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,

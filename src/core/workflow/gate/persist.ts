@@ -21,7 +21,7 @@
  *     {@link InvalidWorkflowGateError} *before* any row is written, so a durable
  *     gate can never carry a vocabulary string outside the contract or an
  *     incoherent scope anchor. A gate hangs from exactly one layer of the
- *     `workflow -> step -> invocation -> round` tree: the scope's anchor id plus
+ *     `workflow -> step -> attempt -> round` tree: the scope's anchor id plus
  *     its ancestry must be present, and any id deeper than the scope must be
  *     null.
  *   - Resolution runs through the same pure {@link evaluateGateDecision} brain
@@ -115,7 +115,7 @@ export type NewWorkflowGate = {
   gateId: string;
   workflowRunId: string;
   stepRunId?: string | null;
-  invocationId?: string | null;
+  attemptId?: string | null;
   roundId?: string | null;
   targetScope: WorkflowGateScope;
   gateType: WorkflowGateType;
@@ -131,7 +131,7 @@ export type WorkflowGateRecord = {
   gateId: string;
   workflowRunId: string;
   stepRunId: string | null;
-  invocationId: string | null;
+  attemptId: string | null;
   roundId: string | null;
   targetScope: WorkflowGateScope;
   gateType: WorkflowGateType;
@@ -174,7 +174,7 @@ export function insertWorkflowGate(
     gateId: gate.gateId,
     workflowRunId: gate.workflowRunId,
     stepRunId: gate.stepRunId ?? null,
-    invocationId: gate.invocationId ?? null,
+    attemptId: gate.attemptId ?? null,
     roundId: gate.roundId ?? null,
     targetScope: gate.targetScope,
     gateType: gate.gateType,
@@ -192,7 +192,7 @@ export function insertWorkflowGate(
   try {
     db.prepare(
       `INSERT INTO workflow_gates (
-         gate_id, workflow_run_id, step_run_id, invocation_id, round_id,
+         gate_id, workflow_run_id, step_run_id, attempt_id, round_id,
          target_scope, gate_type, reason, evidence, allowed_actions,
          recommended_action, policy_envelope, resolved_at, resolved_by,
          resolution_mode, chosen_action, resolution, created_at, updated_at
@@ -201,7 +201,7 @@ export function insertWorkflowGate(
       record.gateId,
       record.workflowRunId,
       record.stepRunId,
-      record.invocationId,
+      record.attemptId,
       record.roundId,
       record.targetScope,
       record.gateType,
@@ -345,7 +345,7 @@ type WorkflowGateRow = {
   gate_id: string;
   workflow_run_id: string;
   step_run_id: string | null;
-  invocation_id: string | null;
+  attempt_id: string | null;
   round_id: string | null;
   target_scope: string;
   gate_type: string;
@@ -362,7 +362,7 @@ type WorkflowGateRow = {
 };
 
 const GATE_SELECT = `
-  SELECT gate_id, workflow_run_id, step_run_id, invocation_id, round_id,
+  SELECT gate_id, workflow_run_id, step_run_id, attempt_id, round_id,
          target_scope, gate_type, reason, evidence, allowed_actions,
          recommended_action, policy_envelope, resolved_at, resolved_by,
          resolution_mode, chosen_action, resolution
@@ -373,7 +373,7 @@ function rowToGate(row: WorkflowGateRow): WorkflowGateRecord {
     gateId: row.gate_id,
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
-    invocationId: row.invocation_id,
+    attemptId: row.attempt_id,
     roundId: row.round_id,
     targetScope: row.target_scope as WorkflowGateScope,
     gateType: row.gate_type as WorkflowGateType,
@@ -392,13 +392,13 @@ function rowToGate(row: WorkflowGateRow): WorkflowGateRecord {
 
 /**
  * The four gate target scopes name a layer of the `workflow -> step ->
- * invocation -> round` tree. A gate must carry the scope's anchor id and every
+ * attempt -> round` tree. A gate must carry the scope's anchor id and every
  * ancestor id, and must not carry an id deeper than the scope.
  */
 const GATE_ANCESTRY_LAYERS = [
   "workflow",
   "step",
-  "invocation",
+  "attempt",
   "round"
 ] as const;
 
@@ -430,7 +430,7 @@ function validateNewGate(
   const ids = [
     gate.workflowRunId,
     gate.stepRunId,
-    gate.invocationId,
+    gate.attemptId,
     gate.roundId
   ];
   ids.forEach((id, index) => {

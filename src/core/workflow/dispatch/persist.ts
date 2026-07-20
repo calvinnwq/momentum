@@ -29,7 +29,7 @@
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
  * touches a lease. The side-effecting half of the dispatcher lives in
- * `dispatch/execute.ts`: it creates the `executor_invocations` /
+ * `dispatch/execute.ts`: it creates the `executor_attempts` /
  * `executor_rounds` start scaffold for a `dispatch` plan, or records the
  * fail-closed manual-recovery effect and releases the dispatch lease for a
  * `fail_closed` plan. A vanished run cannot carry a `workflow_gates` FK, so the

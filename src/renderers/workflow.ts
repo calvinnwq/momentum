@@ -1493,7 +1493,7 @@ export function emitWorkflowRunLogs(
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
-    invocations: envelope.invocations.map(workflowInvocationToJsonShape),
+    attempts: envelope.attempts.map(workflowAttemptToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
     nextAction: nextActionToJsonShape(
       envelope.detail.monitor,
@@ -1531,11 +1531,11 @@ export function workflowRoundToJsonShape(
 ): Record<string, unknown> {
   return {
     roundId: round.roundId,
-    invocationId: round.invocationId,
+    attemptId: round.attemptId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
     executorFamily: round.executorFamily,
-    attempt: round.attempt,
+    attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: round.state,
     classification: round.classification,
@@ -1631,20 +1631,20 @@ function workflowRoundCompletionRecommendation(
   return round.classification ?? "continue";
 }
 
-export function workflowInvocationToJsonShape(
-  invocation: WorkflowRunLogsEnvelope["invocations"][number],
+export function workflowAttemptToJsonShape(
+  attempt: WorkflowRunLogsEnvelope["attempts"][number],
 ): Record<string, unknown> {
   return {
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    state: invocation.state,
-    attempt: invocation.attempt,
-    startedAt: invocation.startedAt,
-    heartbeatAt: invocation.heartbeatAt,
-    finishedAt: invocation.finishedAt,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    state: attempt.state,
+    attempt: attempt.attemptNumber,
+    startedAt: attempt.startedAt,
+    heartbeatAt: attempt.heartbeatAt,
+    finishedAt: attempt.finishedAt,
   };
 }
 
@@ -1681,12 +1681,12 @@ export function renderWorkflowRunLogsText(
           : ""),
     );
   }
-  lines.push(`Executor invocations: ${envelope.invocations.length}`);
-  for (const invocation of envelope.invocations) {
+  lines.push(`Executor attempts: ${envelope.attempts.length}`);
+  for (const attempt of envelope.attempts) {
     lines.push(
-      `- ${invocation.invocationId} [${invocation.stepKey}/${invocation.state}]` +
-        ` attempt=${invocation.attempt}` +
-        ` executor=${invocation.executorFamily}`,
+      `- ${attempt.attemptId} [${attempt.stepKey}/${attempt.state}]` +
+        ` attempt=${attempt.attemptNumber}` +
+        ` executor=${attempt.executorFamily}`,
     );
   }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);
@@ -2086,7 +2086,7 @@ export function workflowGateToJsonShape(
     gateId: gate.gateId,
     workflowRunId: gate.workflowRunId,
     stepRunId: gate.stepRunId,
-    invocationId: gate.invocationId,
+    attemptId: gate.attemptId,
     roundId: gate.roundId,
     targetScope: gate.targetScope,
     gateType: gate.gateType,

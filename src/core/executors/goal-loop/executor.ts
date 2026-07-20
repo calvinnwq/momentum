@@ -13,9 +13,9 @@
  * preserved recovery code, and any durable human gate.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation - exactly the discipline `loop/reducer.ts` and
+ * executor attempt - exactly the discipline `loop/reducer.ts` and
  * `shared/step-finalize.ts` follow. The durable orchestrator that creates the
- * invocation, inserts the round, runs the bounded mechanism, runs finalization,
+ * attempt, inserts the round, runs the bounded mechanism, runs finalization,
  * and persists this decision is layered on top in `goal-loop/orchestrator.ts`,
  * composed around the shared `shared/step-finalize.ts` transaction.
  *
@@ -67,14 +67,14 @@
  */
 
 import {
-  executorInvocationStateForClassification,
+  executorAttemptStateForClassification,
   type ExecutorArtifactClass,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorCompletionClassification,
   type ExecutorHumanGateType,
-  type ExecutorInvocationRecord,
-  type ExecutorInvocationState,
+  type ExecutorAttemptRecord,
+  type ExecutorAttemptState,
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundVerificationResult,
@@ -146,8 +146,8 @@ export type DecideGoalLoopRoundInput = {
 /**
  * The daemon's decision for one completed goal-loop round. `roundState` is the
  * terminal state for the round attempt itself; `classification` is the contract
- * completion decision that drives the owning invocation/step; `continueLoop` is
- * the daemon's go/no-go for another round under the same invocation.
+ * completion decision that drives the owning attempt/step; `continueLoop` is
+ * the daemon's go/no-go for another round under the same attempt.
  */
 export type GoalLoopRoundDecision = {
   classification: ExecutorCompletionClassification;
@@ -259,7 +259,7 @@ export type GoalLoopSelectionFieldSources = {
  * round runs under, plus the precedence source that won each field. The
  * agent/model/effort are copied into the round-start record; `maxRounds` is the
  * budget {@link decideGoalLoopRound} enforces; `timeoutMs` / `policyEnvelope`
- * configure the owning invocation.
+ * configure the owning attempt.
  */
 export type GoalLoopRoundSelection = {
   agentProvider: string | null;
@@ -293,11 +293,11 @@ export type ResolveGoalLoopRoundSelectionInput = {
  */
 export type PlanGoalLoopRoundStartInput = {
   roundId: string;
-  invocationId: string;
+  attemptId: string;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  attempt: number;
+  attemptNumber: number;
   roundIndex: number;
   selection: GoalLoopRoundSelection;
   inputDigest: string | null;
@@ -307,18 +307,18 @@ export type PlanGoalLoopRoundStartInput = {
 };
 
 /**
- * The StepRun identity {@link planGoalLoopInvocation} projects into a durable
- * goal-loop {@link ExecutorInvocationRecord}. This is the "below `StepRun`" half of
+ * The StepRun identity {@link planGoalLoopAttempt} projects into a durable
+ * goal-loop {@link ExecutorAttemptRecord}. This is the "below `StepRun`" half of
  * the adapter: one configured executor session for a `(workflowRunId, stepRunId)`
  * step run, materialized before any round runs. `attempt` distinguishes a re-run of
- * the same step (a fresh invocation, never a mutated one).
+ * the same step (a fresh attempt, never a mutated one).
  */
-export type PlanGoalLoopInvocationInput = {
+export type PlanGoalLoopAttemptInput = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  attempt: number;
-  /** Invocation start clock; stamped as `started_at` and the initial `heartbeat_at`. */
+  attemptNumber: number;
+  /** Attempt start clock; stamped as `started_at` and the initial `heartbeat_at`. */
   startedAt: number;
 };
 
@@ -328,7 +328,7 @@ export type PlanGoalLoopInvocationInput = {
  * log paths (contract "Round Lifecycle" steps 4-5). These are the filesystem /
  * content concerns the pure adapter never invents — the caller resolves them per
  * round (threading prior-round context into the next round's `inputDigest` in the
- * real wiring) and {@link planGoalLoopRoundStartForInvocation} freezes them into
+ * real wiring) and {@link planGoalLoopRoundStartForAttempt} freezes them into
  * the round-start record.
  */
 export type GoalLoopRoundRuntimeInputs = {
@@ -338,13 +338,13 @@ export type GoalLoopRoundRuntimeInputs = {
 };
 
 /**
- * The inputs to {@link planGoalLoopRoundStartForInvocation}: the materialized
- * invocation (whose identity each round inherits), the resolved selection frozen
+ * The inputs to {@link planGoalLoopRoundStartForAttempt}: the materialized
+ * attempt (whose identity each round inherits), the resolved selection frozen
  * into every round, the 0-based round index, the per-round runtime inputs, and the
  * round start clock.
  */
 export type PlanGoalLoopRoundStartForInvocationInput = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   selection: GoalLoopRoundSelection;
   roundIndex: number;
   runtime: GoalLoopRoundRuntimeInputs;
@@ -536,12 +536,12 @@ export function planGoalLoopRoundStart(
 ): ExecutorRoundRecord {
   return {
     roundId: input.roundId,
-    invocationId: input.invocationId,
+    attemptId: input.attemptId,
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     executorFamily: GOAL_LOOP_EXECUTOR_FAMILY,
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     roundIndex: input.roundIndex,
     state: "running",
     classification: null,
@@ -568,59 +568,59 @@ export function planGoalLoopRoundStart(
 }
 
 /**
- * Mint the deterministic, reattachable executor-invocation id for a goal-loop
+ * Mint the deterministic, reattachable executor-attempt id for a goal-loop
  * step run. The id embeds the `(workflowRunId, stepRunId)` step-run identity, the
  * `goal-loop` family, and the `attempt`, so it is globally unique (the
- * `executor_invocations` primary key) yet recomputable from durable state alone —
- * the daemon can reattach to an in-flight invocation without a side table
+ * `executor_attempts` primary key) yet recomputable from durable state alone —
+ * the daemon can reattach to an in-flight attempt without a side table
  * (contract "Heartbeat And Reattach"). A re-run of the same step is a fresh
- * `attempt`, so it never collides with the prior invocation.
+ * `attempt`, so it never collides with the prior attempt.
  */
-export function goalLoopInvocationId(
+export function goalLoopAttemptId(
   workflowRunId: string,
   stepRunId: string,
-  attempt: number,
+  attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${GOAL_LOOP_EXECUTOR_FAMILY}::${attempt}`;
+  return `${workflowRunId}::${stepRunId}::${GOAL_LOOP_EXECUTOR_FAMILY}::${attemptNumber}`;
 }
 
 /**
  * Mint the deterministic, reattachable round id for a 0-based round index under a
- * goal-loop invocation. The id embeds the invocation id and the index so it is
+ * goal-loop attempt. The id embeds the attempt id and the index so it is
  * globally unique (the `executor_rounds` primary key) and consistent with the
- * `(invocation_id, round_index)` uniqueness the persistence layer enforces.
+ * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
 export function goalLoopRoundId(
-  invocationId: string,
+  attemptId: string,
   roundIndex: number,
 ): string {
-  return `${invocationId}::round::${roundIndex}`;
+  return `${attemptId}::round::${roundIndex}`;
 }
 
 /**
  * Project a `StepRun` identity into the durable goal-loop
- * {@link ExecutorInvocationRecord} the orchestrator inserts before any round runs
+ * {@link ExecutorAttemptRecord} the orchestrator inserts before any round runs
  * (contract "State Model": `StepRun -> ExecutorInvocation -> ExecutorRound[]`).
  * This is the start of the adapter "below `StepRun`": one configured executor
  * session for the step, materialized at `running` with a deterministic id and the
  * start clock copied in. Pure: no ids or clocks are invented beyond the supplied
  * `startedAt`.
  */
-export function planGoalLoopInvocation(
-  input: PlanGoalLoopInvocationInput,
-): ExecutorInvocationRecord {
+export function planGoalLoopAttempt(
+  input: PlanGoalLoopAttemptInput,
+): ExecutorAttemptRecord {
   return {
-    invocationId: goalLoopInvocationId(
+    attemptId: goalLoopAttemptId(
       input.workflowRunId,
       input.stepRunId,
-      input.attempt,
+      input.attemptNumber,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     executorFamily: GOAL_LOOP_EXECUTOR_FAMILY,
     state: "running",
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
     finishedAt: null,
@@ -628,26 +628,26 @@ export function planGoalLoopInvocation(
 }
 
 /**
- * Project a materialized invocation + resolved selection + per-round runtime
+ * Project a materialized attempt + resolved selection + per-round runtime
  * inputs into the {@link PlanGoalLoopRoundStartInput} for one round index. The
- * round inherits the invocation's `(workflowRunId, stepRunId, stepKey, attempt)`
+ * round inherits the attempt's `(workflowRunId, stepRunId, stepKey, attempt)`
  * identity and a deterministic {@link goalLoopRoundId}, freezes the resolved
  * selection, and copies in the round's input digest / artifact root / log paths.
  * Feed the result to {@link planGoalLoopRoundStart} to get the durable round-start
  * record. Pure: the caller owns the clock and the runtime inputs; this only wires
  * identity. This is the round-identity half of the adapter "below `StepRun`".
  */
-export function planGoalLoopRoundStartForInvocation(
+export function planGoalLoopRoundStartForAttempt(
   input: PlanGoalLoopRoundStartForInvocationInput,
 ): PlanGoalLoopRoundStartInput {
-  const { invocation, runtime } = input;
+  const { attempt, runtime } = input;
   return {
-    roundId: goalLoopRoundId(invocation.invocationId, input.roundIndex),
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    attempt: invocation.attempt,
+    roundId: goalLoopRoundId(attempt.attemptId, input.roundIndex),
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    attemptNumber: attempt.attemptNumber,
     roundIndex: input.roundIndex,
     selection: input.selection,
     inputDigest: runtime.inputDigest,
@@ -948,15 +948,15 @@ export function decideGoalLoopRound(
 }
 
 /**
- * Map a round classification onto the next state of its owning invocation. A
- * `continue` keeps the invocation `running` for another round; terminal and
- * pause classifications settle or park the invocation. Used by the durable
- * orchestrator when it transitions the `executor_invocations` row after a round.
+ * Map a round classification onto the next state of its owning attempt. A
+ * `continue` keeps the attempt `running` for another round; terminal and
+ * pause classifications settle or park the attempt. Used by the durable
+ * orchestrator when it transitions the `executor_attempts` row after a round.
  */
-export function invocationStateForRoundClassification(
+export function attemptStateForRoundClassification(
   classification: ExecutorCompletionClassification,
-): ExecutorInvocationState {
-  return executorInvocationStateForClassification(classification);
+): ExecutorAttemptState {
+  return executorAttemptStateForClassification(classification);
 }
 
 function continueOrExhaust(input: {

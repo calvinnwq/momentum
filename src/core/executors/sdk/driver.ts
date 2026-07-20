@@ -1,19 +1,19 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import crypto from "node:crypto";
-import { loadExecutorInvocation } from "../loop/persist.js";
+import { loadExecutorAttempt } from "../loop/persist.js";
 import {
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
-  executorInvocationStateForClassification,
+  executorAttemptStateForClassification,
   isExecutorHumanGateCompatibleWithClassification,
   isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   selectExecutorDecisionForHumanGate,
-  type ExecutorInvocationRecord,
+  type ExecutorAttemptRecord,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import { createDurableExecutorEnvelope } from "./envelope.js";
@@ -25,7 +25,7 @@ import {
 
 export type DriveExecutorTicksInput = {
   db: MomentumDb;
-  invocationId: string;
+  attemptId: string;
   executor: Executor;
   config: Readonly<Record<string, unknown>>;
   hostBindings: Readonly<unknown>;
@@ -37,7 +37,7 @@ export type DriveExecutorTicksInput = {
 };
 
 export type DriveExecutorTicksResult = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   ticks: readonly ExecutorTickResult[];
   lastRound: ExecutorRoundRecord | null;
 };
@@ -45,7 +45,7 @@ export type DriveExecutorTicksResult = {
 /**
  * Drive every registered executor through the same bounded daemon-owned loop.
  * The executor records observations and recommends; this controller alone
- * applies terminal classification and invocation state.
+ * applies terminal classification and attempt state.
  */
 export async function driveExecutorTicks(
   input: DriveExecutorTicksInput,
@@ -54,18 +54,18 @@ export async function driveExecutorTicks(
   if (!Number.isInteger(maxTicks) || maxTicks < 1) {
     throw new Error("driveExecutorTicks: maxTicks must be a positive integer");
   }
-  const initial = loadExecutorInvocation(input.db, input.invocationId);
+  const initial = loadExecutorAttempt(input.db, input.attemptId);
   if (initial === undefined) {
-    throw new Error(`Executor invocation not found: ${input.invocationId}`);
+    throw new Error(`Executor attempt not found: ${input.attemptId}`);
   }
   if (initial.executorFamily !== input.executor.name) {
     throw new Error(
-      `Registered executor ${input.executor.name} cannot drive invocation for ${initial.executorFamily}.`,
+      `Registered executor ${input.executor.name} cannot drive attempt for ${initial.executorFamily}.`,
     );
   }
   const envelope = createDurableExecutorEnvelope({
     db: input.db,
-    invocationId: input.invocationId,
+    attemptId: input.attemptId,
     now: input.now ?? Date.now,
     ...(input.authorizeWrite !== undefined
       ? { authorizeWrite: input.authorizeWrite }
@@ -77,7 +77,7 @@ export async function driveExecutorTicks(
 
   for (let index = 0; index < maxTicks; index += 1) {
     const state = envelope.snapshot();
-    if (isTerminalExecutorInvocationState(state.invocation.state)) break;
+    if (isTerminalExecutorAttemptState(state.attempt.state)) break;
     signal.throwIfAborted();
     let tick: ExecutorTickResult;
     try {
@@ -96,7 +96,7 @@ export async function driveExecutorTicks(
           classification: tick.recommendation,
           executorRecommendation: tick.recommendation,
           roundState: tick.recommendedRoundState,
-          invocationState: tick.recommendedInvocationState,
+          attemptState: tick.recommendedAttemptState,
           recoveryCode: tick.recoveryCode,
           humanGate: tick.humanGate,
         },
@@ -117,17 +117,17 @@ export async function driveExecutorTicks(
       const current = afterThrow.currentRound?.round;
       const round =
         current !== undefined &&
-        current.attempt === afterThrow.invocation.attempt &&
+        current.attemptNumber === afterThrow.attempt.attemptNumber &&
         !isTerminalExecutorRoundState(current.state)
           ? current
           : envelope.facade.startRound({
-              roundId: `${initial.invocationId}::daemon-recovery-${crypto.randomUUID()}`,
-              invocationId: afterThrow.invocation.invocationId,
-              workflowRunId: afterThrow.invocation.workflowRunId,
-              stepRunId: afterThrow.invocation.stepRunId,
-              stepKey: afterThrow.invocation.stepKey,
-              executorFamily: afterThrow.invocation.executorFamily,
-              attempt: afterThrow.invocation.attempt,
+              roundId: `${initial.attemptId}::daemon-recovery-${crypto.randomUUID()}`,
+              attemptId: afterThrow.attempt.attemptId,
+              workflowRunId: afterThrow.attempt.workflowRunId,
+              stepRunId: afterThrow.attempt.stepRunId,
+              stepKey: afterThrow.attempt.stepKey,
+              executorFamily: afterThrow.attempt.executorFamily,
+              attemptNumber: afterThrow.attempt.attemptNumber,
               roundIndex: afterThrow.rounds.length,
               state: "running",
               agentProvider: null,
@@ -151,7 +151,7 @@ export async function driveExecutorTicks(
           classification: "manual_recovery_required",
           executorRecommendation: null,
           roundState: "manual_recovery_required",
-          invocationState: "manual_recovery_required",
+          attemptState: "manual_recovery_required",
           recoveryCode: failure.contractInvalid
             ? "executor_contract_invalid"
             : "executor_threw",
@@ -171,11 +171,11 @@ export async function driveExecutorTicks(
     if (tick.recommendation !== "continue") break;
   }
 
-  const invocation = loadExecutorInvocation(input.db, input.invocationId);
-  if (invocation === undefined) {
-    throw new Error(`Executor invocation disappeared: ${input.invocationId}`);
+  const attempt = loadExecutorAttempt(input.db, input.attemptId);
+  if (attempt === undefined) {
+    throw new Error(`Executor attempt disappeared: ${input.attemptId}`);
   }
-  return { invocation, ticks, lastRound };
+  return { attempt, ticks, lastRound };
 }
 
 function persistHumanGateDecisionSelector(
@@ -232,12 +232,12 @@ function validateExecutorTickResult(
     typeof roundId !== "string" ||
     roundId.length === 0 ||
     selectedRound === undefined ||
-    selectedRound.attempt !== state.invocation.attempt ||
+    selectedRound.attemptNumber !== state.attempt.attemptNumber ||
     state.currentRound?.round.roundId !== roundId ||
     isTerminalExecutorRoundState(selectedRound.state)
   ) {
     throw new ExecutorTickContractError(
-      "Executor tick roundId must name the current non-terminal round for the invocation attempt.",
+      "Executor tick roundId must name the current non-terminal round for the attempt attempt.",
     );
   }
   if (
@@ -253,10 +253,10 @@ function validateExecutorTickResult(
     );
   }
   if (
-    !includes(EXECUTOR_INVOCATION_STATES, record["recommendedInvocationState"])
+    !includes(EXECUTOR_ATTEMPT_STATES, record["recommendedAttemptState"])
   ) {
     throw new ExecutorTickContractError(
-      "Executor tick recommendedInvocationState is invalid.",
+      "Executor tick recommendedAttemptState is invalid.",
     );
   }
   const recoveryCode = record["recoveryCode"];
@@ -287,10 +287,10 @@ function validateExecutorTickResult(
   }
   const recommendation = record["recommendation"];
   const recommendedRoundState = record["recommendedRoundState"];
-  const recommendedInvocationState = record["recommendedInvocationState"];
+  const recommendedAttemptState = record["recommendedAttemptState"];
   if (
-    recommendedInvocationState !==
-      executorInvocationStateForClassification(recommendation) ||
+    recommendedAttemptState !==
+      executorAttemptStateForClassification(recommendation) ||
     !isExecutorRoundStateCompatibleWithClassification(
       recommendation,
       recommendedRoundState,

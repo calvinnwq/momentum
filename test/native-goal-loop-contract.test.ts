@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition/definition.js";
 import {
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES
 } from "../src/core/executors/loop/reducer.js";
 import { readRepoFile } from "./helpers/repo-docs.js";
@@ -16,7 +16,7 @@ describe("native goal-loop contract docs", () => {
   it("defines invocation and round ownership below workflow steps", () => {
     expect(spec).toContain("## Native Goal-Loop Contract");
     expect(spec).toContain(
-      "`executor_invocation` is the whole autonomous goal-loop attempt for one workflow step"
+      "`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step"
     );
     expect(spec).toContain(
       "`executor_round` is one durable iteration beneath that invocation"
@@ -27,7 +27,7 @@ describe("native goal-loop contract docs", () => {
   });
 
   it("pins the repo-native invocation and round state vocabulary", () => {
-    expect([...EXECUTOR_INVOCATION_STATES]).toEqual([
+    expect([...EXECUTOR_ATTEMPT_STATES]).toEqual([
       "pending",
       "preparing",
       "running",
@@ -150,7 +150,7 @@ describe("native goal-loop contract docs", () => {
     for (const expected of [
       "Successful rounds commit exactly once after verification evidence is captured",
       "Failed, invalid, stale, unsafe, canceled, or no-op rounds do not create commits",
-      "Momentum resumes from durable executor_invocations, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings",
+      "Momentum resumes from durable executor_attempts, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings",
       "Resume never depends on terminal scrollback",
       "no duplicate completed rounds",
       "no duplicate commits"
@@ -159,7 +159,7 @@ describe("native goal-loop contract docs", () => {
     }
 
     expect(dataDirectory).toContain(
-      "For native goal-loop, `executor_invocations` own the autonomous attempt and `executor_rounds` own each durable iteration"
+      "For native goal-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration"
     );
     expect(workflowCommands).toContain(
       "Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth"

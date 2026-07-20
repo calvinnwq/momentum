@@ -5,14 +5,14 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  ExecutorInvocationConflictError,
-  insertExecutorInvocation,
+  ExecutorAttemptConflictError,
+  insertExecutorAttempt,
   insertExecutorRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
   loadExecutorRound,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
@@ -104,7 +104,7 @@ function openMirrorRoundDb(): MomentumDb {
     attempt: ATTEMPT,
     startedAt: 1,
   });
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   const round = planNoMistakesRoundStart({
     invocation,
     runtime: {
@@ -192,7 +192,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
     expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toEqual([]);
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
   });
@@ -330,7 +330,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
   });
@@ -348,7 +348,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
   });
@@ -366,7 +366,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.decision.classification).toBe("manual_recovery_required");
     expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(result.round.state).toBe("manual_recovery_required");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
   });
@@ -883,8 +883,8 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
     expect(third.round.state).toBe("succeeded");
     expect(third.round.finishedAt).toBe(4_000);
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(4_000);
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.finishedAt).toBe(4_000);
   });
 
   it("parks unchanged running external state in manual recovery after the stall window", () => {
@@ -913,7 +913,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(stalled.round.humanGate).toBe("manual_recovery_required");
     expect(stalled.round.summary).toContain("has not changed");
     expect(stalled.round.summary).toContain("review");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
   });
@@ -1045,7 +1045,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
       "mirroring_external_state",
     );
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("running");
     expect(
       listExecutorCheckpointsForRound(db, ROUND_ID).map((c) => c.stage),
     ).toEqual(["external_state_mirrored", "reserved"]);
@@ -1078,7 +1078,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
     expect(resumed.round.state).toBe("mirroring_external_state");
     expect(resumed.round.finishedAt).toBeNull();
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("running");
   });
 
   it("requires previously mirrored open decisions to resolve before completion", () => {
@@ -1111,7 +1111,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(completed.decision.classification).toBe("manual_recovery_required");
     expect(completed.decision.recoveryCode).toBe("external_state_inconsistent");
     expect(completed.round.state).toBe("manual_recovery_required");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "manual_recovery_required",
     );
     expect(
@@ -1208,7 +1208,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       );
       expect(completed.round.state).toBe("manual_recovery_required");
       expect(completed.round.inputDigest).toBe("sha256:swapped");
-      expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
         "manual_recovery_required",
       );
       expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toHaveLength(1);
@@ -1228,7 +1228,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       polledAt: 2_000,
     });
     expect(gated.round.state).toBe("waiting_operator");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "waiting_operator",
     );
 
@@ -1241,8 +1241,8 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
 
     expect(settled.round.state).toBe("succeeded");
     expect(settled.round.finishedAt).toBe(3_000);
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(3_000);
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.finishedAt).toBe(3_000);
   });
 
   it("recovers a resumed round whose invocation was still waiting_operator", () => {
@@ -1267,7 +1267,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       },
       { now: 2_500 },
     );
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe(
       "waiting_operator",
     );
 
@@ -1279,7 +1279,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
 
     expect(settled.round.state).toBe("succeeded");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("succeeded");
   });
 });
 
@@ -1326,7 +1326,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(expectedIdentityIsRequired).toBe(true);
     const { db, result } = runStep(okReader({ stepStatus: "running" }));
 
-    expect(result.invocation.invocationId).toBe(INVOCATION_ID);
+    expect(result.invocation.attemptId).toBe(INVOCATION_ID);
     expect(result.invocation.executorFamily).toBe("no-mistakes");
     expect(result.round.round.roundId).toBe(ROUND_ID);
     expect(result.round.round.roundIndex).toBe(0);
@@ -1335,7 +1335,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(result.round.round.model).toBeNull();
     expect(result.round.round.effort).toBeNull();
     // Both rows are durable.
-    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)).toEqual(
       result.invocation,
     );
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(result.round.round);
@@ -1392,19 +1392,19 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
   it("settles the invocation blocked on a blocked first poll", () => {
     const { db, result } = runStep(okReader({ stepStatus: "blocked" }));
 
-    // The blocked branch carries an `invocationState` distinct from `roundState`
+    // The blocked branch carries an `attemptState` distinct from `roundState`
     // in the decision; the step settles the durable invocation into a terminal
     // `blocked`, not the `failed` / `manual_recovery_required` the other terminals
     // take. No prior test asserted the *invocation* settles blocked (the
     // round-level blocked test pins only `roundState`), so a regression of the
-    // blocked-branch `invocationState` would otherwise reach the durable row
+    // blocked-branch `attemptState` would otherwise reach the durable row
     // unobserved.
     expect(result.round.round.state).toBe("blocked");
-    expect(result.round.decision.invocationState).toBe("blocked");
+    expect(result.round.decision.attemptState).toBe("blocked");
     expect(result.invocation.state).toBe("blocked");
     // `blocked` is a terminal invocation state, so finished_at is stamped.
     expect(result.invocation.finishedAt).not.toBeNull();
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("blocked");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("blocked");
   });
 
   it("settles the invocation manual_recovery_required on an unreadable first poll", () => {
@@ -1446,7 +1446,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
 
     expect(reattached.decision.classification).toBe("complete");
     expect(reattached.round.state).toBe("succeeded");
-    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorAttempt(db, INVOCATION_ID)!.state).toBe("succeeded");
   });
 
   it("projects the first poll's findings and decisions below the round", () => {
@@ -1490,10 +1490,10 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     });
 
     // A re-run is a fresh attempt minting a fresh invocation, never mutating the prior one.
-    expect(first.invocation.invocationId).not.toBe(
-      second.invocation.invocationId,
+    expect(first.invocation.attemptId).not.toBe(
+      second.invocation.attemptId,
     );
-    expect(second.invocation.invocationId).toBe(
+    expect(second.invocation.attemptId).toBe(
       noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2),
     );
   });
@@ -1503,7 +1503,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     // mirror adapter's single-owner key. A daemon that re-dispatches the same
     // claimed step under the same attempt must not mint a second owner: the id
     // collides at the first durable write inside the start savepoint
-    // (`insertExecutorInvocation`), which rolls back, so nothing is half-written.
+    // (`insertExecutorAttempt`), which rolls back, so nothing is half-written.
     const db = openDb(makeTempDir());
     seedParents(db);
     const base = {
@@ -1520,20 +1520,20 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     const first = runNoMistakesMirrorStep({ ...base, now: stubClock() });
 
     // Snapshot the durable owner + round the first dispatch settled.
-    const ownerBefore = loadExecutorInvocation(db, INVOCATION_ID);
-    const roundsBefore = listExecutorRoundsForInvocation(db, INVOCATION_ID);
+    const ownerBefore = loadExecutorAttempt(db, INVOCATION_ID);
+    const roundsBefore = listExecutorRoundsForAttempt(db, INVOCATION_ID);
     expect(ownerBefore).toEqual(first.invocation);
 
     // A second dispatch under the same attempt collides on the invocation id and
     // fails closed — never a silent second owner.
     expect(() =>
       runNoMistakesMirrorStep({ ...base, now: stubClock() }),
-    ).toThrow(ExecutorInvocationConflictError);
+    ).toThrow(ExecutorAttemptConflictError);
 
     // The durable owner + its round are byte-for-byte unchanged: the start
     // savepoint left no half-written round behind.
-    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(ownerBefore);
-    expect(listExecutorRoundsForInvocation(db, INVOCATION_ID)).toEqual(
+    expect(loadExecutorAttempt(db, INVOCATION_ID)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForAttempt(db, INVOCATION_ID)).toEqual(
       roundsBefore,
     );
   });

@@ -20,7 +20,7 @@ import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/schedul
 import type { WorkflowStepDispatch } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 
 type RunResult = {
   code: number;
@@ -176,7 +176,7 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
       // dispatch — created through the production dispatch path.
       const invocations = verifyDb
         .prepare(
-          "SELECT step_key, executor_family FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
+          "SELECT step_key, executor_family FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{ step_key: string; executor_family: string }>;
       expect(invocations).toEqual([
@@ -366,7 +366,7 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         "running",
       );
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
-      const invocation = loadExecutorInvocation(
+      const invocation = loadExecutorAttempt(
         db,
         deriveDispatchInvocationId(runId, "implementation"),
       );

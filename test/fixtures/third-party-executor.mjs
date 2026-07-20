@@ -19,8 +19,8 @@ export default {
     const invocation = context.state.invocation;
     const index = context.state.rounds.length + 1;
     const round = context.envelope.startRound({
-      roundId: `${invocation.invocationId}::round-${index}`,
-      invocationId: invocation.invocationId,
+      roundId: `${invocation.attemptId}::round-${index}`,
+      attemptId: invocation.attemptId,
       workflowRunId: invocation.workflowRunId,
       stepRunId: invocation.stepRunId,
       stepKey: invocation.stepKey,
@@ -48,7 +48,7 @@ export default {
       roundId: round.roundId,
       recommendation: complete ? "complete" : "continue",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: complete ? "succeeded" : "running",
+      recommendedAttemptState: complete ? "succeeded" : "running",
       recoveryCode: null,
       humanGate: null,
       reason: complete

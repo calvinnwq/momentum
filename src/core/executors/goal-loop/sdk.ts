@@ -15,7 +15,7 @@ import type {
 } from "../sdk/types.js";
 import {
   goalLoopRoundId,
-  invocationStateForRoundClassification,
+  attemptStateForRoundClassification,
   planGoalLoopRoundArtifacts,
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
@@ -92,9 +92,9 @@ export class GoalLoopSdkExecutor implements Executor<
       GoalLoopExecutorHostBindings
     >,
   ): ExecutorTickResult {
-    if (context.state.invocation.executorFamily !== this.name) {
+    if (context.state.attempt.executorFamily !== this.name) {
       throw new Error(
-        `GoalLoopSdkExecutor cannot run invocation ${context.state.invocation.invocationId} for ${context.state.invocation.executorFamily}.`,
+        `GoalLoopSdkExecutor cannot run attempt ${context.state.attempt.attemptId} for ${context.state.attempt.executorFamily}.`,
       );
     }
     const selection =
@@ -102,7 +102,7 @@ export class GoalLoopSdkExecutor implements Executor<
     const current = context.state.currentRound;
     const reusingMaterializedRound =
       current !== null &&
-      current.round.attempt === context.state.invocation.attempt &&
+      current.round.attemptNumber === context.state.attempt.attemptNumber &&
       current.round.classification === null &&
       context.hostBindings.roundAlreadyMaterialized === true &&
       !current.checkpoints.some(
@@ -110,7 +110,7 @@ export class GoalLoopSdkExecutor implements Executor<
       );
     if (
       current !== null &&
-      current.round.attempt === context.state.invocation.attempt &&
+      current.round.attemptNumber === context.state.attempt.attemptNumber &&
       current.round.classification === null &&
       !reusingMaterializedRound
     ) {
@@ -138,12 +138,12 @@ export class GoalLoopSdkExecutor implements Executor<
       : context.state.rounds.length;
     const hostStart = context.hostBindings.start;
     if (
-      hostStart.invocationId !== context.state.invocation.invocationId ||
-      hostStart.attempt !== context.state.invocation.attempt ||
+      hostStart.attemptId !== context.state.attempt.attemptId ||
+      hostStart.attemptNumber !== context.state.attempt.attemptNumber ||
       hostStart.roundIndex !== expectedRoundIndex ||
       hostStart.roundId !==
         goalLoopRoundId(
-          context.state.invocation.invocationId,
+          context.state.attempt.attemptId,
           expectedRoundIndex,
         )
     ) {
@@ -298,11 +298,11 @@ export function goalLoopDispatchBindingDetail(
     hostBindingIdentity: hostBindings.hostBindingIdentity ?? null,
     start: {
       roundId: start.roundId,
-      invocationId: start.invocationId,
+      attemptId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
-      attempt: start.attempt,
+      attempt: start.attemptNumber,
       roundIndex: start.roundIndex,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
@@ -357,12 +357,12 @@ function selectionFromConfig(
 function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
   return {
     roundId: round.roundId,
-    invocationId: round.invocationId,
+    attemptId: round.attemptId,
     workflowRunId: round.workflowRunId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
     executorFamily: round.executorFamily,
-    attempt: round.attempt,
+    attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: "running",
     agentProvider: round.agentProvider,
@@ -446,7 +446,7 @@ function tickResult(
     roundId,
     recommendation: decision.classification,
     recommendedRoundState: decision.roundState,
-    recommendedInvocationState: invocationStateForRoundClassification(
+    recommendedAttemptState: attemptStateForRoundClassification(
       decision.classification,
     ),
     recoveryCode: decision.recoveryCode,

@@ -10,7 +10,7 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type {
@@ -18,7 +18,7 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
@@ -65,9 +65,9 @@ async function run(argv: string[]): Promise<RunResult> {
   return { code, stdout, stderr };
 }
 
-function makeInvocation(runId: string): ExecutorInvocationRecord {
+function makeInvocation(runId: string): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
@@ -86,7 +86,7 @@ function makeRound(
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
@@ -184,7 +184,7 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
        VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
   ).run(runId);
-  insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+  insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
   insertExecutorRound(db, makeRound(runId), { now: 1 });
   insertExecutorArtifact(db, makeArtifact(runId), { now: 5 });
   insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -355,7 +355,7 @@ describe("momentum workflow run logs", () => {
         };
       }>;
       invocations: Array<{
-        invocationId: string;
+        attemptId: string;
         stepKey: string;
         executorFamily: string;
         attempt: number;
@@ -438,7 +438,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(payload.invocations).toEqual([
       expect.objectContaining({
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         stepKey: "implementation",
         executorFamily: "goal-loop",
         attempt: 1,
@@ -522,7 +522,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
 
       const cases: Array<
         [
@@ -717,7 +717,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {
@@ -785,7 +785,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeInvocation(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {

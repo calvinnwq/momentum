@@ -16,8 +16,8 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
@@ -163,7 +163,7 @@ function stepState(db: MomentumDb): string {
 }
 
 function dispatchRounds(db: MomentumDb) {
-  return listExecutorRoundsForInvocation(
+  return listExecutorRoundsForAttempt(
     db,
     deriveDispatchInvocationId(RUN_ID, STEP_ID),
   );
@@ -359,7 +359,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(getUpdateIntentById(db, INTENT_ID)?.status).toBe("applied");
 
     // The dispatch scaffold carries the real M6 outcome as terminal evidence.
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );
@@ -458,7 +458,7 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
 
     // The scaffold carries terminal manual-recovery evidence with the precise
     // M6 cause preserved for the operator — not a fabricated clean terminal.
-    const invocation = loadExecutorInvocation(
+    const invocation = loadExecutorAttempt(
       db,
       deriveDispatchInvocationId(RUN_ID, STEP_ID),
     );

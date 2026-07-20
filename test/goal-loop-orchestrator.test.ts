@@ -5,16 +5,16 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  ExecutorInvocationConflictError,
-  insertExecutorInvocation,
+  ExecutorAttemptConflictError,
+  insertExecutorAttempt,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
   loadExecutorRound
 } from "../src/core/executors/loop/persist.js";
 import type {
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord
 } from "../src/core/executors/loop/reducer.js";
 import {
@@ -72,8 +72,8 @@ function openRoundDb(): MomentumDb {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "inv-1",
+  const invocation: ExecutorAttemptRecord = {
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -84,7 +84,7 @@ function openRoundDb(): MomentumDb {
     heartbeatAt: 1,
     finishedAt: null
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   return db;
 }
 
@@ -101,7 +101,7 @@ function buildStart(
   });
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -588,7 +588,7 @@ describe("runGoalLoopRound — checkpoint stream", () => {
 // ---------------------------------------------------------------------------
 //
 // Composes the single-round driver across a bounded budget through the *real*
-// executor-loop persistence layer: it inserts the durable executor_invocations
+// executor-loop persistence layer: it inserts the durable executor_attempts
 // row (running) before any round, runs runGoalLoopRound per round index until a
 // round's decision stops the loop, and advances/terminalizes the invocation via
 // invocationStateForRoundClassification — succeeded on completion, the durable
@@ -609,9 +609,9 @@ function openInvocationDb(): MomentumDb {
   return db;
 }
 
-function buildInvocation(): ExecutorInvocationRecord {
+function buildInvocation(): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
@@ -643,7 +643,7 @@ function planRoundFor(
   return {
     start: {
       roundId: `round-${roundIndex}`,
-      invocationId: "inv-1",
+      attemptId: "inv-1",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -697,7 +697,7 @@ describe("runGoalLoopInvocation — multi-round completion", () => {
     // The start clock the caller seeded is preserved.
     expect(result.invocation.startedAt).toBe(500);
     // The durable invocation row equals the returned record.
-    expect(loadExecutorInvocation(db, "inv-1")).toEqual(result.invocation);
+    expect(loadExecutorAttempt(db, "inv-1")).toEqual(result.invocation);
   });
 
   it("persists distinct learning evidence for every completed round", () => {
@@ -734,7 +734,7 @@ describe("runGoalLoopInvocation — multi-round completion", () => {
       planRound: (roundIndex) => planRoundFor(roundIndex, 3),
       runRound: (round) => {
         if (round.roundIndex === 0) {
-          stateDuringFirstRound = loadExecutorInvocation(db, "inv-1")?.state;
+          stateDuringFirstRound = loadExecutorAttempt(db, "inv-1")?.state;
         }
         return {
           result: runnerResult({ goal_complete: true }),
@@ -772,7 +772,7 @@ describe("runGoalLoopInvocation — quota pause", () => {
     expect(result.invocation.state).toBe("waiting_operator");
     expect(result.invocation.finishedAt).toBeNull();
     expect(result.invocation.heartbeatAt).toBe(4_000);
-    expect(loadExecutorInvocation(db, "inv-1")).toEqual(result.invocation);
+    expect(loadExecutorAttempt(db, "inv-1")).toEqual(result.invocation);
   });
 });
 
@@ -794,7 +794,7 @@ describe("runGoalLoopInvocation — repo-safety boundaries", () => {
     // The invocation terminalized into manual recovery with finished_at stamped.
     expect(result.invocation.state).toBe("manual_recovery_required");
     expect(result.invocation.finishedAt).toBe(3_000);
-    expect(loadExecutorInvocation(db, "inv-1")).toEqual(result.invocation);
+    expect(loadExecutorAttempt(db, "inv-1")).toEqual(result.invocation);
   });
 
   it("keeps looping after a verification-failure reset while budget remains, then completes", () => {
@@ -902,15 +902,15 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
           : { result: runnerResult({ goal_complete: true }), finalize: COMMITTED }
     });
 
-    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+    const attemptId = goalLoopInvocationId("run-1", "step-1", 1);
 
     // The invocation is materialized below the step run, terminalized succeeded.
-    expect(result.invocation.invocationId).toBe(invocationId);
+    expect(result.invocation.attemptId).toBe(attemptId);
     expect(result.invocation.workflowRunId).toBe("run-1");
     expect(result.invocation.stepRunId).toBe("step-1");
     expect(result.invocation.executorFamily).toBe("goal-loop");
     expect(result.invocation.state).toBe("succeeded");
-    expect(loadExecutorInvocation(db, invocationId)).toEqual(result.invocation);
+    expect(loadExecutorAttempt(db, attemptId)).toEqual(result.invocation);
 
     // Three rounds ran in order under the materialized invocation, all durable.
     expect(result.rounds.map((r) => r.round.roundIndex)).toEqual([0, 1, 2]);
@@ -919,13 +919,13 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
       "continue",
       "complete"
     ]);
-    const durableRounds = listExecutorRoundsForInvocation(db, invocationId);
+    const durableRounds = listExecutorRoundsForAttempt(db, attemptId);
     expect(durableRounds.map((r) => r.roundId)).toEqual([
-      goalLoopRoundId(invocationId, 0),
-      goalLoopRoundId(invocationId, 1),
-      goalLoopRoundId(invocationId, 2)
+      goalLoopRoundId(attemptId, 0),
+      goalLoopRoundId(attemptId, 1),
+      goalLoopRoundId(attemptId, 2)
     ]);
-    expect(durableRounds.every((r) => r.invocationId === invocationId)).toBe(
+    expect(durableRounds.every((r) => r.attemptId === attemptId)).toBe(
       true
     );
   });
@@ -947,9 +947,9 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
       })
     });
 
-    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+    const attemptId = goalLoopInvocationId("run-1", "step-1", 1);
     const round0 = result.rounds[0]?.round;
-    expect(round0?.roundId).toBe(goalLoopRoundId(invocationId, 0));
+    expect(round0?.roundId).toBe(goalLoopRoundId(attemptId, 0));
     // Selection frozen into the round before work ran.
     expect(round0?.agentProvider).toBe("claude");
     expect(round0?.model).toBe("claude-opus-4-8");
@@ -1001,15 +1001,15 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
     expect(observedPriorLearnings).toEqual([[], ["learning-0"]]);
     expect(result.rounds[1]?.round.inputDigest).toBe("sha256:learning-0");
 
-    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
-    expect(loadExecutorRound(db, goalLoopRoundId(invocationId, 1))?.inputDigest).toBe(
+    const attemptId = goalLoopInvocationId("run-1", "step-1", 1);
+    expect(loadExecutorRound(db, goalLoopRoundId(attemptId, 1))?.inputDigest).toBe(
       "sha256:learning-0"
     );
   });
 
   it("inserts the materialized invocation before the first round runs", () => {
     const db = openInvocationDb();
-    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+    const attemptId = goalLoopInvocationId("run-1", "step-1", 1);
     let stateDuringFirstRound: string | undefined;
     runGoalLoopStep({
       db,
@@ -1022,7 +1022,7 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
       now: monotonicClock(),
       runRound: (round) => {
         if (round.roundIndex === 0) {
-          stateDuringFirstRound = loadExecutorInvocation(db, invocationId)?.state;
+          stateDuringFirstRound = loadExecutorAttempt(db, attemptId)?.state;
         }
         return {
           result: runnerResult({ goal_complete: true }),
@@ -1062,7 +1062,7 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
 // adapter's single-owner key (contract "Heartbeat And Reattach"). A daemon that
 // re-dispatches the same claimed step under the same attempt must not mint a
 // second owner: the id collides at the very first durable write
-// (`insertExecutorInvocation`, before any round), so the adapter fails closed
+// (`insertExecutorAttempt`, before any round), so the adapter fails closed
 // and leaves the prior invocation untouched. A genuine re-run uses a fresh
 // `attempt`, which mints an independent invocation rather than mutating the prior.
 
@@ -1087,21 +1087,21 @@ describe("runGoalLoopStep — single-owner enforcement", () => {
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
     const db = openInvocationDb();
     const first = dispatch(db, 1);
-    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+    const attemptId = goalLoopInvocationId("run-1", "step-1", 1);
 
     // Snapshot the durable owner + rounds the first dispatch settled.
-    const ownerBefore = loadExecutorInvocation(db, invocationId);
-    const roundsBefore = listExecutorRoundsForInvocation(db, invocationId);
+    const ownerBefore = loadExecutorAttempt(db, attemptId);
+    const roundsBefore = listExecutorRoundsForAttempt(db, attemptId);
     expect(ownerBefore).toEqual(first.invocation);
 
     // A second dispatch under the same identity collides on the invocation id and
     // fails closed before any work — never a silent second owner.
-    expect(() => dispatch(db, 1)).toThrow(ExecutorInvocationConflictError);
+    expect(() => dispatch(db, 1)).toThrow(ExecutorAttemptConflictError);
 
     // The durable owner + its rounds are byte-for-byte unchanged: no extra round,
     // no mutated terminal state.
-    expect(loadExecutorInvocation(db, invocationId)).toEqual(ownerBefore);
-    expect(listExecutorRoundsForInvocation(db, invocationId)).toEqual(
+    expect(loadExecutorAttempt(db, attemptId)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForAttempt(db, attemptId)).toEqual(
       roundsBefore
     );
   });
@@ -1111,21 +1111,21 @@ describe("runGoalLoopStep — single-owner enforcement", () => {
     const first = dispatch(db, 1);
     const second = dispatch(db, 2);
 
-    expect(first.invocation.invocationId).toBe(
+    expect(first.invocation.attemptId).toBe(
       goalLoopInvocationId("run-1", "step-1", 1)
     );
-    expect(second.invocation.invocationId).toBe(
+    expect(second.invocation.attemptId).toBe(
       goalLoopInvocationId("run-1", "step-1", 2)
     );
-    expect(first.invocation.invocationId).not.toBe(
-      second.invocation.invocationId
+    expect(first.invocation.attemptId).not.toBe(
+      second.invocation.attemptId
     );
 
     // Both owners coexist durably; the re-run did not overwrite the prior attempt.
-    expect(loadExecutorInvocation(db, first.invocation.invocationId)).toEqual(
+    expect(loadExecutorAttempt(db, first.invocation.attemptId)).toEqual(
       first.invocation
     );
-    expect(loadExecutorInvocation(db, second.invocation.invocationId)).toEqual(
+    expect(loadExecutorAttempt(db, second.invocation.attemptId)).toEqual(
       second.invocation
     );
   });

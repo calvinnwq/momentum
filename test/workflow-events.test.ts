@@ -671,7 +671,7 @@ describe("workflow run events", () => {
     const dataDir = makeTempDir();
     const runId = "run-retry-start-preserved";
     const stepId = "no-mistakes";
-    const invocationId = `${runId}::${stepId}::dispatch`;
+    const attemptId = `${runId}::${stepId}::dispatch`;
     const db = openDb(dataDir);
     seedRun(db, {
       runId,
@@ -692,12 +692,12 @@ describe("workflow run events", () => {
       now: 150
     });
     db.prepare(
-      `INSERT INTO executor_invocations
-         (invocation_id, workflow_run_id, step_run_id, step_key,
+      `INSERT INTO executor_attempts
+         (attempt_id, workflow_run_id, step_run_id, step_key,
           executor_family, state, attempt, started_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      invocationId,
+      attemptId,
       runId,
       stepId,
       stepId,
@@ -710,13 +710,13 @@ describe("workflow run events", () => {
     );
     db.prepare(
       `INSERT INTO executor_rounds
-         (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+         (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
           executor_family, attempt, round_index, state, recovery_code,
           created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      `${invocationId}::round-0`,
-      invocationId,
+      `${attemptId}::round-0`,
+      attemptId,
       runId,
       stepId,
       stepId,
@@ -1114,7 +1114,7 @@ describe("workflow run events", () => {
           gate_id TEXT PRIMARY KEY,
           workflow_run_id TEXT NOT NULL,
           step_run_id TEXT,
-          invocation_id TEXT,
+          attempt_id TEXT,
           round_id TEXT,
           target_scope TEXT NOT NULL,
           gate_type TEXT NOT NULL,

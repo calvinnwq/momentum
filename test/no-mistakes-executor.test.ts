@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   transitionExecutorRound,
 } from "../src/core/executors/loop/reducer.js";
 import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
@@ -32,7 +32,7 @@ import {
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
 const INVOCATION_TERMINAL_SET = new Set<string>(
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
 );
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
@@ -130,7 +130,7 @@ describe("decideNoMistakesMirror — still running", () => {
     );
     expect(decision.classification).toBe("continue");
     expect(decision.roundState).toBe("mirroring_external_state");
-    expect(decision.invocationState).toBe("running");
+    expect(decision.attemptState).toBe("running");
     expect(decision.humanGate).toBeNull();
     expect(decision.recoveryCode).toBeNull();
     expect(decision.reason.length).toBeGreaterThan(0);
@@ -154,7 +154,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
     );
     expect(decision.classification).toBe("operator_decision_required");
     expect(decision.roundState).toBe("waiting_operator");
-    expect(decision.invocationState).toBe("waiting_operator");
+    expect(decision.attemptState).toBe("waiting_operator");
     expect(decision.humanGate).toBe("operator_decision_required");
     expect(decision.recoveryCode).toBeNull();
   });
@@ -165,7 +165,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
     );
     expect(decision.classification).toBe("approval_required");
     expect(decision.roundState).toBe("waiting_operator");
-    expect(decision.invocationState).toBe("waiting_operator");
+    expect(decision.attemptState).toBe("waiting_operator");
     expect(decision.humanGate).toBe("approval_required");
     expect(decision.recoveryCode).toBeNull();
   });
@@ -221,7 +221,7 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
     );
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
-    expect(decision.invocationState).toBe("succeeded");
+    expect(decision.attemptState).toBe("succeeded");
     expect(decision.humanGate).toBeNull();
     expect(decision.recoveryCode).toBeNull();
   });
@@ -304,7 +304,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
     );
     expect(decision.classification).toBe("failed");
     expect(decision.roundState).toBe("failed");
-    expect(decision.invocationState).toBe("failed");
+    expect(decision.attemptState).toBe("failed");
     expect(decision.recoveryCode).toBe("external_run_failed");
     expect(decision.humanGate).toBeNull();
   });
@@ -315,7 +315,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
     );
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
-    expect(decision.invocationState).toBe("blocked");
+    expect(decision.attemptState).toBe("blocked");
     expect(decision.recoveryCode).toBe("external_state_blocked");
     expect(decision.humanGate).toBe("external_state_required");
   });
@@ -438,9 +438,9 @@ describe("decideNoMistakesMirror — totality", () => {
       expect(roundHop.ok).toBe(true);
       // The mirror invocation runs; every decided invocation state must be
       // reachable from running.
-      const invocationHop = transitionExecutorInvocation(
+      const invocationHop = transitionExecutorAttempt(
         "running",
-        decision.invocationState,
+        decision.attemptState,
       );
       expect(invocationHop.ok).toBe(true);
       expect(decision.reason.length).toBeGreaterThan(0);
@@ -452,7 +452,7 @@ describe("decideNoMistakesMirror — totality", () => {
       externalState({ stepStatus: "failed" }),
     );
     expect(ROUND_TERMINAL_SET.has(terminal.roundState)).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(terminal.invocationState)).toBe(true);
+    expect(INVOCATION_TERMINAL_SET.has(terminal.attemptState)).toBe(true);
   });
 });
 
@@ -473,10 +473,10 @@ describe("noMistakesInvocationId / noMistakesRoundId", () => {
   });
 
   it("mints a single deterministic round id under an invocation", () => {
-    const invocationId = noMistakesInvocationId("run1", "step1", 0);
-    const roundId = noMistakesRoundId(invocationId);
-    expect(roundId).toContain(invocationId);
-    expect(noMistakesRoundId(invocationId)).toBe(roundId);
+    const attemptId = noMistakesInvocationId("run1", "step1", 0);
+    const roundId = noMistakesRoundId(attemptId);
+    expect(roundId).toContain(attemptId);
+    expect(noMistakesRoundId(attemptId)).toBe(roundId);
   });
 });
 
@@ -588,7 +588,7 @@ describe("planNoMistakesInvocation", () => {
       attempt: 0,
       startedAt: 1000,
     });
-    expect(invocation.invocationId).toBe(
+    expect(invocation.attemptId).toBe(
       noMistakesInvocationId("run1", "step1", 0),
     );
     expect(invocation.workflowRunId).toBe("run1");
@@ -617,7 +617,7 @@ describe("planNoMistakesInvocation", () => {
       attempt: 1,
       startedAt: 2,
     });
-    expect(first.invocationId).not.toBe(second.invocationId);
+    expect(first.attemptId).not.toBe(second.attemptId);
     expect(second.attempt).toBe(1);
   });
 
@@ -632,12 +632,12 @@ describe("planNoMistakesInvocation", () => {
     const decision = decideNoMistakesMirror(
       externalState({ stepStatus: "failed" }),
     );
-    const transition = transitionExecutorInvocation(
+    const transition = transitionExecutorAttempt(
       invocation.state,
-      decision.invocationState,
+      decision.attemptState,
     );
     expect(transition.ok).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(decision.invocationState)).toBe(true);
+    expect(INVOCATION_TERMINAL_SET.has(decision.attemptState)).toBe(true);
   });
 });
 
@@ -663,8 +663,8 @@ describe("planNoMistakesRoundStart", () => {
       startedAt: 2000,
     });
 
-    expect(round.roundId).toBe(noMistakesRoundId(invocation().invocationId));
-    expect(round.invocationId).toBe(invocation().invocationId);
+    expect(round.roundId).toBe(noMistakesRoundId(invocation().attemptId));
+    expect(round.attemptId).toBe(invocation().attemptId);
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("no-mistakes");
@@ -895,7 +895,7 @@ describe("decideNoMistakesUnreadable", () => {
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.roundState).toBe("manual_recovery_required");
-    expect(decision.invocationState).toBe("manual_recovery_required");
+    expect(decision.attemptState).toBe("manual_recovery_required");
     expect(decision.humanGate).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_unreadable");
     // The reader's error is already a full sentence; it is preserved verbatim as
@@ -914,8 +914,8 @@ describe("decideNoMistakesUnreadable", () => {
     // untrusted external evidence and settle the same way (modulo the reason).
     expect(fromReadFailure.classification).toBe(fromBadSnapshot.classification);
     expect(fromReadFailure.roundState).toBe(fromBadSnapshot.roundState);
-    expect(fromReadFailure.invocationState).toBe(
-      fromBadSnapshot.invocationState,
+    expect(fromReadFailure.attemptState).toBe(
+      fromBadSnapshot.attemptState,
     );
     expect(fromReadFailure.humanGate).toBe(fromBadSnapshot.humanGate);
     expect(fromReadFailure.recoveryCode).toBe(fromBadSnapshot.recoveryCode);

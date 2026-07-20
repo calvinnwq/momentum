@@ -31,10 +31,10 @@ import {
   startWorkflowStep,
 } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  updateExecutorInvocationState,
+  loadExecutorAttempt,
+  updateExecutorAttemptState,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationState } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptState } from "../src/core/executors/loop/reducer.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
@@ -141,10 +141,10 @@ function dispatchInvocationId(stepId: string, runId: string = RUN_ID): string {
 function driveInvocationTerminal(
   db: MomentumDb,
   stepId: string,
-  state: ExecutorInvocationState,
+  state: ExecutorAttemptState,
   runId: string = RUN_ID,
 ): void {
-  updateExecutorInvocationState(
+  updateExecutorAttemptState(
     db,
     dispatchInvocationId(stepId, runId),
     state,
@@ -172,7 +172,7 @@ function stepRow(
 function countInvocations(db: MomentumDb, runId: string = RUN_ID): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
+      "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -186,17 +186,17 @@ function runUpdatedAt(db: MomentumDb, runId: string = RUN_ID): number {
 }
 
 describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence", () => {
-  const CLEAN: ReadonlyArray<[ExecutorInvocationState, string]> = [
+  const CLEAN: ReadonlyArray<[ExecutorAttemptState, string]> = [
     ["succeeded", "succeeded"],
     ["failed", "failed"],
     ["cancelled", "canceled"],
   ];
 
-  for (const [invocationState, stepState] of CLEAN) {
-    it(`finalizes the step ${stepState} from a terminal ${invocationState} invocation`, () => {
+  for (const [attemptState, stepState] of CLEAN) {
+    it(`finalizes the step ${stepState} from a terminal ${attemptState} invocation`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", invocationState);
+      driveInvocationTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -226,8 +226,8 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
       // dispatch invocation is left in its terminal state, unchanged.
       expect(countInvocations(db)).toBe(1);
       expect(
-        loadExecutorInvocation(db, dispatchInvocationId("preflight"))?.state,
-      ).toBe(invocationState);
+        loadExecutorAttempt(db, dispatchInvocationId("preflight"))?.state,
+      ).toBe(attemptState);
     });
   }
 });
@@ -256,16 +256,16 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
 });
 
 describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual recovery", () => {
-  const UNCLEAN: ReadonlyArray<ExecutorInvocationState> = [
+  const UNCLEAN: ReadonlyArray<ExecutorAttemptState> = [
     "blocked",
     "manual_recovery_required",
   ];
 
-  for (const invocationState of UNCLEAN) {
-    it(`parks the run for manual recovery on a terminal ${invocationState} invocation`, () => {
+  for (const attemptState of UNCLEAN) {
+    it(`parks the run for manual recovery on a terminal ${attemptState} invocation`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", invocationState);
+      driveInvocationTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -292,7 +292,7 @@ describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual
         gateType: "manual_recovery_required",
         targetScope: "step",
         stepRunId: "preflight",
-        evidence: invocationState,
+        evidence: attemptState,
         resolvedAt: null,
       });
 
@@ -340,7 +340,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
+      "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
     ).run(dispatchInvocationId("preflight"));
     driveInvocationTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
@@ -378,7 +378,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'fixture-executor' WHERE invocation_id = ?",
+      "UPDATE executor_attempts SET executor_family = 'fixture-executor' WHERE attempt_id = ?",
     ).run(dispatchInvocationId("preflight"));
     driveInvocationTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
@@ -485,7 +485,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     dispatchStep(db, "preflight");
     driveInvocationTerminal(db, "preflight", "manual_recovery_required");
     db.prepare(
-      "UPDATE executor_invocations SET attempt = 2 WHERE invocation_id = ?",
+      "UPDATE executor_attempts SET attempt = 2 WHERE attempt_id = ?",
     ).run(dispatchInvocationId("preflight"));
     const legacyGateId = `${RUN_ID}::preflight::reconcile-recovery::manual_recovery_required`;
     insertWorkflowGate(
@@ -544,12 +544,12 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
       }).ok,
     ).toBe(true);
     db.prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
           SET attempt = 2,
               state = 'manual_recovery_required',
               finished_at = ?,
               updated_at = ?
-        WHERE invocation_id = ?`,
+        WHERE attempt_id = ?`,
     ).run(
       RECONCILE_AT + 2,
       RECONCILE_AT + 2,

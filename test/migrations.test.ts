@@ -1614,7 +1614,7 @@ describe("applyQueueMigrations", () => {
   describe("M10 executor-loop schema (NGX-347)", () => {
     const EXECUTOR_TABLES = [
       "executor_definitions",
-      "executor_invocations",
+      "executor_attempts",
       "executor_rounds",
       "executor_artifacts",
       "executor_checkpoints",
@@ -1646,8 +1646,8 @@ describe("applyQueueMigrations", () => {
     function seedInvocation(db: DatabaseSync): void {
       seedRunAndStep(db);
       db.prepare(
-        `INSERT INTO executor_invocations
-           (invocation_id, workflow_run_id, step_run_id, step_key,
+        `INSERT INTO executor_attempts
+           (attempt_id, workflow_run_id, step_run_id, step_key,
             executor_family, state, attempt, created_at, updated_at)
          VALUES ('inv-x', 'run-x', 'step-x', 'implementation',
                  'goal-loop', 'pending', 1, 1, 1)`,
@@ -1668,7 +1668,7 @@ describe("applyQueueMigrations", () => {
         // The full contract "Round Schema" identity / execution / result fields.
         for (const col of [
           "round_id",
-          "invocation_id",
+          "attempt_id",
           "workflow_run_id",
           "step_run_id",
           "step_key",
@@ -1703,11 +1703,11 @@ describe("applyQueueMigrations", () => {
           );
         }
 
-        const invocationCols = getColumns(db, "executor_invocations").map(
+        const invocationCols = getColumns(db, "executor_attempts").map(
           (row) => row.name,
         );
         for (const col of [
-          "invocation_id",
+          "attempt_id",
           "workflow_run_id",
           "step_run_id",
           "step_key",
@@ -1722,7 +1722,7 @@ describe("applyQueueMigrations", () => {
         ]) {
           expect(
             invocationCols,
-            `missing executor_invocations column: ${col}`,
+            `missing executor_attempts column: ${col}`,
           ).toContain(col);
         }
 
@@ -1788,7 +1788,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("enforces the unique round ordering per (invocation_id, round_index)", () => {
+    it("enforces the unique round ordering per (attempt_id, round_index)", () => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1796,7 +1796,7 @@ describe("applyQueueMigrations", () => {
         seedInvocation(db);
         const insertRound = db.prepare(
           `INSERT INTO executor_rounds
-             (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+             (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
               executor_family, attempt, round_index, state,
               created_at, updated_at)
            VALUES (?, 'inv-x', 'run-x', 'step-x', 'implementation',
@@ -1820,7 +1820,7 @@ describe("applyQueueMigrations", () => {
         seedInvocation(db);
         db.prepare(
           `INSERT INTO executor_rounds
-             (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+             (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
               executor_family, attempt, round_index, state,
               created_at, updated_at)
            VALUES ('round-x', 'inv-x', 'run-x', 'step-x', 'implementation',
@@ -1847,8 +1847,8 @@ describe("applyQueueMigrations", () => {
         expect(() =>
           db
             .prepare(
-              `INSERT INTO executor_invocations
-                 (invocation_id, workflow_run_id, step_run_id, step_key,
+              `INSERT INTO executor_attempts
+                 (attempt_id, workflow_run_id, step_run_id, step_key,
                   executor_family, state, attempt, created_at, updated_at)
                VALUES ('inv-orphan', 'run-missing', 'step-missing',
                        'implementation', 'goal-loop', 'pending', 1, 1, 1)`,
@@ -1860,7 +1860,7 @@ describe("applyQueueMigrations", () => {
       }
     });
 
-    it("rejects a round whose invocation_id has no executor_invocations row", () => {
+    it("rejects a round whose attempt_id has no executor_attempts row", () => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1870,7 +1870,7 @@ describe("applyQueueMigrations", () => {
           db
             .prepare(
               `INSERT INTO executor_rounds
-                 (round_id, invocation_id, workflow_run_id, step_run_id,
+                 (round_id, attempt_id, workflow_run_id, step_run_id,
                   step_key, executor_family, attempt, round_index, state,
                   created_at, updated_at)
                VALUES ('round-orphan', 'inv-missing', 'run-x', 'step-x',

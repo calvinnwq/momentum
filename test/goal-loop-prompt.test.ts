@@ -10,7 +10,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       round: {
         workflowRunId: "run-1",
         stepRunId: "step-implementation",
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
         attempt: 1
@@ -77,7 +77,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       ## Round identity
       - workflow_run_id: run-1
       - step_run_id: step-implementation
-      - invocation_id: inv-1
+      - attempt_id: inv-1
       - round_id: round-2
       - round_index: 1
       - iteration: 2
@@ -185,7 +185,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       round: {
         workflowRunId: "run-1",
         stepRunId: "step-1",
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
         attempt: 1
@@ -220,7 +220,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       round: {
         workflowRunId: "run-1",
         stepRunId: "step-1",
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         roundId: "round-2",
         roundIndex: 1,
         attempt: 1
@@ -288,7 +288,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       round: {
         workflowRunId: "run-1",
         stepRunId: "step-1",
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         roundId: "round-7",
         roundIndex: 6,
         attempt: 1
@@ -323,7 +323,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       round: {
         workflowRunId: "run-1",
         stepRunId: "step-1",
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         roundId: "round-7",
         roundIndex: 6,
         attempt: 1

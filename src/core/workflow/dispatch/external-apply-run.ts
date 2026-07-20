@@ -33,14 +33,14 @@
  * Boundary discipline (so the reconciliation seam stays the single finalization owner and a high-risk
  * external write is never duplicated):
  *
- *   - It acts only when a `<run>::<step>::dispatch` invocation exists. A step
+ *   - It acts only when a `<run>::<step>::dispatch` attempt exists. A step
  *     finalized by a live wrapper (or never dispatched through the executor-loop lane)
- *     writes no such invocation, so this seam refuses it (`notDispatched`) and
+ *     writes no such attempt, so this seam refuses it (`notDispatched`) and
  *     never runs the external write.
- *   - It never calls `finishWorkflowStep`, never writes `executor_invocations` /
+ *   - It never calls `finishWorkflowStep`, never writes `executor_attempts` /
  *     `executor_rounds` directly (the terminalize seam owns the scaffold rows),
  *     and never releases the dispatch lease (the reconciliation seam does, on terminal).
- *   - Idempotent on re-entry: once the dispatch invocation is terminal, a prior
+ *   - Idempotent on re-entry: once the dispatch attempt is terminal, a prior
  *     execution already issued the external write and recorded its terminal
  *     evidence, so a re-entered tick NEVER re-runs the write (no second Linear
  *     mutation, no duplicate terminalization). It only re-drives the idempotent
@@ -59,10 +59,12 @@ import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import type { ExecuteExternalApplyResult } from "../../intent/apply-execute.js";
-import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "./executor-evidence.js";
+import { isTerminalExecutorAttemptState } from "../../executors/loop/reducer.js";
+import {
+  loadLatestExecutorAttemptForStep,
+} from "../../executors/loop/persist.js";
+
+import { terminalizeDispatchedExecutorAttempt } from "./executor-evidence.js";
 import {
   reconcileDispatchedWorkflowStep,
   type WorkflowStepReconciliationResult,
@@ -112,15 +114,12 @@ export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
   stepId: string;
   now: number;
 }): ExecuteAndReconcileDispatchedStepResult | null {
-  const invocation = loadExecutorInvocation(
-    input.db,
-    deriveDispatchInvocationId(input.runId, input.stepId),
-  );
-  if (invocation?.executorFamily !== "external-apply") return null;
-  if (!isTerminalExecutorInvocationState(invocation.state)) return null;
-  return reconcileTerminalDispatchedExternalApplyInvocation(
+  const attempt = loadLatestExecutorAttemptForStep(input.db, input.runId, input.stepId);
+  if (attempt?.executorFamily !== "external-apply") return null;
+  if (!isTerminalExecutorAttemptState(attempt.state)) return null;
+  return reconcileTerminalDispatchedExternalApplyAttempt(
     input,
-    invocation.state,
+    attempt.state,
   );
 }
 
@@ -136,28 +135,28 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   input: ExecuteAndReconcileDispatchedExternalApplyStepInput,
 ): Promise<ExecuteAndReconcileDispatchedStepResult> {
   const { db, runId, stepId, runExternalApply, evidence, now } = input;
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  const invocation = loadExecutorInvocation(db, invocationId);
-  if (invocation === undefined) {
-    // No phase-1 dispatch invocation: a live-wrapper direct-finalize / never-dispatched
+  const attempt = loadLatestExecutorAttemptForStep(db, runId, stepId);
+  const attemptId = attempt?.attemptId ?? `${runId}::${stepId}`;
+  if (attempt === undefined) {
+    // No phase-1 dispatch attempt: a live-wrapper direct-finalize / never-dispatched
     // step. The seam owns only dispatched scaffolds, so it refuses and never runs
     // the external write — the structural guard against a double finalize.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: invocationId,
+      detail: attemptId,
     };
   }
-  if (invocation.executorFamily !== "external-apply") {
+  if (attempt.executorFamily !== "external-apply") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${invocationId}: ${invocation.executorFamily}`,
+      detail: `${attemptId}: ${attempt.executorFamily}`,
     };
   }
 
-  if (isTerminalExecutorInvocationState(invocation.state)) {
-    return reconcileTerminalDispatchedExternalApplyInvocation(
+  if (isTerminalExecutorAttemptState(attempt.state)) {
+    return reconcileTerminalDispatchedExternalApplyAttempt(
       { db, runId, stepId, now },
-      invocation.state,
+      attempt.state,
     );
   }
 
@@ -169,7 +168,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     };
   }
   if (step.state !== "running") {
-    // The scaffold invocation is still `running` but the owning step is not, an
+    // The scaffold attempt is still `running` but the owning step is not, an
     // unexpected lane state the seam refuses rather than writing over.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning,
@@ -192,7 +191,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   // Record the result as terminal evidence, then let the reconciliation seam finalize the step from
   // it. terminalize and reconcile are each idempotent and own their own
   // transactions.
-  const terminalize = terminalizeDispatchedExecutorInvocation({
+  const terminalize = terminalizeDispatchedExecutorAttempt({
     db,
     runId,
     stepId,
@@ -222,7 +221,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   };
 }
 
-function reconcileTerminalDispatchedExternalApplyInvocation(
+function reconcileTerminalDispatchedExternalApplyAttempt(
   input: { db: MomentumDb; runId: string; stepId: string; now: number },
   state: string,
 ): ExecuteAndReconcileDispatchedStepResult {

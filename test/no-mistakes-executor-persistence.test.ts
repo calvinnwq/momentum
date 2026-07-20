@@ -7,7 +7,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
@@ -103,7 +103,7 @@ function openMirrorRoundDb(): MomentumDb {
     attempt: ATTEMPT,
     startedAt: 1,
   });
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, invocation, { now: 1 });
   const round = planNoMistakesRoundStart({
     invocation,
     runtime: {

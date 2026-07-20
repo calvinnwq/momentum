@@ -35,19 +35,19 @@
  * Boundary discipline (so the reconciliation seam stays the single finalization owner and a child run
  * is never duplicated):
  *
- *   - It acts only when a `<run>::<step>::dispatch` invocation exists. A step
+ *   - It acts only when a `<run>::<step>::dispatch` attempt exists. A step
  *     finalized by a live wrapper (or never dispatched through the executor-loop lane)
- *     writes no such invocation, so this seam refuses it (`notDispatched`) and
+ *     writes no such attempt, so this seam refuses it (`notDispatched`) and
  *     never starts a child run.
- *   - It never calls `finishWorkflowStep`, never writes `executor_invocations` /
+ *   - It never calls `finishWorkflowStep`, never writes `executor_attempts` /
  *     `executor_rounds` directly (the terminalize seam owns the scaffold rows),
  *     and never releases the dispatch lease (the reconciliation seam does, on terminal).
- *   - Idempotent on re-entry: once the dispatch invocation is terminal, a prior
+ *   - Idempotent on re-entry: once the dispatch attempt is terminal, a prior
  *     execution already mirrored the child terminal and recorded its evidence, so
  *     a re-entered tick NEVER re-starts the child run (no duplicate child run, no
  *     second terminalization). It only re-drives the idempotent the reconciliation seam
  *     reconciliation to converge the finalization. While the child is still in
- *     flight the invocation stays `running`, so the runner is consulted again on
+ *     flight the attempt stays `running`, so the runner is consulted again on
  *     the next tick — the start-or-attach idempotency that keeps each re-check
  *     attached to the *same* child run lives in the injected runner, exactly as
  *     the external-apply write path's idempotency lives in `executeExternalApply`.
@@ -57,10 +57,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
-import { isTerminalExecutorInvocationState } from "../../executors/loop/reducer.js";
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "./executor-evidence.js";
+import { isTerminalExecutorAttemptState } from "../../executors/loop/reducer.js";
+import {
+  loadLatestExecutorAttemptForStep,
+} from "../../executors/loop/persist.js";
+
+import { terminalizeDispatchedExecutorAttempt } from "./executor-evidence.js";
 import {
   reconcileDispatchedWorkflowStep,
   type WorkflowStepReconciliationResult,
@@ -142,25 +144,25 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   input: ExecuteAndReconcileDispatchedSubworkflowStepInput,
 ): Promise<ExecuteAndReconcileDispatchedStepResult> {
   const { db, runId, stepId, runSubworkflowChild, evidence, now } = input;
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  const invocation = loadExecutorInvocation(db, invocationId);
-  if (invocation === undefined) {
-    // No phase-1 dispatch invocation: a live-wrapper direct-finalize / never-dispatched
+  const attempt = loadLatestExecutorAttemptForStep(db, runId, stepId);
+  const attemptId = attempt?.attemptId ?? `${runId}::${stepId}`;
+  if (attempt === undefined) {
+    // No phase-1 dispatch attempt: a live-wrapper direct-finalize / never-dispatched
     // step. The seam owns only dispatched scaffolds, so it refuses and never
     // starts a child run — the structural guard against a double finalize.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: invocationId,
+      detail: attemptId,
     };
   }
-  if (invocation.executorFamily !== "subworkflow") {
+  if (attempt.executorFamily !== "subworkflow") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${invocationId}: ${invocation.executorFamily}`,
+      detail: `${attemptId}: ${attempt.executorFamily}`,
     };
   }
 
-  if (isTerminalExecutorInvocationState(invocation.state)) {
+  if (isTerminalExecutorAttemptState(attempt.state)) {
     // Idempotent re-entry: a prior execution already mirrored the child terminal
     // and recorded its evidence. NEVER re-start the child run (no duplicate child
     // run / duplicate evidence); just re-drive the idempotent reconciliation
@@ -180,7 +182,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
       reconcile: reconciled.reconcile,
-      detail: invocation.state,
+      detail: attempt.state,
     };
   }
 
@@ -192,7 +194,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     };
   }
   if (step.state !== "running") {
-    // The scaffold invocation is still `running` but the owning step is not, an
+    // The scaffold attempt is still `running` but the owning step is not, an
     // unexpected lane state the seam refuses rather than writing over.
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning,
@@ -233,7 +235,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
 
   if (plan.outcome === "defer") {
     // The child is still in flight: record NO terminal evidence and leave the
-    // parent step running for a later tick to re-check. The dispatch invocation
+    // parent step running for a later tick to re-check. The dispatch attempt
     // stays `running` and the lease stays held, so no parent finalization happens
     // over an unfinished child.
     return {
@@ -245,7 +247,7 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
   // Mirror: record the child terminal as terminal evidence, then let the reconciliation seam finalize
   // the parent step from it. terminalize and reconcile are each idempotent and own
   // their own transactions.
-  const terminalize = terminalizeDispatchedExecutorInvocation({
+  const terminalize = terminalizeDispatchedExecutorAttempt({
     db,
     runId,
     stepId,

@@ -6,7 +6,7 @@ import {
   type WorkflowRecoveryClassification,
 } from "../recovery/artifact.js";
 import {
-  terminalizeDispatchedExecutorInvocation,
+  terminalizeDispatchedExecutorAttempt,
   type TerminalizeDispatchedExecutorResult,
 } from "./executor-evidence.js";
 import {
@@ -75,7 +75,7 @@ export function recordDispatchedStepManualRecovery(
       ? { liveRecoveryCode: input.recoveryCode }
       : {}),
   };
-  const terminalize = terminalizeDispatchedExecutorInvocation({
+  const terminalize = terminalizeDispatchedExecutorAttempt({
     db: input.db,
     runId: input.runId,
     stepId: input.stepId,

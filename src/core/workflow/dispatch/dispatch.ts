@@ -9,7 +9,7 @@
  * manual-recovery outcome. It follows the same discipline as `gate/gate.ts`
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
  * executor invocation. The durable twins resolve the claimed step against
- * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
+ * `workflow_runs` / `step_definitions`, create the `executor_attempts` /
  * `executor_rounds` start scaffold, open a `workflow_gates` row when the run can
  * carry one, flag manual recovery for the fail-closed outcome when possible,
  * release the dispatch lease where appropriate, and wire the dispatcher into

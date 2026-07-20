@@ -45,7 +45,7 @@ type DurableLiveStepDecision = Pick<
   ExecutorTickResult,
   | "recommendation"
   | "recommendedRoundState"
-  | "recommendedInvocationState"
+  | "recommendedAttemptState"
   | "recoveryCode"
   | "humanGate"
   | "reason"
@@ -77,11 +77,11 @@ export class LiveStepSdkExecutor implements Executor<
       LiveStepSdkHostBindings
     >,
   ): Promise<ExecutorTickResult> {
-    const invocation = context.state.invocation;
+    const attempt = context.state.attempt;
     const existing =
       [...context.state.rounds]
         .reverse()
-        .find((snapshot) => snapshot.round.attempt === invocation.attempt) ??
+        .find((snapshot) => snapshot.round.attemptNumber === attempt.attemptNumber) ??
       null;
     if (existing !== null) {
       const completed = [...existing.checkpoints]
@@ -104,15 +104,15 @@ export class LiveStepSdkExecutor implements Executor<
       };
     }
 
-    const roundId = `${invocation.invocationId}::round-${context.state.rounds.length + 1}`;
+    const roundId = `${attempt.attemptId}::round-${context.state.rounds.length + 1}`;
     context.envelope.startRound({
       roundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: context.state.rounds.length,
       state: "running",
       agentProvider: null,
@@ -209,7 +209,7 @@ function decisionForResult(
     return {
       recommendation: "manual_recovery_required",
       recommendedRoundState: "manual_recovery_required",
-      recommendedInvocationState: "manual_recovery_required",
+      recommendedAttemptState: "manual_recovery_required",
       recoveryCode:
         typeof precise === "string" && precise.length > 0
           ? precise
@@ -222,7 +222,7 @@ function decisionForResult(
     return {
       recommendation: "complete",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: "succeeded",
+      recommendedAttemptState: "succeeded",
       recoveryCode: null,
       humanGate: null,
       reason: result.result.summary,
@@ -232,7 +232,7 @@ function decisionForResult(
     return {
       recommendation: "failed",
       recommendedRoundState: "failed",
-      recommendedInvocationState: "failed",
+      recommendedAttemptState: "failed",
       recoveryCode: result.result.errorCode ?? "command_failed",
       humanGate: null,
       reason: result.result.errorMessage ?? result.result.summary,
@@ -241,7 +241,7 @@ function decisionForResult(
   return {
     recommendation: "manual_recovery_required",
     recommendedRoundState: "manual_recovery_required",
-    recommendedInvocationState: "manual_recovery_required",
+    recommendedAttemptState: "manual_recovery_required",
     recoveryCode: "unexpected_skipped_terminal",
     humanGate: "manual_recovery_required",
     reason: "A dispatched executor unexpectedly returned skipped.",

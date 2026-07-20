@@ -508,14 +508,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 // Durable executor-loop spine nested below a `StepRun` so
 // bounded autonomy never flattens into top-level workflow steps:
 //
-//   StepRun -> ExecutorInvocation -> ExecutorRound[]
+//   StepRun -> ExecutorAttempt -> ExecutorRound[]
 //                                       -> ExecutorArtifact[]
 //                                       -> ExecutorCheckpoint[]
 //                                       -> ExecutorFinding[]
 //                                       -> ExecutorDecision[]
 //
 // The spine tables mirror the pure `ExecutorDefinitionRecord` /
-// `ExecutorInvocationRecord` / `ExecutorRoundRecord` shapes in
+// `ExecutorAttemptRecord` / `ExecutorRoundRecord` shapes in
 // src/core/executors/loop/reducer.ts (the round columns are exactly the contract
 // "Round Schema" identity / execution / result fields). The four child evidence
 // tables the contract names — `executor_artifacts` / `executor_findings` /
@@ -527,8 +527,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 // and resolution. `string[]` fields (`log_paths`, `key_changes`,
 // `remaining_work`, `changed_files`, `allowed_actions`) are stored as JSON TEXT.
 // The FK references are *enforced* (node:sqlite defaults `PRAGMA foreign_keys =
-// ON`), so an invocation requires a real `(workflow_run_id, step_run_id)`, a
-// round requires a real invocation, and each evidence row requires a real
+// ON`), so an attempt requires a real `(workflow_run_id, step_run_id)`, a
+// round requires a real attempt, and each evidence row requires a real
 // round — bounded autonomy can never orphan itself above its owning StepRun.
 const EXECUTOR_LOOP_DDL = `
 CREATE TABLE IF NOT EXISTS executor_definitions (
@@ -544,40 +544,49 @@ CREATE TABLE IF NOT EXISTS executor_definitions (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE IF NOT EXISTS executor_invocations (
-  invocation_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS executor_attempts (
+  attempt_id TEXT PRIMARY KEY,
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
   step_run_id TEXT NOT NULL,
   step_key TEXT NOT NULL,
   executor_family TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
-  attempt INTEGER NOT NULL DEFAULT 1,
+  attempt_number INTEGER NOT NULL DEFAULT 1,
   started_at INTEGER,
   heartbeat_at INTEGER,
   finished_at INTEGER,
+  legacy_invocation_id TEXT,
+  legacy_provenance TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (workflow_run_id, step_run_id)
     REFERENCES workflow_steps(run_id, step_id)
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS idx_executor_invocations_run
-  ON executor_invocations(workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_executor_attempts_run
+  ON executor_attempts(workflow_run_id);
 
-CREATE INDEX IF NOT EXISTS idx_executor_invocations_step
-  ON executor_invocations(workflow_run_id, step_run_id);
+CREATE INDEX IF NOT EXISTS idx_executor_attempts_step
+  ON executor_attempts(workflow_run_id, step_run_id);
 
-CREATE INDEX IF NOT EXISTS idx_executor_invocations_state
-  ON executor_invocations(state);
+CREATE INDEX IF NOT EXISTS idx_executor_attempts_state
+  ON executor_attempts(state);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_attempts_step_number
+  ON executor_attempts(workflow_run_id, step_run_id, attempt_number);
+
+CREATE INDEX IF NOT EXISTS idx_executor_attempts_legacy_invocation
+  ON executor_attempts(legacy_invocation_id)
+  WHERE legacy_invocation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS executor_rounds (
   round_id TEXT PRIMARY KEY,
-  invocation_id TEXT NOT NULL REFERENCES executor_invocations(invocation_id),
+  attempt_id TEXT NOT NULL REFERENCES executor_attempts(attempt_id),
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
   step_run_id TEXT NOT NULL,
   step_key TEXT NOT NULL,
   executor_family TEXT NOT NULL,
-  attempt INTEGER NOT NULL DEFAULT 1,
+  attempt_number INTEGER NOT NULL DEFAULT 1,
   round_index INTEGER NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
   classification TEXT,
@@ -608,8 +617,8 @@ CREATE TABLE IF NOT EXISTS executor_rounds (
     REFERENCES workflow_steps(run_id, step_id)
 ) STRICT;
 
-CREATE INDEX IF NOT EXISTS idx_executor_rounds_invocation
-  ON executor_rounds(invocation_id);
+CREATE INDEX IF NOT EXISTS idx_executor_rounds_attempt
+  ON executor_rounds(attempt_id);
 
 CREATE INDEX IF NOT EXISTS idx_executor_rounds_run
   ON executor_rounds(workflow_run_id);
@@ -617,8 +626,8 @@ CREATE INDEX IF NOT EXISTS idx_executor_rounds_run
 CREATE INDEX IF NOT EXISTS idx_executor_rounds_step
   ON executor_rounds(workflow_run_id, step_run_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_rounds_invocation_index
-  ON executor_rounds(invocation_id, round_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_rounds_attempt_index
+  ON executor_rounds(attempt_id, round_index);
 
 CREATE TABLE IF NOT EXISTS executor_artifacts (
   artifact_id TEXT PRIMARY KEY,
@@ -681,11 +690,11 @@ CREATE INDEX IF NOT EXISTS idx_executor_decisions_round
 // Durable workflow gates and operator decisions. A gate is the
 // contract "Human Gates" record — a durable pause record, not a prompt hidden
 // inside an executor. Each gate hangs from exactly one layer of the workflow-first
-// tree named by `target_scope` (workflow -> step -> invocation -> round), so the
+// tree named by `target_scope` (workflow -> step -> attempt -> round), so the
 // scope's anchor id plus its ancestry are stored and ids deeper than the scope
 // stay null (enforced in src/core/workflow/gate/persist.ts). `workflow_run_id` is a
 // NOT NULL FK to `workflow_runs(id)` because every gate belongs to a run; the
-// deeper `step_run_id` / `invocation_id` / `round_id` are nullable evidence
+// deeper `step_run_id` / `attempt_id` / `round_id` are nullable evidence
 // linkage. `allowed_actions` and `policy_envelope` are JSON TEXT arrays mirroring
 // the pure `GateDecisionInput` shape. Openness is `resolved_at IS NULL`; a
 // resolution stamps `resolved_at` / `resolved_by` / `resolution_mode` (operator |
@@ -696,7 +705,7 @@ CREATE TABLE IF NOT EXISTS workflow_gates (
   gate_id TEXT PRIMARY KEY,
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
   step_run_id TEXT,
-  invocation_id TEXT,
+  attempt_id TEXT,
   round_id TEXT,
   target_scope TEXT NOT NULL,
   gate_type TEXT NOT NULL,

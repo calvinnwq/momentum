@@ -15,15 +15,15 @@
  *   -> persist the terminal decision  (-> succeeded / failed / manual recovery)
  *   -> persist the round's lifecycle checkpoint stream (contract step 7)
  *
- * {@link runGoalLoopInvocation} is the multi-round loop on top of that single
- * round: it inserts the durable `executor_invocations` row (running) before any
+ * {@link runGoalLoopAttempt} is the multi-round loop on top of that single
+ * round: it inserts the durable `executor_attempts` row (running) before any
  * round, drives {@link runGoalLoopRound} per round index until a round's decision
- * stops the loop, and advances/terminalizes the invocation via
- * {@link invocationStateForRoundClassification} - succeeded on completion, the
+ * stops the loop, and advances/terminalizes the attempt via
+ * {@link attemptStateForRoundClassification} - succeeded on completion, the
  * durable `waiting_operator` pause on a quota / operator gate, a terminal
  * failure / manual recovery on the repo-safety boundaries. The concrete
  * result-file mechanism lives in `goal-loop/mechanism.ts`, while
- * {@link runGoalLoopStep} materializes the invocation/round identity and leaves
+ * {@link runGoalLoopStep} materializes the attempt/round identity and leaves
  * the real daemon wiring to thread each round's result into the next round's
  * input through its runtime input resolver. The prompted-result helper in
  * `goal-loop/mechanism.ts` is the concrete runner-input variant: it renders the
@@ -68,26 +68,26 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   insertExecutorArtifact,
   insertExecutorCheckpoint,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
-  updateExecutorInvocationState,
+  updateExecutorAttemptState,
   updateExecutorRound
 } from "../loop/persist.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
-  type ExecutorInvocationRecord,
+  type ExecutorAttemptRecord,
   type ExecutorRoundRecord
 } from "../loop/reducer.js";
 import {
-  invocationStateForRoundClassification,
-  planGoalLoopInvocation,
+  attemptStateForRoundClassification,
+  planGoalLoopAttempt,
   planGoalLoopRoundArtifacts,
   planGoalLoopRoundCheckpoints,
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
-  planGoalLoopRoundStartForInvocation,
+  planGoalLoopRoundStartForAttempt,
   type GoalLoopFinalizeEvidence,
   type GoalLoopRoundArtifacts,
   type GoalLoopRoundDecision,
@@ -176,7 +176,7 @@ export type RunGoalLoopRoundResult = {
  * Drive one bounded goal-loop round end to end through its durable round-record
  * lifecycle. See the module doc for the ordered contract.
  *
- * @throws {ExecutorRoundConflictError} if the round id / `(invocation, index)`
+ * @throws {ExecutorRoundConflictError} if the round id / `(attempt, index)`
  * already exists (a durable round is the proof a bounded unit started, not an
  * idempotent re-ingest).
  * @throws {Error} if the round index / max-rounds budget is out of range (via
@@ -269,14 +269,14 @@ export function runGoalLoopRound(
 }
 
 /**
- * The per-round inputs the invocation loop asks its caller to materialize for a
+ * The per-round inputs the attempt loop asks its caller to materialize for a
  * given 0-based round index: the round-start projection inputs (identity,
  * resolved selection, input/artifact evidence, start clock) and the daemon clock
  * to stamp as that round's `finished_at`. The loop owns the round *ordering*; the
  * caller owns minting each round's id / input digest / clock — and, in the real
  * wiring, threading the prior round's result into the next round's input.
  */
-export type GoalLoopInvocationRoundPlan = {
+export type GoalLoopAttemptRoundPlan = {
   start: PlanGoalLoopRoundStartInput;
   finishedAt: number;
 };
@@ -284,54 +284,54 @@ export type GoalLoopInvocationRoundPlan = {
 /**
  * Momentum-owned context available while planning the next round.
  * The loop builds this from already persisted prior rounds so a resumed or
- * continuing invocation can derive its next input from durable summaries,
+ * continuing attempt can derive its next input from durable summaries,
  * learnings, recovery evidence, commits, and artifacts instead of terminal
  * scrollback or runner-local notes.
  */
-export type GoalLoopInvocationRoundContext = {
+export type GoalLoopAttemptRoundContext = {
   priorRounds: readonly ExecutorRoundRecord[];
 };
 
 /**
- * Materialize the {@link GoalLoopInvocationRoundPlan} for one round index. Called
+ * Materialize the {@link GoalLoopAttemptRoundPlan} for one round index. Called
  * once per round, in order (0, 1, 2, ...). The returned `start.roundIndex` must
  * equal the requested index so the loop's round-budget accounting stays honest.
  */
-export type GoalLoopInvocationRoundPlanner = (
+export type GoalLoopAttemptRoundPlanner = (
   roundIndex: number,
-  context: GoalLoopInvocationRoundContext
-) => GoalLoopInvocationRoundPlan;
+  context: GoalLoopAttemptRoundContext
+) => GoalLoopAttemptRoundPlan;
 
 export type RunGoalLoopInvocationInput = {
   db: MomentumDb;
   /**
-   * The invocation row to insert before any round runs. It is inserted at its
+   * The attempt row to insert before any round runs. It is inserted at its
    * own `state` (the daemon resolves agent/model/leases in `preparing` and hands
-   * this driver a `running` invocation); the loop never re-derives it.
+   * this driver a `running` attempt); the loop never re-derives it.
    */
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   /** Materializes each round's start projection + finish clock, by round index. */
-  planRound: GoalLoopInvocationRoundPlanner;
+  planRound: GoalLoopAttemptRoundPlanner;
   /** The bounded mechanism each round runs (the same injected runner across rounds). */
   runRound: GoalLoopRoundRunner;
 };
 
 /**
- * The durable result of one finished goal-loop invocation: the persisted terminal
- * (or `waiting_operator`-paused) invocation record and every round outcome it
- * drove, in order. The last round's decision is what settled the invocation.
+ * The durable result of one finished goal-loop attempt: the persisted terminal
+ * (or `waiting_operator`-paused) attempt record and every round outcome it
+ * drove, in order. The last round's decision is what settled the attempt.
  */
-export type RunGoalLoopInvocationResult = {
-  invocation: ExecutorInvocationRecord;
+export type RunGoalLoopAttemptResult = {
+  attempt: ExecutorAttemptRecord;
   rounds: RunGoalLoopRoundResult[];
 };
 
 /**
- * Drive a bounded goal-loop invocation across its rounds. See the module doc for
- * the ordered contract. The loop inserts the durable invocation before any round,
+ * Drive a bounded goal-loop attempt across its rounds. See the module doc for
+ * the ordered contract. The loop inserts the durable attempt before any round,
  * runs {@link runGoalLoopRound} per round index, and — after each round — either
- * heartbeats the still-running invocation and loops (when the daemon decision
- * recommends another round) or settles the invocation into the state its
+ * heartbeats the still-running attempt and loops (when the daemon decision
+ * recommends another round) or settles the attempt into the state its
  * classification maps to and returns.
  *
  * Termination: the loop ends when a round's decision sets `continueLoop` false —
@@ -342,37 +342,37 @@ export type RunGoalLoopInvocationResult = {
  * recommending completion or routing to recovery, exactly as the real goal
  * iteration does.
  *
- * @throws {ExecutorInvocationConflictError} if the invocation id already exists.
+ * @throws {ExecutorAttemptConflictError} if the attempt id already exists.
  * @throws {Error} if the planner returns a round whose `roundIndex` disagrees with
  * the loop index (which would corrupt the round-budget accounting).
- * @throws {ExecutorRoundConflictError} if a round id / `(invocation, index)` already
+ * @throws {ExecutorRoundConflictError} if a round id / `(attempt, index)` already
  * exists (via {@link runGoalLoopRound}).
  */
-export function runGoalLoopInvocation(
+export function runGoalLoopAttempt(
   input: RunGoalLoopInvocationInput
-): RunGoalLoopInvocationResult {
-  const { db, invocation, planRound, runRound } = input;
+): RunGoalLoopAttemptResult {
+  const { db, attempt, planRound, runRound } = input;
 
-  // 1. Insert the durable invocation row before any round runs, so a lost process
-  //    leaves a durable invocation to reattach to. Stamp created_at from the
-  //    invocation's own start clock when present (never an explicit undefined,
+  // 1. Insert the durable attempt row before any round runs, so a lost process
+  //    leaves a durable attempt to reattach to. Stamp created_at from the
+  //    attempt's own start clock when present (never an explicit undefined,
   //    which exactOptionalPropertyTypes forbids).
-  const insertNow = invocation.startedAt ?? invocation.heartbeatAt;
-  insertExecutorInvocation(
+  const insertNow = attempt.startedAt ?? attempt.heartbeatAt;
+  insertExecutorAttempt(
     db,
-    invocation,
+    attempt,
     insertNow !== null ? { now: insertNow } : {}
   );
 
   const rounds: RunGoalLoopRoundResult[] = [];
   for (let roundIndex = 0; ; roundIndex++) {
-    const context: GoalLoopInvocationRoundContext = {
+    const context: GoalLoopAttemptRoundContext = {
       priorRounds: rounds.map((round) => round.round)
     };
     const plan = planRound(roundIndex, context);
     if (plan.start.roundIndex !== roundIndex) {
       throw new Error(
-        `runGoalLoopInvocation: planner returned roundIndex ${String(plan.start.roundIndex)} for loop index ${roundIndex}; the round-start index must match the loop index so the round-budget accounting stays honest`
+        `runGoalLoopAttempt: planner returned roundIndex ${String(plan.start.roundIndex)} for loop index ${roundIndex}; the round-start index must match the loop index so the round-budget accounting stays honest`
       );
     }
 
@@ -384,36 +384,36 @@ export function runGoalLoopInvocation(
     });
     rounds.push(roundOutcome);
 
-    // The daemon recommends another round: heartbeat the still-running invocation
+    // The daemon recommends another round: heartbeat the still-running attempt
     // (running -> running is a no-op transition) and loop.
     if (roundOutcome.decision.continueLoop) {
-      updateExecutorInvocationState(db, invocation.invocationId, "running", {
+      updateExecutorAttemptState(db, attempt.attemptId, "running", {
         heartbeatAt: plan.finishedAt,
         now: plan.finishedAt
       });
       continue;
     }
 
-    // The round stopped the loop. Settle the invocation into the state its
+    // The round stopped the loop. Settle the attempt into the state its
     // classification maps to: a terminal success/failure/recovery, or the durable
     // `waiting_operator` pause (a quota / operator gate is not terminal, so it
     // leaves `finished_at` null for a later operator decision to resume).
-    const invocationState = invocationStateForRoundClassification(
+    const attemptState = attemptStateForRoundClassification(
       roundOutcome.decision.classification
     );
-    const finalInvocation = updateExecutorInvocationState(
+    const finalInvocation = updateExecutorAttemptState(
       db,
-      invocation.invocationId,
-      invocationState,
+      attempt.attemptId,
+      attemptState,
       {
         heartbeatAt: plan.finishedAt,
-        finishedAt: isTerminalExecutorInvocationState(invocationState)
+        finishedAt: isTerminalExecutorAttemptState(attemptState)
           ? plan.finishedAt
           : null,
         now: plan.finishedAt
       }
     );
-    return { invocation: finalInvocation, rounds };
+    return { attempt: finalInvocation, rounds };
   }
 }
 
@@ -422,7 +422,7 @@ export function runGoalLoopInvocation(
  * (`workflowRunId` / `stepRunId` / `stepKey` / `attempt`), the resolved
  * {@link GoalLoopRoundSelection} every round runs under, the bounded mechanism,
  * a per-round runtime-input resolver, and a clock. The adapter mints the
- * invocation / round identities itself, so the caller supplies a `StepRun`, not
+ * attempt / round identities itself, so the caller supplies a `StepRun`, not
  * pre-built executor-loop records.
  */
 export type RunGoalLoopStepInput = {
@@ -430,8 +430,8 @@ export type RunGoalLoopStepInput = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  /** Re-run counter; a fresh attempt mints a fresh invocation, never mutating the prior one. */
-  attempt: number;
+  /** Re-run counter; a fresh attempt mints a fresh attempt, never mutating the prior one. */
+  attemptNumber: number;
   /** The deterministic selection (from `resolveGoalLoopRoundSelection`) frozen into each round. */
   selection: GoalLoopRoundSelection;
   /** The bounded mechanism each round runs (the real goal iteration plugs in here). */
@@ -443,9 +443,9 @@ export type RunGoalLoopStepInput = {
    */
   resolveRoundInputs: (
     roundIndex: number,
-    context: GoalLoopInvocationRoundContext
+    context: GoalLoopAttemptRoundContext
   ) => GoalLoopRoundRuntimeInputs;
-  /** Clock for the invocation + round timestamps; defaults to {@link Date.now}. */
+  /** Clock for the attempt + round timestamps; defaults to {@link Date.now}. */
   now?: () => number;
 };
 
@@ -453,49 +453,49 @@ export type RunGoalLoopStepInput = {
  * The goal-loop executor adapter "below `StepRun`" (contract "State Model":
  * `StepRun -> ExecutorInvocation -> ExecutorRound[]`). This is the single
  * entrypoint a daemon / scheduler calls with a step-run identity: it
- * {@link planGoalLoopInvocation | materializes} the durable goal-loop
- * `executor_invocations` row with a deterministic, reattachable id, then drives
- * the whole invocation through {@link runGoalLoopInvocation}, materializing each
- * round's identity via {@link planGoalLoopRoundStartForInvocation} so every round
- * inherits the invocation's identity and a deterministic {@link goalLoopRoundId}.
+ * {@link planGoalLoopAttempt | materializes} the durable goal-loop
+ * `executor_attempts` row with a deterministic, reattachable id, then drives
+ * the whole attempt through {@link runGoalLoopAttempt}, materializing each
+ * round's identity via {@link planGoalLoopRoundStartForAttempt} so every round
+ * inherits the attempt's identity and a deterministic {@link goalLoopRoundId}.
  *
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
- * invocation reattaches from `(workflowRunId, stepRunId, attempt)` and a round
- * from `(invocationId, roundIndex)`, both recomputable from durable state alone
+ * attempt reattaches from `(workflowRunId, stepRunId, attempt)` and a round
+ * from `(attemptId, roundIndex)`, both recomputable from durable state alone
  * (contract "Heartbeat And Reattach"). The resolved selection is frozen into each
  * round before work runs (contract "Agent And Model Selection") and the per-round
  * input digest / artifact root / log paths come from the injected
  * {@link RunGoalLoopStepInput.resolveRoundInputs} (the daemon's filesystem /
  * threading concern, never invented here).
  *
- * Clocks: the invocation start and each round's start/finish are stamped from the
- * injected `now`. As with {@link runGoalLoopInvocation}, a round's finish clock is
+ * Clocks: the attempt start and each round's start/finish are stamped from the
+ * injected `now`. As with {@link runGoalLoopAttempt}, a round's finish clock is
  * read when the round is planned; refining it to a wall-clock-accurate
  * post-mechanism stamp is part of the deferred real daemon clock wiring.
  *
- * @throws {ExecutorInvocationConflictError} if the invocation id already exists
+ * @throws {ExecutorAttemptConflictError} if the attempt id already exists
  * (a re-run must use a fresh `attempt`).
  * @throws {ExecutorRoundConflictError} if a round id already exists (via
- * {@link runGoalLoopInvocation}).
+ * {@link runGoalLoopAttempt}).
  */
 export function runGoalLoopStep(
   input: RunGoalLoopStepInput
-): RunGoalLoopInvocationResult {
+): RunGoalLoopAttemptResult {
   const now = input.now ?? Date.now;
-  const invocation = planGoalLoopInvocation({
+  const attempt = planGoalLoopAttempt({
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     startedAt: now()
   });
-  return runGoalLoopInvocation({
+  return runGoalLoopAttempt({
     db: input.db,
-    invocation,
+    attempt,
     runRound: input.runRound,
     planRound: (roundIndex, context) => {
-      const start = planGoalLoopRoundStartForInvocation({
-        invocation,
+      const start = planGoalLoopRoundStartForAttempt({
+        attempt,
         selection: input.selection,
         roundIndex,
         runtime: input.resolveRoundInputs(roundIndex, context),
