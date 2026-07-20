@@ -441,7 +441,7 @@ describe("momentum workflow run logs", () => {
         attemptId: "inv-1",
         stepKey: "implementation",
         executorFamily: "goal-loop",
-        attempt: 1,
+        attemptNumber: 1,
         state: "running",
         startedAt: 10,
         heartbeatAt: 10,

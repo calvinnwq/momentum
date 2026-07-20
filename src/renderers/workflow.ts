@@ -1641,7 +1641,7 @@ export function workflowAttemptToJsonShape(
     stepKey: attempt.stepKey,
     executorFamily: attempt.executorFamily,
     state: attempt.state,
-    attempt: attempt.attemptNumber,
+    attemptNumber: attempt.attemptNumber,
     startedAt: attempt.startedAt,
     heartbeatAt: attempt.heartbeatAt,
     finishedAt: attempt.finishedAt,

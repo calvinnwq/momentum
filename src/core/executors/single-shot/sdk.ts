@@ -803,10 +803,20 @@ function singleShotOutcomeFromCheckpoint(
   detail: string,
 ): SingleShotAttemptOutcome {
   const prefix = "attempt outcome: ";
-  if (!detail.startsWith(prefix)) {
+  // Legacy reader: `mechanism_completed` checkpoints recorded before the
+  // attempt/round migration carry the historical prefix, and the migration
+  // preserves checkpoint details verbatim. New checkpoints emit only the
+  // attempt-vocabulary prefix.
+  const legacyPrefix = "invocation outcome: ";
+  const matchedPrefix = detail.startsWith(prefix)
+    ? prefix
+    : detail.startsWith(legacyPrefix)
+      ? legacyPrefix
+      : undefined;
+  if (matchedPrefix === undefined) {
     throw new Error(`Invalid mechanism_completed checkpoint detail: ${detail}`);
   }
-  const value = detail.slice(prefix.length);
+  const value = detail.slice(matchedPrefix.length);
   if (value === "ok") return { ok: true };
   if (!SINGLE_SHOT_RECOVERY_CODE_SET.has(value)) {
     throw new Error(`Unknown durable single-shot recovery code: ${value}`);

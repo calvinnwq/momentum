@@ -274,6 +274,95 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("settles a pre-migration completion checkpoint carrying the legacy attempt-state key", async () => {
+    // Checkpoints recorded before the attempt/round migration serialized the
+    // daemon decision with `recommendedInvocationState`; the migration
+    // preserves those payloads verbatim, so replay must accept the legacy key.
+    const { db, attempt } = openDelegateDb();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 5,
+    });
+    const roundId = `${attempt.attemptId}::round-1`;
+    envelope.facade.startRound({
+      roundId,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordRoundProgress(roundId, {
+      observation: {
+        phase: "capturing_result",
+        summary: "legacy wrapper completed cleanly",
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-legacy-complete`,
+          sequence: 0,
+          stage: "mechanism_completed",
+          detail: JSON.stringify({
+            recommendation: "complete",
+            recommendedRoundState: "succeeded",
+            recommendedInvocationState: "succeeded",
+            recoveryCode: null,
+            humanGate: null,
+            reason: "legacy wrapper completed cleanly",
+          }),
+        },
+      ],
+    });
+    let handoffs = 0;
+    const result = await driveExecutorTicks({
+      db,
+      attemptId: attempt.attemptId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("legacy replay must not hand off again");
+            },
+            readExternalState: () => ({
+              ok: false,
+              error: "legacy replay must not read external state",
+            }),
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(result.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "complete",
+      recoveryCode: null,
+    });
+    expect(handoffs).toBe(0);
+    db.close();
+  });
+
   it("replays legacy completion from a prior attempt without relaunching", async () => {
     const { db, attempt } = openDelegateDb();
     const roundId = seedCurrentRoundCheckpoint(

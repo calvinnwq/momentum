@@ -1119,7 +1119,12 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
   const record = parsed as Record<string, unknown>;
   const recommendation = record["recommendation"];
   const roundState = record["recommendedRoundState"];
-  const attemptState = record["recommendedAttemptState"];
+  // Legacy reader: completion checkpoints recorded before the attempt/round
+  // migration serialized the daemon decision with the historical
+  // `recommendedInvocationState` key, and the migration preserves checkpoint
+  // payloads verbatim.
+  const attemptState =
+    record["recommendedAttemptState"] ?? record["recommendedInvocationState"];
   const recoveryCode = record["recoveryCode"];
   const humanGate = record["humanGate"];
   if (!includes(EXECUTOR_COMPLETION_CLASSIFICATIONS, recommendation)) {
@@ -1154,7 +1159,16 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
   ) {
     throw new Error("legacy mechanism completion fields are inconsistent");
   }
-  return parsed as LegacyLiveStepDecision;
+  // Return a normalized decision rather than the raw record so pre-migration
+  // payloads keyed by `recommendedInvocationState` replay identically.
+  return {
+    recommendation,
+    recommendedRoundState: roundState,
+    recommendedAttemptState: attemptState,
+    recoveryCode,
+    humanGate,
+    reason: record["reason"],
+  };
 }
 
 function parseLegacyCompletionReplay(detail: string): {

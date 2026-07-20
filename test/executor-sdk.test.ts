@@ -1479,6 +1479,78 @@ describe("single-shot built-in SDK proof", () => {
     });
   });
 
+  it("resumes classification from a pre-migration mechanism checkpoint prefix", async () => {
+    // SDK-05 recorded `invocation outcome: ...` details and the migration
+    // preserves checkpoint payloads verbatim; the resume parser must accept the
+    // historical prefix while new checkpoints emit the attempt vocabulary.
+    const { db, attempt } = openExecutorDb("one-shot");
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 40,
+    });
+    const roundId = `${attempt.attemptId}::round::0`;
+    const hostBindings = {
+      start: {
+        roundId,
+        attemptId: attempt.attemptId,
+        workflowRunId: attempt.workflowRunId,
+        stepRunId: attempt.stepRunId,
+        stepKey: attempt.stepKey,
+        family: "one-shot" as const,
+        attemptNumber: attempt.attemptNumber,
+        inputDigest: "sha256:input",
+        artifactRoot: "/artifacts/round-0",
+        logPaths: ["/artifacts/round-0/executor.log"],
+        startedAt: 10,
+      },
+    };
+    await new SingleShotExecutor("one-shot", () => ({
+      outcome: { ok: true },
+      result: {
+        success: true,
+        summary: "completed before host classification",
+        key_changes_made: [],
+        key_learnings: [],
+        remaining_work: [],
+        goal_complete: true,
+        commit: {
+          type: "test",
+          scope: "sdk",
+          subject: "legacy prefix resume",
+          body: "",
+          breaking: false,
+        },
+      },
+    })).tick({
+      state: envelope.snapshot(),
+      config: {},
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+    db.prepare(
+      `UPDATE executor_checkpoints
+          SET detail = 'invocation outcome: ok'
+        WHERE round_id = ? AND stage = 'mechanism_completed'`,
+    ).run(roundId);
+
+    let reran = false;
+    const tick = await new SingleShotExecutor("one-shot", () => {
+      reran = true;
+      throw new Error("mechanism must not rerun");
+    }).tick({
+      state: envelope.snapshot(),
+      config: {},
+      hostBindings,
+      envelope: envelope.facade,
+      signal: new AbortController().signal,
+    });
+
+    expect(reran).toBe(false);
+    expect(tick.recommendation).toBe("complete");
+  });
+
   it("declares strict portable schemas for agent-once and script config", () => {
     expect(AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA.additionalProperties).toBe(false);
     expect(AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA.properties.agent).toEqual(
