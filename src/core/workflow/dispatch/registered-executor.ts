@@ -16,7 +16,7 @@ import type {
   ExecutorTickResult,
 } from "../../executors/sdk/types.js";
 import {
-  listExecutorRoundsForAttempt,
+  listExecutorRoundsForStep,
   loadExecutorAttempt,
   loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
@@ -194,8 +194,15 @@ export function createRegisteredExecutorWorkflowDispatch(
         ...context,
         executorOwnsRounds: true,
         materializeOwnedRound: ({ attempt, now }) => {
+          // Round indices are monotone across the whole step, so a retry
+          // attempt's fallback round must continue after every earlier
+          // attempt's rounds, not restart at 0.
           const roundIndex =
-            listExecutorRoundsForAttempt(context.db, attempt.attemptId).reduce(
+            listExecutorRoundsForStep(
+              context.db,
+              attempt.workflowRunId,
+              attempt.stepRunId,
+            ).reduce(
               (highestRoundIndex, round) =>
                 Math.max(highestRoundIndex, round.roundIndex),
               -1,

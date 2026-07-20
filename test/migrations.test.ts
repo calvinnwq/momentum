@@ -2162,7 +2162,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
-  it("migrates workflow gates to the attempt scope and re-anchors round-scoped gates", () => {
+  it("renames the gate attempt column, re-anchors round-scoped gates, and preserves historical scopes", () => {
     const dataDir = seedLegacyDataDir();
     const db = openDb(dataDir);
     try {
@@ -2181,7 +2181,9 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
           gate_id: "gate-invocation",
           attempt_id: "run-1::implementation::dispatch",
           round_id: null,
-          target_scope: "attempt",
+          // Historical scope values are preserved so re-projected gate event
+          // ids stay stable for replay cursors issued before the migration.
+          target_scope: "invocation",
         },
         {
           gate_id: "gate-round",

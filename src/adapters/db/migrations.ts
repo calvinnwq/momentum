@@ -826,9 +826,10 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
  *   - Rounds keep their ids, indices, evidence links, and `attempt` number
  *     (now `attempt_number`); only their parent key moves from the shared
  *     invocation to their own attempt row.
- *   - `workflow_gates.invocation_id` becomes `attempt_id`; round-scoped gates
- *     are re-anchored to the round's attempt, and the `invocation` target
- *     scope becomes `attempt`.
+ *   - `workflow_gates.invocation_id` becomes `attempt_id` and round-scoped
+ *     gates are re-anchored to the round's attempt. Historical rows keep the
+ *     recorded `invocation` target scope so re-projected gate event ids (and
+ *     the replay cursors holding them) stay stable; new gates write `attempt`.
  *
  * Idempotent: the legacy table is dropped inside the same transaction, so a
  * second open finds nothing to migrate. Runs outside the main migration
@@ -1053,9 +1054,11 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         db.exec(
           "ALTER TABLE workflow_gates RENAME COLUMN invocation_id TO attempt_id",
         );
-        db.exec(
-          "UPDATE workflow_gates SET target_scope = 'attempt' WHERE target_scope = 'invocation'",
-        );
+        // Historical gate rows keep their recorded `invocation` target scope:
+        // `workflow run events` re-projects gate events from these rows and
+        // hashes `targetScope` into each event id, so rewriting the value
+        // would re-issue already-consumed events to replay cursors. The legacy
+        // scope value is read-only provenance; new gates write `attempt`.
         // A round-scoped gate identifies its attempt through its round; the
         // remaining attempt references are the latest lifecycle the legacy
         // invocation row described, and that attempt kept the legacy id.
