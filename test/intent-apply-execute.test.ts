@@ -1410,13 +1410,11 @@ describe("executeExternalApply concurrency and write failures", () => {
 describe("default Linear client factories honor endpoint env var overrides", () => {
   it("defaultBuildLinearClient points at MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT when set", async () => {
     const overrideEndpoint = "http://127.0.0.1:65535/momentum-mock/graphql";
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(JSON.stringify({ data: { issue: null } }), {
-          status: 200,
-        }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ data: { issue: null } }), {
+        status: 200,
+      }),
+    );
     const client = defaultBuildLinearClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
       [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: overrideEndpoint,
@@ -1448,13 +1446,11 @@ describe("default Linear client factories honor endpoint env var overrides", () 
 
   it("defaultBuildLinearRefreshClient points at MOMENTUM_LINEAR_REFRESH_ENDPOINT when set", async () => {
     const overrideEndpoint = "http://127.0.0.1:65535/momentum-mock/graphql";
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(JSON.stringify({ data: { issue: null } }), {
-          status: 200,
-        }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ data: { issue: null } }), {
+        status: 200,
+      }),
+    );
     const client = defaultBuildLinearRefreshClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
       [LINEAR_REFRESH_ENDPOINT_ENV_VAR]: overrideEndpoint,
@@ -1469,13 +1465,11 @@ describe("default Linear client factories honor endpoint env var overrides", () 
   });
 
   it("defaultBuildLinearClient falls back to the production endpoint when the override env var is unset or empty", async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(JSON.stringify({ data: { issue: null } }), {
-          status: 200,
-        }),
-      );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ data: { issue: null } }), {
+        status: 200,
+      }),
+    );
     const client = defaultBuildLinearClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
       [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: "   ",
