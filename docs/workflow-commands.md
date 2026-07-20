@@ -25,7 +25,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
   It is the catch-up substrate for stream mode and discrete pollers, not a replacement for live polling by itself.
-- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor invocations, executor rounds, and their child artifacts, checkpoints, findings, and decisions.
+- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor attempts, executor rounds, and their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 When `MOMENTUM_EXECUTOR_CONFIG` is set, preview imports its configured trusted
@@ -36,7 +36,7 @@ Momentum state, not arbitrary module-initialization behavior.
 That dispatcher tick does not start approved `merge-cleanup` or `linear-refresh` tail steps; those side-effecting steps stay on a human-required operator-decision path.
 `workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files, running dispatch, delivering to OpenClaw, or invoking an LLM.
 
-`workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
+`workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` call print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
 
 ## GUI-ready contracts for Momentum orchestration
@@ -239,7 +239,7 @@ Only the `wfcur1.` cursor namespace is accepted.
 
 See also:
 
-- [docs/data-directory.md](data-directory.md) — the workflow, gate, executor invocation / round, and executor child-evidence table schemas.
+- [docs/data-directory.md](data-directory.md) — the workflow, gate, executor attempt / round, and executor child-evidence table schemas.
 - [docs/evidence-commands.md](evidence-commands.md) — `evidence ingest` and `evidence list` envelopes for the `evidence_records` table.
 
 ## `workflow run start`
@@ -281,7 +281,7 @@ Behaviour:
 - **Materialization**: on success the command durably writes one `workflow_runs` row plus one ordered `workflow_steps` row per definition step, linking the run to the definition it started from (`workflow_definition_key` / `workflow_definition_version`). The run `source` is `workflow-definition`.
 - **Approval boundary**: when `--approval-boundary` is supplied, the pending steps the boundary covers are persisted as `approved`, a `workflow_approvals` row is recorded with synthetic `workflow-run-start://<run-id>/<boundary>` provenance, and the run state is derived as `approved`; otherwise every step is `pending` and the run state is `pending`.
 - **Execution**: `workflow run start` only materializes durable run state.
-  Approved steps are claimed by bounded `daemon start --max-*`, which dispatches valid executor identities into durable `executor_invocations` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
+  Approved steps are claimed by bounded `daemon start --max-*`, which dispatches valid executor identities into durable `executor_attempts` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
   The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them.
   Native coding runs with `route.steps` freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; a corrupt persisted `route.steps` namespace routes to manual recovery with `route_config_invalid` instead of silently falling back.
   The `external-apply` family is filled by the daemon itself for the built-in `linear-refresh` step: it proves `LINEAR_API_KEY`, repo `intent_apply_policy: external_apply_allowed`, the run issue scope, a matching source item, and either one pending Linear `status_update` intent or enough unique issue-scope/source evidence to seed the expected pending `status_update` intent with a `Done` payload deterministically.
@@ -293,7 +293,7 @@ Behaviour:
   An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
   A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
   A successful no-mistakes handoff with no repository changes is accepted only after verification proves the worktree clean; failed verification still rejects it.
-  The delegate invocation and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
+  The delegate attempt and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
   Runtime profile requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
@@ -928,7 +928,7 @@ Options:
   Structured no-mistakes evidence uses `schemaVersion: 1` and must include the workflow run id, issue scope identifiers, branch name and head SHA, pull request id, head SHA, state, draft flag, and check state when a pull request exists, the no-mistakes run id, successful no-mistakes outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
   Required no-mistakes phases must be current and complete: `review`, `tests`, and `push` must be `passed`, while the remaining phases must be `passed` or `not_applicable`.
   The structured path refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown pull request checks, and partial or non-success phase evidence.
-  Expected external identity comes only from the current invocation attempt's latest legacy no-mistakes checkpoint or latest eligible `delegate-supervisor` identity checkpoint authorized by a same-attempt handoff intent with `tool: "no-mistakes"`; older attempts and other-tool delegate checkpoints cannot authorize reconciliation.
+  Expected external identity comes only from the current attempt's latest legacy no-mistakes checkpoint or latest eligible `delegate-supervisor` identity checkpoint authorized by a same-attempt handoff intent with `tool: "no-mistakes"`; older attempts and other-tool delegate checkpoints cannot authorize reconciliation.
   Without `--evidence-pointer`, the command refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 - `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an evidence-backed step is reconciled.
   Use this to reference the specific ledger entry where the tail step's partial execution stopped (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
@@ -951,12 +951,12 @@ Behaviour:
 - A `runtime_unavailable` refusal is retryable for any dispatched step after its registered executor, wrapper, credentials, or other runtime dependency is repaired. This includes stale wrapper/build paths, missing no-mistakes branch-start state, current no-mistakes cancellation evidence before clean runner evidence exists, and merge-cleanup auth, target, PR readback, expected-head, cleanup-branch, or mergeability refusals reported before clean runner evidence exists.
 - Registered SDK `executor_threw` and `executor_contract_invalid` refusals are also retryable after the executor implementation or result contract is repaired.
 - Delegate-supervisor `tool_adapter_unavailable`, `delegate_handoff_failed`, `delegate_handoff_recovery_required`, `external_state_unreadable`, and `external_state_inconsistent` refusals are retryable after the adapter, handoff evidence, or correlated external state is repaired.
-  An `external_state_blocked` invocation is also retryable after the external blocker clears.
-  Guarded clear increments the existing deterministic invocation's attempt, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
+  An `external_state_blocked` attempt is also retryable after the external blocker clears.
+  Guarded clear prepares a fresh immutable attempt with the next attempt number, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
   The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
-  The same transaction releases only the retrying invocation attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
+  The same transaction releases only the retrying attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
@@ -1043,7 +1043,7 @@ Optional arguments:
 - `--json` — emit structured JSON; success writes to stdout, while structured refusals and usage errors write JSON to stderr.
 
 The resolution is race-safe: the update is guarded by `resolved_at IS NULL`, so a concurrent resolve that closed the gate between load and write is refused as `gate_already_resolved` rather than overwriting the prior decision.
-For a round-scoped registered-executor gate, the same transaction records the chosen action on the executor decision and reopens the paused round and invocation. The next scheduler pass can then reacquire dispatch and resume from that durable decision.
+For a round-scoped registered-executor gate, the same transaction records the chosen action on the executor decision and reopens the paused round and attempt. The next scheduler pass can then reacquire dispatch and resume from that durable decision.
 
 ### JSON envelope
 
@@ -1266,7 +1266,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 }
 ```
 
-`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `invocationId`, `roundId`, `targetScope` (`workflow` / `step` / `invocation` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
+`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
@@ -1564,7 +1564,7 @@ Required arguments:
 
 Options:
 
-- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest / timestamp advisory baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
+- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest / timestamp advisory baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across calls.
   See the [progress digest tick](#progress-digest-tick) section.
 
 ### Disposition and report reason
@@ -1665,7 +1665,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 - `changed` / `emit` compare `digest` against the run's last emitted digest (the `monitor_last_emitted_digest` advisory). On a first observation, or whenever the meaningful state changes, both are `true`; a repeated unchanged tick reports both `false` so a caller can suppress a duplicate update. By default `workflow run monitor` reads this baseline without advancing it, so the command stays read-only.
 - `advanced` reports whether this tick persisted the suppression baseline.
   It is `false` for a plain read; it is `true` only when `--advance` was passed and the tick actually emitted (a first observation or a meaningful change).
-  For a supported `momentum-native-coding` run, passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across invocations from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change.
+  For a supported `momentum-native-coding` run, passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across calls from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change.
   An unchanged `--advance` tick refreshes only `monitor_last_seen_digest` and `monitor_last_seen_at`; it leaves the emitted baseline untouched.
 - `terminal` and `cleanup` make end-of-run handling explicit: a clean terminal outcome reports `cleanup: "release"` (release the monitor lease and stop ticking); every other phase reports `cleanup: "none"`. `cleanup` and `terminal` are reported even on a suppressed (`emit: false`) tick.
 - `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
@@ -2250,7 +2250,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | `once_required` | Neither `--once` nor `--stream` was supplied. |
 | `jsonl_required` | `--stream` was supplied without `--jsonl`. |
 | `stream_once_conflict` | `--stream` and `--once` were supplied together. |
-| `usage_error` | The stream invocation is malformed, such as an extra positional argument or a missing value for `--since`; with `--jsonl`, this still renders as JSON and exits `2`. |
+| `usage_error` | The stream call is malformed, such as an extra positional argument or a missing value for `--since`; with `--jsonl`, this still renders as JSON and exits `2`. |
 | `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
 | `data_dir_failed` | Data directory resolution, SQLite access, the bounded `--once` dispatch tick, or stream polling failed. |
 | `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
@@ -2289,7 +2289,7 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow run events <run-id> [--since <cursor>] [--data-dir <path>] [--json]
 ```
 
-Replay one workflow run's durable semantic event projection. This command is for supervisors and app clients that may lose process state and need to catch up from the last event they handled. It is not a streaming API: each invocation reads the current durable database state once, returns the events after `--since`, and exits.
+Replay one workflow run's durable semantic event projection. This command is for supervisors and app clients that may lose process state and need to catch up from the last event they handled. It is not a streaming API: each call reads the current durable database state once, returns the events after `--since`, and exits.
 
 The event stream is built from two durable sources:
 
@@ -2373,7 +2373,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth.
 `workflow run logs` is the shipped consumer of this projection today.
 Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
-A step classified with the legacy/native `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
+A step classified with the legacy/native `goal-loop` executor records one `executor_attempt` for the autonomous attempt and one ordered `executor_round` per durable iteration.
 Before each round's runner starts, Momentum renders a deterministic prompt from objective, source context, round identity, repo/base-head context, acceptance and verification requirements, prior round evidence, and the configured result path.
 Source context and prior-round evidence are quoted as untrusted JSON context, and stale result files are cleared before the runner is asked to write the fresh normalized result JSON.
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
@@ -2384,7 +2384,7 @@ For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `
 For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
 The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while legacy definitions may still run it beneath `goal-loop`.
-In both cases `gnhf` is not a workflow executor family, and its work must remain represented by Momentum invocation and round evidence.
+In both cases `gnhf` is not a workflow executor family, and its work must remain represented by Momentum attempt and round evidence.
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
 
@@ -2393,12 +2393,12 @@ Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery an
 The current coding definition uses `delegate-supervisor` with portable `tool` config for both GNHF implementation and no-mistakes validation.
 The first successful tick persists a handoff intent and correlated handoff checkpoint, then completes the handoff round with any adapter artifact paths.
 Each later bounded executor tick performs one external-state read, normally in a new round; a round reopened after gate resolution resumes in place.
-Only the invocation's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
+Only the attempt's first completed handoff may perform the durable handoff and first read as two ticks under the same workflow claim.
 Later passes and every retry attempt perform one tick, including a retry that launches a fresh external run, and continuation-only daemon cycles wait the configured poll interval before another read.
-If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same invocation instead of parking it or repeating the handoff.
+If the claim is lost after a durable handoff intent or completed handoff exists but before classification, stale auto-release lease recovery makes an unclassified running, capturing-result, or `mirroring_external_state` round resumable under the same attempt instead of parking it or repeating the handoff.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
 The read projects findings and decisions as append-only child evidence, records the raw response digest in `inputDigest`, and records the stable semantic progress digest in `resultDigest`.
-Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the invocation for manual recovery.
+Repeated unchanged running reads refresh liveness but retain the last semantic-progress time; four minutes without semantic progress or terminal evidence parks the attempt for manual recovery.
 A retry reconciles a valid non-terminal correlated handoff through adapter recovery before reuse, preserves decision history, and starts a fresh semantic-progress window for the new attempt.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure does not establish that the correlated external run failed.
@@ -2429,13 +2429,13 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
-It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor attempt read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
 The derived `outcome` reports any terminal `succeeded` round as `successful`, including a `continue` round with no commit SHA.
-This distinguishes a successful bounded handoff or poll from a failed continuation while keeping the invocation eligible for its next scheduler tick.
+This distinguishes a successful bounded handoff or poll from a failed continuation while keeping the attempt eligible for its next scheduler tick.
 
-Invocations are returned across the run in step key, attempt, invocation id order.
-Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
+Attempts are returned across the run in step key, attempt number, attempt id order.
+Rounds are returned across every attempt in the run, ordered by step key, then attempt number, then attempt id, then round index, then round id.
 
 ### JSON envelope
 
@@ -2444,7 +2444,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
   "ok": true,
   "command": "workflow run logs",
   "dataDir": "/path/to/data",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": 1730000600000,
   "run": { "...": "same shape as workflow status detail" },
   "steps": [ "..." ],
@@ -2453,15 +2453,15 @@ Rounds are returned across every invocation in the run, ordered by step key, the
   "monitor": { "...": "same shape as workflow status detail" },
   "evidence": [ "..." ],
   "gates": [ "..." ],
-  "invocations": [
+  "attempts": [
     {
-      "invocationId": "cwfp-abc123::implementation::dispatch",
+      "attemptId": "cwfp-abc123::implementation::attempt-1",
       "workflowRunId": "cwfp-abc123",
       "stepRunId": "implementation",
       "stepKey": "implementation",
       "executorFamily": "goal-loop",
       "state": "running",
-      "attempt": 1,
+      "attemptNumber": 1,
       "startedAt": 1730000500000,
       "heartbeatAt": 1730000550000,
       "finishedAt": null
@@ -2469,12 +2469,12 @@ Rounds are returned across every invocation in the run, ordered by step key, the
   ],
   "rounds": [
     {
-      "roundId": "cwfp-abc123::implementation::dispatch::round-1",
-      "invocationId": "cwfp-abc123::implementation::dispatch",
+      "roundId": "cwfp-abc123::implementation::attempt-1::round-1",
+      "attemptId": "cwfp-abc123::implementation::attempt-1",
       "stepRunId": "implementation",
       "stepKey": "implementation",
       "executorFamily": "goal-loop",
-      "attempt": 1,
+      "attemptNumber": 1,
       "roundIndex": 0,
       "state": "succeeded",
       "classification": "complete",
@@ -2545,7 +2545,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "artifacts": [
         {
           "artifactId": "artifact-1",
-          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "roundId": "cwfp-abc123::implementation::attempt-1::round-1",
           "artifactClass": "verification_output",
           "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
           "digest": "sha256:...",
@@ -2553,7 +2553,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
         },
         {
           "artifactId": "artifact-2",
-          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "roundId": "cwfp-abc123::implementation::attempt-1::round-1",
           "artifactClass": "commit_or_reset_evidence",
           "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt.finalization.json",
           "digest": "sha256:...",
@@ -2563,7 +2563,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "checkpoints": [
         {
           "checkpointId": "checkpoint-1",
-          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "roundId": "cwfp-abc123::implementation::attempt-1::round-1",
           "sequence": 0,
           "stage": "verify",
           "detail": "verification completed"
@@ -2589,7 +2589,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
 
 ```text
 Workflow run logs: cwfp-abc123
-Schema version: 1
+Schema version: 2
 Generated at (epoch ms): 1730000600000
 Run state: running
 Implementation engine: native-goal-loop
@@ -2598,10 +2598,10 @@ Approvals: 1
 Leases: 1
 Gates: 1 (open: 1)
 - gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
-Executor invocations: 1
-- cwfp-abc123::implementation::dispatch [implementation/running] attempt=1 executor=goal-loop
+Executor attempts: 1
+- cwfp-abc123::implementation::attempt-1 [implementation/running] attempt=1 executor=goal-loop
 Executor rounds: 1
-- cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete outcome=successful
+- cwfp-abc123::implementation::attempt-1::round-1 [implementation/succeeded] complete outcome=successful
     summary: implemented the slice
     key changes: added reader
     learnings: use durable round state for follow-up input

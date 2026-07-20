@@ -204,7 +204,11 @@ function dispatchExecutorScaffold(
   executorOwnsRounds: boolean,
   materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): WorkflowStepDispatchResult {
-  const latest = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
+  const latest = loadLatestExecutorAttemptForStep(
+    db,
+    claim.runId,
+    claim.stepId,
+  );
   if (latest !== undefined) {
     const retried = dispatchRetryScaffold(
       db,
@@ -246,12 +250,7 @@ function dispatchExecutorScaffold(
       };
     }
 
-    const attempt = buildAttemptScaffold(
-      claim,
-      family,
-      attemptId,
-      now,
-    );
+    const attempt = buildAttemptScaffold(claim, family, attemptId, now);
     insertExecutorAttempt(db, attempt, { now });
     if (!executorOwnsRounds) {
       insertExecutorRound(

@@ -40,7 +40,7 @@ import {
   type WorkflowStepExecutorResult,
   type WorkflowStepExecutorRetryHint,
   type WorkflowStepExecutorSuccess,
-  type WorkflowStepExecutorTerminalState
+  type WorkflowStepExecutorTerminalState,
 } from "../../src/core/workflow/step/executor.js";
 
 export type FakeWorkflowStepExecutorOutcome =
@@ -66,11 +66,11 @@ const FAKE_OUTCOMES: ReadonlySet<FakeWorkflowStepExecutorOutcome> = new Set([
   "fail_retry",
   "fail_manual_recovery",
   "throw",
-  "runtime_unavailable"
+  "runtime_unavailable",
 ]);
 
 const EXECUTOR_ERROR_CODE_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_EXECUTOR_ERROR_CODES
+  WORKFLOW_STEP_EXECUTOR_ERROR_CODES,
 );
 
 /**
@@ -80,12 +80,12 @@ const EXECUTOR_ERROR_CODE_SET: ReadonlySet<string> = new Set(
  * failure branch without a live command runner.
  */
 export function createFakeWorkflowStepExecutor(
-  kind: WorkflowStepExecutorKind
+  kind: WorkflowStepExecutorKind,
 ): WorkflowStepExecutor {
   return {
     kind,
     executes: true,
-    execute: (input) => runFakeWorkflowStepExecutor(kind, input)
+    execute: (input) => runFakeWorkflowStepExecutor(kind, input),
   };
 }
 
@@ -101,14 +101,14 @@ export function buildFakeWorkflowStepExecutorRegistry(): ReadonlyMap<
 > {
   return new Map(
     WORKFLOW_STEP_EXECUTOR_KINDS.map(
-      (kind) => [kind, createFakeWorkflowStepExecutor(kind)] as const
-    )
+      (kind) => [kind, createFakeWorkflowStepExecutor(kind)] as const,
+    ),
   );
 }
 
 function runFakeWorkflowStepExecutor(
   kind: WorkflowStepExecutorKind,
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
 ): WorkflowStepExecutorDispatchResult {
   const config = readFakeConfig(input.config);
   if (!config.ok) {
@@ -117,20 +117,20 @@ function runFakeWorkflowStepExecutor(
       code: "invalid_input",
       error: config.error,
       executorLogPath: input.executorLogPath,
-      resultJsonPath: input.resultJsonPath
+      resultJsonPath: input.resultJsonPath,
     };
   }
   const outcome = config.value.outcome ?? "success";
   const checkpointMessages = config.value.checkpointMessages ?? [
     `${kind}:start`,
-    `${kind}:work`
+    `${kind}:work`,
   ];
   const baseAt = 1;
   const checkpoints: WorkflowStepExecutorCheckpoint[] = checkpointMessages.map(
     (message, index) => ({
       at: baseAt + index,
-      message
-    })
+      message,
+    }),
   );
 
   switch (outcome) {
@@ -140,7 +140,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        state: "succeeded"
+        state: "succeeded",
       });
     case "skip":
       return success({
@@ -148,7 +148,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        state: "skipped"
+        state: "skipped",
       });
     case "fail_retry":
       return failure({
@@ -158,7 +158,7 @@ function runFakeWorkflowStepExecutor(
         checkpoints,
         errorCode: config.value.errorCode ?? "command_failed",
         retryHint: "retry_after_delay",
-        recoveryHint: "resume"
+        recoveryHint: "resume",
       });
     case "fail_manual_recovery":
       return failure({
@@ -168,12 +168,12 @@ function runFakeWorkflowStepExecutor(
         checkpoints,
         errorCode: config.value.errorCode ?? "manual_recovery_required",
         retryHint: "do_not_retry",
-        recoveryHint: "manual_recovery_required"
+        recoveryHint: "manual_recovery_required",
       });
     case "throw":
       throw new Error(
         config.value.errorMessage ??
-          `fake workflow step executor "${kind}" forced throw`
+          `fake workflow step executor "${kind}" forced throw`,
       );
     case "runtime_unavailable":
       return {
@@ -183,7 +183,7 @@ function runFakeWorkflowStepExecutor(
           config.value.errorMessage ??
           `fake workflow step executor "${kind}" simulated runtime_unavailable`,
         executorLogPath: input.executorLogPath,
-        resultJsonPath: input.resultJsonPath
+        resultJsonPath: input.resultJsonPath,
       };
   }
 }
@@ -199,7 +199,7 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
   if (typeof raw !== "object" || Array.isArray(raw)) {
     return {
       ok: false,
-      error: "WorkflowStepExecutorInput.config must be a plain object."
+      error: "WorkflowStepExecutorInput.config must be a plain object.",
     };
   }
   const record = raw as Record<string, unknown>;
@@ -213,7 +213,7 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
     ) {
       return {
         ok: false,
-        error: `WorkflowStepExecutorInput.config.outcome must be one of: ${[...FAKE_OUTCOMES].join(", ")}.`
+        error: `WorkflowStepExecutorInput.config.outcome must be one of: ${[...FAKE_OUTCOMES].join(", ")}.`,
       };
     }
     value.outcome = rawOutcome as FakeWorkflowStepExecutorOutcome;
@@ -222,13 +222,13 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
     if (typeof record["errorCode"] !== "string") {
       return {
         ok: false,
-        error: "WorkflowStepExecutorInput.config.errorCode must be a string."
+        error: "WorkflowStepExecutorInput.config.errorCode must be a string.",
       };
     }
     if (!EXECUTOR_ERROR_CODE_SET.has(record["errorCode"])) {
       return {
         ok: false,
-        error: `WorkflowStepExecutorInput.config.errorCode must be one of: ${WORKFLOW_STEP_EXECUTOR_ERROR_CODES.join(", ")}.`
+        error: `WorkflowStepExecutorInput.config.errorCode must be one of: ${WORKFLOW_STEP_EXECUTOR_ERROR_CODES.join(", ")}.`,
       };
     }
     value.errorCode = record["errorCode"] as WorkflowStepExecutorErrorCode;
@@ -237,7 +237,8 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
     if (typeof record["errorMessage"] !== "string") {
       return {
         ok: false,
-        error: "WorkflowStepExecutorInput.config.errorMessage must be a string."
+        error:
+          "WorkflowStepExecutorInput.config.errorMessage must be a string.",
       };
     }
     value.errorMessage = record["errorMessage"];
@@ -246,7 +247,8 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
     if (typeof record["resultDigest"] !== "string") {
       return {
         ok: false,
-        error: "WorkflowStepExecutorInput.config.resultDigest must be a string."
+        error:
+          "WorkflowStepExecutorInput.config.resultDigest must be a string.",
       };
     }
     value.resultDigest = record["resultDigest"];
@@ -255,7 +257,7 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
     if (!Array.isArray(record["artifacts"])) {
       return {
         ok: false,
-        error: "WorkflowStepExecutorInput.config.artifacts must be an array."
+        error: "WorkflowStepExecutorInput.config.artifacts must be an array.",
       };
     }
     const artifacts: WorkflowStepExecutorArtifact[] = [];
@@ -269,20 +271,20 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
         return {
           ok: false,
           error:
-            "WorkflowStepExecutorInput.config.artifacts entries must have string `kind` and `path`."
+            "WorkflowStepExecutorInput.config.artifacts entries must have string `kind` and `path`.",
         };
       }
       const record2 = entry as Record<string, unknown>;
       const artifact: WorkflowStepExecutorArtifact = {
         kind: record2["kind"] as string,
-        path: record2["path"] as string
+        path: record2["path"] as string,
       };
       if (record2["digest"] !== undefined) {
         if (typeof record2["digest"] !== "string") {
           return {
             ok: false,
             error:
-              "WorkflowStepExecutorInput.config.artifacts.digest must be a string."
+              "WorkflowStepExecutorInput.config.artifacts.digest must be a string.",
           };
         }
         artifact.digest = record2["digest"];
@@ -296,7 +298,7 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
       return {
         ok: false,
         error:
-          "WorkflowStepExecutorInput.config.checkpointMessages must be an array of strings."
+          "WorkflowStepExecutorInput.config.checkpointMessages must be an array of strings.",
       };
     }
     const messages: string[] = [];
@@ -305,7 +307,7 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
         return {
           ok: false,
           error:
-            "WorkflowStepExecutorInput.config.checkpointMessages entries must be strings."
+            "WorkflowStepExecutorInput.config.checkpointMessages entries must be strings.",
         };
       }
       messages.push(entry);
@@ -325,7 +327,7 @@ type FakeOutcomeInput = {
 function success(
   args: FakeOutcomeInput & {
     state: Extract<WorkflowStepExecutorTerminalState, "succeeded" | "skipped">;
-  }
+  },
 ): WorkflowStepExecutorSuccess {
   const { input, config, checkpoints, state, kind } = args;
   const result: WorkflowStepExecutorResult = {
@@ -337,41 +339,7 @@ function success(
     errorCode: null,
     errorMessage: null,
     retryHint: null,
-    recoveryHint: state === "skipped" ? "skip_already_complete" : null
-  };
-  return {
-    ok: true,
-    result,
-    executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath,
-    diagnostics: {
-      executor: "fake",
-      kind,
-      attempt: input.attemptNumber
-    }
-  };
-}
-
-function failure(
-  args: FakeOutcomeInput & {
-    errorCode: WorkflowStepExecutorErrorCode;
-    retryHint: WorkflowStepExecutorRetryHint;
-    recoveryHint: WorkflowStepExecutorRecoveryHint;
-  }
-): WorkflowStepExecutorSuccess {
-  const { input, config, checkpoints, errorCode, retryHint, recoveryHint, kind } =
-    args;
-  const result: WorkflowStepExecutorResult = {
-    state: "failed",
-    summary: `fake ${kind} executor reported failed (${errorCode})`,
-    checkpoints,
-    artifacts: config.artifacts ?? [],
-    resultDigest: config.resultDigest ?? null,
-    errorCode,
-    errorMessage:
-      config.errorMessage ?? `fake ${kind} executor injected ${errorCode}`,
-    retryHint,
-    recoveryHint
+    recoveryHint: state === "skipped" ? "skip_already_complete" : null,
   };
   return {
     ok: true,
@@ -382,7 +350,48 @@ function failure(
       executor: "fake",
       kind,
       attempt: input.attemptNumber,
-      injected: errorCode
-    }
+    },
+  };
+}
+
+function failure(
+  args: FakeOutcomeInput & {
+    errorCode: WorkflowStepExecutorErrorCode;
+    retryHint: WorkflowStepExecutorRetryHint;
+    recoveryHint: WorkflowStepExecutorRecoveryHint;
+  },
+): WorkflowStepExecutorSuccess {
+  const {
+    input,
+    config,
+    checkpoints,
+    errorCode,
+    retryHint,
+    recoveryHint,
+    kind,
+  } = args;
+  const result: WorkflowStepExecutorResult = {
+    state: "failed",
+    summary: `fake ${kind} executor reported failed (${errorCode})`,
+    checkpoints,
+    artifacts: config.artifacts ?? [],
+    resultDigest: config.resultDigest ?? null,
+    errorCode,
+    errorMessage:
+      config.errorMessage ?? `fake ${kind} executor injected ${errorCode}`,
+    retryHint,
+    recoveryHint,
+  };
+  return {
+    ok: true,
+    result,
+    executorLogPath: input.executorLogPath,
+    resultJsonPath: input.resultJsonPath,
+    diagnostics: {
+      executor: "fake",
+      kind,
+      attempt: input.attemptNumber,
+      injected: errorCode,
+    },
   };
 }

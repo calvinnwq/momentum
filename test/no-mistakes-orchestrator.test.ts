@@ -49,11 +49,7 @@ const STEP_RUN_ID = "step-1";
 const STEP_KEY = "no-mistakes";
 const ATTEMPT = 1;
 const HEAD_SHA = "a".repeat(40);
-const ATTEMPT_ID = noMistakesAttemptId(
-  WORKFLOW_RUN_ID,
-  STEP_RUN_ID,
-  ATTEMPT,
-);
+const ATTEMPT_ID = noMistakesAttemptId(WORKFLOW_RUN_ID, STEP_RUN_ID, ATTEMPT);
 const ROUND_ID = noMistakesRoundId(ATTEMPT_ID);
 const EXPECTED_EXTERNAL_IDENTITY = {
   externalRunId: "nm-run-9",
@@ -1228,9 +1224,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       polledAt: 2_000,
     });
     expect(gated.round.state).toBe("waiting_operator");
-    expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe(
-      "waiting_operator",
-    );
+    expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe("waiting_operator");
 
     const settled = runNoMistakesMirrorRound({
       db,
@@ -1267,9 +1261,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       },
       { now: 2_500 },
     );
-    expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe(
-      "waiting_operator",
-    );
+    expect(loadExecutorAttempt(db, ATTEMPT_ID)!.state).toBe("waiting_operator");
 
     const settled = runNoMistakesMirrorRound({
       db,
@@ -1335,9 +1327,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
     expect(result.round.round.model).toBeNull();
     expect(result.round.round.effort).toBeNull();
     // Both rows are durable.
-    expect(loadExecutorAttempt(db, ATTEMPT_ID)).toEqual(
-      result.attempt,
-    );
+    expect(loadExecutorAttempt(db, ATTEMPT_ID)).toEqual(result.attempt);
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(result.round.round);
   });
 
@@ -1490,9 +1480,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
     });
 
     // A re-run is a fresh attempt minting a fresh attempt, never mutating the prior one.
-    expect(first.attempt.attemptId).not.toBe(
-      second.attempt.attemptId,
-    );
+    expect(first.attempt.attemptId).not.toBe(second.attempt.attemptId);
     expect(second.attempt.attemptId).toBe(
       noMistakesAttemptId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2),
     );
@@ -1533,9 +1521,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
     // The durable owner + its round are byte-for-byte unchanged: the start
     // savepoint left no half-written round behind.
     expect(loadExecutorAttempt(db, ATTEMPT_ID)).toEqual(ownerBefore);
-    expect(listExecutorRoundsForAttempt(db, ATTEMPT_ID)).toEqual(
-      roundsBefore,
-    );
+    expect(listExecutorRoundsForAttempt(db, ATTEMPT_ID)).toEqual(roundsBefore);
   });
 });
 

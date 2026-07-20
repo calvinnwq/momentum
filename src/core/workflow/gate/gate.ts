@@ -37,7 +37,7 @@
 
 import {
   EXECUTOR_HUMAN_GATE_TYPES,
-  type ExecutorHumanGateType
+  type ExecutorHumanGateType,
 } from "../../executors/loop/reducer.js";
 
 /**
@@ -64,7 +64,7 @@ export const WORKFLOW_GATE_SCOPES = [
   "workflow",
   "step",
   "attempt",
-  "round"
+  "round",
 ] as const;
 export type WorkflowGateScope = (typeof WORKFLOW_GATE_SCOPES)[number];
 
@@ -122,7 +122,7 @@ export const GATE_DECISION_REFUSAL_CODES = [
   "actor_required",
   "gate_already_resolved",
   "action_not_allowed",
-  "delegated_action_outside_envelope"
+  "delegated_action_outside_envelope",
 ] as const;
 export type GateDecisionRefusalCode =
   (typeof GATE_DECISION_REFUSAL_CODES)[number];
@@ -155,14 +155,14 @@ export type GateDecisionOutcome =
  */
 export function evaluateGateDecision(
   gate: GateDecisionInput,
-  request: GateDecisionRequest
+  request: GateDecisionRequest,
 ): GateDecisionOutcome {
   const action = request.action.trim();
   if (action.length === 0) {
     return {
       ok: false,
       code: "action_required",
-      message: "A gate decision requires a non-blank action."
+      message: "A gate decision requires a non-blank action.",
     };
   }
   const actor = request.actor.trim();
@@ -170,28 +170,28 @@ export function evaluateGateDecision(
     return {
       ok: false,
       code: "actor_required",
-      message: "A gate decision requires a non-blank actor."
+      message: "A gate decision requires a non-blank actor.",
     };
   }
   if (gate.resolved) {
     return {
       ok: false,
       code: "gate_already_resolved",
-      message: "The gate is already resolved; refusing to re-decide it."
+      message: "The gate is already resolved; refusing to re-decide it.",
     };
   }
   if (!gate.allowedActions.includes(action)) {
     return {
       ok: false,
       code: "action_not_allowed",
-      message: `Action '${action}' is not allowed by this gate. Allowed actions: ${gate.allowedActions.join(", ") || "(none)"}.`
+      message: `Action '${action}' is not allowed by this gate. Allowed actions: ${gate.allowedActions.join(", ") || "(none)"}.`,
     };
   }
   if (request.mode === "delegated" && !gate.policyEnvelope.includes(action)) {
     return {
       ok: false,
       code: "delegated_action_outside_envelope",
-      message: `Delegated policy cannot auto-apply '${action}'; it is outside the gate's policy envelope (${gate.policyEnvelope.join(", ") || "empty"}). An operator decision is required.`
+      message: `Delegated policy cannot auto-apply '${action}'; it is outside the gate's policy envelope (${gate.policyEnvelope.join(", ") || "empty"}). An operator decision is required.`,
     };
   }
   return {
@@ -200,7 +200,7 @@ export function evaluateGateDecision(
       chosenAction: action,
       resolvedBy: actor,
       mode: request.mode,
-      resolution: request.resolutionNote ?? null
-    }
+      resolution: request.resolutionNote ?? null,
+    },
   };
 }

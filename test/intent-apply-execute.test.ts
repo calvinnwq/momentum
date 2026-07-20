@@ -8,7 +8,7 @@ import {
   claimIntentApply,
   finalizeIntentApply,
   getLatestIntentApplyAudit,
-  listIntentApplyAudits
+  listIntentApplyAudits,
 } from "../src/core/intent/apply-audits.js";
 import {
   defaultBuildLinearClient,
@@ -16,22 +16,22 @@ import {
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
   LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR,
-  LINEAR_REFRESH_ENDPOINT_ENV_VAR
+  LINEAR_REFRESH_ENDPOINT_ENV_VAR,
 } from "../src/core/intent/apply-execute.js";
 import type {
   ExecuteExternalApplyDeps,
-  ExecuteExternalApplyInput
+  ExecuteExternalApplyInput,
 } from "../src/core/intent/apply-execute.js";
 import {
   buildIdempotencyMarker,
-  type ExternalUpdateAdapter
+  type ExternalUpdateAdapter,
 } from "../src/adapters/external-update-adapter.js";
 import type {
   LinearExternalUpdateClient,
   LinearExternalUpdateError,
   LinearExternalUpdateInput,
   LinearExternalUpdateResult,
-  LinearExternalUpdateSuccess
+  LinearExternalUpdateSuccess,
 } from "../src/adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
 import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
@@ -61,7 +61,9 @@ function makeRepo(policy: string | null): string {
 }
 
 function externalApplyAllowedPolicy(): string {
-  return ["---", "intent_apply_policy: external_apply_allowed", "---", ""].join("\n");
+  return ["---", "intent_apply_policy: external_apply_allowed", "---", ""].join(
+    "\n",
+  );
 }
 
 function insertSourceItem(
@@ -73,20 +75,20 @@ function insertSourceItem(
     externalKey: string;
     url: string;
     title: string;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO source_items
        (id, adapter_kind, external_id, external_key, url, title, status,
         metadata_json, last_observed_at, goal_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, '{}', 1, NULL, 1, 1)`
+     VALUES (?, ?, ?, ?, ?, ?, NULL, '{}', 1, NULL, 1, 1)`,
   ).run(
     args.id,
     args.adapterKind,
     args.externalId,
     args.externalKey,
     args.url,
-    args.title
+    args.title,
   );
 }
 
@@ -100,7 +102,7 @@ function insertIntent(
     sourceItemId?: string | null;
     payload?: Record<string, unknown>;
     status?: "pending" | "applied" | "skipped" | "canceled";
-  }
+  },
 ): void {
   const status = args.status ?? "pending";
   const appliedAt = status === "applied" ? 1 : null;
@@ -116,7 +118,7 @@ function insertIntent(
         reason, source_item_id, status, idempotency_key, created_at, updated_at,
         applied_at, skipped_at, canceled_at, decision_reason)
      VALUES (?, ?, ?, ?, ?, 'evidence shows goal complete', ?, ?, ?, 1, 1,
-             ?, ?, ?, ?)`
+             ?, ?, ?, ?)`,
   ).run(
     args.id,
     args.adapterKind ?? "linear",
@@ -129,7 +131,7 @@ function insertIntent(
     appliedAt,
     skippedAt,
     canceledAt,
-    status === "applied" ? "operator manual" : null
+    status === "applied" ? "operator manual" : null,
   );
 }
 
@@ -146,13 +148,13 @@ function seedHappyPath(db: MomentumDb): {
     externalId,
     externalKey: "NGX-1001",
     url: "https://linear.app/example/issue/NGX-1001",
-    title: "Happy issue"
+    title: "Happy issue",
   });
   const intentId = "intent_happy";
   insertIntent(db, {
     id: intentId,
     targetExternalId: externalId,
-    sourceItemId
+    sourceItemId,
   });
   return { intentId, sourceItemId, externalId };
 }
@@ -163,7 +165,9 @@ type ApplySpy = {
 };
 
 function makeApplySpy(
-  outcome: LinearExternalUpdateResult | ((input: LinearExternalUpdateInput) => LinearExternalUpdateResult)
+  outcome:
+    | LinearExternalUpdateResult
+    | ((input: LinearExternalUpdateInput) => LinearExternalUpdateResult),
 ): ApplySpy {
   const calls: LinearExternalUpdateInput[] = [];
   return {
@@ -172,8 +176,8 @@ function makeApplySpy(
       async apply(input) {
         calls.push(input);
         return typeof outcome === "function" ? outcome(input) : outcome;
-      }
-    }
+      },
+    },
   };
 }
 
@@ -195,26 +199,28 @@ function makeSuccessOutcome(args: {
     issue: {
       id: args.issueId ?? "linear_issue_id_happy",
       key: args.issueKey ?? "NGX-1001",
-      url: "https://linear.app/example/issue/NGX-1001"
+      url: "https://linear.app/example/issue/NGX-1001",
     },
     comment: {
       id: args.commentId ?? "comment_1",
-      url: args.commentUrl ?? "https://linear.app/example/comment/1"
+      url: args.commentUrl ?? "https://linear.app/example/comment/1",
     },
     status: {
       transitioned: statusTransitioned,
       previousStateId: "state_started",
       previousStateName: "In Progress",
-      nextStateId: statusTransitioned ? (args.nextStateId ?? "state_done") : null,
-      nextStateName: statusTransitioned ? (args.nextStateName ?? "Done") : null
+      nextStateId: statusTransitioned
+        ? (args.nextStateId ?? "state_done")
+        : null,
+      nextStateName: statusTransitioned ? (args.nextStateName ?? "Done") : null,
     },
-    idempotencyMarker: args.idempotencyMarker
+    idempotencyMarker: args.idempotencyMarker,
   };
 }
 
 function makeErrorOutcome(
   code: LinearExternalUpdateError["code"],
-  message: string
+  message: string,
 ): LinearExternalUpdateError {
   return { ok: false, code, error: message };
 }
@@ -236,17 +242,17 @@ function makeRefreshClient(args: {
           title: "Happy issue",
           url: "https://linear.app/example/issue/NGX-1001",
           updatedAt: "2026-05-21T00:00:00.000Z",
-          state: { id: "state-done", name: args.status ?? "Done" }
+          state: { id: "state-done", name: args.status ?? "Done" },
         },
         comments: args.comments ?? [
           {
             id: "comment_1",
             body: `Momentum applied ${args.marker}`,
-            url: "https://linear.app/example/comment/1"
-          }
-        ]
+            url: "https://linear.app/example/comment/1",
+          },
+        ],
       };
-    }
+    },
   };
 }
 
@@ -269,30 +275,30 @@ function makeIssueRefreshPayload(args: {
             {
               id: "comment_1",
               body: `Momentum applied ${args.marker}`,
-              url: "https://linear.app/example/comment/1"
-            }
+              url: "https://linear.app/example/comment/1",
+            },
           ],
-          pageInfo: { hasNextPage: false, endCursor: null }
-        }
-      }
-    }
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
   };
 }
 
 function expectedIdempotencyMarker(
   intentId: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): string {
   return buildIdempotencyMarker({
     adapterKind: "linear",
     intentId,
-    payload
+    payload,
   });
 }
 
 function baseInput(
   db: MomentumDb,
-  overrides: Partial<ExecuteExternalApplyInput> & { intentId: string }
+  overrides: Partial<ExecuteExternalApplyInput> & { intentId: string },
 ): ExecuteExternalApplyInput {
   const deps = overrides.deps ?? {};
   return {
@@ -310,10 +316,10 @@ function baseInput(
         (() =>
           makeRefreshClient({
             marker: expectedIdempotencyMarker(overrides.intentId, {
-              kind: "comment"
-            })
-          }))
-    }
+              kind: "comment",
+            }),
+          })),
+    },
   };
 }
 
@@ -323,7 +329,7 @@ describe("executeExternalApply policy & input gates", () => {
     const db = openDb(dataDir);
     try {
       const result = await executeExternalApply(
-        baseInput(db, { intentId: "missing_intent" })
+        baseInput(db, { intentId: "missing_intent" }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -341,20 +347,22 @@ describe("executeExternalApply policy & input gates", () => {
     try {
       insertIntent(db, { id: "intent_done", status: "applied" });
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "should not be called")
+        makeErrorOutcome("validation_failed", "should not be called"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId: "intent_done",
           repoPath: makeRepo(externalApplyAllowedPolicy()),
-          deps: { buildLinearClient: () => spy.client }
-        })
+          deps: { buildLinearClient: () => spy.client },
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
       expect(result.code).toBe("intent_already_terminal");
       expect(spy.calls).toHaveLength(0);
-      expect(listIntentApplyAudits(db, { intentId: "intent_done" })).toHaveLength(0);
+      expect(
+        listIntentApplyAudits(db, { intentId: "intent_done" }),
+      ).toHaveLength(0);
     } finally {
       db.close();
     }
@@ -366,14 +374,14 @@ describe("executeExternalApply policy & input gates", () => {
     try {
       seedHappyPath(db);
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId: "intent_happy",
           repoPath: null,
-          deps: { buildLinearClient: () => spy.client }
-        })
+          deps: { buildLinearClient: () => spy.client },
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -391,17 +399,19 @@ describe("executeExternalApply policy & input gates", () => {
     try {
       seedHappyPath(db);
       const repoPath = makeRepo(
-        ["---", "intent_apply_policy: create_intents_only", "---", ""].join("\n")
+        ["---", "intent_apply_policy: create_intents_only", "---", ""].join(
+          "\n",
+        ),
       );
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId: "intent_happy",
           repoPath,
-          deps: { buildLinearClient: () => spy.client }
-        })
+          deps: { buildLinearClient: () => spy.client },
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -420,10 +430,10 @@ describe("executeExternalApply policy & input gates", () => {
     try {
       seedHappyPath(db);
       const repoPath = makeRepo(
-        ["---", "intent_apply_policy: bogus_value", "---", ""].join("\n")
+        ["---", "intent_apply_policy: bogus_value", "---", ""].join("\n"),
       );
       const result = await executeExternalApply(
-        baseInput(db, { intentId: "intent_happy", repoPath })
+        baseInput(db, { intentId: "intent_happy", repoPath }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -443,13 +453,15 @@ describe("executeExternalApply policy & input gates", () => {
         baseInput(db, {
           intentId: "intent_happy",
           repoPath,
-          env: {}
-        })
+          env: {},
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
       expect(result.code).toBe("auth_unavailable");
-      expect(listIntentApplyAudits(db, { intentId: "intent_happy" })).toHaveLength(0);
+      expect(
+        listIntentApplyAudits(db, { intentId: "intent_happy" }),
+      ).toHaveLength(0);
     } finally {
       db.close();
     }
@@ -462,11 +474,11 @@ describe("executeExternalApply policy & input gates", () => {
       insertIntent(db, {
         id: "intent_unknown_adapter",
         adapterKind: "github",
-        targetExternalId: "gh_issue_1"
+        targetExternalId: "gh_issue_1",
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const result = await executeExternalApply(
-        baseInput(db, { intentId: "intent_unknown_adapter", repoPath })
+        baseInput(db, { intentId: "intent_unknown_adapter", repoPath }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -484,11 +496,11 @@ describe("executeExternalApply policy & input gates", () => {
         id: "intent_unknown_type",
         adapterKind: "linear",
         intentType: "experimental_unrelated",
-        targetExternalId: "linear_issue_id_x"
+        targetExternalId: "linear_issue_id_x",
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const result = await executeExternalApply(
-        baseInput(db, { intentId: "intent_unknown_type", repoPath })
+        baseInput(db, { intentId: "intent_unknown_type", repoPath }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -504,11 +516,11 @@ describe("executeExternalApply policy & input gates", () => {
     try {
       insertIntent(db, {
         id: "intent_no_target",
-        targetExternalId: null
+        targetExternalId: null,
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const result = await executeExternalApply(
-        baseInput(db, { intentId: "intent_no_target", repoPath })
+        baseInput(db, { intentId: "intent_no_target", repoPath }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -528,7 +540,10 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
       const result = await executeExternalApply(
@@ -537,9 +552,9 @@ describe("executeExternalApply two-phase happy path", () => {
           repoPath,
           deps: {
             buildLinearClient: () => spy.client,
-            now: () => 1000
-          }
-        })
+            now: () => 1000,
+          },
+        }),
       );
 
       expect(result.ok).toBe(true);
@@ -591,23 +606,23 @@ describe("executeExternalApply two-phase happy path", () => {
         externalId,
         externalKey: "NGX-522",
         url: "https://linear.app/example/issue/NGX-522",
-        title: "Status issue"
+        title: "Status issue",
       });
       const payload = {
         state: "Done",
-        comment: "Native workflow finished and should close the tracker."
+        comment: "Native workflow finished and should close the tracker.",
       };
       insertIntent(db, {
         id: "intent_status_update",
         intentType: "status_update",
         targetExternalId: externalId,
         sourceItemId,
-        payload
+        payload,
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const idempotencyMarker = expectedIdempotencyMarker(
         "intent_status_update",
-        payload
+        payload,
       );
       const spy = makeApplySpy((input) => ({
         ok: true,
@@ -615,22 +630,23 @@ describe("executeExternalApply two-phase happy path", () => {
         issue: {
           id: externalId,
           key: "NGX-522",
-          url: "https://linear.app/example/issue/NGX-522"
+          url: "https://linear.app/example/issue/NGX-522",
         },
         comment: {
           id: "comment_status_update",
-          url: "https://linear.app/example/comment/status"
+          url: "https://linear.app/example/comment/status",
         },
         status: {
           transitioned: true,
           previousStateId: "state-started",
           previousStateName: "In Review",
           nextStateId: "state-done",
-          nextStateName: input.statusMutation?.kind === "by_name"
-            ? input.statusMutation.stateName
-            : null
+          nextStateName:
+            input.statusMutation?.kind === "by_name"
+              ? input.statusMutation.stateName
+              : null,
         },
-        idempotencyMarker
+        idempotencyMarker,
       }));
 
       const result = await executeExternalApply(
@@ -649,13 +665,13 @@ describe("executeExternalApply two-phase happy path", () => {
                   {
                     id: "comment_status_update",
                     body: `Momentum applied ${idempotencyMarker}`,
-                    url: "https://linear.app/example/comment/status"
-                  }
-                ]
+                    url: "https://linear.app/example/comment/status",
+                  },
+                ],
               }),
-            now: () => 1000
-          }
-        })
+            now: () => 1000,
+          },
+        }),
       );
 
       expect(result.ok).toBe(true);
@@ -666,17 +682,17 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.external.statusTransitioned).toBe(true);
       expect(result.external.nextStateName).toBe("Done");
       expect(getUpdateIntentById(db, "intent_status_update")?.status).toBe(
-        "applied"
+        "applied",
       );
 
       expect(spy.calls).toHaveLength(1);
       const sent = spy.calls[0]!;
       expect(sent.statusMutation).toEqual({
         kind: "by_name",
-        stateName: "Done"
+        stateName: "Done",
       });
       expect(sent.preview.commentBody).toContain(
-        "Native workflow finished and should close the tracker."
+        "Native workflow finished and should close the tracker.",
       );
       expect(sent.preview.idempotencyMarker).toBe(idempotencyMarker);
     } finally {
@@ -692,19 +708,19 @@ describe("executeExternalApply two-phase happy path", () => {
         id: "intent_status_update_bad",
         intentType: "status_update",
         targetExternalId: "linear_issue_id_status",
-        payload: { comment: "missing state" }
+        payload: { comment: "missing state" },
       });
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
 
       const result = await executeExternalApply(
         baseInput(db, {
           intentId: "intent_status_update_bad",
           repoPath,
-          deps: { buildLinearClient: () => spy.client }
-        })
+          deps: { buildLinearClient: () => spy.client },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -713,7 +729,7 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.message).toContain('"state" or "stateId"');
       expect(spy.calls).toHaveLength(0);
       expect(
-        listIntentApplyAudits(db, { intentId: "intent_status_update_bad" })
+        listIntentApplyAudits(db, { intentId: "intent_status_update_bad" }),
       ).toHaveLength(0);
     } finally {
       db.close();
@@ -728,22 +744,25 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(
         makeSuccessOutcome({
           alreadyApplied: true,
           commentId: "comment_existing",
           commentUrl: "https://linear.app/example/comment/existing",
-          idempotencyMarker
-        })
+          idempotencyMarker,
+        }),
       );
 
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => spy.client, now: () => 2000 }
-        })
+          deps: { buildLinearClient: () => spy.client, now: () => 2000 },
+        }),
       );
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
       expect(result.resultCode).toBe("already_applied");
@@ -765,7 +784,10 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(
         makeSuccessOutcome({
           alreadyApplied: true,
@@ -774,16 +796,16 @@ describe("executeExternalApply two-phase happy path", () => {
           commentUrl: "https://linear.app/example/comment/existing",
           nextStateId: "state_done",
           nextStateName: "Done",
-          idempotencyMarker
-        })
+          idempotencyMarker,
+        }),
       );
 
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => spy.client, now: () => 2050 }
-        })
+          deps: { buildLinearClient: () => spy.client, now: () => 2050 },
+        }),
       );
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
       expect(result.resultCode).toBe("applied");
@@ -808,7 +830,10 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
       const result = await executeExternalApply(
@@ -821,19 +846,19 @@ describe("executeExternalApply two-phase happy path", () => {
               makeRefreshClient({
                 marker: idempotencyMarker,
                 comments: [
-                  { id: "comment_other", body: "unrelated", url: null }
-                ]
+                  { id: "comment_other", body: "unrelated", url: null },
+                ],
               }),
-            now: () => 2100
-          }
-        })
+            now: () => 2100,
+          },
+        }),
       );
 
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
       expect(result.context.reconcile.status).toBe("mismatch_persists");
       expect(result.context.reconcile.warning).toContain(
-        "did not surface idempotency marker"
+        "did not surface idempotency marker",
       );
       expect(result.audit.lifecycleState).toBe("succeeded");
       expect(result.audit.reconcile.status).toBe("mismatch_persists");
@@ -851,22 +876,23 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify(
-              makeIssueRefreshPayload({
-                id: "linear_issue_id_happy",
-                identifier: "NGX-1001",
-                marker: idempotencyMarker
-              })
-            ),
-            { status: 200 }
-          )
-        );
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify(
+            makeIssueRefreshPayload({
+              id: "linear_issue_id_happy",
+              identifier: "NGX-1001",
+              marker: idempotencyMarker,
+            }),
+          ),
+          { status: 200 },
+        ),
+      );
 
       const result = await executeExternalApply({
         db,
@@ -878,8 +904,8 @@ describe("executeExternalApply two-phase happy path", () => {
         statusMutation: null,
         deps: {
           buildLinearClient: () => spy.client,
-          now: () => 2150
-        }
+          now: () => 2150,
+        },
       });
 
       expect(result.ok).toBe(true);
@@ -899,7 +925,10 @@ describe("executeExternalApply two-phase happy path", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
       const result = await executeExternalApply(
@@ -911,16 +940,18 @@ describe("executeExternalApply two-phase happy path", () => {
             updateIntentApplyAuditReconcile: () => {
               throw new Error("simulated reconcile update failure");
             },
-            now: () => 2200
-          }
-        })
+            now: () => 2200,
+          },
+        }),
       );
 
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
-      expect(result.context.reconcile.status).toBe("post_apply_reconcile_failed");
+      expect(result.context.reconcile.status).toBe(
+        "post_apply_reconcile_failed",
+      );
       expect(result.context.reconcile.warning).toContain(
-        "audit reconcile update threw"
+        "audit reconcile update threw",
       );
       expect(result.audit.lifecycleState).toBe("succeeded");
       expect(result.audit.reconcile.status).toBe("pending");
@@ -948,7 +979,7 @@ describe("executeExternalApply concurrency and write failures", () => {
           externalId,
           externalKey: "NGX-1001",
           url: "https://linear.app/example/issue/NGX-1001",
-          title: "Happy issue"
+          title: "Happy issue",
         },
         operatorReason: "first claim",
         operatorActor: "other@operator",
@@ -956,20 +987,21 @@ describe("executeExternalApply concurrency and write failures", () => {
         allowStatusMutation: false,
         mutationKind: "comment",
         previewSummary: "Linear comment on NGX-1001: source_satisfied",
-        idempotencyMarker: "momentum-intent:linear:intent_happy:abcdef0123456789",
-        now: 500
+        idempotencyMarker:
+          "momentum-intent:linear:intent_happy:abcdef0123456789",
+        now: 500,
       });
       if (!preClaim.ok) throw new Error("pre-claim must succeed");
 
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => spy.client, now: () => 600 }
-        })
+          deps: { buildLinearClient: () => spy.client, now: () => 600 },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -998,7 +1030,7 @@ describe("executeExternalApply concurrency and write failures", () => {
           externalId,
           externalKey: "NGX-1001",
           url: null,
-          title: null
+          title: null,
         },
         operatorReason: "first attempt",
         intentApplyPolicy: "external_apply_allowed",
@@ -1007,7 +1039,7 @@ describe("executeExternalApply concurrency and write failures", () => {
         previewSummary: "preview",
         idempotencyMarker:
           "momentum-intent:linear:intent_happy:bbbbbbbbbbbbbbbb",
-        now: 100
+        now: 100,
       });
       if (!claim.ok) throw new Error("claim must succeed");
       const finalize = finalizeIntentApply(db, {
@@ -1015,19 +1047,19 @@ describe("executeExternalApply concurrency and write failures", () => {
         lifecycleState: "audit_incomplete",
         resultCode: "audit_finalize_failed",
         resultMessage: "simulated",
-        now: 110
+        now: 110,
       });
       if (!finalize.ok) throw new Error("finalize must succeed");
 
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => spy.client, now: () => 200 }
-        })
+          deps: { buildLinearClient: () => spy.client, now: () => 200 },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -1046,14 +1078,14 @@ describe("executeExternalApply concurrency and write failures", () => {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const spy = makeApplySpy(
-        makeErrorOutcome("write_rejected", "Linear rejected the mutation")
+        makeErrorOutcome("write_rejected", "Linear rejected the mutation"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => spy.client, now: () => 700 }
-        })
+          deps: { buildLinearClient: () => spy.client, now: () => 700 },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -1080,7 +1112,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       const { intentId } = seedHappyPath(db);
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const spy = makeApplySpy(
-        makeErrorOutcome("write_rejected", "Linear rejected the mutation")
+        makeErrorOutcome("write_rejected", "Linear rejected the mutation"),
       );
 
       let finalizeCalls = 0;
@@ -1097,13 +1129,13 @@ describe("executeExternalApply concurrency and write failures", () => {
                 return {
                   ok: false,
                   code: "audit_already_finalized",
-                  message: "simulated finalize failure"
+                  message: "simulated finalize failure",
                 };
               }
               return finalizeIntentApply(db, input);
-            }
-          }
-        })
+            },
+          },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -1129,7 +1161,10 @@ describe("executeExternalApply concurrency and write failures", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
 
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
@@ -1146,14 +1181,14 @@ describe("executeExternalApply concurrency and write failures", () => {
             return {
               ok: false,
               code: "audit_already_finalized",
-              message: "simulated finalize failure"
+              message: "simulated finalize failure",
             };
           }
           return finalizeIntentApply(db, input);
-        }
+        },
       };
       const result = await executeExternalApply(
-        baseInput(db, { intentId, repoPath, deps })
+        baseInput(db, { intentId, repoPath, deps }),
       );
 
       expect(result.ok).toBe(false);
@@ -1188,7 +1223,10 @@ describe("executeExternalApply concurrency and write failures", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
       const result = await executeExternalApply(
@@ -1201,10 +1239,10 @@ describe("executeExternalApply concurrency and write failures", () => {
             markUpdateIntentApplied: () => ({
               ok: false,
               code: "intent_already_terminal",
-              message: "simulated mark-applied failure"
-            })
-          }
-        })
+              message: "simulated mark-applied failure",
+            }),
+          },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -1214,7 +1252,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.audit?.resultCode).toBe("mark_applied_failed");
       expect(result.context.reconcile).toEqual({
         status: "deferred",
-        warning: "external write applied; intent transition failed"
+        warning: "external write applied; intent transition failed",
       });
 
       const applyState = db
@@ -1242,7 +1280,10 @@ describe("executeExternalApply concurrency and write failures", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const intent = getUpdateIntentById(db, intentId);
       if (!intent) throw new Error("intent missing");
-      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const idempotencyMarker = expectedIdempotencyMarker(
+        intentId,
+        intent.payload,
+      );
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
       const result = await executeExternalApply(
@@ -1259,17 +1300,17 @@ describe("executeExternalApply concurrency and write failures", () => {
                         decision_reason = 'external_apply: concurrent operator',
                         applied_at = ?,
                         updated_at = ?
-                  WHERE id = ?`
+                  WHERE id = ?`,
               ).run(input.now ?? 875, input.now ?? 875, input.intentId);
               return {
                 ok: false,
                 code: "intent_already_terminal",
                 message: "simulated concurrent apply",
-                currentStatus: "applied"
+                currentStatus: "applied",
               };
-            }
-          }
-        })
+            },
+          },
+        }),
       );
 
       expect(result.ok).toBe(true);
@@ -1296,14 +1337,14 @@ describe("executeExternalApply concurrency and write failures", () => {
       const client: LinearExternalUpdateClient = {
         async apply() {
           throw new Error("network kaboom");
-        }
+        },
       };
       const result = await executeExternalApply(
         baseInput(db, {
           intentId,
           repoPath,
-          deps: { buildLinearClient: () => client, now: () => 900 }
-        })
+          deps: { buildLinearClient: () => client, now: () => 900 },
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -1324,7 +1365,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       const client: LinearExternalUpdateClient = {
         async apply() {
           throw new Error("network kaboom");
-        }
+        },
       };
 
       let finalizeCalls = 0;
@@ -1341,13 +1382,13 @@ describe("executeExternalApply concurrency and write failures", () => {
                 return {
                   ok: false,
                   code: "audit_already_finalized",
-                  message: "simulated finalize failure"
+                  message: "simulated finalize failure",
                 };
               }
               return finalizeIntentApply(db, input);
-            }
-          }
-        })
+            },
+          },
+        }),
       );
 
       expect(result.ok).toBe(false);
@@ -1372,14 +1413,13 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        new Response(
-          JSON.stringify({ data: { issue: null } }),
-          { status: 200 }
-        )
+        new Response(JSON.stringify({ data: { issue: null } }), {
+          status: 200,
+        }),
       );
     const client = defaultBuildLinearClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
-      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: overrideEndpoint
+      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: overrideEndpoint,
     });
     await client.apply({
       preview: {
@@ -1391,13 +1431,14 @@ describe("default Linear client factories honor endpoint env var overrides", () 
           externalId: "linear_issue_id_override",
           externalKey: null,
           url: null,
-          title: null
+          title: null,
         },
         mutationKind: "comment",
         summary: "preview summary",
-        commentBody: "marker line\nmomentum-intent:linear:override:0000000000000000",
-        idempotencyMarker: "momentum-intent:linear:override:0000000000000000"
-      }
+        commentBody:
+          "marker line\nmomentum-intent:linear:override:0000000000000000",
+        idempotencyMarker: "momentum-intent:linear:override:0000000000000000",
+      },
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
@@ -1410,17 +1451,16 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        new Response(
-          JSON.stringify({ data: { issue: null } }),
-          { status: 200 }
-        )
+        new Response(JSON.stringify({ data: { issue: null } }), {
+          status: 200,
+        }),
       );
     const client = defaultBuildLinearRefreshClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
-      [LINEAR_REFRESH_ENDPOINT_ENV_VAR]: overrideEndpoint
+      [LINEAR_REFRESH_ENDPOINT_ENV_VAR]: overrideEndpoint,
     });
     await client.refresh({
-      target: { kind: "id", value: "linear_issue_id_override" }
+      target: { kind: "id", value: "linear_issue_id_override" },
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
@@ -1432,14 +1472,13 @@ describe("default Linear client factories honor endpoint env var overrides", () 
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
-        new Response(
-          JSON.stringify({ data: { issue: null } }),
-          { status: 200 }
-        )
+        new Response(JSON.stringify({ data: { issue: null } }), {
+          status: 200,
+        }),
       );
     const client = defaultBuildLinearClient({
       [LINEAR_API_KEY_ENV_VAR]: "test-key",
-      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: "   "
+      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: "   ",
     });
     await client.apply({
       preview: {
@@ -1451,13 +1490,14 @@ describe("default Linear client factories honor endpoint env var overrides", () 
           externalId: "linear_issue_id_fallback",
           externalKey: null,
           url: null,
-          title: null
+          title: null,
         },
         mutationKind: "comment",
         summary: "preview summary",
-        commentBody: "marker line\nmomentum-intent:linear:fallback:0000000000000000",
-        idempotencyMarker: "momentum-intent:linear:fallback:0000000000000000"
-      }
+        commentBody:
+          "marker line\nmomentum-intent:linear:fallback:0000000000000000",
+        idempotencyMarker: "momentum-intent:linear:fallback:0000000000000000",
+      },
     });
     expect(fetchSpy).toHaveBeenCalled();
     const firstCall = fetchSpy.mock.calls[0];
@@ -1475,7 +1515,7 @@ describe("executeExternalApply adapter registry override", () => {
       const repoPath = makeRepo(externalApplyAllowedPolicy());
       const emptyAdapters = new Map<string, ExternalUpdateAdapter>();
       const spy = makeApplySpy(
-        makeErrorOutcome("validation_failed", "must not call")
+        makeErrorOutcome("validation_failed", "must not call"),
       );
       const result = await executeExternalApply(
         baseInput(db, {
@@ -1483,9 +1523,9 @@ describe("executeExternalApply adapter registry override", () => {
           repoPath,
           deps: {
             adapters: emptyAdapters,
-            buildLinearClient: () => spy.client
-          }
-        })
+            buildLinearClient: () => spy.client,
+          },
+        }),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");

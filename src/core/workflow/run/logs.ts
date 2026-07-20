@@ -18,7 +18,7 @@ import {
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   listExecutorAttemptsForRun,
-  listExecutorRoundsForRun
+  listExecutorRoundsForRun,
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -26,12 +26,12 @@ import type {
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
   ExecutorAttemptRecord,
-  ExecutorRoundRecord
+  ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
-  type WorkflowRunDetail
+  type WorkflowRunDetail,
 } from "./status.js";
 
 /**
@@ -63,7 +63,7 @@ export type WorkflowRunLogsEnvelope = {
 export function loadWorkflowRunLogs(
   db: MomentumDb,
   runId: string,
-  options: LoadWorkflowRunLogsOptions = {}
+  options: LoadWorkflowRunLogsOptions = {},
 ): WorkflowRunLogsEnvelope | null {
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
@@ -74,13 +74,13 @@ export function loadWorkflowRunLogs(
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
     checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
     findings: listExecutorFindingsForRound(db, round.roundId),
-    decisions: listExecutorDecisionsForRound(db, round.roundId)
+    decisions: listExecutorDecisionsForRound(db, round.roundId),
   }));
   return {
     schemaVersion: WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
     generatedAt,
     detail,
     attempts,
-    rounds
+    rounds,
   };
 }

@@ -76,9 +76,7 @@ import {
 } from "./reducer.js";
 import { isExecutorName } from "../../workflow/definition/definition.js";
 
-const ATTEMPT_STATE_SET: ReadonlySet<string> = new Set(
-  EXECUTOR_ATTEMPT_STATES,
-);
+const ATTEMPT_STATE_SET: ReadonlySet<string> = new Set(EXECUTOR_ATTEMPT_STATES);
 const ROUND_STATE_SET: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
 const CLASSIFICATION_SET: ReadonlySet<string> = new Set(
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
@@ -502,12 +500,7 @@ export function updateExecutorAttemptState(
       currentSnapshot.updatedAt,
     );
   if (Number(updateResult.changes) === 0) {
-    return handleAttemptPostWriteConflict(
-      db,
-      attemptId,
-      toState,
-      options,
-    );
+    return handleAttemptPostWriteConflict(db, attemptId, toState, options);
   }
   return next;
 }

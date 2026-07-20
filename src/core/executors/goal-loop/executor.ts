@@ -590,10 +590,7 @@ export function goalLoopAttemptId(
  * globally unique (the `executor_rounds` primary key) and consistent with the
  * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
-export function goalLoopRoundId(
-  attemptId: string,
-  roundIndex: number,
-): string {
+export function goalLoopRoundId(attemptId: string, roundIndex: number): string {
   return `${attemptId}::round::${roundIndex}`;
 }
 

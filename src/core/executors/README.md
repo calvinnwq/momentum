@@ -42,11 +42,11 @@ that can record observations/evidence but cannot classify terminal state.
 `sdk/driver.ts` applies daemon-owned decisions one bounded tick at a time.
 `sdk/envelope.ts` is Momentum's SQLite-backed host implementation; its
 daemon-only controller owns a separate frozen facade passed to executor code.
-Facade writes are available only while the invocation is `running`; an operator
+Facade writes are available only while the attempt is `running`; an operator
 wait or any other non-running state revokes executor write access.
-Classification, its checkpoint, and invocation settlement commit atomically on
+Classification, its checkpoint, and attempt settlement commit atomically on
 the controller after a tick returns.
-The controller also rejects classification decisions whose invocation or round
+The controller also rejects classification decisions whose attempt or round
 state is inconsistent with the classification before writing any settlement.
 `goal-loop/sdk.ts` and `single-shot/sdk.ts` are the native profile-backed built-ins: `goal-loop`, `one-shot`, and `script` implement the same `Executor` interface and accept narrow runner adapters as lifecycle extension points.
 `delegate-supervisor/executor.ts` remains the default coding implementation route, while `live-step/sdk-executor.ts` retains the compatibility `no-mistakes` identity.
@@ -83,21 +83,21 @@ Both read-only and finalizing built-ins require clean tracked/untracked status p
 Ignored-worktree comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants.
 Directory-only mode or timestamp mutations therefore remain residue.
 The comparison is intentionally strict; large ignored trees and concurrent cache churn remain operational risks, so mutable caches should live outside the supervised worktree when practical.
-New single-shot dispatches insert their invocation, initial running round, and
+New single-shot dispatches insert their attempt, initial running round, and
 hashed dispatch-binding checkpoint in one transaction after resolving runtime
-inputs, so reattach never inherits a new invocation without its complete binding.
+inputs, so reattach never inherits a new attempt without its complete binding.
 Registration/discovery, structural-preflight schema validation, and daemon tick
 driving remain separate runtime concerns joined by the same executor identity and
 declared config schema.
 Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
-Malformed JavaScript or casted returns leave only the atomically materialized invocation, running round, and dispatch-binding checkpoint for recovery.
+Malformed JavaScript or casted returns leave only the atomically materialized attempt, running round, and dispatch-binding checkpoint for recovery.
 Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
 The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
-After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
+After finalization, its authoritative evidence is the `executor_attempts` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete goal-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
 The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while legacy definitions may still run it beneath `goal-loop`.
-In both cases it must report through Momentum invocation and round evidence rather than become an executor family or make `.gnhf/runs` authoritative state.
+In both cases it must report through Momentum attempt and round evidence rather than become an executor family or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization
 
@@ -127,7 +127,7 @@ projection. `src/adapters/no-mistakes-tool-adapter.ts` is the narrow external
 edge: it hands off to no-mistakes, preserves terminal handoff candidate evidence, and reads normalized state without owning
 durable lifecycle decisions. The older no-mistakes mirror entrypoints remain as
 compatibility callers of the same core classification authority while existing
-recorded `no-mistakes` invocations remain readable.
+recorded `no-mistakes` attempts remain readable.
 The profile-backed host writes its step-scoped receipt before no-mistakes launch and before delegated reset or commit mutation.
 After the wrapper returns, the no-mistakes receipt binds the exact bounded result digest, and the selected mutation, verified no-change acceptance, failed-finalization retry, or prepared-commit recovery revalidates it before mutation or handoff completion.
 Successful no-mistakes handoff finalization accepts a verified clean worktree with no changes to commit; failed verification still rejects it.
@@ -144,7 +144,7 @@ Canonical no-mistakes normalization rejects ambiguous AXI fields and malformed s
 Only decisions with neither a chosen action nor a non-blank resolution are eligible for a new human gate; partial resolution evidence is skipped rather than gated again.
 The selected supervisor decision id is persisted before gate classification, allowing stale dispatch recovery to reuse or recreate the workflow gate without selecting a different unresolved decision.
 An unclassified delegate round with a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation is also resumable after stale dispatch recovery so it can finish classification and parking.
-Profile-backed recovery may take over an active lock for the same interrupted deterministic invocation after lock expiry or after the scheduler proves and releases the matching stale dispatch owner, with compare-and-swap fencing against concurrent or newer ownership.
+Profile-backed recovery may take over an active lock for the same interrupted step-scoped dispatch correlation after lock expiry or after the scheduler proves and releases the matching stale dispatch owner, with compare-and-swap fencing against concurrent or newer ownership.
 
 Every current adapter → executor-core edge has an explicit SDK disposition:
 
@@ -154,7 +154,7 @@ Every current adapter → executor-core edge has an explicit SDK disposition:
 | `live-wrapper-registry.ts` → `sdk/portable-command.ts`                                                                                       | Resolved: the dependency-free portable command identity validator is official SDK config surface shared with host profiles.                                                                                                                                      |
 | `git-transaction.ts` → `runner/types.ts`                                                                                                     | Resolved: type-only use of the SDK `CommitIntent` shape.                                                                                                                                                                                                         |
 | `no-mistakes-executor.ts` → `delegate-supervisor/classifier.ts`                                                                              | Resolved compatibility edge: recorded legacy mirror entrypoints delegate to the official supervision classification authority instead of carrying a second classifier.                                                                                           |
-| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`                                          | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` invocations, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter.                                                      |
+| `no-mistakes-executor.ts` / `no-mistakes-orchestrator.ts` → `loop/*` and `no-mistakes/mechanism.ts`                                          | Temporary compatibility edge: the legacy mirror remains readable for recorded `no-mistakes` attempts, while new coding definitions use the core `delegate-supervisor` lifecycle and narrow tool adapter.                                                         |
 | `no-mistakes-tool-adapter.ts` → `delegate-supervisor/types.ts` and `no-mistakes/mechanism.ts`                                                | Resolved: the adapter implements the official delegated-tool lifecycle interface and reuses the tool-owned external-state reader / normalizer; it imports no executor persistence or controller internals.                                                       |
 | `profile-backed-delegate-tool-adapter.ts` → `delegate-supervisor/{classifier,types}.ts`, `live-step/sdk-executor.ts`, and `runner/result.ts` | Resolved host-adapter edge: the profile bridge implements the delegated-tool interface, uses the single classification authority and official runner parser, and reuses live-step finalization without importing executor persistence or the durable controller. |
 | `real-workflow-probe.ts` → `smoke/workflow-harness.ts`                                                                                       | Temporary, explicitly re-justified: this is gated smoke/test support and will move behind a test-support boundary rather than become SDK runtime.                                                                                                                |

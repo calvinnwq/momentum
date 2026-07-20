@@ -81,8 +81,9 @@ export class LiveStepSdkExecutor implements Executor<
     const existing =
       [...context.state.rounds]
         .reverse()
-        .find((snapshot) => snapshot.round.attemptNumber === attempt.attemptNumber) ??
-      null;
+        .find(
+          (snapshot) => snapshot.round.attemptNumber === attempt.attemptNumber,
+        ) ?? null;
     if (existing !== null) {
       const completed = [...existing.checkpoints]
         .reverse()

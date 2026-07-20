@@ -58,9 +58,7 @@ import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import { isTerminalExecutorAttemptState } from "../../executors/loop/reducer.js";
-import {
-  loadLatestExecutorAttemptForStep,
-} from "../../executors/loop/persist.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 
 import { terminalizeDispatchedExecutorAttempt } from "./executor-evidence.js";
 import {

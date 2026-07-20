@@ -426,10 +426,7 @@ export async function runSingleShotStep(
     attemptNumber: input.attemptNumber,
     startedAt: attemptStartedAt,
   });
-  const existingAttempt = loadExecutorAttempt(
-    db,
-    plannedAttempt.attemptId,
-  );
+  const existingAttempt = loadExecutorAttempt(db, plannedAttempt.attemptId);
   let attempt = plannedAttempt;
   let start = planSingleShotRoundStartForAttempt({
     attempt: plannedAttempt,
@@ -463,8 +460,7 @@ export async function runSingleShotStep(
   } else {
     assertMatchingSingleShotAttempt(existingAttempt, plannedAttempt);
     if (
-      listExecutorRoundsForAttempt(db, existingAttempt.attemptId)
-        .length === 0
+      listExecutorRoundsForAttempt(db, existingAttempt.attemptId).length === 0
     ) {
       throw new Error(
         `Cannot reattach executor attempt ${existingAttempt.attemptId}: no durable round dispatch binding exists.`,

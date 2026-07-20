@@ -143,7 +143,10 @@ function validatePromptInput(input: GoalLoopRoundPromptInput): void {
   if (!Number.isInteger(input.round.roundIndex) || input.round.roundIndex < 0) {
     throw new Error("roundIndex must be a non-negative integer");
   }
-  if (!Number.isInteger(input.round.attemptNumber) || input.round.attemptNumber < 1) {
+  if (
+    !Number.isInteger(input.round.attemptNumber) ||
+    input.round.attemptNumber < 1
+  ) {
     throw new Error("attempt must be a positive integer");
   }
   if (!/^[0-9a-f]{40}$/.test(input.repo.baseHead)) {

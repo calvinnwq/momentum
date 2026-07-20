@@ -251,12 +251,10 @@ export class DurableExecutorEnvelope {
       const now = this.#now();
       const attempt = this.#loadAttempt();
       this.#assertExecutorWritable(attempt, "heartbeat attempt");
-      updateExecutorAttemptState(
-        this.#db,
-        this.#attemptId,
-        attempt.state,
-        { heartbeatAt: now, now },
-      );
+      updateExecutorAttemptState(this.#db, this.#attemptId, attempt.state, {
+        heartbeatAt: now,
+        now,
+      });
       const current = this.#listStepRounds(attempt).at(-1);
       if (
         current !== undefined &&
@@ -427,9 +425,7 @@ export class DurableExecutorEnvelope {
         decision.attemptState,
         {
           heartbeatAt: now,
-          finishedAt: isTerminalExecutorAttemptState(
-            decision.attemptState,
-          )
+          finishedAt: isTerminalExecutorAttemptState(decision.attemptState)
             ? now
             : null,
           now,
@@ -542,7 +538,8 @@ export class DurableExecutorEnvelope {
     if (round.executorFamily !== attempt.executorFamily) {
       mismatches.push("executorFamily");
     }
-    if (round.attemptNumber !== attempt.attemptNumber) mismatches.push("attemptNumber");
+    if (round.attemptNumber !== attempt.attemptNumber)
+      mismatches.push("attemptNumber");
     if (mismatches.length > 0) {
       throw new ExecutorEnvelopeAccessError(
         `Round ${round.roundId} does not match its bound attempt: ${mismatches.join(", ")}.`,
@@ -678,9 +675,7 @@ const COMPLETION_CLASSIFICATIONS: ReadonlySet<string> = new Set(
 const HUMAN_GATE_TYPES: ReadonlySet<string> = new Set(
   EXECUTOR_HUMAN_GATE_TYPES,
 );
-const ATTEMPT_STATES: ReadonlySet<string> = new Set(
-  EXECUTOR_ATTEMPT_STATES,
-);
+const ATTEMPT_STATES: ReadonlySet<string> = new Set(EXECUTOR_ATTEMPT_STATES);
 const ROUND_STATES: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
 
 function invalidInput(message: string): never {
@@ -981,9 +976,7 @@ function checkpointIdExists(db: MomentumDb, checkpointId: string): boolean {
   );
 }
 
-function cloneAttempt(
-  attempt: ExecutorAttemptRecord,
-): ExecutorAttemptRecord {
+function cloneAttempt(attempt: ExecutorAttemptRecord): ExecutorAttemptRecord {
   return { ...attempt };
 }
 

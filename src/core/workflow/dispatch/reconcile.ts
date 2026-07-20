@@ -45,7 +45,7 @@
 
 import {
   isTerminalExecutorAttemptState,
-  type ExecutorAttemptState
+  type ExecutorAttemptState,
 } from "../../executors/loop/reducer.js";
 import type { WorkflowStepTerminalState } from "../step/transitions.js";
 
@@ -81,7 +81,7 @@ const CLEAN_TERMINAL_STEP_STATE: Partial<
 > = {
   succeeded: "succeeded",
   failed: "failed",
-  cancelled: "canceled"
+  cancelled: "canceled",
 };
 
 const FINALIZE_REASON: Partial<Record<ExecutorAttemptState, string>> = {
@@ -90,7 +90,7 @@ const FINALIZE_REASON: Partial<Record<ExecutorAttemptState, string>> = {
   failed:
     "Dispatch attempt reached terminal `failed`; finalizing the workflow step failed.",
   cancelled:
-    "Dispatch attempt reached terminal `cancelled`; finalizing the workflow step canceled."
+    "Dispatch attempt reached terminal `cancelled`; finalizing the workflow step canceled.",
 };
 
 /**
@@ -104,7 +104,7 @@ const FINALIZE_REASON: Partial<Record<ExecutorAttemptState, string>> = {
  * fabricates a clean finalization over an outcome that needs operator inspection.
  */
 export function planWorkflowStepReconciliation(
-  attemptState: ExecutorAttemptState
+  attemptState: ExecutorAttemptState,
 ): WorkflowStepReconciliationPlan {
   if (!isTerminalExecutorAttemptState(attemptState)) {
     return { action: "not_terminal" };
@@ -117,7 +117,7 @@ export function planWorkflowStepReconciliation(
       stepState,
       reason:
         FINALIZE_REASON[attemptState] ??
-        `Dispatch attempt reached terminal \`${attemptState}\`; finalizing the workflow step.`
+        `Dispatch attempt reached terminal \`${attemptState}\`; finalizing the workflow step.`,
     };
   }
 
@@ -127,6 +127,6 @@ export function planWorkflowStepReconciliation(
   return {
     action: "manual_recovery",
     attemptState,
-    reason: `Dispatch attempt ended \`${attemptState}\`; routing the dispatched step to manual recovery rather than a clean workflow-step terminal.`
+    reason: `Dispatch attempt ended \`${attemptState}\`; routing the dispatched step to manual recovery rather than a clean workflow-step terminal.`,
   };
 }

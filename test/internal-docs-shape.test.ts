@@ -60,7 +60,7 @@ describe("repo internal docs boundary", () => {
         "internal/milestones/m10.md",
         "SPEC.md",
         "docs/recovery.md",
-      ])
+      ]),
     ).toEqual([
       "internal/README.md: repo-local internal docs are not allowed",
       "internal/contracts/runtime.md: repo-local internal docs are not allowed",
@@ -69,12 +69,20 @@ describe("repo internal docs boundary", () => {
   });
 
   it("keeps compact source-truth anchors in living repo docs", () => {
-    for (const rel of ["AGENTS.md", "ARCHITECTURE.md", "SPEC.md", "VISION.md"]) {
+    for (const rel of [
+      "AGENTS.md",
+      "ARCHITECTURE.md",
+      "SPEC.md",
+      "VISION.md",
+    ]) {
       const body = readDoc(rel);
-      expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(0);
-      expect(body, `${rel} should route long-form docs to the personal wiki`).toContain(
-        "/Workspaces/Momentum"
+      expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(
+        0,
       );
+      expect(
+        body,
+        `${rel} should route long-form docs to the personal wiki`,
+      ).toContain("/Workspaces/Momentum");
     }
 
     const spec = readDoc("SPEC.md");
@@ -87,22 +95,30 @@ describe("repo internal docs boundary", () => {
       "Runtime Consolidation",
       "api.linear.app",
     ]) {
-      expect(spec, `SPEC.md should preserve current contract term ${phrase}`).toContain(phrase);
+      expect(
+        spec,
+        `SPEC.md should preserve current contract term ${phrase}`,
+      ).toContain(phrase);
     }
   });
 
   it("documents where internal docs go and how exceptions are reviewed", () => {
     for (const rel of ["AGENTS.md", "SPEC.md", "VISION.md"]) {
       const body = readDoc(rel);
-      expect(body, `${rel} should keep the personal wiki as the durable internal home`).toContain(
-        "/Workspaces/Momentum"
+      expect(
+        body,
+        `${rel} should keep the personal wiki as the durable internal home`,
+      ).toContain("/Workspaces/Momentum");
+      expect(
+        body,
+        `${rel} should make internal-doc exceptions explicit`,
+      ).toContain(
+        "There are no standing exceptions for repo-local `internal/` docs",
       );
-      expect(body, `${rel} should make internal-doc exceptions explicit`).toContain(
-        "There are no standing exceptions for repo-local `internal/` docs"
-      );
-      expect(body, `${rel} should require tests for any future exception`).toContain(
-        "docs-boundary tests"
-      );
+      expect(
+        body,
+        `${rel} should require tests for any future exception`,
+      ).toContain("docs-boundary tests");
     }
   });
 
@@ -124,7 +140,10 @@ describe("repo internal docs boundary", () => {
       hits.push(...matches.map((match) => `${rel}: ${match}`));
     }
 
-    expect(hits, `repo markdown must not reference internal paths: ${hits.join("; ")}`).toEqual([]);
+    expect(
+      hits,
+      `repo markdown must not reference internal paths: ${hits.join("; ")}`,
+    ).toEqual([]);
   });
 
   it("keeps public docs free of wiki-only internal routing details", () => {
@@ -140,6 +159,9 @@ describe("repo internal docs boundary", () => {
       if (body.includes("/Workspaces/Momentum")) hits.push(rel);
     }
 
-    expect(hits, "public docs should not mention the private wiki workspace").toEqual([]);
+    expect(
+      hits,
+      "public docs should not mention the private wiki workspace",
+    ).toEqual([]);
   });
 });

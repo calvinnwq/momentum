@@ -2065,9 +2065,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       expect(implFirst.legacy_invocation_id).toBe(
         "run-1::implementation::dispatch",
       );
-      expect(
-        JSON.parse(String(implFirst.legacy_provenance)),
-      ).toMatchObject({
+      expect(JSON.parse(String(implFirst.legacy_provenance))).toMatchObject({
         legacyInvocationId: "run-1::implementation::dispatch",
         source: "reconstructed_from_round_evidence",
       });
@@ -2080,9 +2078,9 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       expect(implLatest.started_at).toBe(2000);
       expect(implLatest.heartbeat_at).toBe(2500);
       expect(implLatest.finished_at).toBeNull();
-      expect(
-        JSON.parse(String(implLatest.legacy_provenance)),
-      ).toMatchObject({ source: "legacy_invocation_row" });
+      expect(JSON.parse(String(implLatest.legacy_provenance))).toMatchObject({
+        source: "legacy_invocation_row",
+      });
 
       expect(preflight.attempt_id).toBe("run-1::preflight::dispatch");
       expect(preflight.attempt_number).toBe(1);
@@ -2213,9 +2211,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       rounds: db
         .prepare("SELECT * FROM executor_rounds ORDER BY round_id")
         .all(),
-      gates: db
-        .prepare("SELECT * FROM workflow_gates ORDER BY gate_id")
-        .all(),
+      gates: db.prepare("SELECT * FROM workflow_gates ORDER BY gate_id").all(),
     });
     const before = snapshot(first);
     first.close();

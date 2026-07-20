@@ -278,9 +278,7 @@ describe("executor SDK core contract", () => {
     expect(beforeDecision?.state).toBe("mirroring_external_state");
     expect(beforeDecision?.classification).toBeNull();
     expect(beforeDecision?.executorRecommendation).toBeNull();
-    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe(
-      "running",
-    );
+    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
 
     envelope.applyDaemonDecision(
       {
@@ -837,9 +835,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("forced attempt settlement failure");
 
-    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe(
-      "running",
-    );
+    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
       state: "mirroring_external_state",
       classification: null,
@@ -872,9 +868,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("expected attempt state running, got succeeded");
 
-    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe(
-      "running",
-    );
+    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
       state: "mirroring_external_state",
       classification: null,
@@ -907,9 +901,7 @@ describe("executor SDK core contract", () => {
       ),
     ).toThrow("incompatible round state failed");
 
-    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe(
-      "running",
-    );
+    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
       state: "mirroring_external_state",
       classification: null,
@@ -998,9 +990,7 @@ describe("executor SDK core contract", () => {
       ).toThrow(/incompatible (recovery code|human gate)/);
     }
 
-    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe(
-      "running",
-    );
+    expect(loadExecutorAttempt(db, attempt.attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, round.roundId)).toMatchObject({
       state: "mirroring_external_state",
       classification: null,

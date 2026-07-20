@@ -59,11 +59,7 @@ const STEP_RUN_ID = "step-1";
 const STEP_KEY = "no-mistakes";
 const ATTEMPT = 1;
 const HEAD_SHA = "a".repeat(40);
-const ATTEMPT_ID = noMistakesAttemptId(
-  WORKFLOW_RUN_ID,
-  STEP_RUN_ID,
-  ATTEMPT,
-);
+const ATTEMPT_ID = noMistakesAttemptId(WORKFLOW_RUN_ID, STEP_RUN_ID, ATTEMPT);
 const ROUND_ID = noMistakesRoundId(ATTEMPT_ID);
 
 const tempRoots: string[] = [];

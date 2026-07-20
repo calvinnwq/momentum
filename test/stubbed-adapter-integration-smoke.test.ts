@@ -11,11 +11,11 @@ import {
   reconcileLinearSource,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
-  type LinearReconciliationFetchPageResult
+  type LinearReconciliationFetchPageResult,
 } from "../src/core/source/reconciliation.js";
 import {
   listSourceItems,
-  listSourceSnapshotsForItem
+  listSourceSnapshotsForItem,
 } from "../src/core/source/items.js";
 import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
@@ -24,7 +24,7 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
-  WORKFLOW_DISPATCH_RESULT_STATUS
+  WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 
 const NOW = 1_700_000_000_000;
@@ -45,7 +45,9 @@ function makeTempDir(prefix = "momentum-ngx-371-smoke-"): string {
   return fs.realpathSync(dir);
 }
 
-function makeLinearIssue(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeLinearIssue(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     id: overrides["id"] ?? "issue-ngx-371",
     identifier: overrides["identifier"] ?? "NGX-371",
@@ -57,39 +59,43 @@ function makeLinearIssue(overrides: Record<string, unknown> = {}): Record<string
     project: overrides["project"] ?? {
       id: "momentum-project",
       key: "NGX",
-      name: "Momentum"
+      name: "Momentum",
     },
     projectMilestone: overrides["projectMilestone"] ?? {
       id: "adapter-test-coverage",
-      name: "Adapter Test Coverage"
+      name: "Adapter Test Coverage",
     },
     labels: overrides["labels"] ?? { nodes: [] },
     assignee: overrides["assignee"] ?? null,
     priority: overrides["priority"] ?? 0,
     updatedAt: overrides["updatedAt"] ?? "2026-06-11T00:00:00.000Z",
-    ...overrides
+    ...overrides,
   };
 }
 
 function fakeLinearClient(
-  pages: readonly LinearReconciliationFetchPageResult[]
-): LinearReconciliationClient & { readonly requests: LinearReconciliationFetchPageInput[] } {
+  pages: readonly LinearReconciliationFetchPageResult[],
+): LinearReconciliationClient & {
+  readonly requests: LinearReconciliationFetchPageInput[];
+} {
   const requests: LinearReconciliationFetchPageInput[] = [];
   let pageIndex = 0;
   return {
     requests,
-    fetchPage(input: LinearReconciliationFetchPageInput): LinearReconciliationFetchPageResult {
+    fetchPage(
+      input: LinearReconciliationFetchPageInput,
+    ): LinearReconciliationFetchPageResult {
       requests.push(input);
       const page = pages[pageIndex];
       pageIndex += 1;
       return page ?? { ok: true, page: { issues: [], nextCursor: null } };
-    }
+    },
   };
 }
 
 function seedCodingWorkflowRun(
   db: MomentumDb,
-  input: { runId: string; repoPath: string; objective: string }
+  input: { runId: string; repoPath: string; objective: string },
 ): void {
   persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
@@ -97,20 +103,20 @@ function seedCodingWorkflowRun(
     runId: input.runId,
     repoPath: input.repoPath,
     objective: input.objective,
-    now: NOW
+    now: NOW,
   });
 }
 
 function approveAndClaimPreflight(db: MomentumDb, runId: string) {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
   ).run(runId);
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId: "preflight",
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW + 1
+    now: NOW + 1,
   });
   expect(claim.ok).toBe(true);
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
@@ -118,7 +124,9 @@ function approveAndClaimPreflight(db: MomentumDb, runId: string) {
 }
 
 function countRows(db: MomentumDb, table: string): number {
-  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
+    n: number;
+  };
   return row.n;
 }
 
@@ -136,22 +144,22 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
               makeLinearIssue({
                 id: "issue-ngx-371",
                 identifier: "NGX-371",
-                updatedAt: 1_700_000_001_000
-              })
+                updatedAt: 1_700_000_001_000,
+              }),
             ],
-            nextCursor: null
-          }
-        }
+            nextCursor: null,
+          },
+        },
       ]);
 
       const reconciliation = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "momentum-project" } },
-        { now: () => NOW + 2 }
+        { now: () => NOW + 2 },
       );
 
       expect(client.requests).toEqual([
-        { cursor: null, filters: { projectId: "momentum-project" } }
+        { cursor: null, filters: { projectId: "momentum-project" } },
       ]);
       expect(reconciliation.run.state).toBe("succeeded");
       expect(reconciliation.counts).toMatchObject({
@@ -159,7 +167,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         itemsObserved: 1,
         itemsCreated: 1,
         itemsUpdated: 0,
-        itemsErrored: 0
+        itemsErrored: 0,
       });
 
       const sourceItems = listSourceItems(db, { adapterKind: "linear" });
@@ -168,23 +176,27 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         externalId: "issue-ngx-371",
         externalKey: "NGX-371",
         title: "Stubbed adapter integration smoke",
-        status: "Todo"
+        status: "Todo",
       });
-      expect(listSourceSnapshotsForItem(db, sourceItems[0]?.id ?? "")).toHaveLength(1);
-      expect(listSourceReconciliationRuns(db, { adapterKind: "linear" })).toHaveLength(1);
+      expect(
+        listSourceSnapshotsForItem(db, sourceItems[0]?.id ?? ""),
+      ).toHaveLength(1);
+      expect(
+        listSourceReconciliationRuns(db, { adapterKind: "linear" }),
+      ).toHaveLength(1);
 
       const runId = "ngx-371-stubbed-happy-path";
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: `Dispatch workflow evidence for ${sourceItems[0]?.externalKey}`
+        objective: `Dispatch workflow evidence for ${sourceItems[0]?.externalKey}`,
       });
       const claim = approveAndClaimPreflight(db, runId);
 
       const dispatch = executeWorkflowStepDispatch(claim, {
         db,
         workerId: WORKER,
-        now: NOW + 3
+        now: NOW + 3,
       });
 
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
@@ -197,7 +209,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       const attempt = db
         .prepare(
           `SELECT workflow_run_id, step_key, executor_family, state, attempt
-             FROM executor_attempts WHERE workflow_run_id = ?`
+             FROM executor_attempts WHERE workflow_run_id = ?`,
         )
         .get(runId) as Record<string, unknown>;
       expect(attempt).toEqual({
@@ -205,13 +217,13 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         step_key: "preflight",
         executor_family: "one-shot",
         state: "running",
-        attempt: 1
+        attempt: 1,
       });
 
       const round = db
         .prepare(
           `SELECT workflow_run_id, step_key, executor_family, state, artifact_root
-             FROM executor_rounds WHERE workflow_run_id = ?`
+             FROM executor_rounds WHERE workflow_run_id = ?`,
         )
         .get(runId) as Record<string, unknown>;
       expect(round).toEqual({
@@ -219,21 +231,21 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         step_key: "preflight",
         executor_family: "one-shot",
         state: "pending",
-        artifact_root: null
+        artifact_root: null,
       });
 
       const workflow = db
         .prepare(
           `SELECT state, monitor_last_seen_state AS monitorState,
                   monitor_step AS monitorStep, monitor_terminal AS monitorTerminal
-             FROM workflow_runs WHERE id = ?`
+             FROM workflow_runs WHERE id = ?`,
         )
         .get(runId) as Record<string, unknown>;
       expect(workflow).toEqual({
         state: "running",
         monitorState: "running",
         monitorStep: "preflight",
-        monitorTerminal: 0
+        monitorTerminal: 0,
       });
     } finally {
       db.close();
@@ -249,14 +261,14 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         {
           ok: false,
           code: "source_auth_unavailable",
-          error: "fake token expired"
-        }
+          error: "fake token expired",
+        },
       ]);
 
       const reconciliation = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "momentum-project" } },
-        { now: () => NOW + 10 }
+        { now: () => NOW + 10 },
       );
 
       expect(reconciliation.run.state).toBe("failed");
@@ -268,18 +280,18 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: "Prove external-apply scaffold stays local"
+        objective: "Prove external-apply scaffold stays local",
       });
       db.prepare(
         `UPDATE step_definitions SET executor = 'external-apply'
-           WHERE definition_key = ? AND definition_version = ? AND step_key = 'preflight'`
+           WHERE definition_key = ? AND definition_version = ? AND step_key = 'preflight'`,
       ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version);
       const claim = approveAndClaimPreflight(db, runId);
 
       const dispatch = executeWorkflowStepDispatch(claim, {
         db,
         workerId: WORKER,
-        now: NOW + 11
+        now: NOW + 11,
       });
 
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
@@ -288,9 +300,9 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
 
       const gates = listWorkflowGatesForRun(db, runId);
       expect(gates).toHaveLength(0);
-      expect(getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery).toBe(
-        false
-      );
+      expect(
+        getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery,
+      ).toBe(false);
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
     } finally {
       db.close();

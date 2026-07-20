@@ -691,11 +691,12 @@ function tryRecoverTerminalDispatchEvidence(
   );
   if (runningStep === undefined) return undefined;
 
-  const attempt = loadLatestExecutorAttemptForStep(db, candidate.runId, runningStep.stepId);
-  if (
-    attempt === undefined ||
-    !isTerminalExecutorAttemptState(attempt.state)
-  ) {
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    candidate.runId,
+    runningStep.stepId,
+  );
+  if (attempt === undefined || !isTerminalExecutorAttemptState(attempt.state)) {
     return undefined;
   }
 
@@ -757,11 +758,19 @@ function tryParkStaleRunningDispatchLease(
       return undefined;
     }
 
-    const attempt = loadLatestExecutorAttemptForStep(db, candidate.runId, runningStep.stepId);
+    const attempt = loadLatestExecutorAttemptForStep(
+      db,
+      candidate.runId,
+      runningStep.stepId,
+    );
     const attemptRounds =
       attempt === undefined
         ? []
-        : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
+        : listExecutorRoundsForStep(
+            db,
+            attempt.workflowRunId,
+            attempt.stepRunId,
+          );
     if (
       attempt !== undefined &&
       attempt.executorFamily === "subworkflow" &&
@@ -1367,7 +1376,11 @@ function isRegisteredSdkContinuation(
   db: MomentumDb,
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
 ): boolean {
-  const attempt = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    claim.runId,
+    claim.stepId,
+  );
   const rounds =
     attempt === undefined
       ? []
@@ -1481,21 +1494,13 @@ function hasResumableDelegateCheckpoint(
   if (!interruptedRound && !completedPoll) return false;
   if (
     interruptedRound &&
-    hasResumableLegacyCompletionReplay(
-      db,
-      activeRound.roundId,
-      attemptRounds,
-    )
+    hasResumableLegacyCompletionReplay(db, activeRound.roundId, attemptRounds)
   ) {
     return true;
   }
   if (
     interruptedRound &&
-    hasResumablePreMarkerLegacyCompletionReplay(
-      db,
-      activeRound,
-      attemptRounds,
-    )
+    hasResumablePreMarkerLegacyCompletionReplay(db, activeRound, attemptRounds)
   ) {
     return true;
   }
@@ -1620,7 +1625,11 @@ function buildActiveSubworkflowClaim(
   const runningStep = steps.find((step) => step.state === "running");
   if (runningStep === undefined) return undefined;
 
-  const attempt = loadLatestExecutorAttemptForStep(db, run.id, runningStep.stepId);
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    run.id,
+    runningStep.stepId,
+  );
   const attemptRounds =
     attempt === undefined
       ? []
@@ -1853,7 +1862,11 @@ function dispatchClaim(
           ),
         });
         if (!heartbeat.ok) {
-          const attempt = loadLatestExecutorAttemptForStep(db, claim.runId, claim.stepId);
+          const attempt = loadLatestExecutorAttemptForStep(
+            db,
+            claim.runId,
+            claim.stepId,
+          );
           const step = db
             .prepare(
               "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",

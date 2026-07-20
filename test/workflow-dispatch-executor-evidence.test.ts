@@ -326,10 +326,8 @@ describe("terminalizeDispatchedExecutorAttempt — failed", () => {
     });
 
     expect(
-      loadExecutorAttempt(
-        db,
-        deriveDispatchAttemptId(RUN_ID, "preflight", 1),
-      )?.state,
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, "preflight", 1))
+        ?.state,
     ).toBe("failed");
     const round = dispatchRound(db, "preflight");
     expect(round.state).toBe("failed");
@@ -456,10 +454,7 @@ describe("terminalizeDispatchedExecutorAttempt — boundary", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
     );
     expect(
-      loadExecutorAttempt(
-        db,
-        deriveDispatchAttemptId(RUN_ID, "preflight", 1),
-      ),
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, "preflight", 1)),
     ).toBeUndefined();
   });
 });

@@ -247,6 +247,37 @@ function claimStep(
   return claim.claim;
 }
 
+/**
+ * Park every existing attempt as terminal history and insert the immutable
+ * retry attempt row a real recovery-cleared re-dispatch would create.
+ */
+function insertRetryAttemptRow(
+  db: ReturnType<typeof openDb>,
+  runId: string,
+  attemptNumber: number,
+): void {
+  db.prepare(
+    `UPDATE executor_attempts
+        SET state = 'manual_recovery_required',
+            finished_at = COALESCE(finished_at, updated_at)
+      WHERE workflow_run_id = ?
+        AND state NOT IN
+          ('manual_recovery_required', 'blocked', 'failed', 'succeeded', 'cancelled')`,
+  ).run(runId);
+  db.prepare(
+    `INSERT INTO executor_attempts
+       (attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+        state, attempt_number, started_at, heartbeat_at, finished_at,
+        created_at, updated_at)
+     SELECT workflow_run_id || '::' || step_run_id || '::attempt-' || ?,
+            workflow_run_id, step_run_id, step_key, executor_family,
+            'running', ?, started_at, heartbeat_at, NULL,
+            created_at, updated_at
+       FROM executor_attempts
+      WHERE workflow_run_id = ? AND attempt_number = 1`,
+  ).run(attemptNumber, attemptNumber, runId);
+}
+
 function reopenInterruptedHandoff(
   db: ReturnType<typeof openDb>,
   runId: string,
@@ -260,11 +291,7 @@ function reopenInterruptedHandoff(
   db.prepare(
     "DELETE FROM executor_checkpoints WHERE round_id = ? AND stage <> 'delegate_handoff_intent'",
   ).run(round.round_id);
-  db.prepare(
-    `UPDATE executor_attempts
-        SET state = 'running', attempt = 2, finished_at = NULL
-      WHERE workflow_run_id = ?`,
-  ).run(runId);
+  insertRetryAttemptRow(db, runId, 2);
   db.prepare(
     `UPDATE workflow_steps
         SET state = 'approved', finished_at = NULL
@@ -657,7 +684,7 @@ describe(
                 schemaVersion: 1,
                 tool,
                 handoffCorrelationId: attemptId,
-                attemptNumber: 1,
+                attempt: 1,
                 phase: "launched",
                 baseHead: headSha,
                 branch,
@@ -670,7 +697,7 @@ describe(
             : {
                 schemaVersion: 1,
                 handoffCorrelationId: attemptId,
-                attemptNumber: 1,
+                attempt: 1,
                 phase: "launched",
                 branch,
                 headSha,
@@ -750,7 +777,7 @@ describe(
         JSON.stringify({
           schemaVersion: 1,
           handoffCorrelationId: attemptId,
-          attemptNumber: 1,
+          attempt: 1,
           phase: "launching",
           branch,
           headSha,
@@ -1358,7 +1385,8 @@ describe(
         handoffReceiptPath,
         JSON.stringify({
           schemaVersion: 1,
-          handoffCorrelationId: "no-mistakes-ownership::implementation::dispatch",
+          handoffCorrelationId:
+            "no-mistakes-ownership::implementation::dispatch",
           attempt: 1,
           phase: "finalizing",
           branch,
@@ -1485,7 +1513,7 @@ describe(
                 schemaVersion: 1,
                 tool,
                 handoffCorrelationId: attemptId,
-                attemptNumber: 1,
+                attempt: 1,
                 phase: "completed",
                 baseHead: headSha,
                 branch,
@@ -1509,7 +1537,7 @@ describe(
               JSON.stringify({
                 schemaVersion: 1,
                 handoffCorrelationId: attemptId,
-                attemptNumber: 1,
+                attempt: 1,
                 phase: "failed",
                 branch,
                 headSha,
@@ -1751,7 +1779,7 @@ printf '%s' '{"success":false}' > '${resultJsonPath}'
           legacyReceiptPath,
           JSON.stringify({
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             externalIdentity: {
               externalRunId: "nm-run-legacy",
               branch,
@@ -2279,7 +2307,7 @@ printf 'run:\n  id: "nm-run-retry-digest"\n  branch: ${branch}\n  status: runnin
           JSON.stringify({
             schemaVersion: 1,
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             phase: "failed",
             branch,
             headSha,
@@ -2437,7 +2465,7 @@ fi
           JSON.stringify({
             schemaVersion: 1,
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             phase: "failed",
             branch,
             headSha,
@@ -2576,7 +2604,7 @@ printf 'run:\n  id: "${reportedRunId}"\n  branch: ${branch}\n  status: running\n
           JSON.stringify({
             schemaVersion: 1,
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             phase,
             branch,
             headSha,
@@ -2753,7 +2781,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -2800,7 +2828,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -2883,7 +2911,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -2957,7 +2985,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3033,11 +3061,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
                 executor_recommendation = NULL, finished_at = NULL
           WHERE round_id = ?`,
       ).run(intentRound.roundId);
-      db.prepare(
-        `UPDATE executor_attempts
-            SET state = 'running', attempt = 3, finished_at = NULL
-          WHERE workflow_run_id = ?`,
-      ).run(runId);
+      insertRetryAttemptRow(db, runId, 3);
       db.prepare(
         `UPDATE workflow_steps
             SET state = 'approved', finished_at = NULL
@@ -3278,7 +3302,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3378,7 +3402,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3488,7 +3512,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
         expect(
           db
             .prepare(
-              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+              "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
             )
             .get(runId),
         ).toEqual({ state: expectedState, attempt: 2 });
@@ -3542,7 +3566,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           JSON.stringify({
             schemaVersion: 1,
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             phase: "launching",
             branch,
             headSha,
@@ -3640,7 +3664,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
           JSON.stringify({
             schemaVersion: 1,
             handoffCorrelationId: attemptId,
-            attemptNumber: 1,
+            attempt: 1,
             phase: "launching",
             branch,
             headSha,
@@ -3766,7 +3790,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3843,7 +3867,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -3934,7 +3958,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -4137,7 +4161,7 @@ printf 'run:\n  id: "nm-run-changed-result"\n  branch: ${branch}\n  status: runn
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "blocked", attempt: 1 });
@@ -4195,7 +4219,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "running", attempt: 2 });
@@ -4242,7 +4266,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 1 });
@@ -4274,7 +4298,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4400,7 +4424,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4475,7 +4499,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          handoffCorrelationId: String(receipt["attemptId"]),
+          handoffCorrelationId: String(receipt["handoffCorrelationId"]),
           attemptNumber: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
@@ -4505,7 +4529,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         resolvePreparedDelegateCommitEvidence({
           tool: "no-mistakes",
-          handoffCorrelationId: String(receipt["attemptId"]),
+          handoffCorrelationId: String(receipt["handoffCorrelationId"]),
           attemptNumber: 2,
           repoPath,
           handoffReceiptPath: receiptPath,
@@ -4539,7 +4563,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4599,7 +4623,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4674,7 +4698,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -4747,7 +4771,7 @@ printf 'run:\n  id: "nm-run-1"\n  branch: %s\n  status: blocked\n  head: %s\nste
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get(runId),
       ).toEqual({ state: "manual_recovery_required", attempt: 2 });

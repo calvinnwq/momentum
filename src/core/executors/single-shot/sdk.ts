@@ -313,7 +313,8 @@ export class SingleShotExecutor implements Executor<
     const config = immutableSingleShotConfig(context.config);
     const hostBindings = immutableSingleShotHostBindings(context.hostBindings);
     const currentAttemptRounds = context.state.rounds.filter(
-      (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
+      (snapshot) =>
+        snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
     );
     if (
       currentAttemptRounds.length > 0 &&
@@ -470,7 +471,8 @@ function loadMaterializedSingleShotRound(
   >,
 ): { round: ExecutorRoundView; checkpoint: ExecutorCheckpointRecord } {
   const currentAttemptRounds = context.state.rounds.filter(
-    (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
+    (snapshot) =>
+      snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(
@@ -531,7 +533,8 @@ function resumeCompletedSingleShotRound(
   >,
 ): SingleShotExecutorTickResult {
   const currentAttemptRounds = context.state.rounds.filter(
-    (snapshot) => snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
+    (snapshot) =>
+      snapshot.round.attemptNumber === context.state.attempt.attemptNumber,
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(

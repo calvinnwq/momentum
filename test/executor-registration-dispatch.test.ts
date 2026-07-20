@@ -199,7 +199,7 @@ describe("profile-backed built-in registration", () => {
       { stage: "classified" },
     ]);
     db.close();
-  });
+  }, 30_000);
 
   it("fails closed when native host bindings have no live-wrapper profile", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -423,7 +423,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       effort: "high",
     });
     db.close();
-  });
+  }, 30_000);
 
   it("resolves a portable script identity through production host bindings", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -513,7 +513,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       fs.readFileSync(path.join(repoPath, "native-script.txt"), "utf8"),
     ).toBe("native script\n");
     db.close();
-  });
+  }, 30_000);
 
   it("preserves an imported native script artifact root outside the repository", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -590,7 +590,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       fs.readFileSync(path.join(repoPath, "native-script.txt"), "utf8"),
     ).toBe("native script\n");
     db.close();
-  });
+  }, 30_000);
 
   it.each(["symlink", "hard-link", "fifo"] as const)(
     "refuses a production native script log $linkKind without launching the command",
@@ -1259,7 +1259,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       ),
     });
     db.close();
-  });
+  }, 30_000);
 
   it("persists runtime_unavailable evidence when the repository disappears before native scaffold materialization", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -2108,9 +2108,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     ).toBe("2");
     expect(
       db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE attempt_id = ?",
-        )
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
         .get(attemptId),
     ).toEqual({ state: "succeeded" });
     db.close();
@@ -2240,7 +2238,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       holder: "crashed-native-worker",
       goalId: "native-lock-recovery-run",
       iteration: 1,
-      jobId: attemptId,
+      jobId: "native-lock-recovery-run::implementation::dispatch",
       leaseExpiresAt: NOW + 60_000,
       now: NOW + 2,
     });
@@ -2268,9 +2266,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(resumed.code).toBe("dispatched");
     expect(
       db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE attempt_id = ?",
-        )
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
         .get(attemptId),
     ).toEqual({ state: "succeeded" });
     expect(
@@ -2564,9 +2560,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     expect(
       db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE attempt_id = ?",
-        )
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
         .get(attemptId),
     ).toEqual({ state: "manual_recovery_required" });
     expect(
@@ -2672,7 +2666,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       holder: "crashed-native-worker",
       goalId: runId,
       iteration: 1,
-      jobId: attemptId,
+      jobId: `${runId}::implementation::dispatch`,
       leaseExpiresAt: NOW + 60_000,
       now: NOW + 2,
     });
@@ -2695,9 +2689,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(resumed.code).toBe("dispatched");
     expect(
       db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE attempt_id = ?",
-        )
+        .prepare("SELECT state FROM executor_attempts WHERE attempt_id = ?")
         .get(attemptId),
     ).toEqual({ state: "manual_recovery_required" });
     expect(

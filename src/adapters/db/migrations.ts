@@ -876,8 +876,9 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               WHERE invocation_id = ?
               ORDER BY attempt, round_index, round_id`,
           )
-          .all(invocation.invocation_id) as
-          unknown as LegacyExecutorRoundGroupRow[];
+          .all(
+            invocation.invocation_id,
+          ) as unknown as LegacyExecutorRoundGroupRow[];
         const groups = new Map<number, LegacyExecutorRoundGroupRow[]>();
         for (const round of rounds) {
           const group = groups.get(round.attempt) ?? [];
@@ -955,7 +956,10 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               legacyInvocationId: invocation.invocation_id,
               source: "reconstructed_from_round_evidence",
               ...(stateReconstructed
-                ? { stateReconstructed: true, lastRoundState: lastRoundState ?? null }
+                ? {
+                    stateReconstructed: true,
+                    lastRoundState: lastRoundState ?? null,
+                  }
                 : {}),
             }),
             groupRounds.length > 0

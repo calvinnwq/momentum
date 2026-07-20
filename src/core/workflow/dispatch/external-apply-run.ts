@@ -60,9 +60,7 @@ import path from "node:path";
 import type { MomentumDb } from "../../../adapters/db.js";
 import type { ExecuteExternalApplyResult } from "../../intent/apply-execute.js";
 import { isTerminalExecutorAttemptState } from "../../executors/loop/reducer.js";
-import {
-  loadLatestExecutorAttemptForStep,
-} from "../../executors/loop/persist.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 
 import { terminalizeDispatchedExecutorAttempt } from "./executor-evidence.js";
 import {
@@ -114,13 +112,14 @@ export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
   stepId: string;
   now: number;
 }): ExecuteAndReconcileDispatchedStepResult | null {
-  const attempt = loadLatestExecutorAttemptForStep(input.db, input.runId, input.stepId);
+  const attempt = loadLatestExecutorAttemptForStep(
+    input.db,
+    input.runId,
+    input.stepId,
+  );
   if (attempt?.executorFamily !== "external-apply") return null;
   if (!isTerminalExecutorAttemptState(attempt.state)) return null;
-  return reconcileTerminalDispatchedExternalApplyAttempt(
-    input,
-    attempt.state,
-  );
+  return reconcileTerminalDispatchedExternalApplyAttempt(input, attempt.state);
 }
 
 /**

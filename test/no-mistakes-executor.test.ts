@@ -31,9 +31,7 @@ import {
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const ATTEMPT_TERMINAL_SET = new Set<string>(
-  EXECUTOR_ATTEMPT_TERMINAL_STATES,
-);
+const ATTEMPT_TERMINAL_SET = new Set<string>(EXECUTOR_ATTEMPT_TERMINAL_STATES);
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
 const HEAD_SHA = "a".repeat(40);
@@ -588,9 +586,7 @@ describe("planNoMistakesAttempt", () => {
       attemptNumber: 0,
       startedAt: 1000,
     });
-    expect(attempt.attemptId).toBe(
-      noMistakesAttemptId("run1", "step1", 0),
-    );
+    expect(attempt.attemptId).toBe(noMistakesAttemptId("run1", "step1", 0));
     expect(attempt.workflowRunId).toBe("run1");
     expect(attempt.stepRunId).toBe("step1");
     expect(attempt.stepKey).toBe("no-mistakes");
@@ -914,9 +910,7 @@ describe("decideNoMistakesUnreadable", () => {
     // untrusted external evidence and settle the same way (modulo the reason).
     expect(fromReadFailure.classification).toBe(fromBadSnapshot.classification);
     expect(fromReadFailure.roundState).toBe(fromBadSnapshot.roundState);
-    expect(fromReadFailure.attemptState).toBe(
-      fromBadSnapshot.attemptState,
-    );
+    expect(fromReadFailure.attemptState).toBe(fromBadSnapshot.attemptState);
     expect(fromReadFailure.humanGate).toBe(fromBadSnapshot.humanGate);
     expect(fromReadFailure.recoveryCode).toBe(fromBadSnapshot.recoveryCode);
   });

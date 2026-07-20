@@ -67,7 +67,7 @@ node dist/index.js workflow handoff demo-1 --data-dir "$DATA" --json
 All three surfaces are read-only:
 
 - `workflow status demo-1` returns the run row plus every step with its `kind`, `state`, and ordering.
-- `workflow run logs demo-1` returns the same detail shape plus `invocations` and `rounds` evidence arrays (both empty until an executor has run).
+- `workflow run logs demo-1` returns the same detail shape plus `attempts` and `rounds` evidence arrays (both empty until an executor has run).
 - `workflow handoff demo-1` lifts `nextAction` to the top level; on a fresh run it reports `code: "await_approval"` with `actionClass: "approve_next_gate"` for the `preflight` step.
 
 ## Approve and continue

@@ -87,7 +87,7 @@ goal-iteration drain lane; with that lane retired no queued goal jobs are
 claimed, so they report an empty work lane (`jobsRun: 0`,
 `lastWorkerCode: "no_work"`). All loop bounds must be
 non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0`
-invocation exits before claiming any work, which is useful as a one-shot
+call exits before claiming any work, which is useful as a one-shot
 readiness probe.
 
 `workflowStepsDispatched` counts workflow scheduler ticks whose top-level code
@@ -95,7 +95,7 @@ is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
 A continuation-only registered-executor tick still counts as `dispatched`, but it also increments `idleCycles` and waits the configured poll interval before the next external-state read.
 For a valid executor identity, dispatch advances the step to `running` and
-creates durable executor invocation / round scaffold rows with deterministic
+creates durable executor attempt / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
 family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
 `daemon start` proves the run's issue scope, `LINEAR_API_KEY`, repo
@@ -130,7 +130,7 @@ before the dispatch scaffold is terminalized.
 For a delegate-supervisor handoff, the daemon runs the same safe finalization but
 stores the wrapper result as durable handoff and terminal-candidate evidence.
 For no-mistakes, a successful result that leaves a verified clean worktree with no changes to commit is valid handoff evidence; failed verification still rejects the handoff.
-The invocation and step do not terminalize or reconcile until a later external-state read receives a daemon-accepted terminal classification.
+The attempt and step do not terminalize or reconcile until a later external-state read receives a daemon-accepted terminal classification.
 The verification commands and timeout resolve per the repo policy precedence:
 the linked goal's stored verification when the run carries a legacy goal, then
 the repo's `MOMENTUM.md` `verification` frontmatter, then no commands, in which
@@ -208,11 +208,11 @@ restarting the daemon. If the repair changes only a transitive dependency that
 Node already attempted to load or evaluate, restart the daemon before clearing recovery;
 the in-process ESM dependency graph cannot be unloaded safely.
 Registered executors are normally driven one bounded tick per daemon scheduler
-pass, and a `continue` recommendation leaves the invocation resumable for the
+pass, and a `continue` recommendation leaves the attempt resumable for the
 next pass after the configured poll interval.
 Executor registration and portable/host binding matching are specified by [Executor SDK](executor-sdk.md#config-and-host-bindings).
 The daemon supplies profile-backed host bindings from the resolved live-wrapper profile.
-Only the first completed profile-backed delegate handoff in an invocation may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
+Only the first completed profile-backed delegate handoff in an attempt may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
 Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
@@ -220,8 +220,8 @@ The profile-backed repo lock is leased for at least the longest configured wrapp
 For an unresolved handoff intent, the next dispatcher may take over the matching active lock after it expires or immediately after the scheduler proves and releases the same stale dispatch owner.
 Repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks prevent a concurrent or newer owner from being displaced.
 Heartbeat and settlement then require the replacement holder and attempt, preventing the former owner from mutating the lock.
-If a crash instead leaves an invocation at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
-If the crash happens before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, stale recovery makes the unclassified round resumable so the same invocation can finish classification and gate parking.
+If a crash instead leaves an attempt at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
+If the crash happens before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, stale recovery makes the unclassified round resumable so the same attempt can finish classification and gate parking.
 
 ### Workflow live-wrapper profile
 
@@ -403,7 +403,7 @@ It settles only after a fresh status read corroborates the same run, branch, and
 After reattachment, the adapter may reload that terminal candidate from the step-scoped `launched` receipt only when its schema and exact run, branch, launch-head, terminal-head, and external identity match and Git proves the terminal head descends from the launch head.
 Approval boundaries use a supervisor-owned `approve` / `reject` decision that external state cannot forge; only the latest resolved `approve` permits later completion.
 The daemon checkpoints that supervisor decision id before gate classification so recovery cannot accidentally park a different mirrored external decision.
-On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after invocation and branch checks plus current-head validation for finalized state; a legacy no-mistakes receipt must also explicitly record successful handoff finalization.
+On upgrade, correlated legacy run-root delegate state or no-mistakes receipts migrate into the step-scoped delegate root only after attempt-correlation and branch checks plus current-head validation for finalized state; a legacy no-mistakes receipt must also explicitly record successful handoff finalization.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 
@@ -453,8 +453,8 @@ remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path or external
 runner state.
-Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked invocation is retryable after its blocker clears.
-The retry keeps the deterministic invocation identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
+Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state failures are likewise retryable after the operator repairs the correlated evidence, and an externally blocked attempt is retryable after its blocker clears.
+The retry inserts a fresh immutable attempt that keeps the step-scoped dispatch correlation for handoff and repo-lock identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
 It sends a prior handoff through adapter recovery before reuse.
 For a locally failed no-mistakes receipt, a correlated failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.

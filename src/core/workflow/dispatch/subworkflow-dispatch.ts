@@ -36,9 +36,7 @@
  *     dispatch outcome), exactly as the external-apply wrapper layers its run.
  */
 
-import {
-  loadLatestExecutorAttemptForStep,
-} from "../../executors/loop/persist.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 import {
   recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
@@ -104,7 +102,11 @@ export function createSubworkflowWorkflowDispatch(
     const result = await baseDispatch(claim, context);
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
-    const attempt = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId);
+    const attempt = loadLatestExecutorAttemptForStep(
+      context.db,
+      claim.runId,
+      claim.stepId,
+    );
     if (attempt?.executorFamily !== "subworkflow") return result;
 
     try {

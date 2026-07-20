@@ -144,10 +144,9 @@ describe("transitionExecutorAttempt", () => {
     ];
     for (const from of active) {
       for (const to of aborts) {
-        expect(
-          transitionExecutorAttempt(from, to).ok,
-          `${from} -> ${to}`,
-        ).toBe(true);
+        expect(transitionExecutorAttempt(from, to).ok, `${from} -> ${to}`).toBe(
+          true,
+        );
       }
     }
   });

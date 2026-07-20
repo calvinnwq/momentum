@@ -71,14 +71,14 @@ import {
   insertExecutorAttempt,
   insertExecutorRound,
   updateExecutorAttemptState,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../loop/persist.js";
 import {
   isTerminalExecutorAttemptState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorAttemptRecord,
-  type ExecutorRoundRecord
+  type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import {
   attemptStateForRoundClassification,
@@ -93,7 +93,7 @@ import {
   type GoalLoopRoundDecision,
   type GoalLoopRoundRuntimeInputs,
   type GoalLoopRoundSelection,
-  type PlanGoalLoopRoundStartInput
+  type PlanGoalLoopRoundStartInput,
 } from "./executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
 import type { RunnerResult } from "../runner/types.js";
@@ -144,7 +144,7 @@ export type GoalLoopRoundMechanismResult = {
  * Tests inject a deterministic fake.
  */
 export type GoalLoopRoundRunner = (
-  round: ExecutorRoundRecord
+  round: ExecutorRoundRecord,
 ) => GoalLoopRoundMechanismResult;
 
 export type RunGoalLoopRoundInput = {
@@ -183,7 +183,7 @@ export type RunGoalLoopRoundResult = {
  * {@link planGoalLoopRoundPersistence}).
  */
 export function runGoalLoopRound(
-  input: RunGoalLoopRoundInput
+  input: RunGoalLoopRoundInput,
 ): RunGoalLoopRoundResult {
   const { db, start, runRound, finishedAt } = input;
 
@@ -205,7 +205,7 @@ export function runGoalLoopRound(
     logPaths: startRecord.logPaths,
     ...(mechanism.artifacts !== undefined
       ? { artifacts: mechanism.artifacts }
-      : {})
+      : {}),
   });
   for (const artifact of artifacts) {
     insertExecutorArtifact(db, artifact, { now: finishedAt });
@@ -226,21 +226,21 @@ export function runGoalLoopRound(
       : {}),
     ...(mechanism.changedFiles !== undefined
       ? { changedFiles: mechanism.changedFiles }
-      : {})
+      : {}),
   });
 
   // 5. Capture the normalized result (when present) then persist the terminal
   //    decision, stamping the daemon clock the pure projection cannot supply.
   if (plan.captureUpdate !== null) {
     updateExecutorRound(db, start.roundId, plan.captureUpdate, {
-      now: finishedAt
+      now: finishedAt,
     });
   }
   const round = updateExecutorRound(
     db,
     start.roundId,
     { ...plan.terminalUpdate, heartbeatAt: finishedAt, finishedAt },
-    { now: finishedAt }
+    { now: finishedAt },
   );
 
   // 6. Persist the round's coarse lifecycle checkpoint stream (contract Round
@@ -253,7 +253,7 @@ export function runGoalLoopRound(
     roundId: start.roundId,
     finalizeOutcome: mechanism.finalize.outcome,
     capturedResult: plan.captureUpdate !== null,
-    classification: plan.decision.classification
+    classification: plan.decision.classification,
   });
   for (const checkpoint of checkpoints) {
     insertExecutorCheckpoint(db, checkpoint, { now: finishedAt });
@@ -264,7 +264,7 @@ export function runGoalLoopRound(
     decision: plan.decision,
     evidence: plan.evidence,
     artifacts,
-    checkpoints
+    checkpoints,
   };
 }
 
@@ -299,7 +299,7 @@ export type GoalLoopAttemptRoundContext = {
  */
 export type GoalLoopAttemptRoundPlanner = (
   roundIndex: number,
-  context: GoalLoopAttemptRoundContext
+  context: GoalLoopAttemptRoundContext,
 ) => GoalLoopAttemptRoundPlan;
 
 export type RunGoalLoopAttemptInput = {
@@ -349,7 +349,7 @@ export type RunGoalLoopAttemptResult = {
  * exists (via {@link runGoalLoopRound}).
  */
 export function runGoalLoopAttempt(
-  input: RunGoalLoopAttemptInput
+  input: RunGoalLoopAttemptInput,
 ): RunGoalLoopAttemptResult {
   const { db, attempt, planRound, runRound } = input;
 
@@ -361,18 +361,18 @@ export function runGoalLoopAttempt(
   insertExecutorAttempt(
     db,
     attempt,
-    insertNow !== null ? { now: insertNow } : {}
+    insertNow !== null ? { now: insertNow } : {},
   );
 
   const rounds: RunGoalLoopRoundResult[] = [];
   for (let roundIndex = 0; ; roundIndex++) {
     const context: GoalLoopAttemptRoundContext = {
-      priorRounds: rounds.map((round) => round.round)
+      priorRounds: rounds.map((round) => round.round),
     };
     const plan = planRound(roundIndex, context);
     if (plan.start.roundIndex !== roundIndex) {
       throw new Error(
-        `runGoalLoopAttempt: planner returned roundIndex ${String(plan.start.roundIndex)} for loop index ${roundIndex}; the round-start index must match the loop index so the round-budget accounting stays honest`
+        `runGoalLoopAttempt: planner returned roundIndex ${String(plan.start.roundIndex)} for loop index ${roundIndex}; the round-start index must match the loop index so the round-budget accounting stays honest`,
       );
     }
 
@@ -380,7 +380,7 @@ export function runGoalLoopAttempt(
       db,
       start: plan.start,
       runRound,
-      finishedAt: plan.finishedAt
+      finishedAt: plan.finishedAt,
     });
     rounds.push(roundOutcome);
 
@@ -389,7 +389,7 @@ export function runGoalLoopAttempt(
     if (roundOutcome.decision.continueLoop) {
       updateExecutorAttemptState(db, attempt.attemptId, "running", {
         heartbeatAt: plan.finishedAt,
-        now: plan.finishedAt
+        now: plan.finishedAt,
       });
       continue;
     }
@@ -399,7 +399,7 @@ export function runGoalLoopAttempt(
     // `waiting_operator` pause (a quota / operator gate is not terminal, so it
     // leaves `finished_at` null for a later operator decision to resume).
     const attemptState = attemptStateForRoundClassification(
-      roundOutcome.decision.classification
+      roundOutcome.decision.classification,
     );
     const finalAttempt = updateExecutorAttemptState(
       db,
@@ -410,8 +410,8 @@ export function runGoalLoopAttempt(
         finishedAt: isTerminalExecutorAttemptState(attemptState)
           ? plan.finishedAt
           : null,
-        now: plan.finishedAt
-      }
+        now: plan.finishedAt,
+      },
     );
     return { attempt: finalAttempt, rounds };
   }
@@ -443,7 +443,7 @@ export type RunGoalLoopStepInput = {
    */
   resolveRoundInputs: (
     roundIndex: number,
-    context: GoalLoopAttemptRoundContext
+    context: GoalLoopAttemptRoundContext,
   ) => GoalLoopRoundRuntimeInputs;
   /** Clock for the attempt + round timestamps; defaults to {@link Date.now}. */
   now?: () => number;
@@ -479,7 +479,7 @@ export type RunGoalLoopStepInput = {
  * {@link runGoalLoopAttempt}).
  */
 export function runGoalLoopStep(
-  input: RunGoalLoopStepInput
+  input: RunGoalLoopStepInput,
 ): RunGoalLoopAttemptResult {
   const now = input.now ?? Date.now;
   const attempt = planGoalLoopAttempt({
@@ -487,7 +487,7 @@ export function runGoalLoopStep(
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     attemptNumber: input.attemptNumber,
-    startedAt: now()
+    startedAt: now(),
   });
   return runGoalLoopAttempt({
     db: input.db,
@@ -499,9 +499,9 @@ export function runGoalLoopStep(
         selection: input.selection,
         roundIndex,
         runtime: input.resolveRoundInputs(roundIndex, context),
-        startedAt: now()
+        startedAt: now(),
       });
       return { start, finishedAt: now() };
-    }
+    },
   });
 }

@@ -28,9 +28,7 @@ import { classifyWorkflowLease } from "../run/reducer.js";
 import { getWorkflowLease, heartbeatWorkflowLease } from "../leases.js";
 import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
-import {
-  ExecutorOwnedRoundMaterializationError,
-} from "./execute.js";
+import { ExecutorOwnedRoundMaterializationError } from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import {
@@ -197,10 +195,7 @@ export function createRegisteredExecutorWorkflowDispatch(
         executorOwnsRounds: true,
         materializeOwnedRound: ({ attempt, now }) => {
           const roundIndex =
-            listExecutorRoundsForAttempt(
-              context.db,
-              attempt.attemptId,
-            ).reduce(
+            listExecutorRoundsForAttempt(context.db, attempt.attemptId).reduce(
               (highestRoundIndex, round) =>
                 Math.max(highestRoundIndex, round.roundIndex),
               -1,

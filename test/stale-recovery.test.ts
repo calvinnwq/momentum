@@ -12,14 +12,14 @@ import {
   heartbeatDaemonRun,
   recoverStaleDaemonRunWithWorkflowDispatch,
   setDaemonRunActiveJob,
-  startDaemonRun
+  startDaemonRun,
 } from "../src/core/daemon/runs.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob,
-  type QueueJobState
+  type QueueJobState,
 } from "../src/core/daemon/queue-jobs.js";
 import { acquireRepoLock, getRepoLock } from "../src/core/repo/locks.js";
 import {
@@ -29,7 +29,7 @@ import {
   recoverStaleClaimedGoalIterationJobs,
   recoverStaleDaemonRuns,
   recoverStaleRepoLocksForTerminalJobs,
-  runStartupRecovery
+  runStartupRecovery,
 } from "../src/core/daemon/stale-recovery.js";
 
 const tempRoots: string[] = [];
@@ -52,7 +52,7 @@ function makeTempDir(prefix = "momentum-stale-recovery-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -72,34 +72,30 @@ function seedGoal(db: MomentumDb, id = "g1"): void {
   db.prepare(
     `INSERT INTO goals
        (id, title, branch, artifact_dir, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(id, "test goal", "momentum/test", "/tmp/test", 1, 1);
 }
 
-function seedGoalWithRepo(
-  db: MomentumDb,
-  id: string,
-  repo: string
-): void {
+function seedGoalWithRepo(db: MomentumDb, id: string, repo: string): void {
   db.prepare(
     `INSERT INTO goals
        (id, title, repo, branch, artifact_dir, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, "test goal", repo, "momentum/test", "/tmp/test", 1, 1);
 }
 
 function seedWorkflowRunAndStep(
   db: MomentumDb,
-  input: { runId: string; stepId: string; now?: number }
+  input: { runId: string; stepId: string; now?: number },
 ): void {
   const now = input.now ?? 1_000;
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', ?, ?)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', ?, ?)",
   ).run(input.runId, now, now);
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-     VALUES (?, ?, 'implementation', 'running', 0, 1, ?, ?)`
+     VALUES (?, ?, 'implementation', 'running', 0, 1, ?, ?)`,
   ).run(input.runId, input.stepId, now, now);
 }
 
@@ -110,14 +106,14 @@ function seedWorkflowDispatchLease(
     expiresAt: number;
     releasedAt?: number | null;
     now?: number;
-  }
+  },
 ): void {
   const now = input.now ?? 1_000;
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-     VALUES (?, 'dispatch', 'worker-1', ?, ?, ?, ?, 'auto-release', ?, ?)`
+     VALUES (?, 'dispatch', 'worker-1', ?, ?, ?, ?, 'auto-release', ?, ?)`,
   ).run(
     input.runId,
     now,
@@ -125,15 +121,18 @@ function seedWorkflowDispatchLease(
     now,
     input.releasedAt ?? null,
     now,
-    now
+    now,
   );
 }
 
-function setJobState(db: MomentumDb, jobId: string, state: QueueJobState): void {
-  db.prepare(`UPDATE jobs SET state = ?, updated_at = updated_at WHERE id = ?`).run(
-    state,
-    jobId
-  );
+function setJobState(
+  db: MomentumDb,
+  jobId: string,
+  state: QueueJobState,
+): void {
+  db.prepare(
+    `UPDATE jobs SET state = ?, updated_at = updated_at WHERE id = ?`,
+  ).run(state, jobId);
 }
 
 type SeedOptions = {
@@ -147,7 +146,7 @@ type SeedOptions = {
 
 function seedQueuedIterationWithLock(
   db: MomentumDb,
-  opts: SeedOptions
+  opts: SeedOptions,
 ): { jobId: string; lockId: string } {
   const goalId = opts.goalId ?? "g1";
   const idempotencyKey = opts.idempotencyKey ?? `${goalId}:1`;
@@ -156,7 +155,7 @@ function seedQueuedIterationWithLock(
     iteration: 1,
     idempotencyKey,
     artifactPath: `/tmp/test/${goalId}/iterations/1`,
-    now: opts.enqueueAt ?? 100
+    now: opts.enqueueAt ?? 100,
   });
   const acquired = acquireRepoLock(db, {
     repoRoot: opts.repoRoot,
@@ -165,10 +164,12 @@ function seedQueuedIterationWithLock(
     iteration: 1,
     jobId: enq.jobId,
     leaseExpiresAt: opts.leaseExpiresAt,
-    now: opts.acquireAt ?? 100
+    now: opts.acquireAt ?? 100,
   });
   if (!acquired.ok) {
-    throw new Error(`failed to acquire repo lock in test fixture: ${acquired.reason}`);
+    throw new Error(
+      `failed to acquire repo lock in test fixture: ${acquired.reason}`,
+    );
   }
   return { jobId: enq.jobId, lockId: acquired.lockId };
 }
@@ -181,7 +182,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       seedGoal(db);
       const { jobId, lockId } = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-a",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, jobId, "succeeded");
 
@@ -194,19 +195,19 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       expect(entry.job.id).toBe(jobId);
       expect(entry.job.state).toBe("succeeded");
       expect(entry.recoveryStatus).toBe(
-        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
       );
 
       const after = getRepoLock(db, lockId);
       expect(after?.state).toBe("released");
       expect(after?.released_at).toBe(5_000);
       expect(after?.recovery_status).toBe(
-        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
       );
 
       const events = db
         .prepare(
-          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE type = 'repo_lock.recovered'"
+          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE type = 'repo_lock.recovered'",
         )
         .all() as Array<{
         goal_id: string;
@@ -228,7 +229,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         lease_expires_at: 1_000,
         recovered_at: 5_000,
         recovery_status: REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
-        owning_job_state: "succeeded"
+        owning_job_state: "succeeded",
       });
     } finally {
       db.close();
@@ -242,7 +243,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       seedGoal(db);
       const { jobId, lockId } = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-a",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, jobId, "failed");
 
@@ -254,7 +255,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       const after = getRepoLock(db, lockId);
       expect(after?.state).toBe("released");
       expect(after?.recovery_status).toBe(
-        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
       );
     } finally {
       db.close();
@@ -271,12 +272,12 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         iteration: 1,
         idempotencyKey: "g1:1",
         artifactPath: "/tmp/test/g1/iterations/1",
-        now: 100
+        now: 100,
       });
       const claimed = claimPendingGoalIterationJob(db, {
         workerId: "worker-a",
         leaseDurationMs: 900,
-        now: 100
+        now: 100,
       });
       if (!claimed.ok) throw new Error("claim failed");
       const acquired = acquireRepoLock(db, {
@@ -286,7 +287,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         iteration: 1,
         jobId: enq.jobId,
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       if (!acquired.ok) throw new Error("acquire failed");
 
@@ -306,7 +307,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       // No recovery event was emitted.
       const events = db
         .prepare(
-          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'"
+          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'",
         )
         .get() as { c: number };
       expect(events.c).toBe(0);
@@ -325,13 +326,13 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         repoRoot: "/tmp/repo-a",
         goalId: "g1",
         idempotencyKey: "g1:1",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       const b = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-b",
         goalId: "g2",
         idempotencyKey: "g2:1",
-        leaseExpiresAt: 2_000
+        leaseExpiresAt: 2_000,
       });
       // a is left pending; b transitions to running.
       setJobState(db, b.jobId, "running");
@@ -345,7 +346,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
 
       const events = db
         .prepare(
-          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'"
+          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'",
         )
         .get() as { c: number };
       expect(events.c).toBe(0);
@@ -370,7 +371,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         iteration: 1,
         jobId: "missing-job-id",
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       if (!acquired.ok) throw new Error("acquire failed");
 
@@ -394,7 +395,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       seedGoal(db);
       const { lockId } = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-a",
-        leaseExpiresAt: 10_000
+        leaseExpiresAt: 10_000,
       });
       // Lease still in future relative to now.
       const out = recoverStaleRepoLocksForTerminalJobs(db, { now: 5_000 });
@@ -413,7 +414,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       seedGoal(db);
       const { jobId, lockId } = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-a",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, jobId, "succeeded");
 
@@ -433,7 +434,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       // Exactly one repo_lock.recovered event in total.
       const events = db
         .prepare(
-          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'"
+          "SELECT count(*) AS c FROM events WHERE type = 'repo_lock.recovered'",
         )
         .get() as { c: number };
       expect(events.c).toBe(1);
@@ -449,14 +450,14 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       seedGoal(db);
       const { jobId, lockId } = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-a",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, jobId, "succeeded");
 
       // Within grace window: not yet stale, no recovery.
       const inGrace = recoverStaleRepoLocksForTerminalJobs(db, {
         now: 1_500,
-        graceMs: 1_000
+        graceMs: 1_000,
       });
       expect(inGrace.recovered).toEqual([]);
       expect(inGrace.skipped).toEqual([]);
@@ -465,7 +466,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       // Past grace window: recovered.
       const past = recoverStaleRepoLocksForTerminalJobs(db, {
         now: 3_000,
-        graceMs: 1_000
+        graceMs: 1_000,
       });
       expect(past.recovered).toHaveLength(1);
       expect(getRepoLock(db, lockId)?.state).toBe("released");
@@ -484,13 +485,13 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
         repoRoot: "/tmp/repo-a",
         goalId: "g1",
         idempotencyKey: "g1:1",
-        leaseExpiresAt: 2_000
+        leaseExpiresAt: 2_000,
       });
       const b = seedQueuedIterationWithLock(db, {
         repoRoot: "/tmp/repo-b",
         goalId: "g2",
         idempotencyKey: "g2:1",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, a.jobId, "succeeded");
       setJobState(db, b.jobId, "failed");
@@ -498,7 +499,7 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       const out = recoverStaleRepoLocksForTerminalJobs(db, { now: 9_000 });
       expect(out.recovered.map((row) => row.lock.id)).toEqual([
         b.lockId,
-        a.lockId
+        a.lockId,
       ]);
     } finally {
       db.close();
@@ -516,7 +517,7 @@ function seedClaimedIteration(
     leaseDurationMs: number;
     enqueueAt?: number;
     claimAt?: number;
-  }
+  },
 ): { jobId: string } {
   const goalId = opts.goalId ?? "g1";
   const iteration = opts.iteration ?? 1;
@@ -526,18 +527,18 @@ function seedClaimedIteration(
     iteration,
     idempotencyKey,
     artifactPath: `/tmp/test/${goalId}/iterations/${iteration}`,
-    now: opts.enqueueAt ?? 100
+    now: opts.enqueueAt ?? 100,
   });
   const claimed = claimPendingGoalIterationJob(db, {
     workerId: opts.workerId ?? "worker-a",
     leaseDurationMs: opts.leaseDurationMs,
-    now: opts.claimAt ?? 100
+    now: opts.claimAt ?? 100,
   });
   if (!claimed.ok) throw new Error(`claim failed: ${claimed.reason}`);
   // Ensure the right job was claimed in tests that enqueue multiple goals.
   if (claimed.job.goal_id !== goalId) {
     throw new Error(
-      `seedClaimedIteration: unexpected claim ordering (claimed ${claimed.job.goal_id}, wanted ${goalId})`
+      `seedClaimedIteration: unexpected claim ordering (claimed ${claimed.job.goal_id}, wanted ${goalId})`,
     );
   }
   return { jobId: claimed.job.id };
@@ -551,7 +552,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       // Lease expires at 1_000; now=5_000 → stale.
       const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
@@ -578,7 +579,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
 
       const events = db
         .prepare(
-          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE type = 'job.recovered'"
+          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE type = 'job.recovered'",
         )
         .all() as Array<{
         goal_id: string;
@@ -599,7 +600,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         previous_lease_expires_at: 1_000,
         attempt_count: 1,
         recovered_at: 5_000,
-        recovery_status: JOB_RECOVERED_AUTO_REPENDED_STATUS
+        recovery_status: JOB_RECOVERED_AUTO_REPENDED_STATUS,
       });
     } finally {
       db.close();
@@ -613,7 +614,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       // Promote to running. The repo may have been written to before the
       // worker died, so auto-recovery must refuse.
@@ -630,7 +631,9 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       expect(stored?.worker_id).toBe("worker-a");
 
       const events = db
-        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.recovered'",
+        )
         .get() as { c: number };
       expect(events.c).toBe(0);
     } finally {
@@ -645,14 +648,14 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const { runId } = startDaemonRun(db, { now: 100 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId,
         lockId: null,
-        now: 100
+        now: 100,
       });
 
       const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
@@ -676,7 +679,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const { runId } = startDaemonRun(db, { now: 100 });
       setDaemonRunActiveJob(db, { runId, jobId, lockId: null, now: 100 });
@@ -684,7 +687,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         runId,
         terminalState: "error",
         now: 200,
-        error: "worker crashed"
+        error: "worker crashed",
       });
 
       const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
@@ -706,7 +709,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const lock = acquireRepoLock(db, {
         repoRoot: "/tmp/repo-a",
@@ -715,7 +718,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         iteration: 1,
         jobId,
         leaseExpiresAt: 1_000,
-        now: 100
+        now: 100,
       });
       if (!lock.ok) throw new Error("acquire failed");
 
@@ -743,7 +746,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       seedClaimedIteration(db, {
         leaseDurationMs: 60_000,
-        claimAt: 100
+        claimAt: 100,
       });
       // Lease expires at 60_100; now=5_000 → still fresh.
       const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
@@ -761,7 +764,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const first = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
       expect(first.recovered).toHaveLength(1);
@@ -774,7 +777,9 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       expect(stored?.state).toBe("pending");
 
       const events = db
-        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.recovered'",
+        )
         .get() as { c: number };
       expect(events.c).toBe(1);
     } finally {
@@ -789,13 +794,13 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db);
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       // Lease expires at 1_000. Within grace window (now=1_500, grace=1_000)
       // → not yet considered stale.
       const inGrace = recoverStaleClaimedGoalIterationJobs(db, {
         now: 1_500,
-        graceMs: 1_000
+        graceMs: 1_000,
       });
       expect(inGrace.recovered).toEqual([]);
       expect(inGrace.skipped).toEqual([]);
@@ -803,7 +808,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
 
       const past = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        graceMs: 1_000
+        graceMs: 1_000,
       });
       expect(past.recovered).toHaveLength(1);
       expect(getQueueJob(db, jobId)?.state).toBe("pending");
@@ -819,20 +824,20 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-a");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const inspectRepoState = (repoRoot: string) => {
         expect(repoRoot).toBe("/tmp/repo-a");
         return {
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "Repo has uncommitted changes: /tmp/repo-a"
+          error: "Repo has uncommitted changes: /tmp/repo-a",
         };
       };
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
@@ -841,14 +846,16 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       expect(skipped.reason).toBe("repo_dirty");
       expect(skipped.repoRoot).toBe("/tmp/repo-a");
       expect(skipped.repoInspectionError).toBe(
-        "Repo has uncommitted changes: /tmp/repo-a"
+        "Repo has uncommitted changes: /tmp/repo-a",
       );
 
       // Job stays claimed; no recovery event emitted.
       const stored = getQueueJob(db, jobId);
       expect(stored?.state).toBe("claimed");
       const events = db
-        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.recovered'",
+        )
         .get() as { c: number };
       expect(events.c).toBe(0);
     } finally {
@@ -863,17 +870,17 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-a");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const inspectRepoState = () => ({
         ok: false as const,
         code: "no_head" as const,
-        error: "Repo has no HEAD commit: /tmp/repo-a"
+        error: "Repo has no HEAD commit: /tmp/repo-a",
       });
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
@@ -892,24 +899,24 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-missing");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const inspectRepoState = () => ({
         ok: false as const,
         code: "missing" as const,
-        error: "Repo path does not exist: /tmp/repo-missing"
+        error: "Repo path does not exist: /tmp/repo-missing",
       });
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
       expect(out.skipped[0]!.reason).toBe("repo_unavailable");
       expect(out.skipped[0]!.repoRoot).toBe("/tmp/repo-missing");
       expect(out.skipped[0]!.repoInspectionError).toBe(
-        "Repo path does not exist: /tmp/repo-missing"
+        "Repo path does not exist: /tmp/repo-missing",
       );
       expect(getQueueJob(db, jobId)?.state).toBe("claimed");
     } finally {
@@ -926,7 +933,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoal(db); // repo defaults to null
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       let inspectorCalled = false;
       const inspectRepoState = () => {
@@ -934,13 +941,13 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         return {
           ok: false as const,
           code: "missing" as const,
-          error: "should not be called"
+          error: "should not be called",
         };
       };
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(inspectorCalled).toBe(false);
       expect(out.recovered).toHaveLength(1);
@@ -959,17 +966,17 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-a");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const inspectRepoState = (repoRoot: string) => ({
         ok: true as const,
         repoPath: repoRoot,
-        head: "a".repeat(40)
+        head: "a".repeat(40),
       });
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(out.recovered).toHaveLength(1);
       expect(out.recovered[0]!.jobBefore.id).toBe(jobId);
@@ -990,7 +997,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-a");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       setJobState(db, jobId, "running");
       let inspectorCalled = false;
@@ -999,13 +1006,13 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         return {
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "dirty"
+          error: "dirty",
         };
       };
 
       const out = recoverStaleClaimedGoalIterationJobs(db, {
         now: 5_000,
-        inspectRepoState
+        inspectRepoState,
       });
       expect(out.skipped).toHaveLength(1);
       expect(out.skipped[0]!.reason).toBe("job_running");
@@ -1023,18 +1030,18 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         const { jobId } = seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "Repo has uncommitted changes: /tmp/repo-a"
+          error: "Repo has uncommitted changes: /tmp/repo-a",
         });
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
         expect(out.recovered).toEqual([]);
         expect(out.skipped).toHaveLength(1);
@@ -1042,12 +1049,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         expect(skipped.reason).toBe("repo_dirty");
         expect(skipped.job.id).toBe(jobId);
 
-        const expectedPath = path.join(
-          dataDir,
-          "goals",
-          "g1",
-          "recovery.md"
-        );
+        const expectedPath = path.join(dataDir, "goals", "g1", "recovery.md");
         expect(skipped.recoveryArtifactPath).toBe(expectedPath);
         expect(fs.existsSync(expectedPath)).toBe(true);
         const md = fs.readFileSync(expectedPath, "utf-8");
@@ -1058,7 +1060,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         expect(md).toContain("- Repo path: /tmp/repo-a");
         expect(md).toContain("- Code: repo_dirty");
         expect(md).toContain(
-          "- Message: Repo has uncommitted changes: /tmp/repo-a"
+          "- Message: Repo has uncommitted changes: /tmp/repo-a",
         );
         expect(md).toContain("- Classified at (epoch ms): 5000");
         expect(md).toContain("## Safe next steps");
@@ -1081,18 +1083,18 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
           idempotencyKey: "g1:1",
           leaseDurationMs: 900,
           claimAt: 100,
-          workerId: "worker-prev"
+          workerId: "worker-prev",
         });
         setJobState(db, previous.jobId, "succeeded");
         db.prepare(
           `INSERT INTO events (goal_id, job_id, type, payload, created_at)
-           VALUES (?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?)`,
         ).run(
           "g1",
           previous.jobId,
           "job.succeeded",
           JSON.stringify({ iteration: 1, commit_sha: head }),
-          200
+          200,
         );
         const current = seedClaimedIteration(db, {
           goalId: "g1",
@@ -1100,26 +1102,26 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
           leaseDurationMs: 900,
           claimAt: 300,
           workerId: "worker-current",
-          iteration: 2
+          iteration: 2,
         });
         fs.writeFileSync(path.join(repo, "dirty.txt"), "dirty\n", "utf-8");
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: `Repo has uncommitted changes: ${repo}`
+          error: `Repo has uncommitted changes: ${repo}`,
         });
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
 
         expect(out.skipped).toHaveLength(1);
         expect(out.skipped[0]!.job.id).toBe(current.jobId);
         const md = fs.readFileSync(
           out.skipped[0]!.recoveryArtifactPath!,
-          "utf-8"
+          "utf-8",
         );
         expect(md).toContain(`- Expected (pre-iteration) commit: ${head}`);
         expect(md).toContain(`- Current commit: ${head}`);
@@ -1135,7 +1137,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         const { jobId } = seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         setJobState(db, jobId, "running");
         db.prepare(
@@ -1143,14 +1145,14 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
              BEFORE UPDATE OF needs_manual_recovery ON goals
              BEGIN
                SELECT RAISE(ABORT, 'manual recovery flag write failed');
-             END`
+             END`,
         ).run();
 
         expect(() =>
           recoverStaleClaimedGoalIterationJobs(db, {
             now: 5_000,
-            dataDir
-          })
+            dataDir,
+          }),
         ).toThrow(/manual recovery flag write failed/);
       } finally {
         db.close();
@@ -1168,14 +1170,14 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
           idempotencyKey: "g1:1",
           leaseDurationMs: 900,
           claimAt: 100,
-          workerId: "worker-a"
+          workerId: "worker-a",
         });
         const claimB = seedClaimedIteration(db, {
           goalId: "g2",
           idempotencyKey: "g2:1",
           leaseDurationMs: 900,
           claimAt: 101,
-          workerId: "worker-b"
+          workerId: "worker-b",
         });
 
         const inspectRepoState = (repoRoot: string) => {
@@ -1183,20 +1185,20 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
             return {
               ok: false as const,
               code: "no_head" as const,
-              error: "Repo has no HEAD commit: /tmp/repo-a"
+              error: "Repo has no HEAD commit: /tmp/repo-a",
             };
           }
           return {
             ok: false as const,
             code: "missing" as const,
-            error: "Repo path does not exist: /tmp/repo-missing"
+            error: "Repo path does not exist: /tmp/repo-missing",
           };
         };
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
         expect(out.skipped).toHaveLength(2);
         const byJob = new Map(out.skipped.map((row) => [row.job.id, row]));
@@ -1205,22 +1207,24 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
 
         expect(skippedA.reason).toBe("repo_unknown_commit");
         expect(skippedA.recoveryArtifactPath).toBe(
-          path.join(dataDir, "goals", "g1", "recovery.md")
+          path.join(dataDir, "goals", "g1", "recovery.md"),
         );
         const mdA = fs.readFileSync(skippedA.recoveryArtifactPath!, "utf-8");
         expect(mdA).toContain("- Code: repo_unknown_commit");
         expect(mdA).toContain("- Repo path: /tmp/repo-a");
-        expect(mdA).toContain("- Message: Repo has no HEAD commit: /tmp/repo-a");
+        expect(mdA).toContain(
+          "- Message: Repo has no HEAD commit: /tmp/repo-a",
+        );
 
         expect(skippedB.reason).toBe("repo_unavailable");
         expect(skippedB.recoveryArtifactPath).toBe(
-          path.join(dataDir, "goals", "g2", "recovery.md")
+          path.join(dataDir, "goals", "g2", "recovery.md"),
         );
         const mdB = fs.readFileSync(skippedB.recoveryArtifactPath!, "utf-8");
         expect(mdB).toContain("- Code: repo_unavailable");
         expect(mdB).toContain("- Repo path: /tmp/repo-missing");
         expect(mdB).toContain(
-          "- Message: Repo path does not exist: /tmp/repo-missing"
+          "- Message: Repo path does not exist: /tmp/repo-missing",
         );
       } finally {
         db.close();
@@ -1234,28 +1238,23 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         const { jobId } = seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         setJobState(db, jobId, "running");
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
-          dataDir
+          dataDir,
         });
         expect(out.skipped).toHaveLength(1);
         const skipped = out.skipped[0]!;
         expect(skipped.reason).toBe("job_running");
-        const expectedPath = path.join(
-          dataDir,
-          "goals",
-          "g1",
-          "recovery.md"
-        );
+        const expectedPath = path.join(dataDir, "goals", "g1", "recovery.md");
         expect(skipped.recoveryArtifactPath).toBe(expectedPath);
         const md = fs.readFileSync(expectedPath, "utf-8");
         expect(md).toContain("- Code: job_running");
         expect(md).toContain(
-          "- Message: Stale claimed job is still in `running` state"
+          "- Message: Stale claimed job is still in `running` state",
         );
         expect(md).toContain("## Safe next steps");
         expect(md).toContain("git -C '/tmp/repo-a' status");
@@ -1273,7 +1272,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         const goalDir = path.join(dataDir, "goals", "g1");
         fs.mkdirSync(goalDir, { recursive: true });
@@ -1296,23 +1295,23 @@ verification:
 ---
 body
 `,
-          "utf-8"
+          "utf-8",
         );
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "Repo has uncommitted changes: /tmp/repo-a"
+          error: "Repo has uncommitted changes: /tmp/repo-a",
         });
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
         expect(out.skipped).toHaveLength(1);
         const md = fs.readFileSync(
           out.skipped[0]!.recoveryArtifactPath!,
-          "utf-8"
+          "utf-8",
         );
         expect(md).toContain("- Runner: trusted-shell");
         expect(md).toContain("- Command: /usr/bin/env");
@@ -1333,27 +1332,27 @@ body
         seedGoalWithRepo(db, "g1", unsafeRepo);
         seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: `Repo has uncommitted changes: ${unsafeRepo}`
+          error: `Repo has uncommitted changes: ${unsafeRepo}`,
         });
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
 
         expect(out.skipped).toHaveLength(1);
         const md = fs.readFileSync(
           out.skipped[0]!.recoveryArtifactPath!,
-          "utf-8"
+          "utf-8",
         );
         expect(md).toContain(
-          "git -C '/tmp/repo with spaces/$(touch pwned)'\\''' status"
+          "git -C '/tmp/repo with spaces/$(touch pwned)'\\''' status",
         );
         expect(md).not.toContain("git -C /tmp/repo with spaces");
       } finally {
@@ -1368,17 +1367,17 @@ body
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         const { jobId } = seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "dirty"
+          error: "dirty",
         });
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
-          inspectRepoState
+          inspectRepoState,
         });
         expect(out.skipped).toHaveLength(1);
         const skipped = out.skipped[0]!;
@@ -1386,7 +1385,7 @@ body
         expect(skipped.reason).toBe("repo_dirty");
         expect(skipped.recoveryArtifactPath).toBeUndefined();
         expect(
-          fs.existsSync(path.join(tempDir, "goals", "g1", "recovery.md"))
+          fs.existsSync(path.join(tempDir, "goals", "g1", "recovery.md")),
         ).toBe(false);
       } finally {
         db.close();
@@ -1404,14 +1403,14 @@ body
           idempotencyKey: "g1:1",
           leaseDurationMs: 900,
           claimAt: 100,
-          workerId: "worker-a"
+          workerId: "worker-a",
         });
         const { runId } = startDaemonRun(db, { now: 100 });
         setDaemonRunActiveJob(db, {
           runId,
           jobId: a.jobId,
           lockId: null,
-          now: 100
+          now: 100,
         });
 
         const b = seedClaimedIteration(db, {
@@ -1419,7 +1418,7 @@ body
           idempotencyKey: "g2:1",
           leaseDurationMs: 900,
           claimAt: 101,
-          workerId: "worker-b"
+          workerId: "worker-b",
         });
         const acquired = acquireRepoLock(db, {
           repoRoot: "/tmp/repo-b",
@@ -1428,13 +1427,13 @@ body
           iteration: 1,
           jobId: b.jobId,
           leaseExpiresAt: 2_000,
-          now: 100
+          now: 100,
         });
         if (!acquired.ok) throw new Error("acquire failed");
 
         const out = recoverStaleClaimedGoalIterationJobs(db, {
           now: 5_000,
-          dataDir
+          dataDir,
         });
         expect(out.skipped).toHaveLength(2);
         for (const entry of out.skipped) {
@@ -1442,10 +1441,10 @@ body
           expect(entry.recoveryArtifactPath).toBeUndefined();
         }
         expect(
-          fs.existsSync(path.join(dataDir, "goals", "g1", "recovery.md"))
+          fs.existsSync(path.join(dataDir, "goals", "g1", "recovery.md")),
         ).toBe(false);
         expect(
-          fs.existsSync(path.join(dataDir, "goals", "g2", "recovery.md"))
+          fs.existsSync(path.join(dataDir, "goals", "g2", "recovery.md")),
         ).toBe(false);
       } finally {
         db.close();
@@ -1459,29 +1458,24 @@ body
         seedGoalWithRepo(db, "g1", "/tmp/repo-a");
         const { jobId } = seedClaimedIteration(db, {
           leaseDurationMs: 900,
-          claimAt: 100
+          claimAt: 100,
         });
         const inspectRepoState = () => ({
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "Repo has uncommitted changes: /tmp/repo-a"
+          error: "Repo has uncommitted changes: /tmp/repo-a",
         });
 
         const out = runStartupRecovery(db, {
           now: 5_000,
           inspectRepoState,
-          dataDir
+          dataDir,
         });
         expect(out.claimedJobs.skipped).toHaveLength(1);
         const skipped = out.claimedJobs.skipped[0]!;
         expect(skipped.job.id).toBe(jobId);
         expect(skipped.reason).toBe("repo_dirty");
-        const expectedPath = path.join(
-          dataDir,
-          "goals",
-          "g1",
-          "recovery.md"
-        );
+        const expectedPath = path.join(dataDir, "goals", "g1", "recovery.md");
         expect(skipped.recoveryArtifactPath).toBe(expectedPath);
         expect(fs.existsSync(expectedPath)).toBe(true);
       } finally {
@@ -1502,25 +1496,25 @@ body
         iteration: 1,
         idempotencyKey: "g1:1",
         artifactPath: "/tmp/test/g1/iterations/1",
-        now: 100
+        now: 100,
       });
       enqueueGoalIterationJob(db, {
         goalId: "g2",
         iteration: 1,
         idempotencyKey: "g2:1",
         artifactPath: "/tmp/test/g2/iterations/1",
-        now: 101
+        now: 101,
       });
       const claimedA = claimPendingGoalIterationJob(db, {
         workerId: "worker-a",
         leaseDurationMs: 1_900,
-        now: 100
+        now: 100,
       });
       if (!claimedA.ok) throw new Error("claim a failed");
       const claimedB = claimPendingGoalIterationJob(db, {
         workerId: "worker-b",
         leaseDurationMs: 900,
-        now: 100
+        now: 100,
       });
       if (!claimedB.ok) throw new Error("claim b failed");
       // claimedA.lease_expires_at = 2_000, claimedB.lease_expires_at = 1_000.
@@ -1528,7 +1522,7 @@ body
       const out = recoverStaleClaimedGoalIterationJobs(db, { now: 9_000 });
       expect(out.recovered.map((row) => row.jobBefore.id)).toEqual([
         claimedB.job.id,
-        claimedA.job.id
+        claimedA.job.id,
       ]);
     } finally {
       db.close();
@@ -1565,14 +1559,14 @@ describe("runStartupRecovery", () => {
         repoRoot: "/tmp/repo-a",
         goalId: "g1",
         idempotencyKey: "g1:1",
-        leaseExpiresAt: 1_000
+        leaseExpiresAt: 1_000,
       });
       setJobState(db, seededLock.jobId, "succeeded");
       // Stale claimed job with no live owner → recoverable.
       const claimed = seedClaimedIteration(db, {
         goalId: "g2",
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
 
       const out = runStartupRecovery(db, { now: 5_000, graceMs: 0 });
@@ -1581,12 +1575,12 @@ describe("runStartupRecovery", () => {
       expect(out.repoLocks.recovered).toHaveLength(1);
       expect(out.repoLocks.recovered[0]!.lock.id).toBe(seededLock.lockId);
       expect(out.repoLocks.recovered[0]!.recoveryStatus).toBe(
-        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
       );
       expect(out.claimedJobs.recovered).toHaveLength(1);
       expect(out.claimedJobs.recovered[0]!.jobBefore.id).toBe(claimed.jobId);
       expect(out.claimedJobs.recovered[0]!.recoveryStatus).toBe(
-        JOB_RECOVERED_AUTO_REPENDED_STATUS
+        JOB_RECOVERED_AUTO_REPENDED_STATUS,
       );
 
       const releasedLock = getRepoLock(db, seededLock.lockId);
@@ -1605,7 +1599,7 @@ describe("runStartupRecovery", () => {
       seedGoal(db);
       const claimed = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const first = runStartupRecovery(db, { now: 5_000 });
       expect(first.claimedJobs.recovered).toHaveLength(1);
@@ -1635,7 +1629,7 @@ describe("runStartupRecovery", () => {
         goalId: "g1",
         idempotencyKey: "g1:1",
         leaseExpiresAt: 1_000,
-        enqueueAt: 200
+        enqueueAt: 200,
       });
       // Stale claimed job (different goal) promoted to running (dirty: repo
       // writes may have happened, refuse auto-recovery).
@@ -1644,7 +1638,7 @@ describe("runStartupRecovery", () => {
         leaseDurationMs: 900,
         enqueueAt: 100,
         claimAt: 100,
-        workerId: "worker-b"
+        workerId: "worker-b",
       });
       setJobState(db, dirtyClaim.jobId, "running");
 
@@ -1669,7 +1663,7 @@ describe("runStartupRecovery", () => {
       seedGoalWithRepo(db, "g1", "/tmp/repo-a");
       const { jobId } = seedClaimedIteration(db, {
         leaseDurationMs: 900,
-        claimAt: 100
+        claimAt: 100,
       });
       const observed: string[] = [];
       const inspectRepoState = (repoRoot: string) => {
@@ -1677,7 +1671,7 @@ describe("runStartupRecovery", () => {
         return {
           ok: false as const,
           code: "dirty_worktree" as const,
-          error: "dirty"
+          error: "dirty",
         };
       };
 
@@ -1705,20 +1699,20 @@ describe("runStartupRecovery daemon recovery wiring", () => {
 
       const out = runStartupRecovery(db, {
         now: 1_000_000,
-        daemonRuns: { staleAfterMs: 30_000 }
+        daemonRuns: { staleAfterMs: 30_000 },
       });
       expect(out.daemonRuns.recovered).toHaveLength(1);
       expect(out.daemonRuns.recovered[0]!.runAfter.id).toBe(runId);
       expect(out.daemonRuns.recovered[0]!.runAfter.state).toBe("error");
       expect(out.daemonRuns.recovered[0]!.recoveryStatus).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
       );
       expect(out.daemonRuns.skipped).toEqual([]);
 
       const stored = getDaemonRun(db, runId);
       expect(stored?.state).toBe("error");
       expect(stored?.recovery_status).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
       );
     } finally {
       db.close();
@@ -1735,8 +1729,8 @@ describe("runStartupRecovery daemon recovery wiring", () => {
         now: 1_000_000,
         daemonRuns: {
           staleAfterMs: 30_000,
-          excludeRunId: runId
-        }
+          excludeRunId: runId,
+        },
       });
       expect(out.daemonRuns.recovered).toEqual([]);
       expect(out.daemonRuns.skipped).toHaveLength(1);
@@ -1775,7 +1769,7 @@ describe("recoverStaleDaemonRuns", () => {
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
-        staleAfterMs: 30_000
+        staleAfterMs: 30_000,
       });
       expect(out.recovered).toHaveLength(1);
       expect(out.skipped).toEqual([]);
@@ -1785,7 +1779,7 @@ describe("recoverStaleDaemonRuns", () => {
       expect(entry.runAfter.id).toBe(runId);
       expect(entry.runAfter.state).toBe("error");
       expect(entry.runAfter.recovery_status).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
       );
       expect(entry.runAfter.finished_at).toBe(100_000);
       expect(entry.recoveryStatus).toBe(DAEMON_RUN_AUTO_RECOVERED_STATUS);
@@ -1793,7 +1787,7 @@ describe("recoverStaleDaemonRuns", () => {
       const stored = getDaemonRun(db, runId);
       expect(stored?.state).toBe("error");
       expect(stored?.recovery_status).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
       );
     } finally {
       db.close();
@@ -1809,7 +1803,7 @@ describe("recoverStaleDaemonRuns", () => {
 
       const out = recoverStaleDaemonRuns(db, {
         now: 10_000,
-        staleAfterMs: 5_000
+        staleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toEqual([]);
@@ -1827,13 +1821,13 @@ describe("recoverStaleDaemonRuns", () => {
         runId,
         jobId: "job-1",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
@@ -1856,29 +1850,29 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.skipped).toEqual([]);
       expect(out.recovered).toHaveLength(1);
       expect(out.recovered[0]!.runBefore.id).toBe(runId);
       expect(out.recovered[0]!.runBefore.active_job_id).toBe(
-        "workflow:run-1:implementation"
+        "workflow:run-1:implementation",
       );
       expect(out.recovered[0]!.recoveryStatus).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS,
       );
 
       const stored = getDaemonRun(db, runId);
@@ -1886,7 +1880,7 @@ describe("recoverStaleDaemonRuns", () => {
       expect(stored?.active_job_id).toBeNull();
       expect(stored?.active_lock_id).toBeNull();
       expect(stored?.recovery_status).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_WORKFLOW_DISPATCH_STATUS,
       );
     } finally {
       db.close();
@@ -1899,45 +1893,45 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "release:1",
-        stepId: "preflight"
+        stepId: "preflight",
       });
       const first = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId: first.runId,
         jobId: "workflow:release:1:preflight",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
       const firstOut = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(firstOut.recovered).toHaveLength(1);
       expect(firstOut.recovered[0]!.runBefore.active_job_id).toBe(
-        "workflow:release:1:preflight"
+        "workflow:release:1:preflight",
       );
 
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
         stepId: "postflight:1",
-        now: 2_000
+        now: 2_000,
       });
       const second = startDaemonRun(db, { now: 2_000 });
       setDaemonRunActiveJob(db, {
         runId: second.runId,
         jobId: "workflow:run-1:postflight:1",
         lockId: null,
-        now: 2_000
+        now: 2_000,
       });
       const secondOut = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(secondOut.recovered).toHaveLength(1);
       expect(secondOut.recovered[0]!.runBefore.active_job_id).toBe(
-        "workflow:run-1:postflight:1"
+        "workflow:run-1:postflight:1",
       );
       expect(secondOut.skipped).toEqual([]);
     } finally {
@@ -1951,21 +1945,21 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: null,
-        now: 9_000
+        now: 9_000,
       });
       heartbeatDaemonRun(db, { runId, now: 9_500 });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 10_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toEqual([]);
@@ -1985,30 +1979,30 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       seedWorkflowDispatchLease(db, {
         runId: "run-1",
-        expiresAt: 120_000
+        expiresAt: 120_000,
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
       expect(out.skipped[0]!.reason).toBe("active_job_present");
       expect(out.skipped[0]!.blockingJobId).toBe(
-        "workflow:run-1:implementation"
+        "workflow:run-1:implementation",
       );
 
       const stored = getDaemonRun(db, runId);
@@ -2026,29 +2020,29 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       seedWorkflowDispatchLease(db, {
         runId: "run-1",
-        expiresAt: 939_950
+        expiresAt: 939_950,
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
 
       const out = runStartupRecovery(db, {
         now: 940_000,
-        graceMs: 100
+        graceMs: 100,
       });
       expect(out.daemonRuns.recovered).toEqual([]);
       expect(out.daemonRuns.skipped).toHaveLength(1);
       expect(out.daemonRuns.skipped[0]!.reason).toBe("active_job_present");
       expect(out.daemonRuns.skipped[0]!.blockingJobId).toBe(
-        "workflow:run-1:implementation"
+        "workflow:run-1:implementation",
       );
 
       const stored = getDaemonRun(db, runId);
@@ -2066,18 +2060,18 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       seedWorkflowDispatchLease(db, {
         runId: "run-1",
-        expiresAt: 100_100
+        expiresAt: 100_100,
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: null,
-        now: 1_000
+        now: 1_000,
       });
 
       const result = recoverStaleDaemonRunWithWorkflowDispatch(db, {
@@ -2086,9 +2080,9 @@ describe("recoverStaleDaemonRuns", () => {
         staleHeartbeatBefore: 95_000,
         workflowDispatchLeaseGuard: {
           now: 100_000,
-          graceMs: 0
+          graceMs: 0,
         },
-        now: 100_000
+        now: 100_000,
       });
       expect(result.ok).toBe(false);
 
@@ -2107,26 +2101,26 @@ describe("recoverStaleDaemonRuns", () => {
     try {
       seedWorkflowRunAndStep(db, {
         runId: "run-1",
-        stepId: "implementation"
+        stepId: "implementation",
       });
       const { runId } = startDaemonRun(db, { now: 1_000 });
       setDaemonRunActiveJob(db, {
         runId,
         jobId: "workflow:run-1:implementation",
         lockId: "lock-1",
-        now: 1_000
+        now: 1_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
       expect(out.skipped[0]!.reason).toBe("active_job_present");
       expect(out.skipped[0]!.blockingJobId).toBe(
-        "workflow:run-1:implementation"
+        "workflow:run-1:implementation",
       );
 
       const stored = getDaemonRun(db, runId);
@@ -2148,13 +2142,13 @@ describe("recoverStaleDaemonRuns", () => {
         runId,
         jobId: null,
         lockId: "lock-1",
-        now: 1_000
+        now: 1_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        activeJobStaleAfterMs: 5_000
+        activeJobStaleAfterMs: 5_000,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
@@ -2175,7 +2169,7 @@ describe("recoverStaleDaemonRuns", () => {
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
         staleAfterMs: 5_000,
-        excludeRunId: runId
+        excludeRunId: runId,
       });
       expect(out.recovered).toEqual([]);
       expect(out.skipped).toHaveLength(1);
@@ -2198,12 +2192,12 @@ describe("recoverStaleDaemonRuns", () => {
       finishDaemonRun(db, {
         runId,
         terminalState: "stopped",
-        now: 2_000
+        now: 2_000,
       });
 
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
-        staleAfterMs: 1_000
+        staleAfterMs: 1_000,
       });
       // listStaleDaemonRuns filters terminal records, so they never appear.
       expect(out.recovered).toEqual([]);
@@ -2220,13 +2214,13 @@ describe("recoverStaleDaemonRuns", () => {
       const { runId } = startDaemonRun(db, { now: 1_000 });
       const first = recoverStaleDaemonRuns(db, {
         now: 100_000,
-        staleAfterMs: 5_000
+        staleAfterMs: 5_000,
       });
       expect(first.recovered).toHaveLength(1);
 
       const second = recoverStaleDaemonRuns(db, {
         now: 200_000,
-        staleAfterMs: 5_000
+        staleAfterMs: 5_000,
       });
       expect(second.recovered).toEqual([]);
       expect(second.skipped).toEqual([]);
@@ -2234,7 +2228,7 @@ describe("recoverStaleDaemonRuns", () => {
       const stored = getDaemonRun(db, runId);
       expect(stored?.state).toBe("error");
       expect(stored?.recovery_status).toBe(
-        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
       );
       // recovery_status / finished_at were set on the first pass and not
       // overwritten by the second attempt (no row matches state guard).
@@ -2252,7 +2246,7 @@ describe("recoverStaleDaemonRuns", () => {
       finishDaemonRun(db, {
         runId: oldest.runId,
         terminalState: "stopped",
-        now: 1_500
+        now: 1_500,
       });
       // Two concurrently-started stale runs with distinct heartbeats. The DB
       // partial unique index forbids two ACTIVE records at once, so we finish
@@ -2261,14 +2255,14 @@ describe("recoverStaleDaemonRuns", () => {
       finishDaemonRun(db, {
         runId: middle.runId,
         terminalState: "stopped",
-        now: 2_500
+        now: 2_500,
       });
       const newest = startDaemonRun(db, { now: 3_000 });
 
       // Only the newest is still active and stale (terminal rows are excluded).
       const out = recoverStaleDaemonRuns(db, {
         now: 100_000,
-        staleAfterMs: 5_000
+        staleAfterMs: 5_000,
       });
       expect(out.recovered).toHaveLength(1);
       expect(out.recovered[0]!.runBefore.id).toBe(newest.runId);
@@ -2282,10 +2276,10 @@ describe("recoverStaleDaemonRuns", () => {
     const db = openDb(dataDir);
     try {
       expect(() =>
-        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: 0 })
+        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: 0 }),
       ).toThrow(/staleAfterMs/);
       expect(() =>
-        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: -1 })
+        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: -1 }),
       ).toThrow(/staleAfterMs/);
     } finally {
       db.close();

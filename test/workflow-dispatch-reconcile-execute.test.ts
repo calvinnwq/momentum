@@ -175,15 +175,10 @@ function driveAttemptTerminal(
   state: ExecutorAttemptState,
   runId: string = RUN_ID,
 ): void {
-  updateExecutorAttemptState(
-    db,
-    dispatchAttemptId(stepId, runId),
-    state,
-    {
-      now: TERMINAL_AT,
-      finishedAt: TERMINAL_AT,
-    },
-  );
+  updateExecutorAttemptState(db, dispatchAttemptId(stepId, runId), state, {
+    now: TERMINAL_AT,
+    finishedAt: TERMINAL_AT,
+  });
 }
 
 function stepRow(

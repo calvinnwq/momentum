@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   EXECUTOR_ATTEMPT_STATES,
-  type ExecutorAttemptState
+  type ExecutorAttemptState,
 } from "../src/core/executors/loop/reducer.js";
 import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch/reconcile.js";
 
@@ -21,7 +21,7 @@ describe("planWorkflowStepReconciliation (RC-2 pure decider)", () => {
     "preparing",
     "running",
     "pausing",
-    "waiting_operator"
+    "waiting_operator",
   ];
 
   it("defers finalization while the bounded executor session is non-terminal", () => {
@@ -50,7 +50,7 @@ describe("planWorkflowStepReconciliation (RC-2 pure decider)", () => {
     const plan = planWorkflowStepReconciliation("blocked");
     expect(plan).toMatchObject({
       action: "manual_recovery",
-      attemptState: "blocked"
+      attemptState: "blocked",
     });
   });
 
@@ -58,7 +58,7 @@ describe("planWorkflowStepReconciliation (RC-2 pure decider)", () => {
     const plan = planWorkflowStepReconciliation("manual_recovery_required");
     expect(plan).toMatchObject({
       action: "manual_recovery",
-      attemptState: "manual_recovery_required"
+      attemptState: "manual_recovery_required",
     });
   });
 
@@ -66,13 +66,18 @@ describe("planWorkflowStepReconciliation (RC-2 pure decider)", () => {
     for (const state of EXECUTOR_ATTEMPT_STATES) {
       const plan = planWorkflowStepReconciliation(state);
       expect(["not_terminal", "finalize", "manual_recovery"]).toContain(
-        plan.action
+        plan.action,
       );
     }
   });
 
   it("only ever finalizes into a terminal workflow-step state", () => {
-    const terminalStepStates = new Set(["succeeded", "failed", "skipped", "canceled"]);
+    const terminalStepStates = new Set([
+      "succeeded",
+      "failed",
+      "skipped",
+      "canceled",
+    ]);
     for (const state of EXECUTOR_ATTEMPT_STATES) {
       const plan = planWorkflowStepReconciliation(state);
       if (plan.action === "finalize") {

@@ -176,10 +176,9 @@ export function resolveWorkflowGateAndResumeRegisteredExecutor(
       resolved.evidence !== null
     ) {
       const attempt = loadExecutorAttempt(db, resolved.attemptId);
-      const round = listExecutorRoundsForAttempt(
-        db,
-        resolved.attemptId,
-      ).find((candidate) => candidate.roundId === resolved.roundId);
+      const round = listExecutorRoundsForAttempt(db, resolved.attemptId).find(
+        (candidate) => candidate.roundId === resolved.roundId,
+      );
       const decision = listExecutorDecisionsForRound(db, resolved.roundId).find(
         (candidate) => candidate.decisionId === resolved.evidence,
       );

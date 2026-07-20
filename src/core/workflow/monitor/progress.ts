@@ -39,7 +39,7 @@ import crypto from "node:crypto";
 import type {
   WorkflowMonitorDisposition,
   WorkflowMonitorEnvelope,
-  WorkflowMonitorReportReason
+  WorkflowMonitorReportReason,
 } from "./envelope.js";
 
 /**
@@ -54,7 +54,7 @@ export const WORKFLOW_MONITOR_PROGRESS_PHASES = [
   "idle",
   "awaiting_approval",
   "blocked",
-  "terminal"
+  "terminal",
 ] as const;
 export type WorkflowMonitorProgressPhase =
   (typeof WORKFLOW_MONITOR_PROGRESS_PHASES)[number];
@@ -107,7 +107,7 @@ export type DeriveWorkflowMonitorProgressOptions = {
 
 export function deriveWorkflowMonitorProgress(
   envelope: WorkflowMonitorEnvelope,
-  options: DeriveWorkflowMonitorProgressOptions = {}
+  options: DeriveWorkflowMonitorProgressOptions = {},
 ): WorkflowMonitorProgressTick {
   const phase = derivePhase(envelope);
   const digest = computeDigest(envelope, phase);
@@ -128,7 +128,7 @@ export function deriveWorkflowMonitorProgress(
     nextAction: envelope.nextAction.code,
     blockerReason: deriveBlockerReason(envelope, phase),
     disposition: envelope.disposition,
-    reportReason: envelope.reportReason
+    reportReason: envelope.reportReason,
   };
 }
 
@@ -140,7 +140,7 @@ export function deriveWorkflowMonitorProgress(
  * stale manual-recovery round or sticky recovery flag as its progress phase.
  */
 function derivePhase(
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
 ): WorkflowMonitorProgressPhase {
   if (
     envelope.terminal &&
@@ -165,7 +165,7 @@ function derivePhase(
 
 function deriveBlockerReason(
   envelope: WorkflowMonitorEnvelope,
-  phase: WorkflowMonitorProgressPhase
+  phase: WorkflowMonitorProgressPhase,
 ): string | null {
   if (phase !== "blocked") return null;
   if (envelope.recovery !== null) return envelope.recovery.message;
@@ -198,7 +198,7 @@ function deriveLastEvent(envelope: WorkflowMonitorEnvelope): string {
  */
 function computeDigest(
   envelope: WorkflowMonitorEnvelope,
-  phase: WorkflowMonitorProgressPhase
+  phase: WorkflowMonitorProgressPhase,
 ): string {
   const projection = {
     phase,
@@ -230,13 +230,13 @@ function computeDigest(
         evidence: gate.evidence,
         allowedActions: [...gate.allowedActions],
         recommendedAction: gate.recommendedAction,
-        policyEnvelope: [...gate.policyEnvelope]
+        policyEnvelope: [...gate.policyEnvelope],
       }))
       .sort((a, b) => (a.gateId < b.gateId ? -1 : a.gateId > b.gateId ? 1 : 0)),
     stepsByState: envelope.counts.stepsByState,
     lastCheckpointStepId: envelope.lastCheckpoint?.stepId ?? null,
     lastCheckpointSource: envelope.lastCheckpoint?.source ?? null,
-    lastCheckpointDigest: envelope.lastCheckpoint?.digest ?? null
+    lastCheckpointDigest: envelope.lastCheckpoint?.digest ?? null,
   };
   const canonical = canonicalStringify(projection);
   const hex = crypto.createHash("sha256").update(canonical).digest("hex");

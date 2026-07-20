@@ -15,7 +15,7 @@ import {
   listWorkflowGatesForRun,
   loadWorkflowGate,
   resolveWorkflowGate,
-  type NewWorkflowGate
+  type NewWorkflowGate,
 } from "../src/core/workflow/gate/persist.js";
 
 const tempRoots: string[] = [];
@@ -38,14 +38,14 @@ function makeTempDir(prefix = "momentum-workflow-gate-persist-"): string {
 function seedRunAndStep(
   db: MomentumDb,
   runId = "run-1",
-  stepId = "step-1"
+  stepId = "step-1",
 ): void {
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES (?, 'test', 1, 1)",
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES (?, ?, 'implementation', 0, 1, 1)`
+       VALUES (?, ?, 'implementation', 0, 1, 1)`,
   ).run(runId, stepId);
 }
 
@@ -70,13 +70,13 @@ function roundGate(overrides: Partial<NewWorkflowGate> = {}): NewWorkflowGate {
     allowedActions: ["fix", "skip", "approve_as_is", "abort"],
     recommendedAction: "fix",
     policyEnvelope: ["fix", "skip"],
-    ...overrides
+    ...overrides,
   };
 }
 
 // A workflow-scoped gate that hangs from the whole run only.
 function workflowGate(
-  overrides: Partial<NewWorkflowGate> = {}
+  overrides: Partial<NewWorkflowGate> = {},
 ): NewWorkflowGate {
   return {
     gateId: "gate-wf",
@@ -85,12 +85,12 @@ function workflowGate(
     gateType: "approval_required",
     reason: "workflow boundary needs an approval",
     allowedActions: ["approve", "reject"],
-    ...overrides
+    ...overrides,
   };
 }
 
 function request(
-  overrides: Partial<GateDecisionRequest> = {}
+  overrides: Partial<GateDecisionRequest> = {},
 ): GateDecisionRequest {
   return { action: "fix", actor: "calvin", mode: "operator", ...overrides };
 }
@@ -117,7 +117,7 @@ describe("insertWorkflowGate", () => {
       resolvedBy: null,
       resolutionMode: null,
       chosenAction: null,
-      resolution: null
+      resolution: null,
     });
   });
 
@@ -150,7 +150,7 @@ describe("insertWorkflowGate", () => {
     const db = openSeededDb();
     insertWorkflowGate(db, roundGate({ reason: "first" }), { now: 1 });
     expect(() =>
-      insertWorkflowGate(db, roundGate({ reason: "second" }), { now: 2 })
+      insertWorkflowGate(db, roundGate({ reason: "second" }), { now: 2 }),
     ).toThrow(WorkflowGateConflictError);
     expect(loadWorkflowGate(db, "gate-1")?.reason).toBe("first");
   });
@@ -158,11 +158,9 @@ describe("insertWorkflowGate", () => {
   it("refuses an unknown gate type without writing a row", () => {
     const db = openSeededDb();
     expect(() =>
-      insertWorkflowGate(
-        db,
-        roundGate({ gateType: "not_a_gate" as never }),
-        { now: 1 }
-      )
+      insertWorkflowGate(db, roundGate({ gateType: "not_a_gate" as never }), {
+        now: 1,
+      }),
     ).toThrow(InvalidWorkflowGateError);
     expect(loadWorkflowGate(db, "gate-1")).toBeUndefined();
   });
@@ -170,11 +168,9 @@ describe("insertWorkflowGate", () => {
   it("refuses an unknown target scope without writing a row", () => {
     const db = openSeededDb();
     expect(() =>
-      insertWorkflowGate(
-        db,
-        roundGate({ targetScope: "executor" as never }),
-        { now: 1 }
-      )
+      insertWorkflowGate(db, roundGate({ targetScope: "executor" as never }), {
+        now: 1,
+      }),
     ).toThrow(InvalidWorkflowGateError);
     expect(loadWorkflowGate(db, "gate-1")).toBeUndefined();
   });
@@ -183,7 +179,7 @@ describe("insertWorkflowGate", () => {
     const db = openSeededDb();
     // round scope requires a round_id
     expect(() =>
-      insertWorkflowGate(db, roundGate({ roundId: null }), { now: 1 })
+      insertWorkflowGate(db, roundGate({ roundId: null }), { now: 1 }),
     ).toThrow(InvalidWorkflowGateError);
   });
 
@@ -191,26 +187,20 @@ describe("insertWorkflowGate", () => {
     const db = openSeededDb();
     // workflow scope must not carry a step/attempt/round id
     expect(() =>
-      insertWorkflowGate(
-        db,
-        workflowGate({ stepRunId: "step-1" }),
-        { now: 1 }
-      )
+      insertWorkflowGate(db, workflowGate({ stepRunId: "step-1" }), { now: 1 }),
     ).toThrow(InvalidWorkflowGateError);
   });
 
   it("refuses a blank reason", () => {
     const db = openSeededDb();
     expect(() =>
-      insertWorkflowGate(db, workflowGate({ reason: "   " }), { now: 1 })
+      insertWorkflowGate(db, workflowGate({ reason: "   " }), { now: 1 }),
     ).toThrow(InvalidWorkflowGateError);
   });
 
   it("enforces the workflow_run_id foreign key", () => {
     const db = openDb(makeTempDir()); // no run seeded
-    expect(() =>
-      insertWorkflowGate(db, workflowGate(), { now: 1 })
-    ).toThrow();
+    expect(() => insertWorkflowGate(db, workflowGate(), { now: 1 })).toThrow();
   });
 });
 
@@ -221,7 +211,7 @@ describe("listWorkflowGatesForRun / listOpenWorkflowGatesForRun", () => {
     insertWorkflowGate(db, roundGate({ gateId: "gate-b" }), { now: 2 });
     expect(listWorkflowGatesForRun(db, "run-1").map((g) => g.gateId)).toEqual([
       "gate-a",
-      "gate-b"
+      "gate-b",
     ]);
   });
 
@@ -231,7 +221,7 @@ describe("listWorkflowGatesForRun / listOpenWorkflowGatesForRun", () => {
     insertWorkflowGate(db, roundGate({ gateId: "gate-done" }), { now: 2 });
     resolveWorkflowGate(db, "gate-done", request(), { now: 3 });
     expect(
-      listOpenWorkflowGatesForRun(db, "run-1").map((g) => g.gateId)
+      listOpenWorkflowGatesForRun(db, "run-1").map((g) => g.gateId),
     ).toEqual(["gate-open"]);
   });
 });
@@ -244,7 +234,7 @@ describe("resolveWorkflowGate", () => {
       db,
       "gate-1",
       request({ action: "abort", actor: "calvin", mode: "operator" }),
-      { now: 9 }
+      { now: 9 },
     );
     expect(resolved.resolvedAt).toBe(9);
     expect(resolved.resolvedBy).toBe("calvin");
@@ -262,7 +252,7 @@ describe("resolveWorkflowGate", () => {
       db,
       "gate-1",
       request({ resolutionNote: "verified locally" }),
-      { now: 2 }
+      { now: 2 },
     );
     expect(resolved.resolution).toBe("verified locally");
   });
@@ -274,7 +264,7 @@ describe("resolveWorkflowGate", () => {
       db,
       "gate-1",
       request({ action: "skip", actor: "policy:auto", mode: "delegated" }),
-      { now: 2 }
+      { now: 2 },
     );
     expect(resolved.resolutionMode).toBe("delegated");
     expect(resolved.chosenAction).toBe("skip");
@@ -288,13 +278,13 @@ describe("resolveWorkflowGate", () => {
         db,
         "gate-1",
         request({ action: "approve_as_is", mode: "delegated" }),
-        { now: 2 }
+        { now: 2 },
       );
       throw new Error("expected refusal");
     } catch (error) {
       expect(error).toBeInstanceOf(WorkflowGateDecisionError);
       expect((error as WorkflowGateDecisionError).code).toBe(
-        "delegated_action_outside_envelope"
+        "delegated_action_outside_envelope",
       );
     }
     expect(loadWorkflowGate(db, "gate-1")?.resolvedAt).toBeNull();
@@ -305,13 +295,13 @@ describe("resolveWorkflowGate", () => {
     insertWorkflowGate(db, roundGate(), { now: 1 });
     try {
       resolveWorkflowGate(db, "gate-1", request({ action: "nuke" }), {
-        now: 2
+        now: 2,
       });
       throw new Error("expected refusal");
     } catch (error) {
       expect(error).toBeInstanceOf(WorkflowGateDecisionError);
       expect((error as WorkflowGateDecisionError).code).toBe(
-        "action_not_allowed"
+        "action_not_allowed",
       );
     }
   });
@@ -322,13 +312,13 @@ describe("resolveWorkflowGate", () => {
     resolveWorkflowGate(db, "gate-1", request(), { now: 2 });
     try {
       resolveWorkflowGate(db, "gate-1", request({ action: "skip" }), {
-        now: 3
+        now: 3,
       });
       throw new Error("expected refusal");
     } catch (error) {
       expect(error).toBeInstanceOf(WorkflowGateDecisionError);
       expect((error as WorkflowGateDecisionError).code).toBe(
-        "gate_already_resolved"
+        "gate_already_resolved",
       );
     }
     // the original resolution is untouched
@@ -338,7 +328,7 @@ describe("resolveWorkflowGate", () => {
   it("throws when resolving an unknown gate", () => {
     const db = openSeededDb();
     expect(() =>
-      resolveWorkflowGate(db, "missing", request(), { now: 1 })
+      resolveWorkflowGate(db, "missing", request(), { now: 1 }),
     ).toThrow(WorkflowGateNotFoundError);
   });
 });

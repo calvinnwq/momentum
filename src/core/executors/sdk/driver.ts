@@ -252,9 +252,7 @@ function validateExecutorTickResult(
       "Executor tick recommendedRoundState is invalid.",
     );
   }
-  if (
-    !includes(EXECUTOR_ATTEMPT_STATES, record["recommendedAttemptState"])
-  ) {
+  if (!includes(EXECUTOR_ATTEMPT_STATES, record["recommendedAttemptState"])) {
     throw new ExecutorTickContractError(
       "Executor tick recommendedAttemptState is invalid.",
     );

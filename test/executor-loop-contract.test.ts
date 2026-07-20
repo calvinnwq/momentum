@@ -7,7 +7,7 @@ import {
   EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorAttempt,
-  transitionExecutorRound
+  transitionExecutorRound,
 } from "../src/core/executors/loop/reducer.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
@@ -31,7 +31,9 @@ describe("executor loop contract", () => {
       "failed",
       "cancelled",
     ]);
-    expect([...EXECUTOR_HUMAN_GATE_TYPES]).toContain("destructive_action_requested");
+    expect([...EXECUTOR_HUMAN_GATE_TYPES]).toContain(
+      "destructive_action_requested",
+    );
     expect([...EXECUTOR_HUMAN_GATE_TYPES]).toContain("credential_required");
   });
 
@@ -69,7 +71,9 @@ describe("executor loop contract", () => {
       ok: false,
       errorCode: "executor_attempt_terminal",
     });
-    expect(transitionExecutorRound("running", "mirroring_external_state")).toEqual({
+    expect(
+      transitionExecutorRound("running", "mirroring_external_state"),
+    ).toEqual({
       ok: true,
       state: "mirroring_external_state",
     });

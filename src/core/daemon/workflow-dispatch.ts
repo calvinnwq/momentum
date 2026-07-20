@@ -380,7 +380,11 @@ function createMissingProfileNativeDispatch(
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
     resolveHostBindings: ({ claim, context, executorName }) => {
-      const attempt = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId);
+      const attempt = loadLatestExecutorAttemptForStep(
+        context.db,
+        claim.runId,
+        claim.stepId,
+      );
       const settleRepoOwnership =
         attempt !== undefined &&
         hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId)
@@ -687,9 +691,12 @@ function createLiveStepHostBindingsResolver(
         resolved.reason,
       );
     }
-    const attempt = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId);
-    if (attempt === undefined)
-      throw new Error("dispatch_attempt_not_found");
+    const attempt = loadLatestExecutorAttemptForStep(
+      context.db,
+      claim.runId,
+      claim.stepId,
+    );
+    if (attempt === undefined) throw new Error("dispatch_attempt_not_found");
     const delegateTool = isDelegate
       ? resolveDelegateToolName(input.config)
       : undefined;
@@ -1731,7 +1738,11 @@ function hasCompletedDelegateHandoff(
   db: MomentumDb,
   attemptId: string,
 ): boolean {
-  return hasExecutorCheckpoint(db, attemptId, DELEGATE_SUPERVISOR_HANDOFF_STAGE);
+  return hasExecutorCheckpoint(
+    db,
+    attemptId,
+    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
+  );
 }
 
 /**

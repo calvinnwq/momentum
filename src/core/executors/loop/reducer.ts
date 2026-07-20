@@ -68,8 +68,7 @@ export const EXECUTOR_ATTEMPT_STATES = [
   "succeeded",
   "cancelled",
 ] as const;
-export type ExecutorAttemptState =
-  (typeof EXECUTOR_ATTEMPT_STATES)[number];
+export type ExecutorAttemptState = (typeof EXECUTOR_ATTEMPT_STATES)[number];
 
 export const EXECUTOR_ATTEMPT_TERMINAL_STATES = [
   "manual_recovery_required",
@@ -381,10 +380,7 @@ export function isTerminalExecutorRoundState(
 export function transitionExecutorAttempt(
   from: ExecutorAttemptState,
   to: ExecutorAttemptState,
-): TransitionResult<
-  ExecutorAttemptState,
-  ExecutorAttemptTransitionErrorCode
-> {
+): TransitionResult<ExecutorAttemptState, ExecutorAttemptTransitionErrorCode> {
   if (!ATTEMPT_STATE_SET.has(from) || !ATTEMPT_STATE_SET.has(to)) {
     return {
       ok: false,

@@ -131,7 +131,8 @@ export class DelegateSupervisorExecutor implements Executor<
       context.config.tool,
     );
     const attemptRounds = context.state.rounds.filter(
-      ({ round }) => round.attemptNumber === context.state.attempt.attemptNumber,
+      ({ round }) =>
+        round.attemptNumber === context.state.attempt.attemptNumber,
     );
     const priorRounds = context.state.rounds.filter(
       ({ round }) => round.attemptNumber < context.state.attempt.attemptNumber,
@@ -1014,7 +1015,11 @@ function findHandoffIntent(
   }
   try {
     const parsed: unknown = JSON.parse(checkpoint.detail);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
       throw new Error("durable delegated handoff intent is invalid");
     }
     const record = parsed as Record<string, unknown>;
@@ -1136,8 +1141,7 @@ function parseLegacyLiveStepDecision(detail: string): LegacyLiveStepDecision {
     throw new Error("legacy mechanism completion reason is invalid");
   }
   if (
-    attemptState !==
-      executorAttemptStateForClassification(recommendation) ||
+    attemptState !== executorAttemptStateForClassification(recommendation) ||
     !isExecutorRoundStateCompatibleWithClassification(
       recommendation,
       roundState,

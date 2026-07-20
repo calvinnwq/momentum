@@ -62,11 +62,9 @@ import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
   WorkflowStepDispatchContext,
-  WorkflowStepDispatchResult
+  WorkflowStepDispatchResult,
 } from "./scheduler.js";
-import {
-  loadLatestExecutorAttemptForStep,
-} from "../../executors/loop/persist.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 
 /**
  * `result_digest` stamped on a step this fixture terminalizes, so durable state
@@ -109,7 +107,7 @@ export const DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR =
 
 const DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES = new Set([
   "external-apply",
-  "subworkflow"
+  "subworkflow",
 ]);
 
 /** Truthy opt-in spellings, matching the repo's other env-flag gates. */
@@ -117,7 +115,7 @@ const TRUTHY_ENV_VALUES: ReadonlySet<string> = new Set([
   "1",
   "true",
   "yes",
-  "on"
+  "on",
 ]);
 
 /**
@@ -126,7 +124,7 @@ const TRUTHY_ENV_VALUES: ReadonlySet<string> = new Set([
  * environment snapshot.
  */
 export function isDogfoodTerminalizeDispatchEnabled(
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): boolean {
   const value = env[DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR];
   if (value === undefined) return false;
@@ -142,7 +140,7 @@ export function isDogfoodTerminalizeDispatchEnabled(
  */
 export function resolveDaemonWorkflowDispatch(
   env: Record<string, string | undefined>,
-  baseDispatch: WorkflowStepDispatch
+  baseDispatch: WorkflowStepDispatch,
 ): WorkflowStepDispatch {
   return isDogfoodTerminalizeDispatchEnabled(env)
     ? createTerminalizingWorkflowDispatch(baseDispatch)
@@ -158,18 +156,22 @@ export function resolveDaemonWorkflowDispatch(
  * it, gated on {@link shouldTerminalizeAfterDispatch}.
  */
 export function createTerminalizingWorkflowDispatch(
-  baseDispatch: WorkflowStepDispatch
+  baseDispatch: WorkflowStepDispatch,
 ): WorkflowStepDispatch {
   return (
     claim: ClaimedWorkflowStep,
-    context: WorkflowStepDispatchContext
+    context: WorkflowStepDispatchContext,
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
-    const executorFamily = loadLatestExecutorAttemptForStep(context.db, claim.runId, claim.stepId)?.executorFamily;
+    const executorFamily = loadLatestExecutorAttemptForStep(
+      context.db,
+      claim.runId,
+      claim.stepId,
+    )?.executorFamily;
     if (
       shouldTerminalizeAfterDispatch(result.status) &&
       !DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES.has(
-        executorFamily ?? ""
+        executorFamily ?? "",
       )
     ) {
       terminalizeDispatchedStep(context.db, claim, context.now);
@@ -189,7 +191,7 @@ export function createTerminalizingWorkflowDispatch(
 function terminalizeDispatchedStep(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
-  now: number
+  now: number,
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -198,7 +200,7 @@ function terminalizeDispatchedStep(
       stepId: claim.stepId,
       state: "succeeded",
       resultDigest: `${DOGFOOD_TERMINALIZE_RESULT_DIGEST_PREFIX}::${claim.stepId}`,
-      now
+      now,
     });
     if (!finished.ok) {
       const cause =
@@ -206,7 +208,7 @@ function terminalizeDispatchedStep(
           ? `${finished.reason} from ${finished.from}`
           : finished.reason;
       throw new Error(
-        `dogfood terminalize: step ${claim.runId}/${claim.stepId} could not be finished succeeded (${cause}); rolling back so the dispatch lease is not released over a non-terminalized step`
+        `dogfood terminalize: step ${claim.runId}/${claim.stepId} could not be finished succeeded (${cause}); rolling back so the dispatch lease is not released over a non-terminalized step`,
       );
     }
     releaseWorkflowLease(db, {
@@ -214,7 +216,7 @@ function terminalizeDispatchedStep(
       leaseKind: claim.lease.leaseKind,
       holder: claim.lease.holder,
       acquiredAt: claim.lease.acquiredAt,
-      now
+      now,
     });
     refreshWorkflowRunStateAfterTerminalize(db, claim.runId, now);
     db.exec("COMMIT");
@@ -237,10 +239,10 @@ function terminalizeDispatchedStep(
 function refreshWorkflowRunStateAfterTerminalize(
   db: MomentumDb,
   runId: string,
-  now: number
+  now: number,
 ): void {
   refreshWorkflowRunRuntimeState(db, {
     runId,
-    now
+    now,
   });
 }

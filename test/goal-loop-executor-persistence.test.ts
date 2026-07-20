@@ -8,13 +8,13 @@ import {
   insertExecutorAttempt,
   insertExecutorRound,
   loadExecutorRound,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import {
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
-  resolveGoalLoopRoundSelection
+  resolveGoalLoopRoundSelection,
 } from "../src/core/executors/goal-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
@@ -40,7 +40,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-goal-loop-persistence-")
+    path.join(os.tmpdir(), "momentum-goal-loop-persistence-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -51,11 +51,11 @@ function makeTempDir(): string {
 function openRoundDb(): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
+       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
   const attempt: ExecutorAttemptRecord = {
     attemptId: "inv-1",
@@ -67,7 +67,7 @@ function openRoundDb(): MomentumDb {
     attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
-    finishedAt: null
+    finishedAt: null,
   };
   insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
@@ -79,8 +79,8 @@ function startRound(db: MomentumDb): void {
       agentProvider: "claude",
       model: "claude-opus-4-8",
       effort: "high",
-      maxRounds: 5
-    }
+      maxRounds: 5,
+    },
   });
   const record = planGoalLoopRoundStart({
     roundId: "round-1",
@@ -94,7 +94,7 @@ function startRound(db: MomentumDb): void {
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-1",
     logPaths: ["/artifacts/round-1/stdout.log"],
-    startedAt: 1_000
+    startedAt: 1_000,
   });
   insertExecutorRound(db, record, { now: 1_000 });
 }
@@ -112,9 +112,9 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
       scope: "goal-loop",
       subject: "project round start",
       body: "",
-      breaking: false
+      breaking: false,
     },
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -129,23 +129,23 @@ const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
         signal: null,
         duration_ms: 12,
         timed_out: false,
-        succeeded: true
-      }
-    ]
+        succeeded: true,
+      },
+    ],
   },
   commit: {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round start"
+    message: "feat(goal-loop): project round start",
   },
-  head: SHA_A
+  head: SHA_A,
 };
 
 const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "result_missing",
   resultFilePath: "/tmp/result.json",
-  error: "result file not found"
+  error: "result file not found",
 };
 
 describe("goal-loop round persistence — committed completion round-trip", () => {
@@ -157,11 +157,11 @@ describe("goal-loop round persistence — committed completion round-trip", () =
       result: runnerResult(),
       finalize: COMMITTED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     updateExecutorRound(db, "round-1", plan.captureUpdate!, { now: 2_000 });
     const final = updateExecutorRound(db, "round-1", plan.terminalUpdate, {
-      now: 3_000
+      now: 3_000,
     });
 
     // Terminal classification and lifecycle.
@@ -198,13 +198,13 @@ describe("goal-loop round persistence — manual recovery boundary", () => {
       result: null,
       finalize: RESULT_MISSING,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     // A missing result has nothing to capture; the round transitions directly
     // from running to manual recovery.
     expect(plan.captureUpdate).toBeNull();
     const final = updateExecutorRound(db, "round-1", plan.terminalUpdate, {
-      now: 2_000
+      now: 2_000,
     });
 
     expect(final.state).toBe("manual_recovery_required");

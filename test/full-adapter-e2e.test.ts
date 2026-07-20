@@ -451,10 +451,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
       const scaffoldAttemptId = `${runId}::preflight::attempt-1`;
-      const scaffoldAttempt = loadExecutorAttempt(
-        db,
-        scaffoldAttemptId,
-      );
+      const scaffoldAttempt = loadExecutorAttempt(db, scaffoldAttemptId);
       expect(scaffoldAttempt?.executorFamily).toBe("one-shot");
       expect(scaffoldAttempt?.state).toBe("running");
       const scaffoldRound = loadExecutorRound(
@@ -526,9 +523,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       );
       const finalizeRoundId = singleShotRoundId(finalizeAttemptId);
       expect(
-        listExecutorRoundsForAttempt(db, finalizeAttemptId).map(
-          (r) => r.state,
-        ),
+        listExecutorRoundsForAttempt(db, finalizeAttemptId).map((r) => r.state),
       ).toEqual(["succeeded"]);
       // The verification-bearing capture is durable in the checkpoint stream and
       // the verification_output artifact row.
@@ -704,9 +699,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // and its ordered rounds, all settled succeeded.
       const attemptId = goalLoopAttemptId(runId, "implementation", 1);
       expect(result.attempt.attemptId).toBe(attemptId);
-      expect(loadExecutorAttempt(db, attemptId)).toEqual(
-        result.attempt,
-      );
+      expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
       const durableRounds = listExecutorRoundsForAttempt(db, attemptId);
       expect(durableRounds.map((r) => r.roundId)).toEqual([
         goalLoopRoundId(attemptId, 0),
@@ -720,10 +713,9 @@ describe("NGX-372 full adapter E2E proof", () => {
       // The terminal round's verification-bearing capture is durable in its
       // lifecycle checkpoint stream.
       expect(
-        listExecutorCheckpointsForRound(
-          db,
-          goalLoopRoundId(attemptId, 1),
-        ).map((c) => c.stage),
+        listExecutorCheckpointsForRound(db, goalLoopRoundId(attemptId, 1)).map(
+          (c) => c.stage,
+        ),
       ).toEqual([
         "round_started",
         "mechanism_completed",
@@ -851,9 +843,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       const attemptId = noMistakesAttemptId(runId, "no-mistakes", 1);
       expect(result.attempt.attemptId).toBe(attemptId);
       expect(attemptId).not.toBe(`${runId}::no-mistakes::dispatch`);
-      expect(loadExecutorAttempt(db, attemptId)).toEqual(
-        result.attempt,
-      );
+      expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
       const roundId = noMistakesRoundId(attemptId);
       expect(result.round.round.roundId).toBe(roundId);
       expect(

@@ -205,18 +205,18 @@ The managed daemon normally drives at most one registered-executor tick per sche
 For the first completed delegate-supervisor handoff in an attempt, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
-If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same invocation.
+If a process dies after a durable handoff intent or completed handoff exists but before daemon classification, stale auto-release dispatch recovery releases the abandoned lease and re-drives that unclassified running, capturing-result, or `mirroring_external_state` round under the same attempt.
 The same recovery applies to a completed `continue` poll whose succeeded or failed round has a durable handoff in its history.
 It does not park the run merely because terminal classification is missing, and it does not repeat the external handoff.
 Native completed-mechanism reattachment follows the durable-envelope rule below.
 If the process instead dies after gate classification but before gate parking finishes, stale dispatch recovery reuses or reconstructs the round-scoped gate from the durable decision selector and unresolved decision.
 That recovery verifies and releases the exact stale lease in the same transaction, preserving the executor's selected operator target without opening manual recovery.
-If a delegate dies earlier after persisting a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation but before classification, stale recovery makes that unclassified round resumable under the same invocation so classification and gate parking can finish.
-The tick must return the id of the current non-terminal round for the current invocation attempt.
-A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the invocation `running`, and makes the invocation eligible for another scheduler pass.
+If a delegate dies earlier after persisting a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation but before classification, stale recovery makes that unclassified round resumable under the same attempt so classification and gate parking can finish.
+The tick must return the id of the current non-terminal round for the current attempt.
+A `continue` recommendation terminalizes that round as `succeeded` or `failed`, keeps the attempt `running`, and makes the attempt eligible for another scheduler pass.
 The executor starts the next sequential round when its next tick observes no current non-terminal round.
 
-Retries keep the deterministic invocation id, increment the invocation attempt, and preserve every earlier attempt's rounds as immutable evidence.
+A retry inserts a fresh immutable attempt with the next attempt number and preserves every earlier attempt and its rounds as immutable evidence; an earlier attempt is never reopened or rewritten.
 A tick cannot settle a round from an earlier attempt or any round other than the current one.
 This prevents a delayed result from an old attempt from completing the active retry.
 
@@ -224,17 +224,17 @@ Dispatch lease heartbeats run independently of the executor tick, including whil
 Every durable envelope write is fenced against the current lease identity and freshness.
 Lease loss aborts the tick signal and prevents later writes from the former owner.
 The profile-backed repository lock spans at least the longest configured wrapper/probe execution window plus the full verification-command budget and is released only after clean finalization or durable handoff evidence.
-Recovery of an unresolved handoff may take over an active lock for the same deterministic invocation after the lock expires or after the scheduler proves and releases the matching stale dispatch owner.
+Recovery of an unresolved handoff may take over an active lock for the same step-scoped deterministic dispatch correlation after the lock expires or after the scheduler proves and releases the matching stale dispatch owner.
 The repository, run, previous holder, attempt, job, and prior deadline must still match, and subsequent heartbeats and settlement remain fenced by the new holder and attempt.
 
-An executor throw settles the active round and invocation for `manual_recovery_required` with `executor_threw`.
+An executor throw settles the active round and attempt for `manual_recovery_required` with `executor_threw`.
 A malformed or internally inconsistent tick result uses `executor_contract_invalid` instead.
 These failures remain durable and do not escape as an unclassified scheduler result.
-After repairing the executor, guarded recovery clear prepares either outcome for a new attempt under the same deterministic invocation.
+After repairing the executor, guarded recovery clear prepares either outcome for a fresh attempt on the same step.
 
-The daemon controller rejects a decision atomically unless its classification, invocation state, round state, recovery code, and human gate form a supported combination:
+The daemon controller rejects a decision atomically unless its classification, attempt state, round state, recovery code, and human gate form a supported combination:
 
-| Classification | Required invocation state | Allowed round states | Recovery code | Human gate |
+| Classification | Required attempt state | Allowed round states | Recovery code | Human gate |
 | --- | --- | --- | --- | --- |
 | `complete` | `succeeded` | `succeeded` | `null` | `null` |
 | `continue` | `running` | `succeeded`, `failed` | `null` | `null` |
@@ -245,7 +245,7 @@ The daemon controller rejects a decision atomically unless its classification, i
 | `failed` | `failed` | `failed` | Non-empty | `null` |
 | `cancelled` | `cancelled` | `cancelled` | `null` | `null` |
 
-An inconsistent daemon decision writes no round settlement, invocation transition, or classification checkpoint.
+An inconsistent daemon decision writes no round settlement, attempt transition, or classification checkpoint.
 An `approval_required` or `operator_decision_required` recommendation must also name a current round with an unresolved durable executor decision and a non-empty allowed-action set.
 For gate selection, a decision is unresolved only when `chosenAction` is absent and `resolution` is null, omitted, or blank.
 A decision with only one of those resolution fields populated is not eligible for another gate.
@@ -253,8 +253,8 @@ Set `humanGateDecisionId` to that decision's durable id when the executor must t
 The daemon persists the selector as round evidence before applying the gate classification so parking can resume safely after a crash.
 When the field is omitted or `null`, the dispatcher preserves the legacy behavior of selecting the last unresolved decision.
 Allowed actions must be unique, non-blank canonical strings (no surrounding whitespace), and `recommendedAction` must be `null` or one of those actions; an invalid gate decision settles as `executor_contract_invalid` instead of parking an unresolvable gate.
-The dispatcher mirrors that decision into a round-scoped workflow gate, releases its dispatch lease, and leaves the invocation paused at `waiting_operator`.
-Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the invocation, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.
+The dispatcher mirrors that decision into a round-scoped workflow gate, releases its dispatch lease, and leaves the attempt paused at `waiting_operator`.
+Resolving the gate with `workflow run decide` records the chosen action on both durable records, reopens the attempt, and lets a later scheduler pass reacquire the lease and resume the executor from its envelope snapshot.
 A `waiting_operator` round reopens in place.
 A terminal `succeeded` or `failed` gate round remains immutable, and the resumed executor starts a new round after reading the resolved decision from the prior round.
 
@@ -269,7 +269,7 @@ Native Windows process execution fails closed with `unsupported_platform` before
 The single-shot lifecycle classifies that refusal as `blocked`; the dispatched live-wrapper lane records manual recovery so the workflow can move to a supported host, clear recovery, and retry the same step in a new attempt and round.
 On supported hosts, a separate process-group anchor remains alive until cleanup and treats loss of its parent-liveness pipe as a daemon crash.
 Every launched process inherits a cryptographically random per-run ownership token; cleanup freshly discovers and re-verifies that token before signalling any individual PID, so PID reuse cannot turn a retained number into authority over an unrelated process.
-Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, invocation, and classification checkpoint.
+Aborting `signal`, timing out, normal leader exit, or losing the daemon terminates the owned tree under a bounded cleanup deadline and, after a host-provided repo-ownership proof succeeds, resets repository mutations to the captured base before the host atomically records the cancelled round, attempt, and classification checkpoint.
 Cleanup verifies tracked/untracked status and a recursive metadata snapshot of ignored paths.
 Missing ownership proof, failed process-tree termination, cleanup residue, or failed repository cleanup preserves the durable in-flight state for recovery instead of recording a false terminal cancellation.
 Custom runner adapters must stop and safely clean up their own in-flight work before rejecting with the signal's abort reason.
@@ -290,28 +290,28 @@ Very large ignored trees can make snapshotting expensive, and concurrent cache c
 Portable POSIX supervision is userland containment, not a sandbox.
 It can prove cleanup for the anchored process group and for descendants observed through ancestry sampling that retain the ownership token.
 A hostile descendant that changes session and strips the token between samples can require cgroups or another OS-backed containment primitive; that case is outside this portable implementation.
-When Momentum observes an unowned escaped descendant, loses ownership visibility, or cannot prove the owned tree is gone, the supervisor fails with `SUPERVISOR_FAILED` and the durable invocation remains in flight for recovery.
+When Momentum observes an unowned escaped descendant, loses ownership visibility, or cannot prove the owned tree is gone, the supervisor fails with `SUPERVISOR_FAILED` and the durable attempt remains in flight for recovery.
 
 ## Envelope facade
 
-`ExecutorEnvelope` is bound to one invocation. It supports:
+`ExecutorEnvelope` is bound to one attempt. It supports:
 
-- `snapshot()` to re-read the durable invocation, rounds, artifacts, checkpoints, findings, and decisions;
+- `snapshot()` to re-read the durable attempt, rounds, artifacts, checkpoints, findings, and decisions; the snapshot spans the step's rounds across attempts so retry evidence stays visible, while every write stays bound to the envelope's attempt;
 - `startRound()` for the next sequential round, with an optional initial checkpoint batch committed atomically with the round;
 - `observeRound()` for non-terminal phase and result/verification/commit evidence;
 - `recordRoundProgress()` to commit an observation and its supporting checkpoint batch atomically;
 - `heartbeat()` for liveness;
 - `recordArtifact()`, `recordCheckpoint()`, `recordFinding()`, and `recordDecision()` for append-only evidence.
 
-It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another invocation, overlapping or gapped rounds, writes after either the round or invocation is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and invocation settlement share one write transaction.
-Executor writes are available only while the invocation is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the invocation again.
+It does not expose SQLite or terminal-classification methods. The daemon controller and frozen executor facade are separate runtime objects, not merely different TypeScript views of one object. The facade rejects evidence for another attempt, overlapping or gapped rounds, writes after either the round or attempt is terminal, and terminal states submitted through JavaScript or casted observation inputs. Every public write validates its complete payload at runtime, including round starts and observations, progress checkpoint batches, artifacts, checkpoints, findings, decisions, and daemon settlement. Observation updates use an explicit runtime field whitelist rather than spreading caller objects. State-dependent checks and writes are transactional; daemon-allocated checkpoint identity, terminal classification, and attempt settlement share one write transaction.
+Executor writes are available only while the attempt is `running`; a daemon transition to `waiting_operator` or any other non-running state revokes every facade write, including heartbeat, until daemon policy moves the attempt again.
 
-If `mechanism_completed` evidence is durable but daemon classification is not, the profile-backed native `goal-loop`, `one-shot`, and `script` entrypoints reattach the matching non-terminal deterministic invocation, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
+If `mechanism_completed` evidence is durable but daemon classification is not, the profile-backed native `goal-loop`, `one-shot`, and `script` entrypoints reattach the matching non-terminal deterministic attempt, reconstruct the outcome from that checkpoint, and return the same recommendation without rerunning the mechanism or repeating its commit.
 Result-capture observations and their completion checkpoints commit together, so a restart cannot see a torn completion proof.
-For a new native dispatch, the invocation, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created invocation without its complete durable reattach binding.
+For a new native dispatch, the attempt, its initial running round, and the hashed `round_started` dispatch-binding checkpoint are materialized in one transaction after runtime inputs resolve, so a crash cannot leave a newly created attempt without its complete durable reattach binding.
 Every subsequent native goal-loop round uses the same atomic round plus binding operation before its mechanism launches.
-Reattach requires the durable `round_started` binding plus unchanged invocation identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
-An invocation without that complete binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
+Reattach requires the durable `round_started` binding plus unchanged attempt identity, selection, input digest, artifact root, log paths, portable config, and host round-start inputs.
+An attempt without that complete binding, or an incomplete round without a durable mechanism outcome, remains recovery work rather than being replayed blindly.
 
 ## Config and host bindings
 
@@ -388,7 +388,7 @@ Daemon profile availability and native no-fallback behavior are owned by [Daemon
 The agent-once and script built-ins publish strict schemas with `additionalProperties: false`. Schema validation is fail-closed once registration/preflight wiring selects the executor, and the native single-shot lifecycle repeats family-specific validation before durable round creation. Script config cannot carry agent fields; agent-once config cannot carry command fields. The SDK declaration itself never turns an unknown field into ambient runtime behavior.
 
 The lifecycle runtime-normalizes the complete runner-adapter return before writing artifacts, result observations, or completion checkpoints.
-Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized invocation, running round, and dispatch-binding checkpoint for recovery.
+Malformed JavaScript or casted returns are rejected at that boundary, leaving only the already-materialized attempt, running round, and dispatch-binding checkpoint for recovery.
 A successful `one-shot` turn requires a successful normalized `RunnerResult`; a `script` turn is exit-code based and must not return a result document or result-document artifact.
 A result digest is valid only when its result document is present.
 Successful turns pass through `capturing_result`, but only a captured document produces `result_captured`; failures do not invent a capture checkpoint.

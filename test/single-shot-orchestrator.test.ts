@@ -822,12 +822,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
       runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
     });
 
-    const attemptId = singleShotAttemptId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
     expect(result.attempt.attemptId).toBe(attemptId);
     expect(result.attempt.executorFamily).toBe("one-shot");
     expect(result.attempt.state).toBe("succeeded");
@@ -1072,21 +1067,16 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     ).rejects.toThrow("timeoutMs must be a whole number of seconds");
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
   });
 
   it("inserts the materialized attempt before the round runs", async () => {
     const db = openStepDb();
-    const attemptId = singleShotAttemptId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
     let durableStateDuringRound:
       { attempt: string | undefined; round: string | undefined } | undefined;
     await runSingleShotStep({
@@ -1139,9 +1129,9 @@ describe("runSingleShotStep — attempt/round materialization", () => {
 
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
     expect(
@@ -1180,9 +1170,9 @@ describe("runSingleShotStep — attempt/round materialization", () => {
 
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
     expect(
@@ -1271,9 +1261,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     // manual-recovery `attemptState` would otherwise reach the durable row
     // unobserved (the round-level head_mismatch test pins only `roundState`).
     expect(result.round.round.state).toBe("manual_recovery_required");
-    expect(result.round.decision.attemptState).toBe(
-      "manual_recovery_required",
-    );
+    expect(result.round.decision.attemptState).toBe("manual_recovery_required");
     expect(result.attempt.state).toBe("manual_recovery_required");
     // `manual_recovery_required` is a terminal attempt state, so finished_at
     // is stamped.
@@ -1319,12 +1307,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", async () => {
     const db = openStepDb();
     const first = await dispatch(db, 1);
-    const attemptId = singleShotAttemptId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
 
     // Snapshot the durable owner + round the first dispatch settled.
     const ownerBefore = loadExecutorAttempt(db, attemptId);
@@ -1333,25 +1316,16 @@ describe("runSingleShotStep — single-owner enforcement", () => {
 
     // A second dispatch under the same identity collides on the attempt id and
     // fails closed before any work — never a silent second owner.
-    await expect(dispatch(db, 1)).rejects.toThrow(
-      ExecutorAttemptConflictError,
-    );
+    await expect(dispatch(db, 1)).rejects.toThrow(ExecutorAttemptConflictError);
 
     // The durable owner + its round are byte-for-byte unchanged.
     expect(loadExecutorAttempt(db, attemptId)).toEqual(ownerBefore);
-    expect(listExecutorRoundsForAttempt(db, attemptId)).toEqual(
-      roundsBefore,
-    );
+    expect(listExecutorRoundsForAttempt(db, attemptId)).toEqual(roundsBefore);
   });
 
   it("refuses attempt-only reattach without a durable dispatch binding", async () => {
     const db = openStepDb();
-    const attemptId = singleShotAttemptId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
     insertExecutorAttempt(
       db,
       {
@@ -1405,16 +1379,12 @@ describe("runSingleShotStep — single-owner enforcement", () => {
       }),
     ).rejects.toThrow("simulated daemon crash");
 
-    const attemptId = singleShotAttemptId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
     expect(loadExecutorAttempt(db, attemptId)?.state).toBe("running");
-    expect(
-      loadExecutorRound(db, singleShotRoundId(attemptId)),
-    ).toMatchObject({ state: "capturing_result", classification: null });
+    expect(loadExecutorRound(db, singleShotRoundId(attemptId))).toMatchObject({
+      state: "capturing_result",
+      classification: null,
+    });
     db.exec("DROP TRIGGER reject_single_shot_classification");
 
     await expect(
@@ -1470,9 +1440,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     expect(second.attempt.attemptId).toBe(
       singleShotAttemptId("run-1", "step-1", "one-shot", 2),
     );
-    expect(first.attempt.attemptId).not.toBe(
-      second.attempt.attemptId,
-    );
+    expect(first.attempt.attemptId).not.toBe(second.attempt.attemptId);
 
     // Both owners coexist durably; the re-run did not overwrite the prior attempt.
     expect(loadExecutorAttempt(db, first.attempt.attemptId)).toEqual(

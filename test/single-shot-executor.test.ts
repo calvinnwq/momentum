@@ -38,9 +38,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const ATTEMPT_TERMINAL_SET = new Set<string>(
-  EXECUTOR_ATTEMPT_TERMINAL_STATES,
-);
+const ATTEMPT_TERMINAL_SET = new Set<string>(EXECUTOR_ATTEMPT_TERMINAL_STATES);
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
 describe("single-shot executor families", () => {
@@ -292,9 +290,7 @@ describe("planSingleShotAttempt", () => {
       decision.attemptState,
     );
     expect(transition.ok).toBe(true);
-    expect(isTerminalExecutorAttemptState(decision.attemptState)).toBe(
-      true,
-    );
+    expect(isTerminalExecutorAttemptState(decision.attemptState)).toBe(true);
     expect(isTerminalExecutorRoundState(decision.roundState)).toBe(true);
   });
 });
