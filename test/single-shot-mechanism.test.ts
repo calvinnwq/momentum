@@ -1394,7 +1394,7 @@ describe("single-shot concrete mechanisms", () => {
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input",
+      recoveryCode: "host_binding_mismatch",
     });
   });
 
@@ -1427,7 +1427,7 @@ describe("single-shot concrete mechanisms", () => {
 
     expect(result.outcome).toEqual({
       ok: false,
-      recoveryCode: "invalid_input",
+      recoveryCode: "host_binding_mismatch",
     });
     expect(fs.existsSync(marker)).toBe(false);
   });
