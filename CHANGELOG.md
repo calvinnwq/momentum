@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/calvinnwq/momentum/compare/v0.20.0...v0.21.0) (2026-07-20)
+
+
+### Features
+
+* **adapters:** reject retired camelCase live-wrapper input aliases ([871b297](https://github.com/calvinnwq/momentum/commit/871b297541c586b907a5b6576d70d0ad5dd86da7))
+* **executors:** dispatch native goal-loop and single-shot lifecycles ([#234](https://github.com/calvinnwq/momentum/issues/234)) ([3d1267e](https://github.com/calvinnwq/momentum/commit/3d1267ef4061170c083e8980519ed60b4b8fe960))
+
+
+### Bug Fixes
+
+* **adapters:** refuse retired wrapper aliases before field validation ([a2e6161](https://github.com/calvinnwq/momentum/commit/a2e61610e48b276d611a8511e82b6b2b960b7584))
+* **adapters:** reject retired live-wrapper config aliases ([98667df](https://github.com/calvinnwq/momentum/commit/98667dfdfecdb909541aff5d9f417d7298e9a9e4))
+
 ## [0.20.0](https://github.com/calvinnwq/momentum/compare/v0.19.0...v0.20.0) (2026-07-16)
 
 
