@@ -1355,7 +1355,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get(runId),
     ).toEqual({ state: "manual_recovery_required", attempt: 2 });
@@ -1627,7 +1627,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -1766,7 +1766,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -1878,7 +1878,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get(runId),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4348,7 +4348,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get("unregistered-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4784,7 +4784,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get("malformed-tick-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });
@@ -4889,7 +4889,7 @@ describe("executor registration and SDK dispatch", () => {
       expect(
         db
           .prepare(
-            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+            "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
           )
           .get("thrown-tick-run"),
       ).toEqual({ state: "succeeded", attempt: 2 });
@@ -5036,7 +5036,7 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT state, attempt_number AS attempt FROM executor_attempts WHERE workflow_run_id = ? ORDER BY attempt_number DESC LIMIT 1",
         )
         .get("module-load-failure-run"),
     ).toEqual({ state: "succeeded", attempt: 2 });

@@ -21,7 +21,10 @@
  *     durable `executor_attempts` + first `executor_rounds` start scaffold —
  *     the contract's Round Lifecycle "create the round row before external work
  *     runs", proof through the production path that a bounded executor session
- *     started. The dispatch lease is *held* (the executor session is in progress,
+ *     started. A first dispatch inserts attempt 1; a re-entry over a retryable
+ *     terminal attempt inserts the next immutable attempt instead of reopening
+ *     the prior one, and any other existing attempt reports already-dispatched.
+ *     The dispatch lease is *held* (the executor session is in progress,
  *     not terminal), the lane's liveness token aging out under its TTL so a
  *     later stale-lease recovery reclaims it; nothing is stranded.
  *   - **fail_closed** (unresolvable, under-configured, or an unsupported family):
@@ -45,12 +48,12 @@
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
  * `executor_attempts` / `executor_rounds` evidence only; the reconciliation seam
- * reconciliation seam (`dispatch/reconcile-execute.ts`) is now the
- * single owner that converts terminal executor evidence into the workflow step's
- * terminal transition. The phase-1 attempt /
- * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
- * reconciling the scaffold with the adapters' own reattachable ids rather than
- * silently colliding with them.
+ * (`dispatch/reconcile-execute.ts`) is the single owner that converts terminal
+ * executor evidence into the workflow step's terminal transition. Attempt ids
+ * are deterministically derived per attempt number
+ * (`deriveDispatchAttemptId`); the legacy `...::dispatch` shape survives only
+ * as the step-scoped external correlation token
+ * (`deriveDispatchCorrelationId`) and as migrated historical attempt ids.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";

@@ -3,7 +3,7 @@
  *
  * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the
- * `<run>::<step>::dispatch` executor attempt (`running`) and its first round
+ * newest dispatch attempt (`running`) and its first round
  * (`pending`) with every evidence field empty, and holds the dispatch lease. The
  * reconciliation seam (`dispatch/reconcile-execute.ts`) then finalizes the
  * workflow step from that attempt's *terminal* executor state. Nothing in
@@ -152,7 +152,7 @@ function readExecutorRecoveryCode(
  * tests, and operator surfaces. Each is a recorded outcome.
  */
 export const WORKFLOW_EXECUTOR_TERMINALIZE_STATUS = {
-  /** No `<run>::<step>::dispatch` attempt exists; nothing was written. */
+  /** No dispatch attempt rows exist for the step; nothing was written. */
   notDispatched: "terminalize_not_dispatched",
   /** The dispatch attempt + round were recorded to a terminal state. */
   terminalized: "terminalize_recorded",
@@ -179,7 +179,7 @@ export type TerminalizeDispatchedExecutorResult = {
 
 /**
  * Record the dispatched step's executor result as terminal evidence on the
- * `<run>::<step>::dispatch` scaffold — the attempt and its first round — so the
+ * newest dispatch scaffold — the latest attempt and its rounds — so the
  * reconciliation seam can finalize the workflow step from it. Writes the
  * attempt/round transitions in one `BEGIN IMMEDIATE` transaction so a mid-write
  * failure can never leave a terminal attempt over a non-terminal round (or the

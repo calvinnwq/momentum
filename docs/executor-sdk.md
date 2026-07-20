@@ -1,6 +1,6 @@
 # Executor SDK
 
-Momentum executors run below workflow steps inside the same durable invocation and round envelope. The SDK contract is deliberately tick-shaped: one call observes durable state, performs at most one bounded turn, records evidence, and recommends an outcome. The daemon decides what happens next.
+Momentum executors run below workflow steps inside the same durable attempt and round envelope. The SDK contract is deliberately tick-shaped: one call observes durable state, performs at most one bounded turn, records evidence, and recommends an outcome. The daemon decides what happens next.
 
 The source contract is `src/core/executors/sdk/types.ts`.
 Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`.
@@ -40,8 +40,8 @@ Executor names are permanent durable identities.
 Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them.
 At dispatch, a missing registration settles the attempt as `manual_recovery_required` with `runtime_unavailable`.
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
-After the executor is installed or repaired, `workflow run clear-recovery` prepares the same deterministic invocation for a new attempt; the next scheduler pass dispatches it without discarding the refused round.
-The successful clear also resolves open `manual_recovery_required` gates for the run when their allowed actions include `clear_recovery`, so the retried invocation is not left behind a stale gate.
+After the executor is installed or repaired, `workflow run clear-recovery` prepares the step for a new attempt; the next scheduler pass inserts a fresh immutable attempt with the next attempt number without discarding the refused attempt or its round.
+The successful clear also resolves open `manual_recovery_required` gates for the run when their allowed actions include `clear_recovery`, so the retried attempt is not left behind a stale gate.
 If one configured module fails to load during daemon dispatch, that configured name receives the same honest refusal while unrelated registered executors remain available.
 Failed daemon discovery is retried on a later scheduler pass, so repairing the executor entry module and clearing recovery does not require a daemon restart.
 Node does not provide a safe in-process unload for an already-evaluated ESM dependency graph; if the repair changes only a transitive dependency that Node already attempted to load or evaluate, restart the daemon before clearing recovery.

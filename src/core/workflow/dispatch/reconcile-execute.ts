@@ -7,7 +7,7 @@
  * runtime-consolidation plan names the reconciliation seam. It is to `dispatch/reconcile.ts` exactly
  * what `dispatch/execute.ts` is to `dispatch.ts`.
  *
- * The seam reads the deterministic `<run>::<step>::dispatch` attempt the
+ * The seam reads the newest dispatch attempt the
  * production dispatcher (`dispatch/execute.ts`) created, asks
  * {@link planWorkflowStepReconciliation} what to do, and applies that decision
  * inside a single `BEGIN IMMEDIATE` transaction:
@@ -29,8 +29,8 @@
  * Two structural guarantees from the runtime-consolidation plan ("The live-wrapper / executor-loop
  * step-finalization boundary"):
  *
- *   1. **Single owner, keyed on the dispatch id.** The seam acts only when a
- *      `<run>::<step>::dispatch` attempt exists. A step finalized by an live
+ *   1. **Single owner, keyed on dispatch attempt rows.** The seam acts only when a
+ *      dispatch attempt row exists for the step. A step finalized by a live
  *      wrapper writes no executor attempt, so the seam refuses it
  *      (`not_dispatched`) and writes nothing — there is no path where both live-wrapper
  *      direct-finalize and executor-loop reconciliation finalize the same step.
@@ -70,7 +70,7 @@ import {
  * returns without explaining what it did to a dispatched step.
  */
 export const WORKFLOW_RECONCILE_RESULT_STATUS = {
-  /** No `<run>::<step>::dispatch` attempt: not this seam's step (live-wrapper lane). */
+  /** No dispatch attempt rows: not this seam's step (live-wrapper lane). */
   notDispatched: "reconcile_not_dispatched",
   /** The bounded executor session is still in progress; left running. */
   deferred: "reconcile_deferred",

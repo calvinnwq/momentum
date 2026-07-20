@@ -25,7 +25,7 @@ export default {
       stepRunId: attempt.stepRunId,
       stepKey: attempt.stepKey,
       executorFamily: attempt.executorFamily,
-      attempt: attempt.attempt,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: context.state.rounds.length,
       state: "capturing_result",
       agentProvider: null,
