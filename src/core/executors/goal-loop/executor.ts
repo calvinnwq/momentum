@@ -910,6 +910,11 @@ export function decideGoalLoopRound(
     };
   }
 
+  // Deliberately indexed against the step lineage, matching SDK-05 exactly:
+  // the shared reopened row continued round indices across retry attempts, so
+  // `maxRounds` has always bounded the step's rounds as a whole rather than
+  // resetting per attempt. Changing that timing would change classification
+  // policy.
   const budgetRemains = maxRounds === null || roundIndex + 1 < maxRounds;
 
   // 2. A committed round captured a durable result. Honour the executor's

@@ -1391,7 +1391,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
   "ok": true,
   "command": "workflow handoff",
   "dataDir": "/path/to/data",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": 1730000600000,
   "run": { "...": "same shape as workflow status detail" },
   "steps": [ "..." ],
@@ -1423,7 +1423,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
 
 ```text
 Workflow handoff: cwfp-abc123
-Schema version: 1
+Schema version: 2
 Generated at (epoch ms): 1730000600000
 
 Workflow run: cwfp-abc123
@@ -1592,7 +1592,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
   "ok": true,
   "command": "workflow run monitor",
   "dataDir": "/path/to/data",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": 1730000600000,
   "runId": "cwfp-abc123",
   "runState": "running",
@@ -1649,7 +1649,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 }
 ```
 
-`schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
+`schemaVersion` is `2`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
 
 ### Progress digest tick
 
@@ -1743,7 +1743,7 @@ workflow runs, not the semantic contract.
 
 ```text
 Workflow run monitor: cwfp-abc123
-Schema version: 1
+Schema version: 2
 Run state: running
 Step state: running
 Terminal: false
@@ -1820,7 +1820,7 @@ Options:
   "command": "workflow run watch",
   "mode": "once",
   "dataDir": "/path/to/data",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": 1730000600000,
   "runId": "mwf-abc123",
   "runState": "running",

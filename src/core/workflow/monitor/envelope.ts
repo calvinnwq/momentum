@@ -32,21 +32,22 @@ import {
   type WorkflowMonitorLeaseView,
   type WorkflowMonitorNextAction,
   type WorkflowMonitorRecovery,
-  type WorkflowMonitorState
+  type WorkflowMonitorState,
 } from "./state.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowEvidenceLink,
   type WorkflowRunDetail,
-  type WorkflowRunDetailGate
+  type WorkflowRunDetailGate,
 } from "../run/status.js";
-import type {
-  WorkflowRunState,
-  WorkflowStepState
-} from "../run/reducer.js";
+import type { WorkflowRunState, WorkflowStepState } from "../run/reducer.js";
 
-export const WORKFLOW_MONITOR_SCHEMA_VERSION = 1;
+/**
+ * Version 2 renamed the embedded gate anchor `invocationId` to `attemptId`
+ * alongside the attempt/round model migration.
+ */
+export const WORKFLOW_MONITOR_SCHEMA_VERSION = 2;
 
 /**
  * The three decisions the monitor runner makes from one envelope:
@@ -59,7 +60,7 @@ export const WORKFLOW_MONITOR_SCHEMA_VERSION = 1;
 export const WORKFLOW_MONITOR_DISPOSITIONS = [
   "wait",
   "report",
-  "recover"
+  "recover",
 ] as const;
 export type WorkflowMonitorDisposition =
   (typeof WORKFLOW_MONITOR_DISPOSITIONS)[number];
@@ -71,7 +72,7 @@ export const WORKFLOW_MONITOR_REPORT_REASONS = [
   "monitor_drift",
   "awaiting_approval",
   "in_progress",
-  "idle"
+  "idle",
 ] as const;
 export type WorkflowMonitorReportReason =
   (typeof WORKFLOW_MONITOR_REPORT_REASONS)[number];
@@ -151,8 +152,8 @@ export type BuildWorkflowMonitorEnvelopeOptions = {
   generatedAt?: number;
 };
 
-export type LoadWorkflowMonitorEnvelopeOptions =
-  LoadWorkflowRunDetailOptions & BuildWorkflowMonitorEnvelopeOptions;
+export type LoadWorkflowMonitorEnvelopeOptions = LoadWorkflowRunDetailOptions &
+  BuildWorkflowMonitorEnvelopeOptions;
 
 /**
  * Classify whether a monitor tick should report, wait, or recover. Precedence
@@ -161,7 +162,7 @@ export type LoadWorkflowMonitorEnvelopeOptions =
  */
 export function classifyWorkflowMonitorReport(
   monitor: WorkflowMonitorState,
-  needsManualRecovery: boolean
+  needsManualRecovery: boolean,
 ): WorkflowMonitorReport {
   // Clean terminal substrate evidence wins over stale durable recovery flags.
   // `clear-recovery` is not actionable once the reducer has no recovery object
@@ -215,19 +216,19 @@ export function classifyWorkflowMonitorReport(
 
 function reportOf(
   disposition: WorkflowMonitorDisposition,
-  reportReason: WorkflowMonitorReportReason
+  reportReason: WorkflowMonitorReportReason,
 ): WorkflowMonitorReport {
   return { disposition, reportable: disposition !== "wait", reportReason };
 }
 
 export function buildWorkflowMonitorEnvelope(
   detail: WorkflowRunDetail,
-  options: BuildWorkflowMonitorEnvelopeOptions = {}
+  options: BuildWorkflowMonitorEnvelopeOptions = {},
 ): WorkflowMonitorEnvelope {
   const monitor = detail.monitor;
   const report = classifyWorkflowMonitorReport(
     monitor,
-    detail.run.needsManualRecovery
+    detail.run.needsManualRecovery,
   );
   return {
     schemaVersion: WORKFLOW_MONITOR_SCHEMA_VERSION,
@@ -254,14 +255,14 @@ export function buildWorkflowMonitorEnvelope(
     counts: countsFromDetail(detail),
     monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest,
     monitorLastSeenAt: detail.run.monitorLastSeenAt,
-    monitorLastEmittedAt: detail.run.monitorLastEmittedAt
+    monitorLastEmittedAt: detail.run.monitorLastEmittedAt,
   };
 }
 
 export function loadWorkflowMonitorEnvelope(
   db: MomentumDb,
   runId: string,
-  options: LoadWorkflowMonitorEnvelopeOptions = {}
+  options: LoadWorkflowMonitorEnvelopeOptions = {},
 ): WorkflowMonitorEnvelope | null {
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
@@ -269,7 +270,7 @@ export function loadWorkflowMonitorEnvelope(
 }
 
 function countsFromDetail(
-  detail: WorkflowRunDetail
+  detail: WorkflowRunDetail,
 ): WorkflowMonitorEnvelopeCounts {
   const stepsByState: Record<WorkflowStepState, number> = {
     pending: 0,
@@ -279,7 +280,7 @@ function countsFromDetail(
     failed: 0,
     skipped: 0,
     blocked: 0,
-    canceled: 0
+    canceled: 0,
   };
   for (const step of detail.steps) {
     stepsByState[step.state] += 1;
@@ -290,6 +291,6 @@ function countsFromDetail(
     approvals: detail.approvals.length,
     leases: detail.leases.length,
     gates: detail.gates.length,
-    gatesOpen: detail.gates.filter((gate) => gate.resolvedAt === null).length
+    gatesOpen: detail.gates.filter((gate) => gate.resolvedAt === null).length,
   };
 }

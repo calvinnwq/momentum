@@ -9,18 +9,18 @@ import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   WORKFLOW_MONITOR_DISPOSITIONS,
-  WORKFLOW_MONITOR_REPORT_REASONS
+  WORKFLOW_MONITOR_REPORT_REASONS,
 } from "../src/core/workflow/monitor/envelope.js";
 import {
   WORKFLOW_MONITOR_CLEANUP_ACTIONS,
-  WORKFLOW_MONITOR_PROGRESS_PHASES
+  WORKFLOW_MONITOR_PROGRESS_PHASES,
 } from "../src/core/workflow/monitor/progress.js";
 import { WORKFLOW_MONITOR_NEXT_ACTION_CODES } from "../src/core/workflow/monitor/state.js";
 import {
   WORKFLOW_OPERATOR_ACTION_CLASSES,
   WORKFLOW_WATCH_HUMAN_ACTION_CODES,
   WORKFLOW_WATCH_RECOMMENDED_ACTIONS,
-  WORKFLOW_WATCH_STUCK_RISKS
+  WORKFLOW_WATCH_STUCK_RISKS,
 } from "../src/renderers/workflow.js";
 import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/monitor/watch-advisory.js";
 
@@ -76,8 +76,8 @@ type WorkflowGuiWatchContractFixture = {
 const WATCH_CONTRACT = JSON.parse(
   fs.readFileSync(
     path.join(process.cwd(), "test/fixtures/workflow-gui-contract.json"),
-    "utf-8"
-  )
+    "utf-8",
+  ),
 ) as WorkflowGuiWatchContractFixture;
 
 /**
@@ -114,16 +114,19 @@ const FRESH_EXPIRY = 9_999_999_999_999;
 
 const WATCH_ENVELOPE_KEYS = WATCH_CONTRACT.watch.envelopeKeys.slice().sort();
 
-const WATCH_NEXT_ACTION_KEYS =
-  WATCH_CONTRACT.watch.scenarioKeys.nextAction.slice().sort();
-const WATCH_ACTIVE_STEP_KEYS =
-  WATCH_CONTRACT.watch.scenarioKeys.activeStep.slice().sort();
-const WATCH_HUMAN_ACTION_KEYS =
-  WATCH_CONTRACT.watch.scenarioKeys.humanAction.slice().sort();
+const WATCH_NEXT_ACTION_KEYS = WATCH_CONTRACT.watch.scenarioKeys.nextAction
+  .slice()
+  .sort();
+const WATCH_ACTIVE_STEP_KEYS = WATCH_CONTRACT.watch.scenarioKeys.activeStep
+  .slice()
+  .sort();
+const WATCH_HUMAN_ACTION_KEYS = WATCH_CONTRACT.watch.scenarioKeys.humanAction
+  .slice()
+  .sort();
 const WATCH_RECOMMENDED_ACTION_POLICY_KEYS =
   WATCH_CONTRACT.watch.scenarioKeys.recommendedActionPolicy.slice().sort();
 const WATCH_MONITOR_REASONS = WATCH_CONTRACT.watch.reasons.filter(
-  (reason) => reason !== "quiet_heartbeat" && reason !== "stuck_risk"
+  (reason) => reason !== "quiet_heartbeat" && reason !== "stuck_risk",
 );
 
 afterEach(() => {
@@ -137,7 +140,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-watch-contract-")
+    path.join(os.tmpdir(), "momentum-watch-contract-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -145,7 +148,7 @@ function makeTempDir(): string {
 
 async function run(
   argv: string[],
-  env: Record<string, string | undefined> = {}
+  env: Record<string, string | undefined> = {},
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -154,15 +157,15 @@ async function run(
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env
+    env,
   });
   return { code, stdout, stderr };
 }
@@ -174,7 +177,7 @@ function seedRun(
     state: string;
     needsManualRecovery?: boolean;
     manualRecoveryReason?: string | null;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
@@ -184,7 +187,7 @@ function seedRun(
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -203,7 +206,7 @@ function seedRun(
     null,
     input.state === "succeeded" ? SEED_NOW + 1 : null,
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
@@ -215,14 +218,14 @@ function seedStep(
     kind: string;
     state: string;
     order: number;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -237,19 +240,19 @@ function seedStep(
     input.state === "succeeded" ? SEED_NOW : null,
     input.state === "succeeded" ? SEED_NOW + 1 : null,
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
 function seedLease(
   db: MomentumDb,
-  input: { runId: string; expiresAt: number }
+  input: { runId: string; expiresAt: number },
 ): void {
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     "managed-step",
@@ -260,7 +263,7 @@ function seedLease(
     null,
     "auto-release",
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
@@ -277,15 +280,15 @@ function seedOpenGate(db: MomentumDb, runId: string): void {
       evidence: `goals/${runId}/gates/${runId}-gate.json`,
       allowedActions: ["fix", "skip", "approve_as_is"],
       recommendedAction: "fix",
-      policyEnvelope: ["fix"]
+      policyEnvelope: ["fix"],
     },
-    { now: SEED_NOW }
+    { now: SEED_NOW },
   );
 }
 
 async function watchOnce(
   dataDir: string,
-  runId: string
+  runId: string,
 ): Promise<Record<string, unknown>> {
   const result = await run([
     "workflow",
@@ -295,7 +298,7 @@ async function watchOnce(
     "--once",
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -314,7 +317,7 @@ function expectedHumanActionCommand(template: unknown, runId: string): unknown {
 function expectedInspectionCommand(
   template: unknown,
   runId: string,
-  dataDir: string | undefined
+  dataDir: string | undefined,
 ): unknown {
   if (typeof template !== "string") return template;
   if (template.includes("${dataDir}") && dataDir === undefined) {
@@ -336,7 +339,7 @@ function shellQuote(value: string): string {
  */
 function assertWatchEnvelopeContract(
   payload: Record<string, unknown>,
-  runId: string
+  runId: string,
 ): void {
   expect(Object.keys(payload).sort()).toEqual(WATCH_ENVELOPE_KEYS);
 
@@ -344,7 +347,7 @@ function assertWatchEnvelopeContract(
   expect(payload["command"]).toBe("workflow run watch");
   expect(payload["mode"]).toBe("once");
   expect(payload["runId"]).toBe(runId);
-  expect(payload["schemaVersion"]).toBe(1);
+  expect(payload["schemaVersion"]).toBe(2);
   expect(typeof payload["generatedAt"]).toBe("number");
   expect(typeof payload["dataDir"]).toBe("string");
   expect(typeof payload["runState"]).toBe("string");
@@ -352,22 +355,23 @@ function assertWatchEnvelopeContract(
 
   expect(isMember(WORKFLOW_WATCH_REASONS, payload["reason"])).toBe(true);
   expect(isMember(WORKFLOW_MONITOR_DISPOSITIONS, payload["disposition"])).toBe(
-    true
+    true,
   );
   expect(isMember(WORKFLOW_MONITOR_PROGRESS_PHASES, payload["phase"])).toBe(
-    true
+    true,
   );
   expect(isMember(WORKFLOW_MONITOR_CLEANUP_ACTIONS, payload["cleanup"])).toBe(
-    true
+    true,
   );
   expect(
-    isMember(WORKFLOW_WATCH_RECOMMENDED_ACTIONS, payload["recommendedAction"])
+    isMember(WORKFLOW_WATCH_RECOMMENDED_ACTIONS, payload["recommendedAction"]),
   ).toBe(true);
-  const recommendedActionPolicy = payload[
-    "recommendedActionPolicy"
-  ] as Record<string, unknown>;
+  const recommendedActionPolicy = payload["recommendedActionPolicy"] as Record<
+    string,
+    unknown
+  >;
   expect(Object.keys(recommendedActionPolicy).sort()).toEqual(
-    WATCH_RECOMMENDED_ACTION_POLICY_KEYS
+    WATCH_RECOMMENDED_ACTION_POLICY_KEYS,
   );
   expect(typeof recommendedActionPolicy["action"]).toBe("string");
   expect(typeof recommendedActionPolicy["authority"]).toBe("string");
@@ -382,7 +386,7 @@ function assertWatchEnvelopeContract(
   expect(typeof payload["quietThresholdSeconds"]).toBe("number");
   expect(
     payload["inspectionCommand"] === null ||
-      typeof payload["inspectionCommand"] === "string"
+      typeof payload["inspectionCommand"] === "string",
   ).toBe(true);
   expect(typeof payload["digest"]).toBe("string");
   expect((payload["digest"] as string).startsWith("sha256:")).toBe(true);
@@ -390,20 +394,20 @@ function assertWatchEnvelopeContract(
   const nextAction = payload["nextAction"] as Record<string, unknown>;
   expect(Object.keys(nextAction).sort()).toEqual(WATCH_NEXT_ACTION_KEYS);
   expect(isMember(WORKFLOW_MONITOR_NEXT_ACTION_CODES, nextAction["code"])).toBe(
-    true
-  );
-  expect(isMember(WORKFLOW_OPERATOR_ACTION_CLASSES, nextAction["actionClass"])).toBe(
-    true
+    true,
   );
   expect(
+    isMember(WORKFLOW_OPERATOR_ACTION_CLASSES, nextAction["actionClass"]),
+  ).toBe(true);
+  expect(
     nextAction["recoveryDetail"] === null ||
-      typeof nextAction["recoveryDetail"] === "object"
+      typeof nextAction["recoveryDetail"] === "object",
   ).toBe(true);
 
   const activeStep = payload["activeStep"];
   if (activeStep !== null) {
     expect(Object.keys(activeStep as Record<string, unknown>).sort()).toEqual(
-      WATCH_ACTIVE_STEP_KEYS
+      WATCH_ACTIVE_STEP_KEYS,
     );
   }
 
@@ -412,7 +416,7 @@ function assertWatchEnvelopeContract(
     const human = humanAction as Record<string, unknown>;
     expect(Object.keys(human).sort()).toEqual(WATCH_HUMAN_ACTION_KEYS);
     expect(isMember(WORKFLOW_WATCH_HUMAN_ACTION_CODES, human["code"])).toBe(
-      true
+      true,
     );
     expect(typeof human["command"]).toBe("string");
   }
@@ -422,7 +426,7 @@ function assertWatchScenario(
   payload: Record<string, unknown>,
   runId: string,
   scenarioName: string,
-  dataDir?: string
+  dataDir?: string,
 ): void {
   const scenario = WATCH_CONTRACT.watch.scenarios[scenarioName];
   if (scenario === undefined) {
@@ -440,7 +444,7 @@ function assertWatchScenario(
     expect(payload["quietForSeconds"]).toBe(scenario.quietForSeconds);
   } else if (scenario.quietForSecondsMin !== undefined) {
     expect(payload["quietForSeconds"] as number).toBeGreaterThanOrEqual(
-      scenario.quietForSecondsMin
+      scenario.quietForSecondsMin,
     );
   } else {
     expect(typeof payload["quietForSeconds"]).toBe("number");
@@ -450,11 +454,11 @@ function assertWatchScenario(
   expect(payload["cleanup"]).toBe(scenario.cleanup);
   if (scenario.inspectionCommand !== undefined) {
     expect(payload["inspectionCommand"]).toBe(
-      expectedInspectionCommand(scenario.inspectionCommand, runId, dataDir)
+      expectedInspectionCommand(scenario.inspectionCommand, runId, dataDir),
     );
   }
   expect(payload["recommendedActionPolicy"]).toMatchObject(
-    scenario.recommendedActionPolicy
+    scenario.recommendedActionPolicy,
   );
 
   if (scenario.activeStep === null) {
@@ -482,7 +486,7 @@ function assertWatchScenario(
     }
     if ("command" in scenario.humanAction) {
       expect(humanAction["command"]).toBe(
-        expectedHumanActionCommand(scenario.humanAction["command"], runId)
+        expectedHumanActionCommand(scenario.humanAction["command"], runId),
       );
     }
   }
@@ -492,30 +496,30 @@ describe("workflow run watch supervisor envelope contract", () => {
   it("freezes the supervisor enum vocabularies so a value cannot drift silently", () => {
     expect([...WORKFLOW_MONITOR_REPORT_REASONS]).toEqual(WATCH_MONITOR_REASONS);
     expect([...WORKFLOW_MONITOR_DISPOSITIONS]).toEqual(
-      WATCH_CONTRACT.watch.dispositions
+      WATCH_CONTRACT.watch.dispositions,
     );
     expect([...WORKFLOW_MONITOR_PROGRESS_PHASES]).toEqual([
       "advancing",
       "idle",
       "awaiting_approval",
       "blocked",
-      "terminal"
+      "terminal",
     ]);
     expect([...WORKFLOW_MONITOR_CLEANUP_ACTIONS]).toEqual(["none", "release"]);
     expect([...WORKFLOW_WATCH_RECOMMENDED_ACTIONS]).toEqual(
-      WATCH_CONTRACT.watch.recommendedActions
+      WATCH_CONTRACT.watch.recommendedActions,
     );
     expect([...WORKFLOW_WATCH_STUCK_RISKS]).toEqual(
-      WATCH_CONTRACT.watch.recommendedActionPolicy.stuckRisk
+      WATCH_CONTRACT.watch.recommendedActionPolicy.stuckRisk,
     );
     expect([...WORKFLOW_WATCH_HUMAN_ACTION_CODES]).toEqual([
       "approve",
       "resolve_gate",
-      "clear_recovery"
+      "clear_recovery",
     ]);
     expect([...WORKFLOW_WATCH_REASONS]).toEqual(WATCH_CONTRACT.watch.reasons);
     expect([...WORKFLOW_MONITOR_NEXT_ACTION_CODES]).toEqual(
-      WATCH_CONTRACT.watch.nextActionCodes
+      WATCH_CONTRACT.watch.nextActionCodes,
     );
   });
 
@@ -530,7 +534,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, { runId, expiresAt: FRESH_EXPIRY });
     } finally {
@@ -541,7 +545,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     assertWatchScenario(payload, runId, "progress");
     expect(payload["nextAction"]).toMatchObject({
       code: "resume_running",
-      stepId: "implementation"
+      stepId: "implementation",
     });
   });
 
@@ -556,7 +560,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, { runId, expiresAt: FRESH_EXPIRY });
     } finally {
@@ -587,7 +591,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -606,14 +610,14 @@ describe("workflow run watch supervisor envelope contract", () => {
         runId,
         state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "dispatch lease requires operator recovery"
+        manualRecoveryReason: "dispatch lease requires operator recovery",
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -633,14 +637,14 @@ describe("workflow run watch supervisor envelope contract", () => {
         state: "running",
         needsManualRecovery: true,
         manualRecoveryReason:
-          "runtime_unavailable: wrapper config is missing for preflight"
+          "runtime_unavailable: wrapper config is missing for preflight",
       });
       seedStep(db, {
         runId,
         stepId: "preflight",
         kind: "preflight",
         state: "approved",
-        order: 0
+        order: 0,
       });
     } finally {
       db.close();
@@ -650,11 +654,11 @@ describe("workflow run watch supervisor envelope contract", () => {
     assertWatchEnvelopeContract(payload, runId);
     expect(payload["nextAction"]).toMatchObject({
       actionClass: "fix_setup_config_then_retry",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
     expect(payload["humanAction"]).toMatchObject({
       code: "clear_recovery",
-      command: `momentum workflow run clear-recovery ${runId}`
+      command: `momentum workflow run clear-recovery ${runId}`,
     });
   });
 
@@ -669,7 +673,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "failed",
-        order: 3
+        order: 3,
       });
     } finally {
       db.close();
@@ -680,7 +684,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["nextAction"]).toMatchObject({
       code: "rerun_failed_step",
       actionClass: "retry_failed_step",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
     expect(payload["humanAction"]).toBeNull();
   });
@@ -695,14 +699,14 @@ describe("workflow run watch supervisor envelope contract", () => {
         state: "failed",
         needsManualRecovery: true,
         manualRecoveryReason:
-          "operator mentioned checks-passed deterministic evidence while investigating"
+          "operator mentioned checks-passed deterministic evidence while investigating",
       });
       seedStep(db, {
         runId,
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "failed",
-        order: 3
+        order: 3,
       });
     } finally {
       db.close();
@@ -713,7 +717,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["nextAction"]).toMatchObject({
       code: "rerun_failed_step",
       actionClass: "retry_failed_step",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
   });
 
@@ -727,14 +731,14 @@ describe("workflow run watch supervisor envelope contract", () => {
         state: "failed",
         needsManualRecovery: true,
         manualRecoveryReason:
-          "interrupted no-mistakes checks-passed evidence needs reconciliation"
+          "interrupted no-mistakes checks-passed evidence needs reconciliation",
       });
       seedStep(db, {
         runId,
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "failed",
-        order: 3
+        order: 3,
       });
     } finally {
       db.close();
@@ -748,15 +752,12 @@ describe("workflow run watch supervisor envelope contract", () => {
       recoveryDetail: {
         kind: "no_mistakes_deterministic_evidence",
         evidencePointerRequired: true,
-        refusalReason: null
-      }
+        refusalReason: null,
+      },
     });
   });
 
-  it.each([
-    ["merge-cleanup"] as const,
-    ["linear-refresh"] as const
-  ])(
+  it.each([["merge-cleanup"] as const, ["linear-refresh"] as const])(
     "external-tail recovery: labels %s evidence-backed reconciliation",
     async (kind) => {
       const dataDir = makeTempDir();
@@ -769,7 +770,7 @@ describe("workflow run watch supervisor envelope contract", () => {
           stepId: kind,
           kind,
           state: "failed",
-          order: 4
+          order: 4,
         });
       } finally {
         db.close();
@@ -783,20 +784,17 @@ describe("workflow run watch supervisor envelope contract", () => {
         recoveryDetail: {
           kind: "external_tail_reconcile",
           evidencePointerRequired: true,
-          refusalReason: null
-        }
+          refusalReason: null,
+        },
       });
       expect(payload["humanAction"]).toMatchObject({
         code: "clear_recovery",
-        command: `momentum workflow run clear-recovery ${runId} --evidence-pointer <ref>`
+        command: `momentum workflow run clear-recovery ${runId} --evidence-pointer <ref>`,
       });
-    }
+    },
   );
 
-  it.each([
-    ["merge-cleanup"] as const,
-    ["linear-refresh"] as const
-  ])(
+  it.each([["merge-cleanup"] as const, ["linear-refresh"] as const])(
     "external-tail manual recovery: keeps %s external reconciliation action class",
     async (kind) => {
       const dataDir = makeTempDir();
@@ -807,14 +805,14 @@ describe("workflow run watch supervisor envelope contract", () => {
           runId,
           state: "failed",
           needsManualRecovery: true,
-          manualRecoveryReason: `${kind} needs reconciliation`
+          manualRecoveryReason: `${kind} needs reconciliation`,
         });
         seedStep(db, {
           runId,
           stepId: kind,
           kind,
           state: "failed",
-          order: 4
+          order: 4,
         });
       } finally {
         db.close();
@@ -828,10 +826,10 @@ describe("workflow run watch supervisor envelope contract", () => {
         recoveryDetail: {
           kind: "external_tail_reconcile",
           evidencePointerRequired: true,
-          refusalReason: null
-        }
+          refusalReason: null,
+        },
       });
-    }
+    },
   );
 
   it("open operator gate: labels the action as gate resolution", async () => {
@@ -845,7 +843,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
       seedOpenGate(db, runId);
     } finally {
@@ -857,11 +855,11 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["nextAction"]).toMatchObject({
       code: "advance_to_step",
       actionClass: "resolve_gate",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
     expect(payload["humanAction"]).toMatchObject({
       code: "resolve_gate",
-      command: `momentum workflow run decide ${runId}-gate --action <action> --actor <name>`
+      command: `momentum workflow run decide ${runId}-gate --action <action> --actor <name>`,
     });
   });
 
@@ -876,7 +874,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedLease(db, { runId, expiresAt: 5_000 });
     } finally {
@@ -888,7 +886,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["nextAction"]).toMatchObject({
       code: "investigate_stale",
       actionClass: "clear_recovery",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
     expect(payload["humanAction"]).toBeNull();
   });
@@ -918,7 +916,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "canceled",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -939,7 +937,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -960,7 +958,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "failed",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -981,7 +979,7 @@ describe("workflow run watch supervisor envelope contract", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, { runId, expiresAt: FRESH_EXPIRY });
     } finally {
@@ -999,7 +997,7 @@ describe("workflow run watch supervisor envelope contract", () => {
                  monitor_last_seen_at = 1,
                  monitor_last_emitted_digest = ?,
            monitor_last_emitted_at = 1
-           WHERE id = ?`
+           WHERE id = ?`,
         )
         .run(digest, digest, runId);
     } finally {

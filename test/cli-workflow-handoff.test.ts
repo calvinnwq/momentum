@@ -38,15 +38,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -63,7 +63,7 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     "running",
@@ -82,14 +82,14 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
     recent,
     null,
     now,
-    now
+    now,
   );
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     "implementation",
@@ -103,13 +103,13 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
     recent,
     null,
     now,
-    now
+    now,
   );
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     "managed-step",
@@ -120,7 +120,7 @@ function seedRunningRun(db: MomentumDb, runId: string): void {
     null,
     "auto-release",
     now,
-    now
+    now,
   );
 }
 
@@ -132,14 +132,14 @@ describe("momentum workflow handoff", () => {
       "handoff",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow handoff",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -151,7 +151,7 @@ describe("momentum workflow handoff", () => {
       "cwfp-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -159,7 +159,7 @@ describe("momentum workflow handoff", () => {
       ok: false,
       command: "workflow handoff",
       code: "run_not_found",
-      runId: "cwfp-missing"
+      runId: "cwfp-missing",
     });
   });
 
@@ -171,11 +171,11 @@ describe("momentum workflow handoff", () => {
       "cwfp-x",
       "extra",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for workflow handoff: extra"
+      "Unexpected argument for workflow handoff: extra",
     );
   });
 
@@ -194,7 +194,7 @@ describe("momentum workflow handoff", () => {
       "cwfp-handoff01",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -220,7 +220,7 @@ describe("momentum workflow handoff", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow handoff");
-    expect(payload.schemaVersion).toBe(1);
+    expect(payload.schemaVersion).toBe(2);
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-handoff01");
     expect(payload.run.state).toBe("running");
@@ -246,11 +246,11 @@ describe("momentum workflow handoff", () => {
          SET needs_manual_recovery = 1,
              manual_recovery_reason = ?,
              manual_recovery_at = ?
-         WHERE id = ?`
+         WHERE id = ?`,
       ).run(
         "runtime_unavailable: wrapper config is missing for implementation",
         Date.now(),
-        runId
+        runId,
       );
     } finally {
       db.close();
@@ -262,7 +262,7 @@ describe("momentum workflow handoff", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -279,11 +279,11 @@ describe("momentum workflow handoff", () => {
     };
     expect(payload.monitor.nextAction).toMatchObject({
       actionClass: "fix_setup_config_then_retry",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
     expect(payload.nextAction).toMatchObject({
       actionClass: "fix_setup_config_then_retry",
-      recoveryDetail: null
+      recoveryDetail: null,
     });
   });
 
@@ -301,11 +301,11 @@ describe("momentum workflow handoff", () => {
       "handoff",
       "cwfp-text-handoff",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow handoff: cwfp-text-handoff");
-    expect(result.stdout).toContain("Schema version: 1");
+    expect(result.stdout).toContain("Schema version: 2");
     expect(result.stdout).toContain("Workflow run: cwfp-text-handoff");
     expect(result.stdout).toContain("- Next action: resume_running");
   });
@@ -325,9 +325,9 @@ describe("momentum workflow handoff", () => {
           reason: "approve before external apply",
           allowedActions: ["approve", "reject"],
           recommendedAction: "approve",
-          policyEnvelope: []
+          policyEnvelope: [],
         },
-        { now: Date.now() }
+        { now: Date.now() },
       );
     } finally {
       db.close();
@@ -339,7 +339,7 @@ describe("momentum workflow handoff", () => {
       "cwfp-handoffgate",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -365,8 +365,8 @@ describe("momentum workflow handoff", () => {
       recommendedActionPolicy: {
         action: "approval_decision",
         authority: "human_required",
-        risk: "medium"
-      }
+        risk: "medium",
+      },
     });
 
     const textResult = await run([
@@ -374,7 +374,7 @@ describe("momentum workflow handoff", () => {
       "handoff",
       "cwfp-handoffgate",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Gates: 1 (open: 1)");

@@ -98,8 +98,8 @@ function monitorFrom(overrides: Partial<WorkflowMonitorInput>) {
 }
 
 describe("workflow-monitor-envelope constants", () => {
-  it("pins the schema version at 1 for M8", () => {
-    expect(WORKFLOW_MONITOR_SCHEMA_VERSION).toBe(1);
+  it("pins the schema version at 2 for the attempt/round gate anchor rename", () => {
+    expect(WORKFLOW_MONITOR_SCHEMA_VERSION).toBe(2);
   });
 
   it("exposes a stable set of dispositions", () => {
@@ -367,7 +367,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
     const envelope = buildWorkflowMonitorEnvelope(detailFrom(), {
       generatedAt: 4_242,
     });
-    expect(envelope.schemaVersion).toBe(1);
+    expect(envelope.schemaVersion).toBe(2);
     expect(envelope.generatedAt).toBe(4_242);
     expect(envelope.runId).toBe(RUN_ID);
     expect(envelope.runState).toBe("running");
