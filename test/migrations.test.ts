@@ -2747,4 +2747,231 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       db.close();
     }
   });
+
+  it("creates a retry attempt and initial round atomically when a legacy round owns the canonical id", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        INSERT INTO workflow_runs
+          (id, state, source, plan_json, created_at, updated_at)
+        VALUES
+          ('round-id-owner', 'succeeded',
+           'momentum-native-coding-workflow', '{}', 100, 600);
+        INSERT INTO workflow_steps
+          (run_id, step_id, kind, state, step_order, required, started_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('round-id-owner', 'implementation', 'implementation', 'succeeded',
+           0, 1, 100, 600, 100, 600);
+        INSERT INTO executor_invocations
+          (invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, state, attempt, started_at, heartbeat_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('round-id-owner::implementation::dispatch', 'round-id-owner',
+           'implementation', 'implementation', 'one-shot', 'succeeded', 1,
+           100, 500, 600, 100, 600);
+        INSERT INTO executor_rounds
+          (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt, round_index, state, classification,
+           executor_recommendation, started_at, heartbeat_at, finished_at,
+           created_at, updated_at)
+        VALUES
+          ('run-1::implementation::attempt-3::round-5',
+           'round-id-owner::implementation::dispatch', 'round-id-owner',
+           'implementation', 'implementation', 'one-shot', 1, 0, 'succeeded',
+           'complete', 'complete', 100, 500, 600, 100, 600);
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      db.exec(`
+        UPDATE executor_attempts
+           SET state = 'manual_recovery_required', finished_at = 2600
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_rounds
+           SET round_index = 4,
+               state = 'manual_recovery_required',
+               classification = 'manual_recovery_required',
+               recovery_code = 'executor_threw', finished_at = 2600
+         WHERE round_id = 'run-1::implementation::dispatch::round-3';
+      `);
+
+      const started = startRetryableDispatchAttempt(db, {
+        runId: "run-1",
+        stepId: "implementation",
+        now: 3000,
+        stepState: "running",
+      });
+      expect(started).toEqual({
+        started: true,
+        attemptId: "run-1::implementation::attempt-3",
+        attemptNumber: 3,
+        roundIndex: 5,
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT round_id, attempt_id, attempt_number, round_index
+               FROM executor_rounds
+              WHERE attempt_id = 'run-1::implementation::attempt-3'`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          round_id: "run-1::implementation::attempt-3::round-5::allocated-1",
+          attempt_id: "run-1::implementation::attempt-3",
+          attempt_number: 3,
+          round_index: 5,
+        },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count
+               FROM executor_attempts
+              WHERE workflow_run_id = 'run-1'
+                AND step_run_id = 'implementation'
+                AND attempt_number = 3`,
+          )
+          .get(),
+      ).toEqual({ count: 1 });
+
+      db.exec(`
+        UPDATE executor_attempts
+           SET state = 'manual_recovery_required', finished_at = 3100
+         WHERE attempt_id = 'run-1::implementation::attempt-3';
+        UPDATE executor_rounds
+           SET state = 'manual_recovery_required',
+               classification = 'manual_recovery_required',
+               recovery_code = 'executor_threw', finished_at = 3100
+         WHERE attempt_id = 'run-1::implementation::attempt-3';
+        INSERT INTO executor_rounds
+          (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt_number, round_index, state, created_at,
+           updated_at)
+        VALUES
+          ('run-1::implementation::attempt-4::round-6',
+           'round-id-owner::implementation::dispatch', 'round-id-owner',
+           'implementation', 'implementation', 'one-shot', 1, 1,
+           'succeeded', 3100, 3100);
+        CREATE TRIGGER reject_allocated_retry_round
+        BEFORE INSERT ON executor_rounds
+        WHEN NEW.round_id LIKE
+          'run-1::implementation::attempt-4::round-6::allocated-%'
+        BEGIN
+          SELECT RAISE(ABORT, 'reject allocated retry round');
+        END;
+      `);
+      expect(() =>
+        startRetryableDispatchAttempt(db, {
+          runId: "run-1",
+          stepId: "implementation",
+          now: 3200,
+          stepState: "running",
+        }),
+      ).toThrow("reject allocated retry round");
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count
+               FROM executor_attempts
+              WHERE workflow_run_id = 'run-1'
+                AND step_run_id = 'implementation'
+                AND attempt_number = 4`,
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps delimiter-bearing run and step ids in separate migration groups", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        INSERT INTO workflow_runs
+          (id, state, source, plan_json, created_at, updated_at)
+        VALUES
+          ('r::s', 'running', 'momentum-native-coding-workflow', '{}', 100, 500),
+          ('r', 'running', 'momentum-native-coding-workflow', '{}', 100, 500);
+        INSERT INTO workflow_steps
+          (run_id, step_id, kind, state, step_order, required, started_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('r::s', 't', 'implementation', 'running', 0, 1, 100, NULL, 100, 500),
+          ('r', 's::t', 'implementation', 'running', 0, 1, 100, NULL, 100, 500);
+        INSERT INTO executor_invocations
+          (invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, state, attempt, started_at, heartbeat_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('tuple-a-dispatch', 'r::s', 't', 't', 'delegate-supervisor',
+           'running', 1, 100, 500, NULL, 100, 500),
+          ('tuple-a-mirror', 'r::s', 't', 't', 'no-mistakes',
+           'running', 1, 200, 500, NULL, 200, 500),
+          ('tuple-b-dispatch', 'r', 's::t', 's::t', 'delegate-supervisor',
+           'running', 1, 110, 500, NULL, 110, 500),
+          ('tuple-b-mirror', 'r', 's::t', 's::t', 'no-mistakes',
+           'running', 1, 210, 500, NULL, 210, 500);
+        INSERT INTO executor_rounds
+          (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt, round_index, state, started_at,
+           heartbeat_at, created_at, updated_at)
+        VALUES
+          ('tuple-a-dispatch-round', 'tuple-a-dispatch', 'r::s', 't', 't',
+           'delegate-supervisor', 1, 0, 'running', 100, 500, 100, 500),
+          ('tuple-a-mirror-round', 'tuple-a-mirror', 'r::s', 't', 't',
+           'no-mistakes', 1, 0, 'running', 200, 500, 200, 500),
+          ('tuple-b-dispatch-round', 'tuple-b-dispatch', 'r', 's::t', 's::t',
+           'delegate-supervisor', 1, 0, 'running', 110, 500, 110, 500),
+          ('tuple-b-mirror-round', 'tuple-b-mirror', 'r', 's::t', 's::t',
+           'no-mistakes', 1, 0, 'running', 210, 500, 210, 500);
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const attemptsFor = (runId: string, stepId: string) =>
+        db
+          .prepare(
+            `SELECT workflow_run_id, step_run_id, attempt_number
+               FROM executor_attempts
+              WHERE workflow_run_id = ? AND step_run_id = ?
+              ORDER BY attempt_number`,
+          )
+          .all(runId, stepId);
+      expect(attemptsFor("r::s", "t")).toEqual([
+        { workflow_run_id: "r::s", step_run_id: "t", attempt_number: 1 },
+        { workflow_run_id: "r::s", step_run_id: "t", attempt_number: 2 },
+      ]);
+      expect(attemptsFor("r", "s::t")).toEqual([
+        { workflow_run_id: "r", step_run_id: "s::t", attempt_number: 1 },
+        { workflow_run_id: "r", step_run_id: "s::t", attempt_number: 2 },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT id, needs_manual_recovery
+               FROM workflow_runs
+              WHERE id IN ('r::s', 'r')
+              ORDER BY id`,
+          )
+          .all(),
+      ).toEqual([
+        { id: "r", needs_manual_recovery: 1 },
+        { id: "r::s", needs_manual_recovery: 1 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

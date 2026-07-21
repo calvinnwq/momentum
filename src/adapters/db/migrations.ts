@@ -950,7 +950,11 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       const highestAssignedByStep = new Map<string, number>();
       const groupsByStep = new Map<
         string,
-        Map<string, LegacyExecutorAttemptGroup[]>
+        {
+          runId: string;
+          stepId: string;
+          groupsByInvocation: Map<string, LegacyExecutorAttemptGroup[]>;
+        }
       >();
       const ambiguousRunReasons = new Map<string, string>();
 
@@ -977,9 +981,16 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         }
         const attemptNumbers = [...groups.keys()].sort((a, b) => a - b);
         const latestAttemptNumber = attemptNumbers.at(-1)!;
-        const stepKey = `${invocation.workflow_run_id}::${invocation.step_run_id}`;
-        const stepGroups = groupsByStep.get(stepKey) ?? new Map();
-        stepGroups.set(
+        const stepKey = JSON.stringify([
+          invocation.workflow_run_id,
+          invocation.step_run_id,
+        ]);
+        const stepGroups = groupsByStep.get(stepKey) ?? {
+          runId: invocation.workflow_run_id,
+          stepId: invocation.step_run_id,
+          groupsByInvocation: new Map<string, LegacyExecutorAttemptGroup[]>(),
+        };
+        stepGroups.groupsByInvocation.set(
           invocation.invocation_id,
           attemptNumbers.map((attemptNumber) => {
             const groupRounds = groups.get(attemptNumber)!;
@@ -1000,7 +1011,10 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         groupsByStep.set(stepKey, stepGroups);
       }
 
-      for (const [stepKey, groupsByInvocation] of groupsByStep) {
+      for (const [
+        stepKey,
+        { runId, stepId, groupsByInvocation },
+      ] of groupsByStep) {
         const invocationQueues = [...groupsByInvocation.values()].map(
           (groups) => [...groups],
         );
@@ -1131,8 +1145,6 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             authorityBearingGroups.length > 1 ||
             ambiguousAuthority.length > 0
           ) {
-            const runId = assignedGroups[0]!.group.invocation.workflow_run_id;
-            const stepId = assignedGroups[0]!.group.invocation.step_run_id;
             const carriesRecovery = authorityBearingGroups.some(({ group }) =>
               LEGACY_RECOVERY_BEARING_ATTEMPT_STATES.has(
                 group.invocation.state,

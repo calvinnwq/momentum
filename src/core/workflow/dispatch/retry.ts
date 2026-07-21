@@ -1,6 +1,7 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   ExecutorAttemptConflictError,
+  ExecutorRoundConflictError,
   insertExecutorAttempt,
   insertExecutorRound,
 } from "../../executors/loop/persist.js";
@@ -200,8 +201,10 @@ export type StartRetryableDispatchAttemptResult =
  * untouched: a retry is a new immutable attempt with the next `attemptNumber`,
  * never a reopened or rewritten one. Fresh ids use the canonical derived shape
  * when it is available and a deterministic suffix when preserved legacy data
- * already occupies that unrestricted id. A concurrent retry still loses the
- * unique step-attempt-number insert race and reports `started: false`.
+ * already occupies that unrestricted id. The attempt and its initial round are
+ * one savepoint-protected write, and round ids use the same collision-safe
+ * allocation. A concurrent retry still loses the unique step-attempt-number
+ * insert race and reports `started: false`.
  */
 export function startRetryableDispatchAttempt(
   db: MomentumDb,
@@ -232,66 +235,103 @@ export function startRetryableDispatchAttempt(
   // so cross-attempt round ordering is always (attemptNumber, roundIndex).
   const nextRoundIndex = retryable.latestRoundIndex + 1;
 
-  let nextAttemptId = canonicalAttemptId;
-  let allocationSuffix = 0;
-  while (true) {
-    try {
-      insertExecutorAttempt(
-        db,
-        {
-          attemptId: nextAttemptId,
-          workflowRunId: retryable.runId,
-          stepRunId: retryable.stepId,
-          stepKey: retryable.stepId,
-          executorFamily: retryable.executorFamily,
-          state: "running",
-          attemptNumber: nextAttemptNumber,
-          startedAt: input.now,
-          heartbeatAt: null,
-          finishedAt: null,
-        },
-        { now: input.now },
-      );
-      break;
-    } catch (error) {
-      if (!(error instanceof ExecutorAttemptConflictError)) throw error;
-      const concurrentRetry = db
-        .prepare(
-          `SELECT 1
-             FROM executor_attempts
-            WHERE workflow_run_id = ?
-              AND step_run_id = ?
-              AND attempt_number = ?`,
-        )
-        .get(retryable.runId, retryable.stepId, nextAttemptNumber);
-      if (concurrentRetry !== undefined) {
-        return { started: false };
+  const savepoint = "start_retryable_dispatch_attempt";
+  const rollback = (): void => {
+    db.exec(
+      `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`,
+    );
+  };
+  db.exec(`SAVEPOINT ${savepoint}`);
+  try {
+    let nextAttemptId = canonicalAttemptId;
+    let allocationSuffix = 0;
+    while (true) {
+      try {
+        insertExecutorAttempt(
+          db,
+          {
+            attemptId: nextAttemptId,
+            workflowRunId: retryable.runId,
+            stepRunId: retryable.stepId,
+            stepKey: retryable.stepId,
+            executorFamily: retryable.executorFamily,
+            state: "running",
+            attemptNumber: nextAttemptNumber,
+            startedAt: input.now,
+            heartbeatAt: null,
+            finishedAt: null,
+          },
+          { now: input.now },
+        );
+        break;
+      } catch (error) {
+        if (!(error instanceof ExecutorAttemptConflictError)) throw error;
+        const concurrentRetry = db
+          .prepare(
+            `SELECT 1
+               FROM executor_attempts
+              WHERE workflow_run_id = ?
+                AND step_run_id = ?
+                AND attempt_number = ?`,
+          )
+          .get(retryable.runId, retryable.stepId, nextAttemptNumber);
+        if (concurrentRetry !== undefined) {
+          rollback();
+          return { started: false };
+        }
+        allocationSuffix += 1;
+        nextAttemptId = `${canonicalAttemptId}::allocated-${allocationSuffix}`;
       }
-      allocationSuffix += 1;
-      nextAttemptId = `${canonicalAttemptId}::allocated-${allocationSuffix}`;
     }
-  }
 
-  if (input.executorOwnsRounds !== true) {
-    insertExecutorRound(
-      db,
-      buildRetryRound(
+    if (input.executorOwnsRounds !== true) {
+      const canonicalRound = buildRetryRound(
         retryable,
         nextAttemptId,
         nextAttemptNumber,
         nextRoundIndex,
         input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
-      ),
-      { now: input.now },
-    );
-  }
+      );
+      let nextRoundId = canonicalRound.roundId;
+      let roundAllocationSuffix = 0;
+      while (true) {
+        try {
+          insertExecutorRound(
+            db,
+            { ...canonicalRound, roundId: nextRoundId },
+            { now: input.now },
+          );
+          break;
+        } catch (error) {
+          if (!(error instanceof ExecutorRoundConflictError)) throw error;
+          const concurrentRound = db
+            .prepare(
+              `SELECT 1
+                 FROM executor_rounds
+                WHERE attempt_id = ? AND round_index = ?`,
+            )
+            .get(nextAttemptId, nextRoundIndex);
+          if (concurrentRound !== undefined) {
+            rollback();
+            return { started: false };
+          }
+          roundAllocationSuffix += 1;
+          nextRoundId = `${canonicalRound.roundId}::allocated-${roundAllocationSuffix}`;
+        }
+      }
+    }
 
-  return {
-    started: true,
-    attemptId: nextAttemptId,
-    attemptNumber: nextAttemptNumber,
-    roundIndex: nextRoundIndex,
-  };
+    db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    return {
+      started: true,
+      attemptId: nextAttemptId,
+      attemptNumber: nextAttemptNumber,
+      roundIndex: nextRoundIndex,
+    };
+  } catch (error) {
+    rollback();
+    throw error;
+  }
 }
 
 function parseRetryableDispatchRow(
