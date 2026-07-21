@@ -196,7 +196,11 @@ export function createRegisteredExecutorWorkflowDispatch(
       result = baseDispatch(claim, {
         ...context,
         executorOwnsRounds: true,
-        materializeOwnedRound: ({ attempt, now }) => {
+        materializeOwnedRound: ({
+          attempt,
+          now,
+          roundId: requestedRoundId,
+        }) => {
           // Round indices are monotone across the whole step, so a retry
           // attempt's fallback round must continue after every earlier
           // attempt's rounds, not restart at 0.
@@ -210,7 +214,11 @@ export function createRegisteredExecutorWorkflowDispatch(
                 Math.max(highestRoundIndex, round.roundIndex),
               -1,
             ) + 1;
-          const round = genericRoundRecord(attempt, roundIndex, now);
+          const canonicalRound = genericRoundRecord(attempt, roundIndex, now);
+          const round =
+            requestedRoundId === undefined
+              ? canonicalRound
+              : { ...canonicalRound, roundId: requestedRoundId };
           return {
             round,
             checkpoint: {

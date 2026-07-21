@@ -1167,6 +1167,8 @@ export type WorkflowStepDispatchContext = {
     attempt: ExecutorAttemptRecord;
     selection: CodingStepExecutorSelection;
     now: number;
+    /** Final collision-safe identity requested by the dispatch transaction. */
+    roundId?: string;
   }) => {
     round: ExecutorRoundRecord;
     checkpoint: ExecutorCheckpointRecord;

@@ -58,6 +58,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  ExecutorEvidenceConflictError,
   ExecutorRoundConflictError,
   insertExecutorCheckpoint,
   insertExecutorAttempt,
@@ -261,16 +262,11 @@ function dispatchExecutorScaffold(
         { now },
       );
     } else if (materializeOwnedRound !== undefined) {
-      let materialized;
-      try {
-        materialized = materializeOwnedRound({
-          attempt,
-          selection,
-          now,
-        });
-      } catch (error) {
-        throw new ExecutorOwnedRoundMaterializationError(error);
-      }
+      const materialized = materializeCollisionSafeOwnedRound(
+        db,
+        materializeOwnedRound,
+        { attempt, selection, now },
+      );
       insertOwnedRoundMaterialization(db, materialized, now);
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
@@ -324,16 +320,11 @@ function dispatchRetryScaffold(
           new Error("freshly started retry attempt is unavailable"),
         );
       }
-      let materialized;
-      try {
-        materialized = materializeOwnedRound({
-          attempt,
-          selection,
-          now,
-        });
-      } catch (error) {
-        throw new ExecutorOwnedRoundMaterializationError(error);
-      }
+      const materialized = materializeCollisionSafeOwnedRound(
+        db,
+        materializeOwnedRound,
+        { attempt, selection, now },
+      );
       insertOwnedRoundMaterialization(db, materialized, now);
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
@@ -345,48 +336,117 @@ function dispatchRetryScaffold(
   }
 }
 
+type OwnedRoundMaterialization = {
+  round: ExecutorRoundRecord;
+  checkpoint: ExecutorCheckpointRecord;
+};
+
+type OwnedRoundMaterializer = NonNullable<
+  WorkflowStepDispatchContext["materializeOwnedRound"]
+>;
+
+function materializeCollisionSafeOwnedRound(
+  db: MomentumDb,
+  materialize: OwnedRoundMaterializer,
+  input: {
+    attempt: ExecutorAttemptRecord;
+    selection: CodingStepExecutorSelection;
+    now: number;
+  },
+): OwnedRoundMaterialization {
+  let materialized: OwnedRoundMaterialization;
+  try {
+    materialized = materialize(input);
+  } catch (error) {
+    throw new ExecutorOwnedRoundMaterializationError(error);
+  }
+  const roundId = allocateOwnedRoundId(db, materialized.round);
+  if (roundId === materialized.round.roundId) return materialized;
+  try {
+    materialized = materialize({ ...input, roundId });
+  } catch (error) {
+    throw new ExecutorOwnedRoundMaterializationError(error);
+  }
+  if (
+    materialized.round.roundId !== roundId ||
+    materialized.checkpoint.roundId !== roundId
+  ) {
+    throw new ExecutorOwnedRoundMaterializationError(
+      new Error("owned-round materializer ignored its allocated round id"),
+    );
+  }
+  return materialized;
+}
+
+function allocateOwnedRoundId(
+  db: MomentumDb,
+  round: ExecutorRoundRecord,
+): string {
+  const concurrentRound = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds
+        WHERE attempt_id = ? AND round_index = ?`,
+    )
+    .get(round.attemptId, round.roundIndex);
+  if (concurrentRound !== undefined) {
+    throw new ExecutorRoundConflictError(round.roundId);
+  }
+  let roundId = round.roundId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_rounds WHERE round_id = ?")
+      .get(roundId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    roundId = `${round.roundId}::allocated-${allocationSuffix}`;
+  }
+  return roundId;
+}
+
 function insertOwnedRoundMaterialization(
   db: MomentumDb,
-  materialized: {
-    round: ExecutorRoundRecord;
-    checkpoint: ExecutorCheckpointRecord;
-  },
+  materialized: OwnedRoundMaterialization,
   now: number,
 ): void {
-  const canonicalRoundId = materialized.round.roundId;
-  let roundId = canonicalRoundId;
-  let allocationSuffix = 0;
-  while (true) {
-    try {
-      insertExecutorRound(db, { ...materialized.round, roundId }, { now });
-      break;
-    } catch (error) {
-      if (!(error instanceof ExecutorRoundConflictError)) throw error;
-      const concurrentRound = db
-        .prepare(
-          `SELECT round_id
-             FROM executor_rounds
-            WHERE attempt_id = ? AND round_index = ?`,
-        )
-        .get(materialized.round.attemptId, materialized.round.roundIndex);
-      if (concurrentRound !== undefined) throw error;
-      allocationSuffix += 1;
-      roundId = `${canonicalRoundId}::allocated-${allocationSuffix}`;
-    }
-  }
+  insertExecutorRound(db, materialized.round, { now });
+  const checkpointId = allocateOwnedCheckpointId(db, materialized.checkpoint);
   insertExecutorCheckpoint(
     db,
-    {
-      ...materialized.checkpoint,
-      checkpointId: materialized.checkpoint.checkpointId.startsWith(
-        canonicalRoundId,
-      )
-        ? `${roundId}${materialized.checkpoint.checkpointId.slice(canonicalRoundId.length)}`
-        : materialized.checkpoint.checkpointId,
-      roundId,
-    },
+    { ...materialized.checkpoint, checkpointId },
     { now },
   );
+}
+
+function allocateOwnedCheckpointId(
+  db: MomentumDb,
+  checkpoint: ExecutorCheckpointRecord,
+): string {
+  const concurrentCheckpoint = db
+    .prepare(
+      `SELECT 1
+         FROM executor_checkpoints
+        WHERE round_id = ? AND sequence = ?`,
+    )
+    .get(checkpoint.roundId, checkpoint.sequence);
+  if (concurrentCheckpoint !== undefined) {
+    throw new ExecutorEvidenceConflictError(
+      "checkpoint",
+      checkpoint.checkpointId,
+    );
+  }
+  let checkpointId = checkpoint.checkpointId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_checkpoints WHERE checkpoint_id = ?")
+      .get(checkpointId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    checkpointId = `${checkpoint.checkpointId}::allocated-${allocationSuffix}`;
+  }
+  return checkpointId;
 }
 
 /**

@@ -27,7 +27,11 @@ import {
 } from "../src/core/executors/live-step/sdk-executor.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
-import { insertExecutorAttempt } from "../src/core/executors/loop/persist.js";
+import {
+  insertExecutorAttempt,
+  insertExecutorCheckpoint,
+  insertExecutorRound,
+} from "../src/core/executors/loop/persist.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 import { validateExecutorConfig } from "../src/core/executors/sdk/config-schema.js";
 import {
@@ -1527,7 +1531,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     },
   );
 
-  it("retries a repaired native goal-loop host binding while preserving the failed attempt", async () => {
+  it("retries a repaired native goal-loop binding through preserved round and checkpoint id collisions", async () => {
     const repoPath = initNativeDispatchRepo();
     const profileDir = tempDir();
     const runId = "repaired-native-goal-loop-binding-run";
@@ -1602,6 +1606,68 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       },
     });
 
+    const retryRoundId = `${runId}::implementation::attempt-2::round::1`;
+    const allocatedRetryRoundId = `${retryRoundId}::allocated-1`;
+    const collisionOwnerRunId = `${runId}::collision-owner`;
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: collisionOwnerRunId,
+      repoPath,
+      objective: "Preserve unrestricted legacy evidence identities",
+      now: NOW,
+    });
+    const collisionOwnerAttemptId = `${collisionOwnerRunId}::attempt-1`;
+    insertExecutorAttempt(db, {
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: collisionOwnerRunId,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      state: "succeeded",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+    });
+    insertExecutorRound(db, {
+      roundId: retryRoundId,
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: collisionOwnerRunId,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "succeeded",
+      classification: "complete",
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: null,
+      humanGate: null,
+    });
+    insertExecutorCheckpoint(db, {
+      checkpointId: `${allocatedRetryRoundId}-checkpoint-0`,
+      roundId: retryRoundId,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    });
+
     writeGoalLoopDispatchProfile(profileDir, { timeoutSec: 4 });
     const repaired = resolveDaemonWorkflowStepDispatch(
       { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
@@ -1634,29 +1700,44 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT attempt_number AS attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          "SELECT round_id, attempt_number AS attempt, state, classification, recovery_code FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
         .all(runId),
     ).toEqual([
       {
+        round_id: `${runId}::implementation::attempt-1::round::0`,
         attempt: 1,
         state: "manual_recovery_required",
         classification: "manual_recovery_required",
         recovery_code: "host_binding_mismatch",
       },
       {
+        round_id: allocatedRetryRoundId,
         attempt: 2,
         state: "succeeded",
         classification: "continue",
         recovery_code: null,
       },
       {
+        round_id: `${runId}::implementation::attempt-2::round::2`,
         attempt: 2,
         state: "succeeded",
         classification: "complete",
         recovery_code: null,
       },
     ]);
+    expect(
+      db
+        .prepare(
+          `SELECT checkpoint_id, detail
+             FROM executor_checkpoints
+            WHERE round_id = ? AND sequence = 0`,
+        )
+        .get(allocatedRetryRoundId),
+    ).toEqual({
+      checkpoint_id: `${allocatedRetryRoundId}-checkpoint-0::allocated-1`,
+      detail: expect.stringMatching(/^dispatch binding v2: sha256:/),
+    });
     expect(
       fs.readFileSync(
         path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),

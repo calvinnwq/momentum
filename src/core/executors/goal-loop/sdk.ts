@@ -142,13 +142,15 @@ export class GoalLoopSdkExecutor implements Executor<
       : nextExecutorRoundIndex(
           context.state.rounds.map((snapshot) => snapshot.round),
         );
+    const expectedRoundId = reusingMaterializedRound
+      ? current.round.roundId
+      : goalLoopRoundId(context.state.attempt.attemptId, expectedRoundIndex);
     const hostStart = context.hostBindings.start;
     if (
       hostStart.attemptId !== context.state.attempt.attemptId ||
       hostStart.attemptNumber !== context.state.attempt.attemptNumber ||
       hostStart.roundIndex !== expectedRoundIndex ||
-      hostStart.roundId !==
-        goalLoopRoundId(context.state.attempt.attemptId, expectedRoundIndex)
+      hostStart.roundId !== expectedRoundId
     ) {
       throw new Error(
         "Native goal-loop host round binding is stale or invalid.",

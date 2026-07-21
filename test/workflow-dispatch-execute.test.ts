@@ -614,9 +614,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workerId: WORKER,
       now: NOW + 2,
       executorOwnsRounds: true,
-      materializeOwnedRound: ({ attempt }) => ({
+      materializeOwnedRound: ({ attempt, roundId }) => ({
         round: {
-          roundId: collidingRoundId,
+          roundId: roundId ?? collidingRoundId,
           attemptId: attempt.attemptId,
           workflowRunId: attempt.workflowRunId,
           stepRunId: attempt.stepRunId,
@@ -647,8 +647,8 @@ describe("executeWorkflowStepDispatch — supported family", () => {
           humanGate: null,
         },
         checkpoint: {
-          checkpointId: `${collidingRoundId}-checkpoint-0`,
-          roundId: collidingRoundId,
+          checkpointId: `${roundId ?? collidingRoundId}-checkpoint-0`,
+          roundId: roundId ?? collidingRoundId,
           sequence: 0,
           stage: "round_started",
           detail: null,

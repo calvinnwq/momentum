@@ -465,7 +465,7 @@ function createNativeOwnedRoundMaterializerResolver(
     const wrapper = profile.wrappers.get(step.kind);
     if (wrapper === undefined) return undefined;
 
-    return ({ attempt, selection, now }) => {
+    return ({ attempt, selection, now, roundId: requestedRoundId }) => {
       const existingRounds = listExecutorRoundsForStep(
         input.context.db,
         attempt.workflowRunId,
@@ -539,7 +539,8 @@ function createNativeOwnedRoundMaterializerResolver(
         >;
         const roundRoot = path.join(artifactRoot, `round-${roundIndex + 1}`);
         const start = {
-          roundId: `${attempt.attemptId}::round::${roundIndex}`,
+          roundId:
+            requestedRoundId ?? `${attempt.attemptId}::round::${roundIndex}`,
           attemptId: attempt.attemptId,
           workflowRunId: attempt.workflowRunId,
           stepRunId: attempt.stepRunId,
@@ -576,7 +577,8 @@ function createNativeOwnedRoundMaterializerResolver(
       }
 
       const start = {
-        roundId: `${attempt.attemptId}::round::${roundIndex}`,
+        roundId:
+          requestedRoundId ?? `${attempt.attemptId}::round::${roundIndex}`,
         attemptId: attempt.attemptId,
         workflowRunId: attempt.workflowRunId,
         stepRunId: attempt.stepRunId,
