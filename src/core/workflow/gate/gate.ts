@@ -75,6 +75,16 @@ export function isWorkflowGateScope(value: string): value is WorkflowGateScope {
 }
 
 /**
+ * Historical scope values that may still be read from migrated durable rows.
+ * They are intentionally excluded from {@link WorkflowGateScope}: new gates
+ * must use the immutable attempt vocabulary, while old event ids retain their
+ * recorded `invocation` scope for replay compatibility.
+ */
+export const LEGACY_WORKFLOW_GATE_SCOPES = ["invocation"] as const;
+export type WorkflowGateReadScope =
+  WorkflowGateScope | (typeof LEGACY_WORKFLOW_GATE_SCOPES)[number];
+
+/**
  * How a decision is being made:
  *   - `operator`: an explicit human decision. Any action in the gate's
  *     `allowedActions` resolves the gate.

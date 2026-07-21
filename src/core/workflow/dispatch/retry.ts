@@ -53,7 +53,6 @@ export type RetryableDispatchedStepRecovery = {
   kind: WorkflowStepKind;
   attemptId: string;
   executorFamily: ExecutorName;
-  attemptState: RetryableAttemptState;
   attemptNumber: number;
   latestRoundIndex: number;
   recoveryCode: string;
@@ -66,7 +65,6 @@ type RetryableDispatchRow = {
   run_id: string;
   step_id: string;
   kind: string;
-  state: string;
   attempt_id: string;
   executor_family: string;
   attempt_state: string;
@@ -93,7 +91,6 @@ export function findRetryableDispatchedStepRecovery(
       `SELECT s.run_id,
               s.step_id,
               s.kind,
-              s.state,
               s.step_order,
               s.required,
               s.started_at,
@@ -361,7 +358,6 @@ function parseRetryableDispatchRow(
     kind: row.kind,
     attemptId: row.attempt_id,
     executorFamily: row.executor_family,
-    attemptState: row.attempt_state,
     attemptNumber: row.attempt_number,
     latestRoundIndex: row.round_index,
     recoveryCode: row.recovery_code,

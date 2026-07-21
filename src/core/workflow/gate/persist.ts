@@ -42,6 +42,7 @@ import {
   type GateDecisionMode,
   type GateDecisionRefusalCode,
   type GateDecisionRequest,
+  type WorkflowGateReadScope,
   type WorkflowGateScope,
   type WorkflowGateType,
 } from "./gate.js";
@@ -126,14 +127,19 @@ export type NewWorkflowGate = {
   policyEnvelope?: readonly string[];
 };
 
-/** A durable gate record loaded from `workflow_gates`. */
+/**
+ * A durable gate record loaded from `workflow_gates`.
+ *
+ * Historical SDK-05 rows may retain the read-only `invocation` scope so replay
+ * event ids remain stable; new rows are restricted to {@link WorkflowGateScope}.
+ */
 export type WorkflowGateRecord = {
   gateId: string;
   workflowRunId: string;
   stepRunId: string | null;
   attemptId: string | null;
   roundId: string | null;
-  targetScope: WorkflowGateScope;
+  targetScope: WorkflowGateReadScope;
   gateType: WorkflowGateType;
   reason: string;
   evidence: string | null;
@@ -374,7 +380,7 @@ function rowToGate(row: WorkflowGateRow): WorkflowGateRecord {
     stepRunId: row.step_run_id,
     attemptId: row.attempt_id,
     roundId: row.round_id,
-    targetScope: row.target_scope as WorkflowGateScope,
+    targetScope: row.target_scope as WorkflowGateReadScope,
     gateType: row.gate_type as WorkflowGateType,
     reason: row.reason,
     evidence: row.evidence,

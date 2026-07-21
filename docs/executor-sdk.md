@@ -4,6 +4,9 @@ Momentum executors run below workflow steps inside the same durable attempt and 
 
 The source contract is `src/core/executors/sdk/types.ts`.
 Momentum's durable facade implementation is `src/core/executors/sdk/envelope.ts`.
+The attempt/round rename is a breaking SDK surface change before 1.0.
+Registered modules must read `context.state.attempt` and return `recommendedAttemptState`.
+Momentum does not adapt invocation-named live module fields; persisted durable rows have a separate in-place migration path.
 The current `goal-loop` built-in proves repeated native rounds through `src/core/executors/goal-loop/sdk.ts`, `one-shot` and `script` prove the single-turn contract through `src/core/executors/single-shot/sdk.ts`, and `delegate-supervisor` proves repeated bounded external supervision through `src/core/executors/delegate-supervisor/`.
 
 Module registration, discovery, declared-schema preflight, and daemon dispatch use this interface for both built-ins and third-party executors.

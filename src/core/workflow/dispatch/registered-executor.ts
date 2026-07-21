@@ -204,16 +204,13 @@ export function createRegisteredExecutorWorkflowDispatch(
           // Round indices are monotone across the whole step, so a retry
           // attempt's fallback round must continue after every earlier
           // attempt's rounds, not restart at 0.
-          const roundIndex =
+          const roundIndex = nextExecutorRoundIndex(
             listExecutorRoundsForStep(
               context.db,
               attempt.workflowRunId,
               attempt.stepRunId,
-            ).reduce(
-              (highestRoundIndex, round) =>
-                Math.max(highestRoundIndex, round.roundIndex),
-              -1,
-            ) + 1;
+            ),
+          );
           const canonicalRound = genericRoundRecord(attempt, roundIndex, now);
           const round =
             requestedRoundId === undefined

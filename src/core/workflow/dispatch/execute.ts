@@ -354,19 +354,19 @@ function materializeCollisionSafeOwnedRound(
     now: number;
   },
 ): OwnedRoundMaterialization {
-  let materialized: OwnedRoundMaterialization;
-  try {
-    materialized = materialize(input);
-  } catch (error) {
-    throw new ExecutorOwnedRoundMaterializationError(error);
-  }
+  const materializeSafely = (
+    materializerInput: Parameters<OwnedRoundMaterializer>[0],
+  ): OwnedRoundMaterialization => {
+    try {
+      return materialize(materializerInput);
+    } catch (error) {
+      throw new ExecutorOwnedRoundMaterializationError(error);
+    }
+  };
+  let materialized = materializeSafely(input);
   const roundId = allocateOwnedRoundId(db, materialized.round);
   if (roundId === materialized.round.roundId) return materialized;
-  try {
-    materialized = materialize({ ...input, roundId });
-  } catch (error) {
-    throw new ExecutorOwnedRoundMaterializationError(error);
-  }
+  materialized = materializeSafely({ ...input, roundId });
   if (
     materialized.round.roundId !== roundId ||
     materialized.checkpoint.roundId !== roundId

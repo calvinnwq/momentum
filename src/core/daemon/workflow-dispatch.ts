@@ -471,12 +471,7 @@ function createNativeOwnedRoundMaterializerResolver(
         attempt.workflowRunId,
         attempt.stepRunId,
       );
-      const roundIndex =
-        existingRounds.reduce(
-          (highestRoundIndex, round) =>
-            Math.max(highestRoundIndex, round.roundIndex),
-          -1,
-        ) + 1;
+      const roundIndex = nextExecutorRoundIndex(existingRounds);
       const canonicalRepoPath = fs.realpathSync(resolved.exec.repoPath);
       const canonicalRunDir = canonicalizeRunDir(
         resolved.exec.repoPath,
@@ -1049,12 +1044,7 @@ function createLiveStepHostBindingsResolver(
             round.classification === null,
         );
       const roundIndex =
-        resumableRound?.roundIndex ??
-        attemptRounds.reduce(
-          (highestRoundIndex, round) =>
-            Math.max(highestRoundIndex, round.roundIndex),
-          -1,
-        ) + 1;
+        resumableRound?.roundIndex ?? nextExecutorRoundIndex(attemptRounds);
       const preparedRound = prepareGoalLoopRoundRoot(runDir, roundIndex + 1);
       if (!preparedRound.ok) {
         repoOwnership.settle(false);

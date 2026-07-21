@@ -353,9 +353,9 @@ export class DurableExecutorEnvelope {
     return withSqliteTransaction(this.#db, "write", () => {
       this.#authorizeWrite();
       assertDaemonDecisionInput(decision);
-      const currentInvocation = this.#loadAttempt();
+      const currentAttempt = this.#loadAttempt();
       this.#assertAttemptUnsettled(
-        currentInvocation,
+        currentAttempt,
         `classify round ${decision.roundId}`,
       );
       const currentRound = this.#loadOwnedRound(decision.roundId);
@@ -364,12 +364,12 @@ export class DurableExecutorEnvelope {
           `Cannot reclassify terminal round ${decision.roundId} (${currentRound.state}).`,
         );
       }
-      const expectedInvocationState = executorAttemptStateForClassification(
+      const expectedAttemptState = executorAttemptStateForClassification(
         decision.classification,
       );
-      if (decision.attemptState !== expectedInvocationState) {
+      if (decision.attemptState !== expectedAttemptState) {
         throw new ExecutorEnvelopeAccessError(
-          `Cannot classify round ${decision.roundId} as ${decision.classification}: expected attempt state ${expectedInvocationState}, got ${decision.attemptState}.`,
+          `Cannot classify round ${decision.roundId} as ${decision.classification}: expected attempt state ${expectedAttemptState}, got ${decision.attemptState}.`,
         );
       }
       if (

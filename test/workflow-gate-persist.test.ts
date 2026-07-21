@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import type { GateDecisionRequest } from "../src/core/workflow/gate/gate.js";
+import type {
+  GateDecisionRequest,
+  WorkflowGateReadScope,
+} from "../src/core/workflow/gate/gate.js";
 import {
   InvalidWorkflowGateError,
   WorkflowGateConflictError,
@@ -144,6 +147,30 @@ describe("insertWorkflowGate", () => {
   it("returns undefined when loading an unknown gate id", () => {
     const db = openSeededDb();
     expect(loadWorkflowGate(db, "missing")).toBeUndefined();
+  });
+
+  it("loads historical invocation-scoped rows through the read-only scope type", () => {
+    const db = openSeededDb();
+    db.prepare(
+      `INSERT INTO workflow_gates (
+         gate_id, workflow_run_id, step_run_id, attempt_id, target_scope,
+         gate_type, reason, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "gate-legacy-invocation",
+      "run-1",
+      "step-1",
+      "inv-1",
+      "invocation",
+      "operator_decision_required",
+      "historical gate",
+      1,
+      1,
+    );
+
+    const loaded = loadWorkflowGate(db, "gate-legacy-invocation");
+    const scope: WorkflowGateReadScope = loaded!.targetScope;
+    expect(scope).toBe("invocation");
   });
 
   it("refuses a duplicate gate id and leaves the existing row untouched", () => {

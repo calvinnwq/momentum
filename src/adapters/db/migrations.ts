@@ -1459,10 +1459,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
 type PragmaColumnRow = { name: string };
 
 function ensureColumn(db: MomentumDb, table: string, column: ColumnSpec): void {
-  const rows = db
-    .prepare(`PRAGMA table_info(${table})`)
-    .all() as PragmaColumnRow[];
-  if (rows.some((row) => row.name === column.name)) return;
+  if (columnExists(db, table, column.name)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column.name} ${column.type}`);
 }
 
