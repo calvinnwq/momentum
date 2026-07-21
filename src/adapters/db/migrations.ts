@@ -859,9 +859,11 @@ function compareLegacyAttemptGroups(
  *     provenance rather than inventing a clean terminal.
  *   - Every migrated attempt keeps `legacy_invocation_id` plus a compact
  *     `legacy_provenance` JSON describing how its facts were derived.
- *   - Rounds keep their ids, indices, evidence links, and `attempt` number
- *     (now `attempt_number`); only their parent key moves from the shared
- *     invocation to their own attempt row.
+ *   - Rounds keep their ids, indices, and evidence links. Their parent key moves
+ *     from the shared invocation to their own attempt row. When attempt numbers
+ *     collide across legacy invocation rows for one step, groups are ordered by
+ *     lifecycle and receive monotone step-wide numbers; provenance preserves a
+ *     changed legacy number.
  *   - `workflow_gates.invocation_id` becomes `attempt_id` and round-scoped
  *     gates are re-anchored to the round's attempt. Historical rows keep the
  *     recorded `invocation` target scope so re-projected gate event ids (and

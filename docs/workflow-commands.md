@@ -952,9 +952,9 @@ Behaviour:
 - Registered SDK `executor_threw` and `executor_contract_invalid` refusals are also retryable after the executor implementation or result contract is repaired.
 - Delegate-supervisor `tool_adapter_unavailable`, `delegate_handoff_failed`, `delegate_handoff_recovery_required`, `external_state_unreadable`, and `external_state_inconsistent` refusals are retryable after the adapter, handoff evidence, or correlated external state is repaired.
   An `external_state_blocked` attempt is also retryable after the external blocker clears.
-  Guarded clear prepares a fresh immutable attempt with the next attempt number, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
+  Guarded clear prepares the step for retry; the next dispatcher inserts a fresh immutable attempt with the next attempt number, routes any unresolved handoff intent or prior valid correlated handoff through adapter recovery before launch or reuse, preserves prior decisions, and starts a fresh semantic-stall window for the new attempt.
   The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`.
-  The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
+  The previous failed executor round remains durable; the next dispatch creates a new attempt and round and does not rerun an already-terminal successful step.
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
   The same transaction releases only the retrying attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
@@ -1266,7 +1266,9 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 }
 ```
 
-`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
+`gates` is the list of durable workflow / step / executor gates for the run, oldest first.
+Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
+Gate rows migrated from the legacy invocation model may retain `targetScope: "invocation"` as read-only provenance so their replay event ids remain stable; new gates never emit that scope.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
@@ -1882,7 +1884,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `command` | string | Always `"workflow run watch"`. |
 | `mode` | string | `"once"` for the one-shot envelope below. Stream-mode records carry `"stream"` instead; see [Stream mode](#stream-mode). |
 | `dataDir` | string | Resolved data directory the tick read. |
-| `schemaVersion` | number | Envelope schema version; currently `1`. |
+| `schemaVersion` | number | Envelope schema version; currently `2`. |
 | `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
 | `runId` | string | The inspected run id. |
 | `runState` | string | Durable run state (`pending`, `running`, `succeeded`, `failed`, `canceled`). |

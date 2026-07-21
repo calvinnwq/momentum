@@ -107,7 +107,7 @@ export type ExecutorRoundEnvelopeSnapshot = {
 export type ExecutorEnvelopeSnapshot = {
   readonly attempt: Readonly<ExecutorAttemptRecord>;
   readonly rounds: readonly ExecutorRoundEnvelopeSnapshot[];
-  /** The highest-index round, or null before the attempt has started one. */
+  /** Latest round in attempt-number / round-index order, or null before the step has any rounds. */
   readonly currentRound: ExecutorRoundEnvelopeSnapshot | null;
 };
 

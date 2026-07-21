@@ -234,7 +234,7 @@ That completion requires a full 40-character SHA matching the repository's curre
 Delegate handoff failures use `tool_adapter_unavailable`, `delegate_handoff_failed`, or `delegate_handoff_recovery_required`.
 Unreadable, contradictory, cancelled, identity-mismatched, or stalled external state uses `external_state_unreadable` or `external_state_inconsistent` and must be inspected before guarded recovery clear.
 An attempt settled with `external_state_blocked` is retryable only after the external blocker clears.
-Guarded clear may insert a fresh later attempt, but an unresolved prior handoff intent is reconciled before the adapter may launch anything again.
+Guarded clear prepares the step for retry; the next dispatcher inserts the fresh later attempt, and an unresolved prior handoff intent is reconciled before the adapter may launch anything again.
 The later attempt retains a valid non-terminal correlated handoff and prior decisions but starts a fresh four-minute semantic-stall window.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure does not establish that external outcome.

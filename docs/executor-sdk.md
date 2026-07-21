@@ -81,7 +81,10 @@ export const executor: Executor<Config, HostBindings> = {
   ) {
     context.signal.throwIfAborted();
     const attempt = context.state.attempt;
-    const roundIndex = context.state.rounds.length;
+    const roundIndex = context.state.rounds.reduce(
+      (highest, item) => Math.max(highest, item.round.roundIndex),
+      -1
+    ) + 1;
     const round = context.envelope.startRound({
       roundId: `${attempt.attemptId}::round-${roundIndex + 1}`,
       attemptId: attempt.attemptId,
@@ -202,6 +205,8 @@ Profile-backed built-ins use Momentum's internal host-binding resolver for live-
 ## Registered dispatch lifecycle
 
 The managed daemon normally drives at most one registered-executor tick per scheduler pass.
+Registered SDK continuation is gated across the whole step lineage: its first durable round must have index 0.
+A legacy or migrated dispatch lineage whose first round is index 1 is not redispatched as an SDK tick, including on a mixed-lineage retry; it remains on the reconciliation or recovery path.
 For the first completed delegate-supervisor handoff in an attempt, the profile-backed dispatcher permits a second bounded tick in the same pass so the first external-state read follows that durable handoff immediately.
 Later passes and every retry attempt return to one tick, including a retry that launches a fresh external run.
 A continuation-only pass waits the configured daemon poll interval before the next external-state read.
