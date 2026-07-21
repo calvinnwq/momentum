@@ -911,13 +911,16 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       // new unique `(workflow_run_id, step_run_id, attempt_number)` index.
       // Colliding groups are renumbered deterministically by lifecycle time
       // while each invocation keeps its internal group order, and the original
-      // number is preserved in provenance.
+      // number is preserved in provenance. If a multi-lineage step still has
+      // live work that would be renumbered or demoted, the run is parked for
+      // manual recovery instead of guessing which lineage is authoritative.
       const attemptNumberByLegacyGroup = new Map<string, number>();
       const highestAssignedByStep = new Map<string, number>();
       const groupsByStep = new Map<
         string,
         Map<string, LegacyExecutorAttemptGroup[]>
       >();
+      const ambiguousRunReasons = new Map<string, string>();
 
       for (const invocation of invocations) {
         const rounds = db
@@ -969,6 +972,10 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         const invocationQueues = [...groupsByInvocation.values()].map(
           (groups) => [...groups],
         );
+        const assignedGroups: Array<{
+          group: LegacyExecutorAttemptGroup;
+          assignedAttemptNumber: number;
+        }> = [];
         while (invocationQueues.some((groups) => groups.length > 0)) {
           const group = invocationQueues
             .filter((groups) => groups.length > 0)
@@ -987,6 +994,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             (highestAssignedByStep.get(stepKey) ?? 0) + 1,
           );
           highestAssignedByStep.set(stepKey, assignedAttemptNumber);
+          assignedGroups.push({ group, assignedAttemptNumber });
           attemptIdByLegacyGroup.set(
             `${invocation.invocation_id}::${attemptNumber}`,
             attemptId,
@@ -1067,6 +1075,46 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               : invocation.updated_at,
           );
         }
+
+        if (groupsByInvocation.size > 1) {
+          const highestAssigned = highestAssignedByStep.get(stepKey) ?? 0;
+          const liveGroups = assignedGroups.filter(
+            ({ group }) =>
+              group.isLatest &&
+              !LEGACY_TERMINAL_ATTEMPT_STATES.has(group.invocation.state),
+          );
+          const ambiguousLive = liveGroups.filter(
+            ({ group, assignedAttemptNumber }) =>
+              assignedAttemptNumber !== group.legacyAttemptNumber ||
+              assignedAttemptNumber !== highestAssigned,
+          );
+          if (liveGroups.length > 1 || ambiguousLive.length > 0) {
+            const runId = assignedGroups[0]!.group.invocation.workflow_run_id;
+            const stepId = assignedGroups[0]!.group.invocation.step_run_id;
+            if (!ambiguousRunReasons.has(runId)) {
+              ambiguousRunReasons.set(
+                runId,
+                `attempt migration found multiple legacy executor lineages with live work for step ${stepId}; inspect the migrated attempts and clear recovery explicitly`,
+              );
+            }
+          }
+        }
+      }
+
+      // Fail closed on ambiguous live lineages: the run opens with every row
+      // and all evidence preserved, but is parked for operator recovery
+      // instead of letting a renumbered or demoted live attempt resume (its
+      // durable fences still encode the original attempt number) or letting a
+      // stale terminal lineage finalize the step as the newest attempt.
+      const parkRun = db.prepare(
+        `UPDATE workflow_runs
+            SET needs_manual_recovery = 1,
+                manual_recovery_reason = COALESCE(manual_recovery_reason, ?),
+                manual_recovery_at = COALESCE(manual_recovery_at, updated_at)
+          WHERE id = ?`,
+      );
+      for (const [runId, reason] of ambiguousRunReasons) {
+        parkRun.run(reason, runId);
       }
 
       // Rebuild executor_rounds under the attempt hierarchy. Round ids,

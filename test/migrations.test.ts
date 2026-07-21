@@ -2041,6 +2041,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
                   state, attempt_number, started_at, heartbeat_at, finished_at,
                   legacy_invocation_id, legacy_provenance
              FROM executor_attempts
+            WHERE workflow_run_id = 'run-1'
             ORDER BY step_run_id, attempt_number`,
         )
         .all() as Array<Record<string, unknown>>;
@@ -2186,7 +2187,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
                   classification, recovery_code, summary, key_learnings,
                   verification_results
              FROM executor_rounds
-            WHERE step_run_id = 'implementation'
+            WHERE workflow_run_id = 'run-1' AND step_run_id = 'implementation'
             ORDER BY attempt_number, round_index`,
         )
         .all() as Array<Record<string, unknown>>;
@@ -2302,6 +2303,65 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
+  it("parks a run whose step carries ambiguous live legacy lineages", () => {
+    // run-2's implementation step has a live dispatch lineage plus a
+    // later-created terminal adapter lineage. Lifecycle ordering makes the
+    // terminal lineage the highest attempt, so resuming the live lineage (or
+    // trusting the stale terminal one as newest) would misrepresent state;
+    // the migration opens the database but fails closed into manual recovery.
+    const dataDir = seedLegacyDataDir();
+    const db = openDb(dataDir);
+    try {
+      const attempts = db
+        .prepare(
+          `SELECT attempt_id, state, attempt_number, legacy_provenance
+             FROM executor_attempts
+            WHERE workflow_run_id = 'run-2'
+            ORDER BY attempt_number`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(attempts).toMatchObject([
+        {
+          attempt_id: "run-2::implementation::dispatch",
+          state: "running",
+          attempt_number: 1,
+        },
+        {
+          attempt_id: "no-mistakes::run-2::implementation::mirror",
+          state: "failed",
+          attempt_number: 2,
+        },
+      ]);
+      expect(JSON.parse(String(attempts[1]?.legacy_provenance))).toMatchObject({
+        legacyAttemptNumber: 1,
+      });
+
+      const run = db
+        .prepare(
+          `SELECT needs_manual_recovery, manual_recovery_reason
+             FROM workflow_runs WHERE id = 'run-2'`,
+        )
+        .get() as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(run.needs_manual_recovery).toBe(1);
+      expect(run.manual_recovery_reason).toContain(
+        "multiple legacy executor lineages with live work",
+      );
+
+      // run-1's terminal-only collision renumbers without parking.
+      const runOne = db
+        .prepare(
+          "SELECT needs_manual_recovery FROM workflow_runs WHERE id = 'run-1'",
+        )
+        .get() as { needs_manual_recovery: number };
+      expect(runOne.needs_manual_recovery).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("is a no-op when the migrated database is opened again", () => {
     const dataDir = seedLegacyDataDir();
     const first = openDb(dataDir);
@@ -2358,7 +2418,8 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       const attempts = db
         .prepare(
           `SELECT attempt_id, state, attempt_number FROM executor_attempts
-            WHERE step_run_id = 'implementation' ORDER BY attempt_number`,
+            WHERE workflow_run_id = 'run-1' AND step_run_id = 'implementation'
+            ORDER BY attempt_number`,
         )
         .all();
       expect(attempts).toEqual([

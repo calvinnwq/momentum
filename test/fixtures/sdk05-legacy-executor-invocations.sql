@@ -11,7 +11,10 @@
 -- delegate handoff-intent checkpoint carrying the legacy `invocationId`
 -- external correlation, and a second invocation row for one step (an
 -- adapter-minted mirror invocation) whose attempt number collides with the
--- dispatch scaffold's under the new unique step/attempt-number index.
+-- dispatch scaffold's under the new unique step/attempt-number index, and a
+-- second run whose step carries a live dispatch lineage alongside a
+-- later-created terminal adapter lineage (an ambiguous multi-lineage shape
+-- the migration must park for manual recovery rather than resolve by guess).
 
 CREATE TABLE workflow_runs (
   id TEXT PRIMARY KEY,
@@ -188,13 +191,16 @@ CREATE TABLE workflow_gates (
 ) STRICT;
 
 INSERT INTO workflow_runs (id, state, source, plan_json, created_at, updated_at)
-VALUES ('run-1', 'running', 'momentum-native-coding-workflow', '{}', 100, 2500);
+VALUES
+  ('run-1', 'running', 'momentum-native-coding-workflow', '{}', 100, 2500),
+  ('run-2', 'running', 'momentum-native-coding-workflow', '{}', 100, 900);
 
 INSERT INTO workflow_steps
   (run_id, step_id, kind, state, step_order, required, started_at, finished_at, created_at, updated_at)
 VALUES
   ('run-1', 'preflight', 'preflight', 'succeeded', 0, 1, 100, 200, 100, 200),
-  ('run-1', 'implementation', 'implementation', 'running', 1, 1, 1000, NULL, 100, 2500);
+  ('run-1', 'implementation', 'implementation', 'running', 1, 1, 1000, NULL, 100, 2500),
+  ('run-2', 'implementation', 'implementation', 'running', 0, 1, 100, NULL, 100, 900);
 
 -- The reopened invocation: attempt 1 reached manual recovery, an operator
 -- cleared it, and the dispatcher reopened the same row as attempt 2.
@@ -207,7 +213,12 @@ VALUES
   ('run-1::preflight::dispatch', 'run-1', 'preflight', 'preflight',
    'one-shot', 'succeeded', 1, 100, 150, 200, 100, 200),
   ('no-mistakes::run-1::preflight::mirror', 'run-1', 'preflight', 'preflight',
-   'no-mistakes', 'succeeded', 1, 300, 350, 400, 300, 400);
+   'no-mistakes', 'succeeded', 1, 300, 350, 400, 300, 400),
+  ('run-2::implementation::dispatch', 'run-2', 'implementation',
+   'implementation', 'delegate-supervisor', 'running', 1, 100, 900, NULL,
+   100, 900),
+  ('no-mistakes::run-2::implementation::mirror', 'run-2', 'implementation',
+   'implementation', 'no-mistakes', 'failed', 1, 500, 550, 600, 500, 600);
 
 INSERT INTO executor_rounds
   (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
@@ -229,6 +240,16 @@ VALUES
    'no-mistakes', 1, 0, 'succeeded', 'complete', 'complete', 300, 350, 400,
    NULL, NULL, NULL, NULL, NULL, NULL, '[]', 'mirror settled', '[]', '[]',
    '[]', '[]', NULL, '[]', NULL, NULL, NULL, 300, 400),
+  ('run-2::implementation::dispatch::round-1', 'run-2::implementation::dispatch',
+   'run-2', 'implementation', 'implementation', 'delegate-supervisor', 1, 0,
+   'running', NULL, NULL, 100, 900, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+   '[]', NULL, '[]', '[]', '[]', '[]', NULL, '[]', NULL, NULL, NULL, 100, 900),
+  ('no-mistakes::run-2::implementation::mirror::round::0',
+   'no-mistakes::run-2::implementation::mirror', 'run-2', 'implementation',
+   'implementation', 'no-mistakes', 1, 0, 'failed', 'failed', 'failed', 500,
+   550, 600, NULL, NULL, NULL, NULL, NULL, NULL, '[]', 'mirror failed', '[]',
+   '[]', '[]', '[]', NULL, '[]', NULL, 'external_state_blocked', NULL, 500,
+   600),
   ('run-1::implementation::dispatch::round-1', 'run-1::implementation::dispatch',
    'run-1', 'implementation', 'implementation', 'delegate-supervisor', 1, 1,
    'succeeded', 'continue', 'continue', 1000, 1100, 1200, 'claude', 'model-a',
