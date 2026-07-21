@@ -1125,6 +1125,7 @@ State and filter compose: passing both returns runs whose literal state matches 
   "ok": true,
   "command": "workflow status",
   "dataDir": "/path/to/data",
+  "schemaVersion": 2,
   "state": null,
   "filter": "active",
   "count": 1,
@@ -1174,6 +1175,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
   "ok": true,
   "command": "workflow status",
   "dataDir": "/path/to/data",
+  "schemaVersion": 2,
   "run": { "runId": "cwfp-abc123", "state": "running", "...": "..." },
   "steps": [
     {
@@ -1266,6 +1268,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 }
 ```
 
+`schemaVersion` is `2` in both list and detail mode.
 `gates` is the list of durable workflow / step / executor gates for the run, oldest first.
 Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 Gate rows migrated from the legacy invocation model may retain `targetScope: "invocation"` as read-only provenance so their replay event ids remain stable; new gates never emit that scope.
@@ -1384,7 +1387,7 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
 ```
 
-Emits a machine-readable next-action envelope for one workflow run. Wraps the same detail loader as `workflow status <run-id>`, adds `schemaVersion` and `generatedAt`, and surfaces `nextAction` at the top level (mirroring `monitor.nextAction`) so OpenClaw tooling can dispatch without re-reading the monitor block.
+Emits a machine-readable next-action envelope for one workflow run. Wraps the same detail loader and schema version as `workflow status <run-id>`, adds `generatedAt`, and surfaces `nextAction` at the top level (mirroring `monitor.nextAction`) so OpenClaw tooling can dispatch without re-reading the monitor block.
 
 ### JSON envelope
 

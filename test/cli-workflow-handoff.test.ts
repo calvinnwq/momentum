@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { insertExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
@@ -315,12 +316,30 @@ describe("momentum workflow handoff", () => {
     const db = openDb(dataDir);
     try {
       seedRunningRun(db, "cwfp-handoffgate");
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: "handoff-attempt-1",
+          workflowRunId: "cwfp-handoffgate",
+          stepRunId: "implementation",
+          stepKey: "implementation",
+          executorFamily: "goal-loop",
+          state: "running",
+          attemptNumber: 1,
+          startedAt: Date.now(),
+          heartbeatAt: Date.now(),
+          finishedAt: null,
+        },
+        { now: Date.now() },
+      );
       insertWorkflowGate(
         db,
         {
           gateId: "handoff-gate-1",
           workflowRunId: "cwfp-handoffgate",
-          targetScope: "workflow",
+          stepRunId: "implementation",
+          attemptId: "handoff-attempt-1",
+          targetScope: "attempt",
           gateType: "approval_required",
           reason: "approve before external apply",
           allowedActions: ["approve", "reject"],
@@ -345,6 +364,7 @@ describe("momentum workflow handoff", () => {
     const payload = JSON.parse(result.stdout) as {
       gates: Array<{
         gateId: string;
+        attemptId: string | null;
         targetScope: string;
         gateType: string;
         open: boolean;
@@ -357,17 +377,37 @@ describe("momentum workflow handoff", () => {
       }>;
     };
     expect(payload.gates.map((g) => g.gateId)).toEqual(["handoff-gate-1"]);
-    expect(payload.gates[0]).toMatchObject({
-      targetScope: "workflow",
+    expect(payload.gates[0]).toEqual({
+      gateId: "handoff-gate-1",
+      workflowRunId: "cwfp-handoffgate",
+      stepRunId: "implementation",
+      attemptId: "handoff-attempt-1",
+      roundId: null,
+      targetScope: "attempt",
       gateType: "approval_required",
+      reason: "approve before external apply",
+      evidence: null,
       open: true,
       allowedActions: ["approve", "reject"],
+      recommendedAction: "approve",
       recommendedActionPolicy: {
         action: "approval_decision",
         authority: "human_required",
         risk: "medium",
+        evidenceRequired: ["open approval gate", "operator approval phrase"],
+        rollback:
+          "Clear or supersede the approval through the normal workflow gate path.",
+        rationale:
+          "Approval changes the authorized execution envelope and must remain operator-gated.",
       },
+      policyEnvelope: [],
+      resolvedAt: null,
+      resolvedBy: null,
+      resolutionMode: null,
+      chosenAction: null,
+      resolution: null,
     });
+    expect(payload.gates[0]).not.toHaveProperty("invocationId");
 
     const textResult = await run([
       "workflow",

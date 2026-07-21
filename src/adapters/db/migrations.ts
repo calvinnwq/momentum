@@ -851,12 +851,13 @@ function compareLegacyAttemptGroups(
  *     describes, so that attempt inherits the row's id, state, and timestamps
  *     unchanged. Preserving the id also preserves every external reference to
  *     it (gates, receipts, checkpoint details).
- *   - Earlier groups become immutable historical attempts with deterministic
- *     derived ids (`<invocationId>::attempt-<n>`). Their state and timestamps
- *     are reconstructed from their own terminal rounds; a group whose last
- *     round is somehow non-terminal (impossible through the SDK-05 write path)
- *     is conservatively recorded as `manual_recovery_required` and flagged in
- *     provenance rather than inventing a clean terminal.
+ *   - Earlier groups become immutable historical attempts with deterministic,
+ *     collision-checked derived ids (`<invocationId>::attempt-<n>` when that
+ *     id is free). Their state and timestamps are reconstructed from their own
+ *     terminal rounds; a group whose last round is somehow non-terminal
+ *     (impossible through the SDK-05 write path) is conservatively recorded as
+ *     `manual_recovery_required` and flagged in provenance rather than
+ *     inventing a clean terminal.
  *   - Every migrated attempt keeps `legacy_invocation_id` plus a compact
  *     `legacy_provenance` JSON describing how its facts were derived.
  *   - Rounds keep their ids, indices, and evidence links. Their parent key moves
@@ -905,6 +906,32 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const attemptIdByLegacyGroup = new Map<string, string>();
+      const reservedAttemptIds = new Set(
+        invocations.map((invocation) => invocation.invocation_id),
+      );
+      const allocatedAttemptIds = new Set<string>();
+      const allocateHistoricalAttemptId = (
+        invocationId: string,
+        attemptNumber: number,
+      ): string => {
+        const base = `${invocationId}::attempt-${attemptNumber}`;
+        if (!reservedAttemptIds.has(base) && !allocatedAttemptIds.has(base)) {
+          allocatedAttemptIds.add(base);
+          return base;
+        }
+        let suffix = 1;
+        while (true) {
+          const candidate = `${base}::migrated-${suffix}`;
+          if (
+            !reservedAttemptIds.has(candidate) &&
+            !allocatedAttemptIds.has(candidate)
+          ) {
+            allocatedAttemptIds.add(candidate);
+            return candidate;
+          }
+          suffix += 1;
+        }
+      };
       // The legacy schema only made `invocation_id` unique, so one step can
       // carry several invocation rows (for example a dispatcher scaffold plus
       // an adapter-minted invocation) whose attempt numbers collide under the
@@ -988,7 +1015,11 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
           const groupRounds = group.rounds;
           const attemptId = group.isLatest
             ? invocation.invocation_id
-            : `${invocation.invocation_id}::attempt-${attemptNumber}`;
+            : allocateHistoricalAttemptId(
+                invocation.invocation_id,
+                attemptNumber,
+              );
+          if (group.isLatest) allocatedAttemptIds.add(attemptId);
           const assignedAttemptNumber = Math.max(
             attemptNumber,
             (highestAssignedByStep.get(stepKey) ?? 0) + 1,
@@ -1109,12 +1140,18 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       const parkRun = db.prepare(
         `UPDATE workflow_runs
             SET needs_manual_recovery = 1,
-                manual_recovery_reason = COALESCE(manual_recovery_reason, ?),
+                manual_recovery_reason = CASE
+                  WHEN manual_recovery_reason IS NULL
+                    OR trim(manual_recovery_reason) = '' THEN ?
+                  WHEN instr(manual_recovery_reason, ?) > 0
+                    THEN manual_recovery_reason
+                  ELSE manual_recovery_reason || char(10) || ?
+                END,
                 manual_recovery_at = COALESCE(manual_recovery_at, updated_at)
           WHERE id = ?`,
       );
       for (const [runId, reason] of ambiguousRunReasons) {
-        parkRun.run(reason, runId);
+        parkRun.run(reason, reason, reason, runId);
       }
 
       // Rebuild executor_rounds under the attempt hierarchy. Round ids,

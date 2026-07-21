@@ -2177,6 +2177,157 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
+  it("allocates collision-safe historical attempt ids and remains idempotent", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `INSERT INTO executor_invocations (
+             invocation_id, workflow_run_id, step_run_id, step_key,
+             executor_family, state, attempt, started_at, heartbeat_at,
+             finished_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "run-1::implementation::dispatch::attempt-1",
+          "run-1",
+          "implementation",
+          "implementation",
+          "no-mistakes",
+          "succeeded",
+          1,
+          1600,
+          1650,
+          1700,
+          1600,
+          1700,
+        );
+      legacy
+        .prepare(
+          `INSERT INTO executor_rounds (
+             round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+             executor_family, attempt, round_index, state, classification,
+             executor_recommendation, started_at, heartbeat_at, finished_at,
+             log_paths, key_changes, key_learnings, remaining_work,
+             changed_files, verification_results, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "collision-lineage-round",
+          "run-1::implementation::dispatch::attempt-1",
+          "run-1",
+          "implementation",
+          "implementation",
+          "no-mistakes",
+          1,
+          0,
+          "succeeded",
+          "complete",
+          "complete",
+          1600,
+          1650,
+          1700,
+          "[]",
+          "[]",
+          "[]",
+          "[]",
+          "[]",
+          "[]",
+          1600,
+          1700,
+        );
+      legacy
+        .prepare(
+          `INSERT INTO executor_artifacts (
+             artifact_id, round_id, artifact_class, path, digest, description,
+             created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "collision-lineage-artifact",
+          "collision-lineage-round",
+          "logs",
+          "/tmp/run-1/collision-lineage.log",
+          "sha256:collision-lineage",
+          "independent lineage evidence",
+          1650,
+        );
+    } finally {
+      legacy.close();
+    }
+
+    const first = openDb(dataDir);
+    const snapshot = (db: DatabaseSync) => ({
+      attempts: db
+        .prepare(
+          `SELECT attempt_id, legacy_invocation_id, attempt_number
+             FROM executor_attempts
+            WHERE workflow_run_id = 'run-1'
+              AND step_run_id = 'implementation'
+            ORDER BY attempt_number`,
+        )
+        .all(),
+      rounds: db
+        .prepare(
+          `SELECT round_id, attempt_id, attempt_number
+             FROM executor_rounds
+            WHERE workflow_run_id = 'run-1'
+              AND step_run_id = 'implementation'
+            ORDER BY attempt_number, round_index`,
+        )
+        .all(),
+      artifacts: db
+        .prepare(
+          `SELECT artifact_id, round_id, digest
+             FROM executor_artifacts
+            WHERE artifact_id IN ('artifact-1', 'collision-lineage-artifact')
+            ORDER BY artifact_id`,
+        )
+        .all(),
+    });
+    const before = snapshot(first);
+    expect(before.attempts).toHaveLength(3);
+    const attemptIds = before.attempts.map((attempt) =>
+      String((attempt as Record<string, unknown>).attempt_id),
+    );
+    expect(attemptIds).toEqual([
+      expect.not.stringMatching(/^run-1::implementation::dispatch::attempt-1$/),
+      "run-1::implementation::dispatch::attempt-1",
+      "run-1::implementation::dispatch",
+    ]);
+    expect(before.rounds).toContainEqual({
+      round_id: "run-1::implementation::dispatch::round-1",
+      attempt_id: attemptIds[0],
+      attempt_number: 1,
+    });
+    expect(before.rounds).toContainEqual({
+      round_id: "collision-lineage-round",
+      attempt_id: "run-1::implementation::dispatch::attempt-1",
+      attempt_number: 2,
+    });
+    expect(before.artifacts).toEqual([
+      {
+        artifact_id: "artifact-1",
+        round_id: "run-1::implementation::dispatch::round-1",
+        digest: "sha256:log-1",
+      },
+      {
+        artifact_id: "collision-lineage-artifact",
+        round_id: "collision-lineage-round",
+        digest: "sha256:collision-lineage",
+      },
+    ]);
+    first.close();
+
+    const second = openDb(dataDir);
+    try {
+      expect(snapshot(second)).toEqual(before);
+    } finally {
+      second.close();
+    }
+  });
+
   it("preserves every round id, ordering, and evidence link across the split", () => {
     const dataDir = seedLegacyDataDir();
     const db = openDb(dataDir);
@@ -2310,6 +2461,18 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     // trusting the stale terminal one as newest) would misrepresent state;
     // the migration opens the database but fails closed into manual recovery.
     const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `UPDATE workflow_runs
+              SET manual_recovery_reason = 'previously cleared recovery'
+            WHERE id = 'run-2'`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
     const db = openDb(dataDir);
     try {
       const attempts = db
@@ -2346,6 +2509,9 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         manual_recovery_reason: string | null;
       };
       expect(run.needs_manual_recovery).toBe(1);
+      expect(run.manual_recovery_reason).toContain(
+        "previously cleared recovery",
+      );
       expect(run.manual_recovery_reason).toContain(
         "multiple legacy executor lineages with live work",
       );

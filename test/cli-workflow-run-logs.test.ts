@@ -358,7 +358,7 @@ describe("momentum workflow run logs", () => {
         attemptId: string;
         stepKey: string;
         executorFamily: string;
-        attempt: number;
+        attemptNumber: number;
         state: string;
         startedAt: number | null;
         heartbeatAt: number | null;
@@ -409,6 +409,26 @@ describe("momentum workflow run logs", () => {
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
     expect(payload.schemaVersion).toBe(2);
+    expect(Object.keys(payload).sort()).toEqual(
+      [
+        "approvals",
+        "attempts",
+        "command",
+        "dataDir",
+        "evidence",
+        "gates",
+        "generatedAt",
+        "leases",
+        "monitor",
+        "nextAction",
+        "ok",
+        "rounds",
+        "run",
+        "schemaVersion",
+        "steps",
+      ].sort(),
+    );
+    expect(payload).not.toHaveProperty("invocations");
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-logs01");
     expect(payload.steps.map((s) => s.stepId)).toEqual(["implementation"]);
@@ -436,6 +456,30 @@ describe("momentum workflow run logs", () => {
         }),
       }),
     ]);
+    expect(Object.keys(payload.gates[0]!).sort()).toEqual(
+      [
+        "allowedActions",
+        "attemptId",
+        "chosenAction",
+        "evidence",
+        "gateId",
+        "gateType",
+        "open",
+        "policyEnvelope",
+        "reason",
+        "recommendedAction",
+        "recommendedActionPolicy",
+        "resolution",
+        "resolutionMode",
+        "resolvedAt",
+        "resolvedBy",
+        "roundId",
+        "stepRunId",
+        "targetScope",
+        "workflowRunId",
+      ].sort(),
+    );
+    expect(payload.gates[0]).not.toHaveProperty("invocationId");
     expect(payload.attempts).toEqual([
       expect.objectContaining({
         attemptId: "inv-1",
@@ -448,8 +492,66 @@ describe("momentum workflow run logs", () => {
         finishedAt: null,
       }),
     ]);
+    expect(Object.keys(payload.attempts[0]!).sort()).toEqual(
+      [
+        "attemptId",
+        "attemptNumber",
+        "executorFamily",
+        "finishedAt",
+        "heartbeatAt",
+        "startedAt",
+        "state",
+        "stepKey",
+        "stepRunId",
+        "workflowRunId",
+      ].sort(),
+    );
+    expect(payload.attempts[0]).not.toHaveProperty("attempt");
     expect(payload.rounds).toHaveLength(1);
     const round = payload.rounds[0]!;
+    expect(Object.keys(round).sort()).toEqual(
+      [
+        "agentProvider",
+        "artifactRoot",
+        "artifacts",
+        "attemptId",
+        "attemptNumber",
+        "changedFiles",
+        "checkpoints",
+        "classification",
+        "commitSha",
+        "decisions",
+        "effort",
+        "executorFamily",
+        "executorRecommendation",
+        "findings",
+        "finishedAt",
+        "heartbeatAt",
+        "humanGate",
+        "inputDigest",
+        "keyChanges",
+        "keyLearnings",
+        "learnings",
+        "logPaths",
+        "model",
+        "nativeRoundEvidence",
+        "outcome",
+        "recoveryCode",
+        "recoveryReason",
+        "remainingWork",
+        "resultDigest",
+        "roundId",
+        "roundIndex",
+        "startedAt",
+        "state",
+        "stepKey",
+        "stepRunId",
+        "summary",
+        "verificationStatus",
+      ].sort(),
+    );
+    expect(round).not.toHaveProperty("invocationId");
+    expect(round).not.toHaveProperty("attempt");
     expect(round.roundId).toBe("round-1");
     expect(round.summary).toBe("implemented the slice");
     expect(round.keyLearnings).toEqual([
