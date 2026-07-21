@@ -361,12 +361,13 @@ export class SingleShotExecutor implements Executor<
     const durableStart =
       materialized?.round ??
       context.envelope.startRound(roundStartForSdk(start));
+    const roundId = durableStart.roundId;
     const roundStartedCheckpoint =
       materialized?.checkpoint ??
       context.envelope.recordCheckpoint(
-        start.roundId,
+        roundId,
         withoutRoundId(
-          planSingleShotRoundStartedCheckpoint(start.roundId, dispatchBinding),
+          planSingleShotRoundStartedCheckpoint(roundId, dispatchBinding),
         ),
       );
     let completionDurable = false;
@@ -397,20 +398,17 @@ export class SingleShotExecutor implements Executor<
       });
 
       const artifacts = planSingleShotRoundArtifacts({
-        roundId: start.roundId,
+        roundId,
         logPaths: frozenLogPaths,
         ...(mechanism.artifacts !== undefined
           ? { artifacts: mechanism.artifacts }
           : {}),
       }).map((artifact) =>
-        context.envelope.recordArtifact(
-          start.roundId,
-          withoutRoundId(artifact),
-        ),
+        context.envelope.recordArtifact(roundId, withoutRoundId(artifact)),
       );
 
       const checkpointPlan = planSingleShotRoundCheckpoints({
-        roundId: start.roundId,
+        roundId,
         outcome: mechanism.outcome,
         capturedResult: mechanism.outcome.ok && mechanism.result != null,
         classification: plan.decision.classification,
@@ -421,7 +419,7 @@ export class SingleShotExecutor implements Executor<
           "Single-shot checkpoint plan omitted daemon classification.",
         );
       }
-      const progress = context.envelope.recordRoundProgress(start.roundId, {
+      const progress = context.envelope.recordRoundProgress(roundId, {
         // Capture result and repo-safety evidence, but deliberately omit terminal
         // state, classification, recovery gate, and recommendation. Those fields
         // are available only to the daemon controller after this tick returns.
@@ -445,7 +443,7 @@ export class SingleShotExecutor implements Executor<
       completionDurable = true;
 
       return {
-        roundId: start.roundId,
+        roundId,
         recommendation: plan.decision.classification,
         recommendedRoundState: plan.decision.roundState,
         recommendedAttemptState: plan.decision.attemptState,

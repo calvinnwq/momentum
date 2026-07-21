@@ -180,6 +180,7 @@ export class GoalLoopSdkExecutor implements Executor<
       ]);
     }
 
+    const roundId = durableRound.roundId;
     let completionDurable = false;
     try {
       context.signal.throwIfAborted();
@@ -201,21 +202,18 @@ export class GoalLoopSdkExecutor implements Executor<
           : {}),
       });
       const artifacts = planGoalLoopRoundArtifacts({
-        roundId: start.roundId,
+        roundId,
         logPaths: durableRound.logPaths,
         ...(mechanism.artifacts !== undefined
           ? { artifacts: mechanism.artifacts }
           : {}),
       });
       for (const artifact of artifacts) {
-        context.envelope.recordArtifact(
-          start.roundId,
-          withoutRoundId(artifact),
-        );
+        context.envelope.recordArtifact(roundId, withoutRoundId(artifact));
       }
       const checkpoints = [
         {
-          checkpointId: `${start.roundId}-checkpoint-1`,
+          checkpointId: `${roundId}-checkpoint-1`,
           sequence: 1,
           stage: "mechanism_completed",
           detail: durableDecisionDetail(plan.decision, mechanism),
@@ -224,14 +222,14 @@ export class GoalLoopSdkExecutor implements Executor<
           ? []
           : [
               {
-                checkpointId: `${start.roundId}-checkpoint-2`,
+                checkpointId: `${roundId}-checkpoint-2`,
                 sequence: 2,
                 stage: "result_captured",
                 detail: null,
               },
             ]),
       ];
-      context.envelope.recordRoundProgress(start.roundId, {
+      context.envelope.recordRoundProgress(roundId, {
         observation: observationFromPersistencePlan(
           plan.captureUpdate,
           plan.terminalUpdate,
@@ -239,7 +237,7 @@ export class GoalLoopSdkExecutor implements Executor<
         checkpoints,
       });
       completionDurable = true;
-      return tickResult(start.roundId, plan.decision);
+      return tickResult(roundId, plan.decision);
     } finally {
       context.hostBindings.settleRepoOwnership?.(completionDurable);
     }

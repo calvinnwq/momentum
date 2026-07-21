@@ -58,8 +58,8 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
-  ExecutorEvidenceConflictError,
-  ExecutorRoundConflictError,
+  allocateExecutorCheckpointId,
+  allocateExecutorRoundId,
   insertExecutorCheckpoint,
   insertExecutorAttempt,
   insertExecutorRound,
@@ -364,7 +364,7 @@ function materializeCollisionSafeOwnedRound(
     }
   };
   let materialized = materializeSafely(input);
-  const roundId = allocateOwnedRoundId(db, materialized.round);
+  const roundId = allocateExecutorRoundId(db, materialized.round);
   if (roundId === materialized.round.roundId) return materialized;
   materialized = materializeSafely({ ...input, roundId });
   if (
@@ -378,75 +378,21 @@ function materializeCollisionSafeOwnedRound(
   return materialized;
 }
 
-function allocateOwnedRoundId(
-  db: MomentumDb,
-  round: ExecutorRoundRecord,
-): string {
-  const concurrentRound = db
-    .prepare(
-      `SELECT 1
-         FROM executor_rounds
-        WHERE attempt_id = ? AND round_index = ?`,
-    )
-    .get(round.attemptId, round.roundIndex);
-  if (concurrentRound !== undefined) {
-    throw new ExecutorRoundConflictError(round.roundId);
-  }
-  let roundId = round.roundId;
-  let allocationSuffix = 0;
-  while (
-    db
-      .prepare("SELECT 1 FROM executor_rounds WHERE round_id = ?")
-      .get(roundId) !== undefined
-  ) {
-    allocationSuffix += 1;
-    roundId = `${round.roundId}::allocated-${allocationSuffix}`;
-  }
-  return roundId;
-}
-
 function insertOwnedRoundMaterialization(
   db: MomentumDb,
   materialized: OwnedRoundMaterialization,
   now: number,
 ): void {
   insertExecutorRound(db, materialized.round, { now });
-  const checkpointId = allocateOwnedCheckpointId(db, materialized.checkpoint);
+  const checkpointId = allocateExecutorCheckpointId(
+    db,
+    materialized.checkpoint,
+  );
   insertExecutorCheckpoint(
     db,
     { ...materialized.checkpoint, checkpointId },
     { now },
   );
-}
-
-function allocateOwnedCheckpointId(
-  db: MomentumDb,
-  checkpoint: ExecutorCheckpointRecord,
-): string {
-  const concurrentCheckpoint = db
-    .prepare(
-      `SELECT 1
-         FROM executor_checkpoints
-        WHERE round_id = ? AND sequence = ?`,
-    )
-    .get(checkpoint.roundId, checkpoint.sequence);
-  if (concurrentCheckpoint !== undefined) {
-    throw new ExecutorEvidenceConflictError(
-      "checkpoint",
-      checkpoint.checkpointId,
-    );
-  }
-  let checkpointId = checkpoint.checkpointId;
-  let allocationSuffix = 0;
-  while (
-    db
-      .prepare("SELECT 1 FROM executor_checkpoints WHERE checkpoint_id = ?")
-      .get(checkpointId) !== undefined
-  ) {
-    allocationSuffix += 1;
-    checkpointId = `${checkpoint.checkpointId}::allocated-${allocationSuffix}`;
-  }
-  return checkpointId;
 }
 
 /**

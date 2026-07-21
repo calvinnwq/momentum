@@ -658,7 +658,7 @@ function startRound(
     context.state.rounds.map((snapshot) => snapshot.round),
   );
   const roundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
-  context.envelope.startRound({
+  const round = context.envelope.startRound({
     roundId,
     attemptId: attempt.attemptId,
     workflowRunId: attempt.workflowRunId,
@@ -683,7 +683,7 @@ function startRound(
     verificationStatus: null,
     commitSha: null,
   });
-  return roundId;
+  return round.roundId;
 }
 
 function observeDecision(

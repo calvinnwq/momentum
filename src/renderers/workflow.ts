@@ -554,7 +554,7 @@ export function emitWorkflowRunDecideSuccess(
     dataDir,
     gateId: resolved.gateId,
     runId: resolved.workflowRunId,
-    targetScope: resolved.targetScope,
+    targetScope: publicWorkflowGateTargetScope(resolved.targetScope),
     gateType: resolved.gateType,
     chosenAction: resolved.chosenAction,
     resolvedBy: resolved.resolvedBy,
@@ -570,7 +570,7 @@ export function emitWorkflowRunDecideSuccess(
   const lines = [
     `Workflow gate resolved: ${resolved.gateId}`,
     `Run: ${resolved.workflowRunId}`,
-    `Scope: ${resolved.targetScope} (${resolved.gateType})`,
+    `Scope: ${publicWorkflowGateTargetScope(resolved.targetScope)} (${resolved.gateType})`,
     `Action: ${resolved.chosenAction}`,
     `Resolved by: ${resolved.resolvedBy} (${resolved.resolutionMode})`,
     `Note: ${resolved.resolution ?? "(none)"}`,
@@ -1676,7 +1676,7 @@ export function renderWorkflowRunLogsText(
   );
   for (const gate of openGates) {
     lines.push(
-      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN` +
+      `- ${gate.gateId} [${publicWorkflowGateTargetScope(gate.targetScope)}/${gate.gateType}] OPEN` +
         ` allowed=${gate.allowedActions.join(",")}` +
         (gate.recommendedAction !== null
           ? ` recommended=${gate.recommendedAction}`
@@ -2081,6 +2081,10 @@ export function workflowEvidenceToJsonShape(
   };
 }
 
+function publicWorkflowGateTargetScope(targetScope: string): string {
+  return targetScope === "invocation" ? "attempt" : targetScope;
+}
+
 export function workflowGateToJsonShape(
   gate: WorkflowGateRecord,
 ): Record<string, unknown> {
@@ -2090,7 +2094,7 @@ export function workflowGateToJsonShape(
     stepRunId: gate.stepRunId,
     attemptId: gate.attemptId,
     roundId: gate.roundId,
-    targetScope: gate.targetScope,
+    targetScope: publicWorkflowGateTargetScope(gate.targetScope),
     gateType: gate.gateType,
     reason: gate.reason,
     evidence: gate.evidence,
@@ -2222,7 +2226,7 @@ export function renderWorkflowDetailText(
           `action=${gate.chosenAction ?? "(none)"} ` +
           `(${gate.resolutionMode ?? "?"})`;
     lines.push(
-      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`,
+      `- ${gate.gateId} [${publicWorkflowGateTargetScope(gate.targetScope)}/${gate.gateType}] ${status}`,
     );
   }
   lines.push("");

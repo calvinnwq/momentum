@@ -220,6 +220,76 @@ export class ExecutorEvidenceConflictError extends Error {
   }
 }
 
+/**
+ * Allocate a round id before executor-owned code writes the round.
+ *
+ * The `(attemptId, roundIndex)` row is the concurrency identity and must refuse
+ * a genuine duplicate, while an unrelated historical row that already occupies
+ * the requested global id receives a deterministic suffix.
+ */
+export function allocateExecutorRoundId(
+  db: MomentumDb,
+  round: ExecutorRoundRecord,
+): string {
+  const concurrentRound = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds
+        WHERE attempt_id = ? AND round_index = ?`,
+    )
+    .get(round.attemptId, round.roundIndex);
+  if (concurrentRound !== undefined) {
+    throw new ExecutorRoundConflictError(round.roundId);
+  }
+
+  let roundId = round.roundId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_rounds WHERE round_id = ?")
+      .get(roundId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    roundId = `${round.roundId}::allocated-${allocationSuffix}`;
+  }
+  return roundId;
+}
+
+/** Allocate a checkpoint id while preserving same-round sequence conflicts. */
+export function allocateExecutorCheckpointId(
+  db: MomentumDb,
+  checkpoint: Pick<
+    ExecutorCheckpointRecord,
+    "checkpointId" | "roundId" | "sequence"
+  >,
+): string {
+  const concurrentCheckpoint = db
+    .prepare(
+      `SELECT 1
+         FROM executor_checkpoints
+        WHERE round_id = ? AND sequence = ?`,
+    )
+    .get(checkpoint.roundId, checkpoint.sequence);
+  if (concurrentCheckpoint !== undefined) {
+    throw new ExecutorEvidenceConflictError(
+      "checkpoint",
+      checkpoint.checkpointId,
+    );
+  }
+
+  let checkpointId = checkpoint.checkpointId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_checkpoints WHERE checkpoint_id = ?")
+      .get(checkpointId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    checkpointId = `${checkpoint.checkpointId}::allocated-${allocationSuffix}`;
+  }
+  return checkpointId;
+}
+
 export type PersistExecutorDefinitionOptions = {
   now?: number;
 };

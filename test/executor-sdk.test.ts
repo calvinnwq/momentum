@@ -11,6 +11,7 @@ import {
 } from "../src/core/executors/goal-loop/executor.js";
 import {
   insertExecutorAttempt,
+  insertExecutorCheckpoint,
   insertExecutorRound,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
@@ -1032,6 +1033,71 @@ describe("executor SDK core contract", () => {
       classification: null,
     });
     expect(listExecutorCheckpointsForRound(db, round.roundId)).toEqual([]);
+  });
+
+  it("allocates executor-owned round and checkpoint identities around migrated collisions", () => {
+    const { db, attempt: priorAttempt } = openExecutorDb("goal-loop");
+    const currentAttempt: ExecutorAttemptRecord = {
+      ...priorAttempt,
+      attemptId: "run-1::step-1::attempt-2",
+      attemptNumber: 2,
+    };
+    insertExecutorAttempt(db, currentAttempt, { now: 20 });
+
+    const requestedRoundId = `${currentAttempt.attemptId}::round-2`;
+    const occupiedRound = {
+      ...emptyRound(priorAttempt, "mirroring_external_state"),
+      roundId: requestedRoundId,
+      roundIndex: 0,
+    };
+    insertExecutorRound(db, occupiedRound, { now: 20 });
+    insertExecutorCheckpoint(
+      db,
+      {
+        checkpointId: `${requestedRoundId}-checkpoint-0`,
+        roundId: requestedRoundId,
+        sequence: 0,
+        stage: "round_started",
+        detail: null,
+      },
+      { now: 20 },
+    );
+
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: currentAttempt.attemptId,
+      now: () => 30,
+    });
+    const started = envelope.facade.startRound(
+      roundStartForSdk({
+        ...emptyRound(currentAttempt, "mirroring_external_state"),
+        roundId: requestedRoundId,
+        roundIndex: 1,
+      }),
+      [
+        {
+          checkpointId: `${requestedRoundId}-checkpoint-0`,
+          sequence: 0,
+          stage: "round_started",
+          detail: null,
+        },
+      ],
+    );
+
+    expect(started.roundId).toBe(`${requestedRoundId}::allocated-1`);
+    expect(listExecutorCheckpointsForRound(db, started.roundId)).toEqual([
+      expect.objectContaining({
+        checkpointId: `${started.roundId}-checkpoint-0`,
+        roundId: started.roundId,
+        sequence: 0,
+      }),
+    ]);
+    expect(loadExecutorRound(db, started.roundId)).toEqual(
+      expect.objectContaining({
+        attemptId: currentAttempt.attemptId,
+        roundIndex: 1,
+      }),
+    );
   });
 });
 

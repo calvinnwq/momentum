@@ -109,9 +109,9 @@ export class LiveStepSdkExecutor implements Executor<
     const nextRoundIndex = nextExecutorRoundIndex(
       context.state.rounds.map((snapshot) => snapshot.round),
     );
-    const roundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
-    context.envelope.startRound({
-      roundId,
+    const requestedRoundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
+    const durableRound = context.envelope.startRound({
+      roundId: requestedRoundId,
       attemptId: attempt.attemptId,
       workflowRunId: attempt.workflowRunId,
       stepRunId: attempt.stepRunId,
@@ -135,6 +135,7 @@ export class LiveStepSdkExecutor implements Executor<
       verificationStatus: null,
       commitSha: null,
     });
+    const roundId = durableRound.roundId;
     context.envelope.recordCheckpoint(roundId, {
       checkpointId: `${roundId}-checkpoint-0`,
       sequence: 0,

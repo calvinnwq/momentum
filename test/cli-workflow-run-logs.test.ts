@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
@@ -1000,5 +1001,57 @@ describe("momentum workflow run logs", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Implementation engine: native-goal-loop");
+  });
+
+  it("projects migrated invocation gate scopes into the v2 attempt vocabulary", async () => {
+    const dataDir = makeTempDir();
+    const legacyDb = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacyDb.exec(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/sdk05-legacy-executor-invocations.sql",
+          ),
+          "utf8",
+        ),
+      );
+    } finally {
+      legacyDb.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      "run-1",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      schemaVersion: number;
+      gates: Array<{
+        gateId: string;
+        targetScope: string;
+        attemptId: string | null;
+        roundId: string | null;
+      }>;
+    };
+    expect(payload.schemaVersion).toBe(2);
+    expect(
+      payload.gates.find((gate) => gate.gateId === "gate-invocation"),
+    ).toEqual(
+      expect.objectContaining({
+        targetScope: "attempt",
+        attemptId: "run-1::implementation::dispatch",
+        roundId: null,
+      }),
+    );
+    expect(
+      payload.gates.some((gate) => gate.targetScope === "invocation"),
+    ).toBe(false);
   });
 });

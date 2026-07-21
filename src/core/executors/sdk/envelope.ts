@@ -2,6 +2,8 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  allocateExecutorCheckpointId,
+  allocateExecutorRoundId,
   insertExecutorArtifact,
   insertExecutorCheckpoint,
   insertExecutorDecision,
@@ -189,11 +191,33 @@ export class DurableExecutorEnvelope {
       }
       const now = this.#now();
       const durableRecord = roundRecordFromStart(record, now);
-      const round = insertExecutorRound(this.#db, durableRecord, { now });
+      const roundId = allocateExecutorRoundId(this.#db, durableRecord);
+      const round = insertExecutorRound(
+        this.#db,
+        { ...durableRecord, roundId },
+        { now },
+      );
       for (const checkpoint of initialCheckpoints) {
+        const checkpointPrefix = `${record.roundId}-`;
+        const checkpointId = checkpoint.checkpointId.startsWith(
+          checkpointPrefix,
+        )
+          ? `${round.roundId}${checkpoint.checkpointId.slice(record.roundId.length)}`
+          : checkpoint.checkpointId;
+        const checkpointRecord = {
+          ...checkpoint,
+          checkpointId,
+          roundId: round.roundId,
+        };
         insertExecutorCheckpoint(
           this.#db,
-          { ...checkpoint, roundId: round.roundId },
+          {
+            ...checkpointRecord,
+            checkpointId: allocateExecutorCheckpointId(
+              this.#db,
+              checkpointRecord,
+            ),
+          },
           { now },
         );
       }
