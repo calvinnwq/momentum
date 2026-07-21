@@ -2119,6 +2119,63 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
+  it("orders colliding groups by lifecycle while preserving invocation order", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `UPDATE executor_invocations
+              SET state = 'running', attempt = 2, started_at = 500,
+                  heartbeat_at = 550, finished_at = NULL, updated_at = 550
+            WHERE invocation_id = 'run-1::preflight::dispatch'`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const attempts = db
+        .prepare(
+          `SELECT attempt_id, attempt_number, state, legacy_provenance
+             FROM executor_attempts
+            WHERE workflow_run_id = 'run-1' AND step_run_id = 'preflight'
+            ORDER BY attempt_number`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(
+        attempts.map(({ attempt_id, attempt_number, state }) => ({
+          attempt_id,
+          attempt_number,
+          state,
+        })),
+      ).toEqual([
+        {
+          attempt_id: "run-1::preflight::dispatch::attempt-1",
+          attempt_number: 1,
+          state: "succeeded",
+        },
+        {
+          attempt_id: "no-mistakes::run-1::preflight::mirror",
+          attempt_number: 2,
+          state: "succeeded",
+        },
+        {
+          attempt_id: "run-1::preflight::dispatch",
+          attempt_number: 3,
+          state: "running",
+        },
+      ]);
+      expect(JSON.parse(String(attempts[2]?.legacy_provenance))).toMatchObject({
+        legacyAttemptNumber: 2,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves every round id, ordering, and evidence link across the split", () => {
     const dataDir = seedLegacyDataDir();
     const db = openDb(dataDir);
@@ -2261,6 +2318,9 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     const db = openDb(dataDir);
     try {
       db.exec(`
+        UPDATE executor_rounds
+           SET round_index = 8
+         WHERE round_id = 'run-1::implementation::dispatch::round-1';
         UPDATE executor_attempts
            SET state = 'manual_recovery_required', finished_at = 2600
          WHERE attempt_id = 'run-1::implementation::dispatch';
@@ -2280,7 +2340,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         started: true,
         attemptId: "run-1::implementation::attempt-3",
         attemptNumber: 3,
-        roundIndex: 4,
+        roundIndex: 9,
       });
       const attempts = db
         .prepare(

@@ -1464,13 +1464,31 @@ describe("single-shot built-in SDK proof", () => {
       state: "capturing_result",
       classification: null,
     });
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(
+      attempt.attemptId,
+      JSON.stringify({ legacyAttemptNumber: 1 }),
+      attempt.attemptId,
+    );
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE round_id = ?",
+    ).run(roundId);
+    const migratedHostBindings = {
+      ...hostBindings,
+      start: { ...hostBindings.start, attemptNumber: 2 },
+    };
     await expect(
       new SingleShotExecutor("one-shot", () => {
         throw new Error("changed dispatch must not rerun");
       }).tick({
         state: envelope.snapshot(),
         config: { agent: { model: "changed-model" } },
-        hostBindings,
+        hostBindings: migratedHostBindings,
         envelope: envelope.facade,
         signal: new AbortController().signal,
       }),
@@ -1484,7 +1502,7 @@ describe("single-shot built-in SDK proof", () => {
     const tick = await resumed.tick({
       state: envelope.snapshot(),
       config: {},
-      hostBindings,
+      hostBindings: migratedHostBindings,
       envelope: envelope.facade,
       signal: new AbortController().signal,
     });

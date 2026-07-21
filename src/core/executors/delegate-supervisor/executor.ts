@@ -13,6 +13,7 @@ import {
   EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
   executorAttemptStateForClassification,
+  executorRoundReplayAttemptNumber,
   isExecutorHumanGateCompatibleWithClassification,
   isExecutorRecoveryCodeCompatibleWithClassification,
   isExecutorRoundStateCompatibleWithClassification,
@@ -233,7 +234,10 @@ export class DelegateSupervisorExecutor implements Executor<
           intent.value.attemptId,
           unresolvedPriorIntent.round.attemptId,
         ) ||
-        intent.value.attempt !== unresolvedPriorIntent.round.attemptNumber
+        !intentMatchesRoundAttempt(
+          intent.value.attempt,
+          unresolvedPriorIntent.round,
+        )
       ) {
         return adapterIdentityMismatchResult(
           context,
@@ -336,7 +340,10 @@ export class DelegateSupervisorExecutor implements Executor<
           intent.value.attemptId,
           roundBeforeHandoff.round.attemptId,
         ) ||
-        intent.value.attempt !== roundBeforeHandoff.round.attemptNumber
+        !intentMatchesRoundAttempt(
+          intent.value.attempt,
+          roundBeforeHandoff.round,
+        )
       ) {
         return adapterIdentityMismatchResult(
           context,
@@ -992,6 +999,16 @@ function intentMatchesAttemptIdentity(
   return (
     roundAttemptId === intentAttemptId ||
     roundAttemptId.startsWith(`${intentAttemptId}::attempt-`)
+  );
+}
+
+function intentMatchesRoundAttempt(
+  intentAttempt: number,
+  round: ExecutorRoundEnvelopeSnapshot["round"],
+): boolean {
+  return (
+    intentAttempt === round.attemptNumber ||
+    intentAttempt === executorRoundReplayAttemptNumber(round)
   );
 }
 

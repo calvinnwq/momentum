@@ -4,10 +4,11 @@ import crypto from "node:crypto";
 
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
 
-import type {
-  ExecutorArtifactRecord,
-  ExecutorCheckpointRecord,
-  ExecutorRoundRecord,
+import {
+  executorRoundReplayAttemptNumber,
+  type ExecutorArtifactRecord,
+  type ExecutorCheckpointRecord,
+  type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import { normalizeRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
@@ -664,9 +665,26 @@ function assertResumableDispatchBinding(
     context.config,
     host,
   );
+  const replayAttemptNumber = executorRoundReplayAttemptNumber(round);
+  const replayBinding = singleShotDispatchBindingDetailForAttempt(
+    family,
+    context.config,
+    host,
+    context.hostBindings.selection,
+    context.hostBindings.hostBindingIdentity,
+    replayAttemptNumber,
+  );
+  const legacyReplayBinding = legacySingleShotDispatchBindingDetailForAttempt(
+    family,
+    context.config,
+    host,
+    replayAttemptNumber,
+  );
   if (
     bindingCheckpoint?.detail !== expectedBinding &&
-    bindingCheckpoint?.detail !== legacyBinding
+    bindingCheckpoint?.detail !== legacyBinding &&
+    bindingCheckpoint?.detail !== replayBinding &&
+    bindingCheckpoint?.detail !== legacyReplayBinding
   ) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
@@ -680,6 +698,24 @@ export function singleShotDispatchBindingDetail(
   start: SingleShotExecutorHostBindings["start"],
   selection?: Readonly<SingleShotRoundSelection>,
   hostBindingIdentity?: string,
+): string {
+  return singleShotDispatchBindingDetailForAttempt(
+    family,
+    config,
+    start,
+    selection,
+    hostBindingIdentity,
+    start.attemptNumber,
+  );
+}
+
+function singleShotDispatchBindingDetailForAttempt(
+  family: SingleShotExecutorFamily,
+  config: Readonly<SingleShotExecutorConfig>,
+  start: SingleShotExecutorHostBindings["start"],
+  selection: Readonly<SingleShotRoundSelection> | undefined,
+  hostBindingIdentity: string | undefined,
+  attemptNumber: number,
 ): string {
   const payload = canonicalJson({
     version: 2,
@@ -697,7 +733,7 @@ export function singleShotDispatchBindingDetail(
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
       family: start.family,
-      attempt: start.attemptNumber,
+      attempt: attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
       logPaths: start.logPaths ?? [],
@@ -710,6 +746,20 @@ function legacySingleShotDispatchBindingDetail(
   family: SingleShotExecutorFamily,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
+): string {
+  return legacySingleShotDispatchBindingDetailForAttempt(
+    family,
+    config,
+    start,
+    start.attemptNumber,
+  );
+}
+
+function legacySingleShotDispatchBindingDetailForAttempt(
+  family: SingleShotExecutorFamily,
+  config: Readonly<SingleShotExecutorConfig>,
+  start: SingleShotExecutorHostBindings["start"],
+  attemptNumber: number,
 ): string {
   const payload = canonicalJson({
     family,
@@ -724,7 +774,7 @@ function legacySingleShotDispatchBindingDetail(
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
       family: start.family,
-      attempt: start.attemptNumber,
+      attempt: attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
       logPaths: start.logPaths ?? [],

@@ -504,6 +504,7 @@ export type ExecutorRoundRecord = {
   stepKey: string;
   executorFamily: ExecutorName;
   attemptNumber: number;
+  legacyAttemptNumber?: number;
   roundIndex: number;
   // Execution.
   state: ExecutorRoundState;
@@ -531,6 +532,12 @@ export type ExecutorRoundRecord = {
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
 };
+
+export function executorRoundReplayAttemptNumber(
+  round: Pick<ExecutorRoundRecord, "attemptNumber" | "legacyAttemptNumber">,
+): number {
+  return round.legacyAttemptNumber ?? round.attemptNumber;
+}
 
 /**
  * One verification command result captured by a round.

@@ -100,7 +100,10 @@ export function findRetryableDispatchedStepRecovery(
               a.executor_family,
               a.state AS attempt_state,
               a.attempt_number,
-              r.round_index,
+              (SELECT MAX(step_round.round_index)
+                 FROM executor_rounds AS step_round
+                WHERE step_round.workflow_run_id = s.run_id
+                  AND step_round.step_run_id = s.step_id) AS round_index,
               r.recovery_code
          FROM workflow_steps AS s
          JOIN executor_attempts AS a

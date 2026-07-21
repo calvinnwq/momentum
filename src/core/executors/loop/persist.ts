@@ -1062,6 +1062,7 @@ type ExecutorRoundRow = {
   step_key: string;
   executor_family: string;
   attempt_number: number;
+  legacy_provenance: string | null;
   round_index: number;
   state: string;
   classification: string | null;
@@ -1150,6 +1151,9 @@ const ROUND_SELECT = `
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
          verification_status, verification_results, commit_sha, recovery_code, human_gate,
+         (SELECT legacy_provenance
+            FROM executor_attempts
+           WHERE attempt_id = executor_rounds.attempt_id) AS legacy_provenance,
          updated_at
     FROM executor_rounds`;
 
@@ -1193,6 +1197,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
   const verificationResults = parseVerificationResults(
     row.verification_results,
   );
+  const legacyAttemptNumber = parseLegacyAttemptNumber(row.legacy_provenance);
   return {
     roundId: row.round_id,
     attemptId: row.attempt_id,
@@ -1201,6 +1206,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     stepKey: row.step_key,
     executorFamily: row.executor_family as ExecutorName,
     attemptNumber: row.attempt_number,
+    ...(legacyAttemptNumber !== undefined ? { legacyAttemptNumber } : {}),
     roundIndex: row.round_index,
     state: row.state as ExecutorRoundState,
     classification:
@@ -1228,6 +1234,22 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     recoveryCode: row.recovery_code,
     humanGate: row.human_gate as ExecutorHumanGateType | null,
   };
+}
+
+function parseLegacyAttemptNumber(
+  provenance: string | null,
+): number | undefined {
+  if (provenance === null) return undefined;
+  try {
+    const parsed = JSON.parse(provenance) as unknown;
+    if (parsed === null || typeof parsed !== "object") return undefined;
+    const value = (parsed as Record<string, unknown>).legacyAttemptNumber;
+    return Number.isSafeInteger(value) && Number(value) > 0
+      ? Number(value)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToArtifact(row: ExecutorArtifactRow): ExecutorArtifactRecord {

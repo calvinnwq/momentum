@@ -899,6 +899,20 @@ describe("delegate-supervisor SDK executor", () => {
       digest: null,
       description: "partially persisted handoff evidence",
     });
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(
+      attempt.attemptId,
+      JSON.stringify({ legacyAttemptNumber: 1 }),
+      attempt.attemptId,
+    );
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE round_id = ?",
+    ).run(roundId);
     let handoffs = 0;
     let recoveries = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -954,6 +968,78 @@ describe("delegate-supervisor SDK executor", () => {
       "delegate_handoff_completed",
       "classified",
     ]);
+    db.close();
+  });
+
+  it("recovers an interrupted intent written after attempt renumbering", async () => {
+    const { db, attempt } = openDelegateDb();
+    const roundId = seedRound(db, attempt, 0);
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(
+      attempt.attemptId,
+      JSON.stringify({ legacyAttemptNumber: 1 }),
+      attempt.attemptId,
+    );
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE round_id = ?",
+    ).run(roundId);
+    createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 5,
+    }).facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-delegate_handoff_intent`,
+      sequence: 0,
+      stage: "delegate_handoff_intent",
+      detail: JSON.stringify({
+        tool: "no-mistakes",
+        attemptId: attempt.attemptId,
+        attempt: 2,
+      }),
+    });
+    let recoveries = 0;
+    const result = await driveExecutorTicks({
+      db,
+      attemptId: attempt.attemptId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              throw new Error("interrupted handoff must not launch again");
+            },
+            recoverHandoff: () => {
+              recoveries += 1;
+              return {
+                externalIdentity: {
+                  externalRunId: "nm-run-1",
+                  branch: "feature/delegate-supervisor",
+                  headSha: HEAD,
+                },
+                summary: "reattached post-migration handoff",
+              };
+            },
+            readExternalState: () => {
+              throw new Error("first resumed tick only settles handoff");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(recoveries).toBe(1);
+    expect(result.lastRound).toMatchObject({
+      roundId,
+      state: "succeeded",
+      classification: "continue",
+    });
     db.close();
   });
 

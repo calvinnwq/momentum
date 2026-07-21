@@ -138,6 +138,7 @@ export type ExecutorRoundStart = Omit<
   | "finishedAt"
   | "recoveryCode"
   | "humanGate"
+  | "legacyAttemptNumber"
   | "logPaths"
   | "keyChanges"
   | "keyLearnings"

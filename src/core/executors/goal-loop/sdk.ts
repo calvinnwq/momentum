@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
 import {
+  executorRoundReplayAttemptNumber,
   nextExecutorRoundIndex,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
@@ -272,7 +273,15 @@ function assertGoalLoopRoundMatchesHost(
     hostBindings,
     selection,
   );
-  if (binding?.detail !== expectedBinding) {
+  const replayBinding = goalLoopDispatchBindingDetailForAttempt(
+    hostBindings,
+    selection,
+    executorRoundReplayAttemptNumber(round),
+  );
+  if (
+    binding?.detail !== expectedBinding &&
+    binding?.detail !== replayBinding
+  ) {
     // Rounds written before the versioned binding shipped carried a null
     // checkpoint detail. That legacy evidence is sufficient only to classify
     // an already-completed mechanism. Relaunching incomplete work requires the
@@ -293,6 +302,18 @@ export function goalLoopDispatchBindingDetail(
   hostBindings: Readonly<GoalLoopExecutorHostBindings>,
   selection: Readonly<GoalLoopRoundSelection>,
 ): string {
+  return goalLoopDispatchBindingDetailForAttempt(
+    hostBindings,
+    selection,
+    hostBindings.start.attemptNumber,
+  );
+}
+
+function goalLoopDispatchBindingDetailForAttempt(
+  hostBindings: Readonly<GoalLoopExecutorHostBindings>,
+  selection: Readonly<GoalLoopRoundSelection>,
+  attemptNumber: number,
+): string {
   const start = hostBindings.start;
   const payload = canonicalJson({
     version: 2,
@@ -307,7 +328,7 @@ export function goalLoopDispatchBindingDetail(
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
-      attempt: start.attemptNumber,
+      attempt: attemptNumber,
       roundIndex: start.roundIndex,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,

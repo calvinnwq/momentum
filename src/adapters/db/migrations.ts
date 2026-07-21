@@ -790,6 +790,14 @@ type LegacyExecutorRoundGroupRow = {
   updated_at: number;
 };
 
+type LegacyExecutorAttemptGroup = {
+  invocation: LegacyExecutorInvocationRow;
+  legacyAttemptNumber: number;
+  rounds: LegacyExecutorRoundGroupRow[];
+  isLatest: boolean;
+  lifecycleAt: number;
+};
+
 const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "manual_recovery_required",
   "blocked",
@@ -797,6 +805,34 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "succeeded",
   "cancelled",
 ]);
+
+function legacyAttemptGroupLifecycleAt(
+  invocation: LegacyExecutorInvocationRow,
+  rounds: readonly LegacyExecutorRoundGroupRow[],
+  isLatest: boolean,
+): number {
+  const lifecycleStarts = rounds.map(
+    (round) => round.started_at ?? round.created_at,
+  );
+  if (isLatest) {
+    lifecycleStarts.push(invocation.started_at ?? invocation.updated_at);
+  }
+  return Math.min(...lifecycleStarts);
+}
+
+function compareLegacyAttemptGroups(
+  left: LegacyExecutorAttemptGroup,
+  right: LegacyExecutorAttemptGroup,
+): number {
+  return (
+    left.lifecycleAt - right.lifecycleAt ||
+    left.invocation.created_at - right.invocation.created_at ||
+    left.invocation.invocation_id.localeCompare(
+      right.invocation.invocation_id,
+    ) ||
+    left.legacyAttemptNumber - right.legacyAttemptNumber
+  );
+}
 
 /**
  * Migrate the legacy SDK-05 `executor_invocations` schema into the immutable
@@ -871,11 +907,15 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       // carry several invocation rows (for example a dispatcher scaffold plus
       // an adapter-minted invocation) whose attempt numbers collide under the
       // new unique `(workflow_run_id, step_run_id, attempt_number)` index.
-      // Colliding groups are renumbered deterministically - invocations in
-      // `created_at, invocation_id` order, each keeping its internal group
-      // order - and the original number is preserved in provenance.
+      // Colliding groups are renumbered deterministically by lifecycle time
+      // while each invocation keeps its internal group order, and the original
+      // number is preserved in provenance.
       const attemptNumberByLegacyGroup = new Map<string, number>();
       const highestAssignedByStep = new Map<string, number>();
+      const groupsByStep = new Map<
+        string,
+        Map<string, LegacyExecutorAttemptGroup[]>
+      >();
 
       for (const invocation of invocations) {
         const rounds = db
@@ -900,12 +940,44 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         }
         const attemptNumbers = [...groups.keys()].sort((a, b) => a - b);
         const latestAttemptNumber = attemptNumbers.at(-1)!;
-
         const stepKey = `${invocation.workflow_run_id}::${invocation.step_run_id}`;
-        for (const attemptNumber of attemptNumbers) {
-          const groupRounds = groups.get(attemptNumber)!;
-          const isLatest = attemptNumber === latestAttemptNumber;
-          const attemptId = isLatest
+        const stepGroups = groupsByStep.get(stepKey) ?? new Map();
+        stepGroups.set(
+          invocation.invocation_id,
+          attemptNumbers.map((attemptNumber) => {
+            const groupRounds = groups.get(attemptNumber)!;
+            const isLatest = attemptNumber === latestAttemptNumber;
+            return {
+              invocation,
+              legacyAttemptNumber: attemptNumber,
+              rounds: groupRounds,
+              isLatest,
+              lifecycleAt: legacyAttemptGroupLifecycleAt(
+                invocation,
+                groupRounds,
+                isLatest,
+              ),
+            };
+          }),
+        );
+        groupsByStep.set(stepKey, stepGroups);
+      }
+
+      for (const [stepKey, groupsByInvocation] of groupsByStep) {
+        const invocationQueues = [...groupsByInvocation.values()].map(
+          (groups) => [...groups],
+        );
+        while (invocationQueues.some((groups) => groups.length > 0)) {
+          const group = invocationQueues
+            .filter((groups) => groups.length > 0)
+            .sort((left, right) =>
+              compareLegacyAttemptGroups(left[0]!, right[0]!),
+            )[0]!
+            .shift()!;
+          const { invocation } = group;
+          const attemptNumber = group.legacyAttemptNumber;
+          const groupRounds = group.rounds;
+          const attemptId = group.isLatest
             ? invocation.invocation_id
             : `${invocation.invocation_id}::attempt-${attemptNumber}`;
           const assignedAttemptNumber = Math.max(
@@ -922,7 +994,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             assignedAttemptNumber,
           );
           const renumbered = assignedAttemptNumber !== attemptNumber;
-          if (isLatest) {
+          if (group.isLatest) {
             insertAttempt.run(
               attemptId,
               invocation.workflow_run_id,

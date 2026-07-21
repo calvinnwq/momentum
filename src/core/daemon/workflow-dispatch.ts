@@ -144,6 +144,7 @@ import {
   listExecutorRoundsForStep,
   loadLatestExecutorAttemptForStep,
 } from "../executors/loop/persist.js";
+import { nextExecutorRoundIndex } from "../executors/loop/reducer.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
 import {
@@ -1289,7 +1290,8 @@ function createLiveStepHostBindingsResolver(
             round.attemptNumber === attempt.attemptNumber &&
             round.classification === null,
         );
-      const roundIndex = resumableRound?.roundIndex ?? attemptRounds.length;
+      const roundIndex =
+        resumableRound?.roundIndex ?? nextExecutorRoundIndex(attemptRounds);
       const runRound =
         singleShot.name === "one-shot"
           ? createOneShotLiveWrapperRoundRunner(wrapper, {

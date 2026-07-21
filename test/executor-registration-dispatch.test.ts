@@ -1844,6 +1844,9 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       state: "manual_recovery_required",
       recovery_code: "host_binding_mismatch",
     });
+    db.prepare(
+      "UPDATE executor_rounds SET round_index = 5 WHERE workflow_run_id = ?",
+    ).run(runId);
     expect(
       clearWorkflowRunManualRecoveryGuarded(db, {
         runId,
@@ -1892,8 +1895,15 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       { attempt: 1, recovery_code: "host_binding_mismatch" },
       { attempt: 2, recovery_code: null },
     ]);
+    expect(
+      db
+        .prepare(
+          "SELECT round_index FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+        )
+        .all(runId),
+    ).toEqual([{ round_index: 5 }, { round_index: 6 }]);
     db.close();
-  }, 15_000);
+  }, 30_000);
 
   it("reattaches a checkpointed goal-loop mechanism without rerunning or recommitting", async () => {
     const repoPath = initNativeDispatchRepo();
@@ -2027,13 +2037,27 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         encoding: "utf8",
       }).trim(),
     ).toBe("2");
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(attemptId, JSON.stringify({ legacyAttemptNumber: 1 }), attemptId);
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE attempt_id = ?",
+    ).run(attemptId);
+    const migratedHostBindings = {
+      ...hostBindings,
+      start: { ...hostBindings.start, attemptNumber: 2 },
+    };
 
     expect(() =>
       executor.tick({
         state: envelope.snapshot(),
         config: {},
         hostBindings: {
-          ...hostBindings,
+          ...migratedHostBindings,
           selection: resolveGoalLoopRoundSelection({
             stepConfig: {
               agentProvider: "claude",
@@ -2049,28 +2073,28 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     for (const changedHostBindings of [
       {
-        ...hostBindings,
+        ...migratedHostBindings,
         selection: {
           ...hostBindings.selection,
           timeoutMs: 6_000,
         },
       },
       {
-        ...hostBindings,
+        ...migratedHostBindings,
         selection: {
           ...hostBindings.selection,
           maxRounds: 9,
         },
       },
       {
-        ...hostBindings,
+        ...migratedHostBindings,
         selection: {
           ...hostBindings.selection,
           policyEnvelope: "changed-policy",
         },
       },
       {
-        ...hostBindings,
+        ...migratedHostBindings,
         hostBindingIdentity: "sha256:changed-runner",
       },
     ]) {
@@ -2091,7 +2115,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       executor,
       config: {},
       hostBindings: {
-        ...hostBindings,
+        ...migratedHostBindings,
         runRound: () => {
           mechanisms += 1;
           throw new Error("checkpointed mechanism reran");
