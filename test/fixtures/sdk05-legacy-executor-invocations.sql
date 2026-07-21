@@ -273,7 +273,11 @@ VALUES
   ('checkpoint-4', 'run-1::implementation::dispatch::round-3', 0,
    'delegate_handoff_intent',
    '{"tool":"gnhf","invocationId":"run-1::implementation::dispatch","attempt":2}',
-   2010);
+   2010),
+  ('checkpoint-5', 'no-mistakes::run-1::preflight::mirror::round::0', 0,
+   'delegate_handoff_intent',
+   '{"tool":"no-mistakes","invocationId":"no-mistakes::run-1::preflight::mirror","attempt":1}',
+   310);
 
 INSERT INTO executor_findings
   (finding_id, round_id, severity, title, detail, selected, external_ref, created_at)

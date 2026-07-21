@@ -2218,7 +2218,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         .get() as Record<string, number>;
       expect(evidence).toEqual({
         artifacts: 2,
-        checkpoints: 4,
+        checkpoints: 5,
         findings: 1,
         decisions: 1,
       });
@@ -2242,6 +2242,19 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         tool: "gnhf",
         invocationId: "run-1::implementation::dispatch",
         attempt: 1,
+      });
+
+      // A renumbered lineage's handoff-intent payload has its `attempt` field
+      // translated to the assigned number so the migrated round still fences.
+      const renumberedIntent = db
+        .prepare(
+          "SELECT detail FROM executor_checkpoints WHERE checkpoint_id = 'checkpoint-5'",
+        )
+        .get() as { detail: string };
+      expect(JSON.parse(renumberedIntent.detail)).toEqual({
+        tool: "no-mistakes",
+        invocationId: "no-mistakes::run-1::preflight::mirror",
+        attempt: 2,
       });
     } finally {
       db.close();

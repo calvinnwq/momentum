@@ -1144,6 +1144,61 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       db.exec("ALTER TABLE executor_rounds_next RENAME TO executor_rounds");
       db.exec(EXECUTOR_ROUNDS_INDEX_DDL);
 
+      // Delegate handoff-intent checkpoints fence their payload's `attempt`
+      // against the owning round's attempt number. For groups the collision
+      // renumbering moved, translate that one field so an in-flight renumbered
+      // lineage stays resumable; every other checkpoint payload is
+      // attempt-number-free and stays frozen verbatim.
+      const renumberedGroups = [...attemptNumberByLegacyGroup.entries()].filter(
+        ([key, assigned]) =>
+          Number(key.slice(key.lastIndexOf("::") + 2)) !== assigned,
+      );
+      if (renumberedGroups.length > 0) {
+        const selectIntentCheckpoints = db.prepare(
+          `SELECT c.checkpoint_id, c.detail
+             FROM executor_checkpoints AS c
+             JOIN executor_rounds AS r ON r.round_id = c.round_id
+            WHERE r.attempt_id = ?
+              AND c.stage = 'delegate_handoff_intent'
+              AND c.detail IS NOT NULL`,
+        );
+        const updateIntentDetail = db.prepare(
+          "UPDATE executor_checkpoints SET detail = ? WHERE checkpoint_id = ?",
+        );
+        for (const [key, assigned] of renumberedGroups) {
+          const attemptId = attemptIdByLegacyGroup.get(key);
+          if (attemptId === undefined) continue;
+          const originalNumber = Number(key.slice(key.lastIndexOf("::") + 2));
+          const checkpoints = selectIntentCheckpoints.all(attemptId) as Array<{
+            checkpoint_id: string;
+            detail: string;
+          }>;
+          for (const checkpoint of checkpoints) {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(checkpoint.detail);
+            } catch {
+              continue;
+            }
+            if (
+              parsed === null ||
+              typeof parsed !== "object" ||
+              Array.isArray(parsed) ||
+              (parsed as { attempt?: unknown }).attempt !== originalNumber
+            ) {
+              continue;
+            }
+            updateIntentDetail.run(
+              JSON.stringify({
+                ...(parsed as Record<string, unknown>),
+                attempt: assigned,
+              }),
+              checkpoint.checkpoint_id,
+            );
+          }
+        }
+      }
+
       if (
         tableExists(db, "workflow_gates") &&
         columnExists(db, "workflow_gates", "invocation_id")
