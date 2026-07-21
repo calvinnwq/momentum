@@ -1826,6 +1826,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         recoveryCode: "host_binding_mismatch",
       },
     });
+    const retryRoundId = `${runId}::preflight::attempt-2::round::1`;
+    insertExecutorCheckpoint(db, {
+      checkpointId: `${retryRoundId}-checkpoint-0`,
+      roundId: `${runId}::preflight::attempt-1::round::0`,
+      sequence: 99,
+      stage: "classified",
+      detail: "preserved legacy checkpoint identity",
+    });
     writeNativeDispatchProfile(profileDir, script, "repo-cleanup");
     const repaired = resolveDaemonWorkflowStepDispatch(
       {
@@ -1861,6 +1869,17 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       { attempt: 1, recovery_code: "host_binding_mismatch" },
       { attempt: 2, recovery_code: null },
     ]);
+    expect(
+      db
+        .prepare(
+          `SELECT checkpoint_id
+             FROM executor_checkpoints
+            WHERE round_id = ? AND sequence = 0`,
+        )
+        .get(retryRoundId),
+    ).toEqual({
+      checkpoint_id: `${retryRoundId}-checkpoint-0::allocated-1`,
+    });
     db.close();
   }, 15_000);
 
@@ -1940,6 +1959,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         recoveryCode: "host_binding_mismatch",
       },
     });
+    const retryRoundId = `${runId}::preflight::attempt-2::round::6`;
+    insertExecutorCheckpoint(db, {
+      checkpointId: `${retryRoundId}-checkpoint-0`,
+      roundId: `${runId}::preflight::attempt-1::round::0`,
+      sequence: 99,
+      stage: "classified",
+      detail: "preserved legacy checkpoint identity",
+    });
     writeNativeDispatchProfile(
       profileDir,
       NATIVE_ONE_SHOT_SCRIPT,
@@ -1979,10 +2006,24 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     expect(
       db
         .prepare(
-          "SELECT round_index FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
+          `SELECT r.round_index, c.checkpoint_id
+             FROM executor_rounds r
+             LEFT JOIN executor_checkpoints c
+               ON c.round_id = r.round_id AND c.sequence = 0
+            WHERE r.workflow_run_id = ?
+            ORDER BY r.round_index`,
         )
         .all(runId),
-    ).toEqual([{ round_index: 5 }, { round_index: 6 }]);
+    ).toEqual([
+      {
+        round_index: 5,
+        checkpoint_id: `${runId}::preflight::attempt-1::round::0-checkpoint-0`,
+      },
+      {
+        round_index: 6,
+        checkpoint_id: `${retryRoundId}-checkpoint-0::allocated-1`,
+      },
+    ]);
     db.close();
   }, 30_000);
 

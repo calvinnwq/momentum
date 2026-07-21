@@ -510,7 +510,10 @@ function loadMaterializedSingleShotRound(
   const checkpoint = snapshot.checkpoints[0];
   if (
     checkpoint === undefined ||
-    checkpoint.checkpointId !== expectedCheckpoint.checkpointId ||
+    !isAllocatedCheckpointIdentity(
+      checkpoint.checkpointId,
+      expectedCheckpoint.checkpointId,
+    ) ||
     checkpoint.sequence !== expectedCheckpoint.sequence ||
     checkpoint.stage !== expectedCheckpoint.stage ||
     checkpoint.detail !== expectedCheckpoint.detail
@@ -520,6 +523,18 @@ function loadMaterializedSingleShotRound(
     );
   }
   return { round: snapshot.round, checkpoint };
+}
+
+function isAllocatedCheckpointIdentity(
+  checkpointId: string,
+  canonicalCheckpointId: string,
+): boolean {
+  if (checkpointId === canonicalCheckpointId) return true;
+  const allocatedPrefix = `${canonicalCheckpointId}::allocated-`;
+  return (
+    checkpointId.startsWith(allocatedPrefix) &&
+    /^[1-9]\d*$/.test(checkpointId.slice(allocatedPrefix.length))
+  );
 }
 
 const SINGLE_SHOT_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
