@@ -7,9 +7,11 @@
 -- The data deliberately includes the hardest legacy shape: a
 -- delegate-supervisor step that ran, reached manual recovery, was reopened in
 -- place, and wrote rounds under two attempt numbers on one invocation row --
--- plus round-scoped/invocation-scoped gates, all four evidence classes, and a
+-- plus round-scoped/invocation-scoped gates, all four evidence classes, a
 -- delegate handoff-intent checkpoint carrying the legacy `invocationId`
--- external correlation.
+-- external correlation, and a second invocation row for one step (an
+-- adapter-minted mirror invocation) whose attempt number collides with the
+-- dispatch scaffold's under the new unique step/attempt-number index.
 
 CREATE TABLE workflow_runs (
   id TEXT PRIMARY KEY,
@@ -203,7 +205,9 @@ VALUES
   ('run-1::implementation::dispatch', 'run-1', 'implementation', 'implementation',
    'delegate-supervisor', 'running', 2, 2000, 2500, NULL, 1000, 2500),
   ('run-1::preflight::dispatch', 'run-1', 'preflight', 'preflight',
-   'one-shot', 'succeeded', 1, 100, 150, 200, 100, 200);
+   'one-shot', 'succeeded', 1, 100, 150, 200, 100, 200),
+  ('no-mistakes::run-1::preflight::mirror', 'run-1', 'preflight', 'preflight',
+   'no-mistakes', 'succeeded', 1, 300, 350, 400, 300, 400);
 
 INSERT INTO executor_rounds
   (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
@@ -220,6 +224,11 @@ VALUES
    'sha256:out-0', '/tmp/run-1/preflight', '["/tmp/run-1/preflight/log"]',
    'preflight ok', '[]', '[]', '[]', '[]', 'passed', '[]', NULL, NULL, NULL,
    100, 200),
+  ('no-mistakes::run-1::preflight::mirror::round::0',
+   'no-mistakes::run-1::preflight::mirror', 'run-1', 'preflight', 'preflight',
+   'no-mistakes', 1, 0, 'succeeded', 'complete', 'complete', 300, 350, 400,
+   NULL, NULL, NULL, NULL, NULL, NULL, '[]', 'mirror settled', '[]', '[]',
+   '[]', '[]', NULL, '[]', NULL, NULL, NULL, 300, 400),
   ('run-1::implementation::dispatch::round-1', 'run-1::implementation::dispatch',
    'run-1', 'implementation', 'implementation', 'delegate-supervisor', 1, 1,
    'succeeded', 'continue', 'continue', 1000, 1100, 1200, 'claude', 'model-a',

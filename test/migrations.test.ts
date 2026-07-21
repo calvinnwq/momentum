@@ -2044,9 +2044,10 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
             ORDER BY step_run_id, attempt_number`,
         )
         .all() as Array<Record<string, unknown>>;
-      expect(attempts).toHaveLength(3);
+      expect(attempts).toHaveLength(4);
 
-      const [implFirst, implLatest, preflight] = attempts as [
+      const [implFirst, implLatest, preflight, preflightMirror] = attempts as [
+        Record<string, unknown>,
         Record<string, unknown>,
         Record<string, unknown>,
         Record<string, unknown>,
@@ -2085,6 +2086,34 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       expect(preflight.attempt_id).toBe("run-1::preflight::dispatch");
       expect(preflight.attempt_number).toBe(1);
       expect(preflight.state).toBe("succeeded");
+
+      // The legacy schema allowed a second invocation row for the same step
+      // and attempt number (here an adapter-minted mirror invocation); it is
+      // deterministically renumbered past the dispatch scaffold instead of
+      // colliding with the new unique step/attempt-number index.
+      expect(preflightMirror.attempt_id).toBe(
+        "no-mistakes::run-1::preflight::mirror",
+      );
+      expect(preflightMirror.attempt_number).toBe(2);
+      expect(preflightMirror.state).toBe("succeeded");
+      expect(
+        JSON.parse(String(preflightMirror.legacy_provenance)),
+      ).toMatchObject({
+        legacyInvocationId: "no-mistakes::run-1::preflight::mirror",
+        legacyAttemptNumber: 1,
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, attempt_number, round_index
+               FROM executor_rounds WHERE round_id = ?`,
+          )
+          .get("no-mistakes::run-1::preflight::mirror::round::0"),
+      ).toEqual({
+        attempt_id: "no-mistakes::run-1::preflight::mirror",
+        attempt_number: 2,
+        round_index: 0,
+      });
     } finally {
       db.close();
     }

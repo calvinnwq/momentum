@@ -856,7 +856,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
                   executor_family, state, attempt, started_at, heartbeat_at,
                   finished_at, created_at, updated_at
              FROM executor_invocations
-            ORDER BY invocation_id`,
+            ORDER BY workflow_run_id, step_run_id, created_at, invocation_id`,
         )
         .all() as unknown as LegacyExecutorInvocationRow[];
       const insertAttempt = db.prepare(
@@ -867,6 +867,15 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const attemptIdByLegacyGroup = new Map<string, string>();
+      // The legacy schema only made `invocation_id` unique, so one step can
+      // carry several invocation rows (for example a dispatcher scaffold plus
+      // an adapter-minted invocation) whose attempt numbers collide under the
+      // new unique `(workflow_run_id, step_run_id, attempt_number)` index.
+      // Colliding groups are renumbered deterministically - invocations in
+      // `created_at, invocation_id` order, each keeping its internal group
+      // order - and the original number is preserved in provenance.
+      const attemptNumberByLegacyGroup = new Map<string, number>();
+      const highestAssignedByStep = new Map<string, number>();
 
       for (const invocation of invocations) {
         const rounds = db
@@ -892,16 +901,27 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         const attemptNumbers = [...groups.keys()].sort((a, b) => a - b);
         const latestAttemptNumber = attemptNumbers.at(-1)!;
 
+        const stepKey = `${invocation.workflow_run_id}::${invocation.step_run_id}`;
         for (const attemptNumber of attemptNumbers) {
           const groupRounds = groups.get(attemptNumber)!;
           const isLatest = attemptNumber === latestAttemptNumber;
           const attemptId = isLatest
             ? invocation.invocation_id
             : `${invocation.invocation_id}::attempt-${attemptNumber}`;
+          const assignedAttemptNumber = Math.max(
+            attemptNumber,
+            (highestAssignedByStep.get(stepKey) ?? 0) + 1,
+          );
+          highestAssignedByStep.set(stepKey, assignedAttemptNumber);
           attemptIdByLegacyGroup.set(
             `${invocation.invocation_id}::${attemptNumber}`,
             attemptId,
           );
+          attemptNumberByLegacyGroup.set(
+            `${invocation.invocation_id}::${attemptNumber}`,
+            assignedAttemptNumber,
+          );
+          const renumbered = assignedAttemptNumber !== attemptNumber;
           if (isLatest) {
             insertAttempt.run(
               attemptId,
@@ -910,7 +930,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               invocation.step_key,
               invocation.executor_family,
               invocation.state,
-              attemptNumber,
+              assignedAttemptNumber,
               invocation.started_at,
               invocation.heartbeat_at,
               invocation.finished_at,
@@ -918,6 +938,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               JSON.stringify({
                 legacyInvocationId: invocation.invocation_id,
                 source: "legacy_invocation_row",
+                ...(renumbered ? { legacyAttemptNumber: attemptNumber } : {}),
               }),
               invocation.created_at,
               invocation.updated_at,
@@ -948,7 +969,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             invocation.step_key,
             invocation.executor_family,
             state,
-            attemptNumber,
+            assignedAttemptNumber,
             startedAts.length > 0 ? Math.min(...startedAts) : null,
             heartbeatAts.length > 0 ? Math.max(...heartbeatAts) : null,
             finishedAts.length > 0 ? Math.max(...finishedAts) : null,
@@ -956,6 +977,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             JSON.stringify({
               legacyInvocationId: invocation.invocation_id,
               source: "reconstructed_from_round_evidence",
+              ...(renumbered ? { legacyAttemptNumber: attemptNumber } : {}),
               ...(stateReconstructed
                 ? {
                     stateReconstructed: true,
@@ -999,10 +1021,11 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
          )`,
       );
       for (const round of legacyRounds) {
-        const attemptId = attemptIdByLegacyGroup.get(
-          `${String(round.invocation_id)}::${Number(round.attempt)}`,
-        );
-        if (attemptId === undefined) {
+        const legacyGroupKey = `${String(round.invocation_id)}::${Number(round.attempt)}`;
+        const attemptId = attemptIdByLegacyGroup.get(legacyGroupKey);
+        const assignedAttemptNumber =
+          attemptNumberByLegacyGroup.get(legacyGroupKey);
+        if (attemptId === undefined || assignedAttemptNumber === undefined) {
           throw new Error(
             `executor attempt migration cannot re-anchor round ${String(round.round_id)}: no attempt group for invocation ${String(round.invocation_id)} attempt ${String(round.attempt)}`,
           );
@@ -1014,7 +1037,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
           round.step_run_id as string,
           round.step_key as string,
           round.executor_family as string,
-          round.attempt as number,
+          assignedAttemptNumber,
           round.round_index as number,
           round.state as string,
           round.classification as string | null,
