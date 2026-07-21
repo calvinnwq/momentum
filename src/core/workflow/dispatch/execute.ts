@@ -58,6 +58,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  ExecutorRoundConflictError,
   insertExecutorCheckpoint,
   insertExecutorAttempt,
   insertExecutorRound,
@@ -66,6 +67,7 @@ import {
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorAttemptRecord,
+  ExecutorCheckpointRecord,
   ExecutorName,
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
@@ -269,8 +271,7 @@ function dispatchExecutorScaffold(
       } catch (error) {
         throw new ExecutorOwnedRoundMaterializationError(error);
       }
-      insertExecutorRound(db, materialized.round, { now });
-      insertExecutorCheckpoint(db, materialized.checkpoint, { now });
+      insertOwnedRoundMaterialization(db, materialized, now);
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
@@ -333,8 +334,7 @@ function dispatchRetryScaffold(
       } catch (error) {
         throw new ExecutorOwnedRoundMaterializationError(error);
       }
-      insertExecutorRound(db, materialized.round, { now });
-      insertExecutorCheckpoint(db, materialized.checkpoint, { now });
+      insertOwnedRoundMaterialization(db, materialized, now);
     }
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
@@ -343,6 +343,50 @@ function dispatchRetryScaffold(
     safeRollback(db);
     throw error;
   }
+}
+
+function insertOwnedRoundMaterialization(
+  db: MomentumDb,
+  materialized: {
+    round: ExecutorRoundRecord;
+    checkpoint: ExecutorCheckpointRecord;
+  },
+  now: number,
+): void {
+  const canonicalRoundId = materialized.round.roundId;
+  let roundId = canonicalRoundId;
+  let allocationSuffix = 0;
+  while (true) {
+    try {
+      insertExecutorRound(db, { ...materialized.round, roundId }, { now });
+      break;
+    } catch (error) {
+      if (!(error instanceof ExecutorRoundConflictError)) throw error;
+      const concurrentRound = db
+        .prepare(
+          `SELECT round_id
+             FROM executor_rounds
+            WHERE attempt_id = ? AND round_index = ?`,
+        )
+        .get(materialized.round.attemptId, materialized.round.roundIndex);
+      if (concurrentRound !== undefined) throw error;
+      allocationSuffix += 1;
+      roundId = `${canonicalRoundId}::allocated-${allocationSuffix}`;
+    }
+  }
+  insertExecutorCheckpoint(
+    db,
+    {
+      ...materialized.checkpoint,
+      checkpointId: materialized.checkpoint.checkpointId.startsWith(
+        canonicalRoundId,
+      )
+        ? `${roundId}${materialized.checkpoint.checkpointId.slice(canonicalRoundId.length)}`
+        : materialized.checkpoint.checkpointId,
+      roundId,
+    },
+    { now },
+  );
 }
 
 /**

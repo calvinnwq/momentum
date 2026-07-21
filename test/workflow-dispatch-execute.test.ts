@@ -23,6 +23,11 @@ import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
+import {
+  insertExecutorCheckpoint,
+  insertExecutorAttempt,
+  insertExecutorRound,
+} from "../src/core/executors/loop/persist.js";
 
 const NOW = 1_700_000_000_000;
 const RUN_ID = "run-dispatch-exec-001";
@@ -501,6 +506,182 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       )
       .get(RUN_ID) as { n: number };
     expect(rounds.n).toBe(1);
+  });
+
+  it("allocates a collision-safe native-owned round id on retry", () => {
+    const db = openSeededDb();
+    const targetAttemptId = `${RUN_ID}::implementation::attempt-1`;
+    const collidingRoundId = `${RUN_ID}::implementation::attempt-2::round::1`;
+
+    insertExecutorAttempt(db, {
+      attemptId: targetAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      state: "manual_recovery_required",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+    });
+    insertExecutorRound(db, {
+      roundId: `${targetAttemptId}::round::0`,
+      attemptId: targetAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: "executor_threw",
+      humanGate: null,
+    });
+    const collisionOwnerAttemptId = `${RUN_ID}::preflight::legacy-owner`;
+    insertExecutorAttempt(db, {
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "preflight",
+      stepKey: "preflight",
+      executorFamily: "one-shot",
+      state: "succeeded",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+    });
+    insertExecutorRound(db, {
+      roundId: collidingRoundId,
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "preflight",
+      stepKey: "preflight",
+      executorFamily: "one-shot",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "succeeded",
+      classification: "complete",
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: null,
+      humanGate: null,
+    });
+    insertExecutorCheckpoint(db, {
+      checkpointId: `${collidingRoundId}-checkpoint-0`,
+      roundId: collidingRoundId,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    });
+
+    const claim = approveAndClaim(db, "implementation");
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 2,
+      executorOwnsRounds: true,
+      materializeOwnedRound: ({ attempt }) => ({
+        round: {
+          roundId: collidingRoundId,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
+          executorFamily: attempt.executorFamily,
+          attemptNumber: attempt.attemptNumber,
+          roundIndex: 1,
+          state: "running",
+          classification: null,
+          startedAt: NOW + 2,
+          heartbeatAt: NOW + 2,
+          finishedAt: null,
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: null,
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+          recoveryCode: null,
+          humanGate: null,
+        },
+        checkpoint: {
+          checkpointId: `${collidingRoundId}-checkpoint-0`,
+          roundId: collidingRoundId,
+          sequence: 0,
+          stage: "round_started",
+          detail: null,
+        },
+      }),
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(
+      db
+        .prepare(
+          `SELECT round_id, attempt_id, round_index
+             FROM executor_rounds
+            WHERE attempt_id = ?`,
+        )
+        .get(`${RUN_ID}::implementation::attempt-2`),
+    ).toEqual({
+      round_id: `${collidingRoundId}::allocated-1`,
+      attempt_id: `${RUN_ID}::implementation::attempt-2`,
+      round_index: 1,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT checkpoint_id, round_id
+             FROM executor_checkpoints
+            WHERE round_id = ?`,
+        )
+        .get(`${collidingRoundId}::allocated-1`),
+    ).toEqual({
+      checkpoint_id: `${collidingRoundId}::allocated-1-checkpoint-0`,
+      round_id: `${collidingRoundId}::allocated-1`,
+    });
   });
 });
 
