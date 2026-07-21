@@ -198,8 +198,10 @@ export type StartRetryableDispatchAttemptResult =
  * Start a fresh durable attempt for a step whose newest attempt ended in a
  * retryable terminal. The prior attempt row and all of its rounds are left
  * untouched: a retry is a new immutable attempt with the next `attemptNumber`,
- * never a reopened or rewritten one. A concurrent retry loses the deterministic
- * attempt-id insert race and reports `started: false`.
+ * never a reopened or rewritten one. Fresh ids use the canonical derived shape
+ * when it is available and a deterministic suffix when preserved legacy data
+ * already occupies that unrestricted id. A concurrent retry still loses the
+ * unique step-attempt-number insert race and reports `started: false`.
  */
 export function startRetryableDispatchAttempt(
   db: MomentumDb,
@@ -221,7 +223,7 @@ export function startRetryableDispatchAttempt(
   }
 
   const nextAttemptNumber = retryable.attemptNumber + 1;
-  const nextAttemptId = deriveDispatchAttemptId(
+  const canonicalAttemptId = deriveDispatchAttemptId(
     input.runId,
     input.stepId,
     nextAttemptNumber,
@@ -230,28 +232,44 @@ export function startRetryableDispatchAttempt(
   // so cross-attempt round ordering is always (attemptNumber, roundIndex).
   const nextRoundIndex = retryable.latestRoundIndex + 1;
 
-  try {
-    insertExecutorAttempt(
-      db,
-      {
-        attemptId: nextAttemptId,
-        workflowRunId: retryable.runId,
-        stepRunId: retryable.stepId,
-        stepKey: retryable.stepId,
-        executorFamily: retryable.executorFamily,
-        state: "running",
-        attemptNumber: nextAttemptNumber,
-        startedAt: input.now,
-        heartbeatAt: null,
-        finishedAt: null,
-      },
-      { now: input.now },
-    );
-  } catch (error) {
-    if (error instanceof ExecutorAttemptConflictError) {
-      return { started: false };
+  let nextAttemptId = canonicalAttemptId;
+  let allocationSuffix = 0;
+  while (true) {
+    try {
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: nextAttemptId,
+          workflowRunId: retryable.runId,
+          stepRunId: retryable.stepId,
+          stepKey: retryable.stepId,
+          executorFamily: retryable.executorFamily,
+          state: "running",
+          attemptNumber: nextAttemptNumber,
+          startedAt: input.now,
+          heartbeatAt: null,
+          finishedAt: null,
+        },
+        { now: input.now },
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof ExecutorAttemptConflictError)) throw error;
+      const concurrentRetry = db
+        .prepare(
+          `SELECT 1
+             FROM executor_attempts
+            WHERE workflow_run_id = ?
+              AND step_run_id = ?
+              AND attempt_number = ?`,
+        )
+        .get(retryable.runId, retryable.stepId, nextAttemptNumber);
+      if (concurrentRetry !== undefined) {
+        return { started: false };
+      }
+      allocationSuffix += 1;
+      nextAttemptId = `${canonicalAttemptId}::allocated-${allocationSuffix}`;
     }
-    throw error;
   }
 
   if (input.executorOwnsRounds !== true) {

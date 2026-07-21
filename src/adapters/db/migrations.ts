@@ -806,6 +806,11 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "cancelled",
 ]);
 
+const LEGACY_RECOVERY_BEARING_ATTEMPT_STATES: ReadonlySet<string> = new Set([
+  "manual_recovery_required",
+  "blocked",
+]);
+
 function legacyAttemptGroupLifecycleAt(
   invocation: LegacyExecutorInvocationRow,
   rounds: readonly LegacyExecutorRoundGroupRow[],
@@ -938,9 +943,9 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       // new unique `(workflow_run_id, step_run_id, attempt_number)` index.
       // Colliding groups are renumbered deterministically by lifecycle time
       // while each invocation keeps its internal group order, and the original
-      // number is preserved in provenance. If a multi-lineage step still has
-      // live work that would be renumbered or demoted, the run is parked for
-      // manual recovery instead of guessing which lineage is authoritative.
+      // number is preserved in provenance. If a multi-lineage step has live or
+      // recovery-bearing work that would be renumbered or demoted, the run is
+      // parked instead of guessing which lineage is authoritative.
       const attemptNumberByLegacyGroup = new Map<string, number>();
       const highestAssignedByStep = new Map<string, number>();
       const groupsByStep = new Map<
@@ -1109,34 +1114,45 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
 
         if (groupsByInvocation.size > 1) {
           const highestAssigned = highestAssignedByStep.get(stepKey) ?? 0;
-          const liveGroups = assignedGroups.filter(
+          const authorityBearingGroups = assignedGroups.filter(
             ({ group }) =>
               group.isLatest &&
-              !LEGACY_TERMINAL_ATTEMPT_STATES.has(group.invocation.state),
+              (!LEGACY_TERMINAL_ATTEMPT_STATES.has(group.invocation.state) ||
+                LEGACY_RECOVERY_BEARING_ATTEMPT_STATES.has(
+                  group.invocation.state,
+                )),
           );
-          const ambiguousLive = liveGroups.filter(
+          const ambiguousAuthority = authorityBearingGroups.filter(
             ({ group, assignedAttemptNumber }) =>
               assignedAttemptNumber !== group.legacyAttemptNumber ||
               assignedAttemptNumber !== highestAssigned,
           );
-          if (liveGroups.length > 1 || ambiguousLive.length > 0) {
+          if (
+            authorityBearingGroups.length > 1 ||
+            ambiguousAuthority.length > 0
+          ) {
             const runId = assignedGroups[0]!.group.invocation.workflow_run_id;
             const stepId = assignedGroups[0]!.group.invocation.step_run_id;
+            const carriesRecovery = authorityBearingGroups.some(({ group }) =>
+              LEGACY_RECOVERY_BEARING_ATTEMPT_STATES.has(
+                group.invocation.state,
+              ),
+            );
             if (!ambiguousRunReasons.has(runId)) {
               ambiguousRunReasons.set(
                 runId,
-                `attempt migration found multiple legacy executor lineages with live work for step ${stepId}; inspect the migrated attempts and clear recovery explicitly`,
+                `attempt migration found multiple legacy executor lineages with ${carriesRecovery ? "recovery-bearing" : "live"} work for step ${stepId}; inspect the migrated attempts and clear recovery explicitly`,
               );
             }
           }
         }
       }
 
-      // Fail closed on ambiguous live lineages: the run opens with every row
-      // and all evidence preserved, but is parked for operator recovery
-      // instead of letting a renumbered or demoted live attempt resume (its
-      // durable fences still encode the original attempt number) or letting a
-      // stale terminal lineage finalize the step as the newest attempt.
+      // Fail closed on ambiguous authority-bearing lineages: the run opens with
+      // every row and all evidence preserved, but is parked for operator
+      // recovery instead of letting a renumbered or demoted live attempt resume
+      // (its durable fences still encode the original attempt number) or
+      // letting synthetic retry ancestry drive recovery or finalization.
       const parkRun = db.prepare(
         `UPDATE workflow_runs
             SET needs_manual_recovery = 1,

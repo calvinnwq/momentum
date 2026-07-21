@@ -7,6 +7,7 @@ import path from "node:path";
 import { openDb } from "../src/adapters/db.js";
 import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
 import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
+import { selectRunnableWorkflowWork } from "../src/core/workflow/dispatch/scheduler.js";
 
 const tempRoots: string[] = [];
 
@@ -2528,6 +2529,58 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
+  it("parks recovery-bearing terminal lineages instead of treating their synthetic order as authoritative", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        UPDATE executor_invocations
+           SET state = 'succeeded', finished_at = 400, updated_at = 400
+         WHERE invocation_id = 'run-2::implementation::dispatch';
+        UPDATE executor_rounds
+           SET state = 'succeeded', classification = 'complete',
+               executor_recommendation = 'complete', finished_at = 400,
+               updated_at = 400
+         WHERE round_id = 'run-2::implementation::dispatch::round-1';
+        UPDATE executor_invocations
+           SET state = 'manual_recovery_required', finished_at = 600,
+               updated_at = 600
+         WHERE invocation_id = 'no-mistakes::run-2::implementation::mirror';
+        UPDATE executor_rounds
+           SET state = 'manual_recovery_required',
+               classification = 'manual_recovery_required',
+               executor_recommendation = NULL,
+               recovery_code = 'external_state_blocked', finished_at = 600,
+               updated_at = 600
+         WHERE round_id = 'no-mistakes::run-2::implementation::mirror::round::0';
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const run = db
+        .prepare(
+          `SELECT needs_manual_recovery, manual_recovery_reason
+             FROM workflow_runs WHERE id = 'run-2'`,
+        )
+        .get() as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(run.needs_manual_recovery).toBe(1);
+      expect(run.manual_recovery_reason).toContain(
+        "multiple legacy executor lineages with recovery-bearing work",
+      );
+      expect(
+        selectRunnableWorkflowWork(db, { runId: "run-2", now: 700 }),
+      ).toEqual({ runnable: [], staleLeases: [] });
+    } finally {
+      db.close();
+    }
+  });
+
   it("is a no-op when the migrated database is opened again", () => {
     const dataDir = seedLegacyDataDir();
     const first = openDb(dataDir);
@@ -2603,6 +2656,91 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
           attempt_id: "run-1::implementation::attempt-3",
           state: "running",
           attempt_number: 3,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("allocates a collision-safe retry id after preserving an unrestricted legacy id", () => {
+    const dataDir = seedLegacyDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        INSERT INTO workflow_runs
+          (id, state, source, plan_json, created_at, updated_at)
+        VALUES
+          ('run-3', 'running', 'momentum-native-coding-workflow', '{}', 100, 600);
+        INSERT INTO workflow_steps
+          (run_id, step_id, kind, state, step_order, required, started_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('run-3', 'implementation', 'implementation', 'running', 0, 1,
+           100, NULL, 100, 600);
+        INSERT INTO executor_invocations
+          (invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, state, attempt, started_at, heartbeat_at,
+           finished_at, created_at, updated_at)
+        VALUES
+          ('run-3::implementation::attempt-2', 'run-3', 'implementation',
+           'implementation', 'no-mistakes', 'manual_recovery_required', 1,
+           100, 500, 600, 100, 600);
+        INSERT INTO executor_rounds
+          (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt, round_index, state, classification,
+           started_at, heartbeat_at, finished_at, recovery_code, created_at,
+           updated_at)
+        VALUES
+          ('run-3::implementation::legacy-round',
+           'run-3::implementation::attempt-2', 'run-3', 'implementation',
+           'implementation', 'no-mistakes', 1, 0,
+           'manual_recovery_required', 'manual_recovery_required', 100, 500,
+           600, 'external_state_blocked', 100, 600);
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const first = startRetryableDispatchAttempt(db, {
+        runId: "run-3",
+        stepId: "implementation",
+        now: 700,
+        stepState: "running",
+      });
+      expect(first).toEqual({
+        started: true,
+        attemptId: "run-3::implementation::attempt-2::allocated-1",
+        attemptNumber: 2,
+        roundIndex: 1,
+      });
+      expect(
+        startRetryableDispatchAttempt(db, {
+          runId: "run-3",
+          stepId: "implementation",
+          now: 800,
+          stepState: "running",
+        }),
+      ).toEqual({ started: false });
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, attempt_number
+               FROM executor_attempts
+              WHERE workflow_run_id = 'run-3'
+              ORDER BY attempt_number`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          attempt_id: "run-3::implementation::attempt-2",
+          attempt_number: 1,
+        },
+        {
+          attempt_id: "run-3::implementation::attempt-2::allocated-1",
+          attempt_number: 2,
         },
       ]);
     } finally {
