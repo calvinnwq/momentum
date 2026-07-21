@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/calvinnwq/momentum/compare/v0.21.0...v0.22.0) (2026-07-21)
+
+
+### Features
+
+* **executors:** adopt immutable attempt and round model ([#236](https://github.com/calvinnwq/momentum/issues/236)) ([a348ad2](https://github.com/calvinnwq/momentum/commit/a348ad2370c4090218b9fe7e2a5443cde66ce808))
+
 ## [0.21.0](https://github.com/calvinnwq/momentum/compare/v0.20.0...v0.21.0) (2026-07-20)
 
 
