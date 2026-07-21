@@ -16,9 +16,17 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 
 - `WorkflowDefinition` and `StepDefinition` define reusable workflow shape.
 - `WorkflowRun` and `StepRun` track run and step lifecycle.
-- `ExecutorInvocation` and `ExecutorRound` sit below a step and store executor
-  attempts, artifacts, result summaries, verification status, commit metadata,
-  recovery codes, findings, decisions, and checkpoints.
+- `ExecutorAttempt` and `ExecutorRound` sit below a step and store executor
+  rounds, artifacts, result summaries, verification status, commit metadata,
+  recovery codes, findings, decisions, and checkpoints. An attempt is one
+  immutable executor go for one step and one executor identity: a retry inserts
+  a fresh attempt with the next attempt number. Round order is deterministic
+  within an attempt and cross-attempt ordering is attempt number, then round
+  index; the dispatch lane additionally keeps round indices monotone across the
+  whole step. Opening an SDK-05 database migrates in place, exactly once: each legacy
+  invocation splits into immutable attempts by round attempt groups, preserving
+  round ids, evidence links, and `legacy_invocation_id` / `legacy_provenance`
+  columns.
 - The goal-first CLI lane and its goal-iteration execution mechanism are
   retired. `Goal`, `Iteration`, and `Job` rows remain durable compatibility
   data served by `recovery clear`, daemon status/startup recovery, and doctor.
@@ -48,18 +56,18 @@ transitions from durable evidence.
 ## Executor SDK Contract
 
 The executor-loop layer is the executor SDK boundary. `Executor.tick` receives a
-read-only durable invocation/round snapshot, machine-portable step config,
+read-only durable attempt/round snapshot, machine-portable step config,
 machine-local host bindings, a cancellation signal, and an `ExecutorEnvelope`.
 One tick performs at most one bounded turn and returns an
-`ExecutorTickResult` recommendation. Recommended round/invocation states,
+`ExecutorTickResult` recommendation. Recommended round/attempt states,
 classification, recovery code, and gate remain advisory; only the daemon-side
 envelope controller can apply terminal classification and state transitions.
 The controller and executor facade are different runtime objects, so an executor
 cannot recover daemon authority with a type cast.
 Before settlement, the controller validates that the classification maps to its
-required invocation state, permits the requested round state, and carries a
+required attempt state, permits the requested round state, and carries a
 classification-compatible recovery code and human gate; an inconsistent daemon
-decision writes no round, invocation, or classification-checkpoint change.
+decision writes no round, attempt, or classification-checkpoint change.
 The envelope clock owns round start and heartbeat timestamps as well as durable
 observations and terminal settlement after awaited runner work, so executor input
 cannot forge liveness and asynchronous rounds cannot finish before their bounded
@@ -72,11 +80,13 @@ Built-in asynchronous process adapters preserve captured stdout and stderr in
 the executor log during cancellation and decode streaming UTF-8 across split
 pipe chunks without replacement-character corruption.
 
-`ExecutorEnvelope` is bound to one durable invocation. It can start the next
+`ExecutorEnvelope` is bound to one durable attempt. It can start the next
 round, record non-terminal round observations, heartbeat, and append artifacts,
-checkpoints, findings, and decisions. It exposes no SQLite handle and rejects
-cross-invocation evidence, overlapping or non-sequential rounds, and evidence
-mutation after either the round or invocation becomes terminal. State-dependent
+checkpoints, findings, and decisions. Its snapshot spans all of the step's
+rounds across attempts so retry evidence stays visible, while every write stays
+bound to the envelope's attempt. It exposes no SQLite handle and rejects
+cross-attempt evidence, overlapping or non-sequential rounds, and evidence
+mutation after either the round or attempt becomes terminal. State-dependent
 writes and coherent snapshots use SQLite transactions so concurrent ticks cannot
 cross those guards. Every public envelope write validates its complete runtime
 payload, and an explicit observation-field whitelist prevents JavaScript or
@@ -85,12 +95,12 @@ Daemon-allocated classification checkpoint identity is chosen inside the same
 write transaction as terminal settlement. Its snapshots include all durable child
 evidence so a later tick can resume without terminal scrollback or
 executor-private state.
-Executor facade writes are allowed only while the invocation is `running`;
-`waiting_operator` and every other non-running invocation state revoke all
+Executor facade writes are allowed only while the attempt is `running`;
+`waiting_operator` and every other non-running attempt state revoke all
 executor writes, including heartbeat.
 Result-capture observations and their completion checkpoints commit atomically.
 Native completed-mechanism reattachment is specified by [Executor SDK](docs/executor-sdk.md#envelope-facade).
-New single-shot dispatches materialize the invocation, initial running round,
+New single-shot dispatches materialize the attempt, initial running round,
 and hashed `round_started` dispatch-binding checkpoint in one transaction after
 resolving runtime inputs, so the first durable owner always has its complete
 reattach binding.
@@ -117,20 +127,22 @@ Workflow structural preflight validates third-party step config against the
 registered declaration before workflow-run rows are written.
 An unregistered executor records the honest `runtime_unavailable` class in
 `manual_recovery_required`; after registration repair and guarded recovery clear,
-the same deterministic invocation reopens with an incremented attempt.
+dispatch inserts a fresh immutable attempt with the next attempt number, while
+the step-scoped deterministic dispatch correlation survives only for external
+handoff receipts and repo-lock identity.
 The successful clear also resolves every open `manual_recovery_required` gate
 for the run that permits `clear_recovery`, in the same transaction as the flag
 clear and retry preparation.
 The daemon SDK driver normally applies one bounded tick per scheduler pass and
-rechecks non-terminal invocations, so single-round and multi-round executors
+rechecks non-terminal attempts, so single-round and multi-round executors
 share one driving loop.
-The first delegate-supervisor handoff completed anywhere in an invocation may use a second bounded tick in that initial pass so the first external-state read follows the durable handoff immediately.
+The first delegate-supervisor handoff completed anywhere in an attempt may use a second bounded tick in that initial pass so the first external-state read follows the durable handoff immediately.
 Later passes and every retry attempt use one tick, even when a conclusively failed or cancelled prior external run allows the retry to launch a fresh run.
 Continuation-only passes observe the daemon poll interval before the next external-state read.
 If a crash leaves an unclassified running, capturing-result, or
 `mirroring_external_state` round with durable handoff intent or completed handoff evidence, stale
 auto-release dispatch-lease recovery releases the abandoned lease and makes
-that same invocation scheduler-resumable instead of parking the run or
+that same attempt scheduler-resumable instead of parking the run or
 repeating the handoff.
 The same recovery applies after a completed `continue` poll when its succeeded
 or failed round has a durable handoff in its history.
@@ -141,19 +153,20 @@ only the same stale lease.
 If the crash happens earlier, after a delegate mirrored a gate-eligible decision
 and observed `waiting_operator` but before classification, the mirrored
 checkpoint and decision make the unclassified round resumable so the executor
-can finish classification and gate parking under the same invocation.
+can finish classification and gate parking under the same attempt.
 Approval and operator-decision ticks must include an unresolved durable decision
 with unique canonical non-blank actions and any recommendation inside that set.
 Gate eligibility requires both `chosenAction` and non-blank `resolution` to be
 absent; partially resolved decision evidence is never selected for a new gate.
 An executor may select that decision with `humanGateDecisionId`; the daemon persists the selector before classification, and an omitted or null selector retains last-unresolved-decision compatibility.
 Dispatch mirrors it into a round-scoped workflow gate and releases its lease;
-gate resolution records the chosen action and makes the invocation
+gate resolution records the chosen action and makes the attempt
 scheduler-resumable.
 A paused round reopens in place, while a terminal gate round remains immutable
 and the executor starts its next round from the resolved decision.
-Retries preserve earlier rounds under the deterministic invocation and increment
-the attempt, while the driver rejects cross-attempt or non-current round results.
+A retry inserts a fresh immutable attempt with the next attempt number and
+never reopens or rewrites an earlier attempt or its rounds, while the driver
+rejects cross-attempt or non-current round results.
 Delegate retries retain correlated handoff and decision evidence but start a new
 semantic-stall window for the new attempt.
 A valid non-terminal handoff is reconciled through adapter recovery before reuse.
@@ -164,7 +177,7 @@ A conclusively failed or cancelled run permits one fresh launch; every other sta
 An independent dispatch-lease heartbeat continues during synchronous ticks, and
 every executor write is fenced against live lease ownership.
 The profile-backed repo lock covers at least the longest configured wrapper/probe execution window plus the complete verification budget, and it is released only after clean finalization or durable delegate handoff evidence.
-An unresolved delegate intent can take over an active lock only for the same deterministic invocation: either after that lock expires or after the scheduler proves and releases the matching stale dispatch owner.
+An unresolved delegate intent can take over an active lock only for the same step-scoped deterministic dispatch correlation: either after that lock expires or after the scheduler proves and releases the matching stale dispatch owner.
 Repository, run, job, previous-holder, attempt, and deadline compare-and-swap fencing prevents displacement of a concurrent or newer owner, and later lock writes require the new holder and attempt.
 
 Lifecycle classes layer narrower adapter extension points over the same core
@@ -180,7 +193,7 @@ signal aborts, the command times out, its leader exits, or the daemon disappears
 The runner then resets
 owned repository mutations to the captured base only after a host-provided
 repo-ownership proof succeeds, before the host records the cancelled round,
-invocation, and classification checkpoint atomically. Missing ownership proof or
+attempt, and classification checkpoint atomically. Missing ownership proof or
 failed process-tree cleanup, reset residue, or other failed cleanup leaves the
 durable in-flight state for recovery instead of recording a false terminal
 cancellation.
@@ -236,7 +249,7 @@ envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
-Malformed JavaScript or casted returns are rejected with only the atomically materialized invocation, running round, and dispatch-binding checkpoint left for recovery.
+Malformed JavaScript or casted returns are rejected with only the atomically materialized attempt, running round, and dispatch-binding checkpoint left for recovery.
 Successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX fallback
@@ -270,14 +283,14 @@ daemon ownership.
 ## Native Goal-Loop Contract
 
 The native `goal-loop` is Momentum's autonomous implementation flywheel below a workflow step.
-`executor_invocation` is the whole autonomous goal-loop attempt for one workflow step.
-`executor_round` is one durable iteration beneath that invocation.
-The invocation owns the ordered round sequence, shared lease/checkpoint envelope, accumulated notes and learnings, and final stop condition for the attempt.
+`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step.
+`executor_round` is one durable iteration beneath that attempt.
+The attempt owns the ordered round sequence, shared lease/checkpoint envelope, accumulated notes and learnings, and final stop condition.
 A completed round is never replayed, renamed, or overwritten to continue the loop.
-A later loop iteration creates the next round under the same invocation, and a retry after terminal recovery creates a new invocation or explicitly reopened attempt according to the step recovery policy.
+A later loop iteration creates the next round under the same attempt, and a retry after terminal recovery inserts a fresh immutable attempt with the next attempt number according to the step recovery policy.
 
 Goal-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.
-Invocation states are `pending`, `preparing`, `running`, `pausing`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
+Executor attempt states are `pending`, `preparing`, `running`, `pausing`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
 Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirroring_external_state`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
@@ -309,7 +322,7 @@ Failed, invalid, stale, unsafe, canceled, or no-op rounds do not create commits.
 They still preserve their result document when present, verification or reset evidence, recovery reason, artifacts, checkpoints, and learnings so the next round can avoid repeating the same work.
 A reset belongs to the round finalization path that detected unsafe or incomplete work; it must never manufacture a commit to make progress look cleaner.
 
-Momentum resumes from durable executor_invocations, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings.
+Momentum resumes from durable executor_attempts, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings.
 Resume never depends on terminal scrollback, chat transcript memory, process handles, or a runner-owned run directory.
 On resume, terminal rounds remain immutable, in-flight rounds are rechecked against their lease and checkpoint evidence, stale rounds move to manual recovery or a recovered evidence state through repo-native recovery codes, and the next runnable round receives the accumulated notes/learnings from prior rounds.
 The loop must preserve no duplicate completed rounds and no duplicate commits by deriving the next round index and commit ownership from durable Momentum rows.
@@ -319,9 +332,9 @@ If a round never reached a safe commit boundary, resume may start a later round 
 GNHF is source material, a compatibility reference, or an optional runner below `goal-loop` for legacy definitions; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
 GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native goal-loop runner mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
-Momentum's durable source of truth is the workflow run, step, executor invocation, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
+Momentum's durable source of truth is the workflow run, step, executor attempt, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
 `gnhf` must not become a first-class executor family merely to reuse behavior.
-Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum invocation and round records instead of making `.gnhf/runs` authoritative.
+Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum attempt and round records instead of making `.gnhf/runs` authoritative.
 
 ## Workflow Safety
 
@@ -337,7 +350,7 @@ not terminal by itself: Momentum reads the runner result, verifies, commits or
 resets against the captured base HEAD, and only then records terminal executor
 evidence for reconciliation.
 For profile-backed delegate-supervisor steps, that same finalization produces
-durable handoff and candidate evidence instead; the invocation and workflow step
+durable handoff and candidate evidence instead; the attempt and workflow step
 remain non-terminal until a later external-state read receives a daemon-accepted
 terminal classification.
 Repo-local run artifact directories must be ignored by git before wrapper work
@@ -490,12 +503,12 @@ That terminal handoff evidence is persisted for a full 40-character commit SHA b
 It settles only after a fresh status view corroborates the same run, branch, and exact current repository `HEAD` with passed or explicitly absent CI, no active findings, and no unresolved decisions; a compatible lagging monitoring view may corroborate the cached terminal state without replacing it.
 Current pending CI is never promoted by stored terminal proof, and proof for one commit never settles a descendant commit.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
-The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the invocation in manual recovery so operators inspect the external run before clearing recovery.
+The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the attempt in manual recovery so operators inspect the external run before clearing recovery.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed no-mistakes row.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
 That reconciliation accepts the legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` path and a structured deterministic evidence JSON path whose schema records the workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
-Its expected identity comes only from the current invocation attempt's latest no-mistakes legacy checkpoint or a `delegate-supervisor` attempt whose durable handoff intent selects `tool: "no-mistakes"`; prior-attempt and other-tool checkpoints cannot authorize reconciliation.
+Its expected identity comes only from the current attempt's latest no-mistakes legacy checkpoint or a `delegate-supervisor` attempt whose durable handoff intent selects `tool: "no-mistakes"`; prior-attempt and other-tool checkpoints cannot authorize reconciliation.
 Structured evidence is refused when its schema, identity, findings, check state, outcome, or phase statuses are unknown, stale, ambiguous, partial, mismatched, unresolved, pending, failed, or otherwise non-successful.
 
 ## Runtime Consolidation

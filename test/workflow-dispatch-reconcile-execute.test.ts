@@ -31,10 +31,10 @@ import {
   startWorkflowStep,
 } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  updateExecutorInvocationState,
+  loadExecutorAttempt,
+  updateExecutorAttemptState,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationState } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptState } from "../src/core/executors/loop/reducer.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
@@ -45,14 +45,14 @@ import {
  * RC-2 (NGX-480) production reconciliation effect twin.
  *
  * `reconcileDispatchedWorkflowStep` is the single production seam that finalizes
- * an M10 dispatched workflow step from its `<run>::<step>::dispatch` invocation's
+ * an M10 dispatched workflow step from its `<run>::<step>::dispatch` attempt's
  * terminal executor evidence — the production replacement for the dogfood
  * terminalize stand-in. These tests drive a step through the REAL production
- * dispatch (`executeWorkflowStepDispatch`), drive the dispatch invocation to a
+ * dispatch (`executeWorkflowStepDispatch`), drive the dispatch attempt to a
  * terminal executor state, and assert the reconciliation seam finalizes the step
  * exactly once, idempotently, releasing the dispatch lease and refreshing cached
  * run state — and that it never touches a step it does not own (the M9
- * direct-finalize lane, which writes no `::dispatch` invocation).
+ * direct-finalize lane, which writes no `::dispatch` attempt).
  */
 
 const NOW = 1_700_000_000_000;
@@ -117,7 +117,7 @@ function approveAndClaim(
 
 /**
  * Drive a step through the production dispatch lane so it lands `running` with a
- * `<run>::<step>::dispatch` invocation (`running`) and a held dispatch lease,
+ * `<run>::<step>::dispatch` attempt (`running`) and a held dispatch lease,
  * exactly as the daemon workflow lane leaves it before the executor terminates.
  */
 function dispatchStep(
@@ -133,26 +133,52 @@ function dispatchStep(
   });
 }
 
-function dispatchInvocationId(stepId: string, runId: string = RUN_ID): string {
-  return `${runId}::${stepId}::dispatch`;
+function dispatchAttemptId(stepId: string, runId: string = RUN_ID): string {
+  return `${runId}::${stepId}::attempt-1`;
 }
 
-/** Drive the dispatch invocation to a terminal executor-invocation state. */
-function driveInvocationTerminal(
+/** Insert the immutable retry attempt row a real retry dispatch would create. */
+function insertRetryAttemptRow(
   db: MomentumDb,
   stepId: string,
-  state: ExecutorInvocationState,
+  attemptNumber: number,
+  state: string,
+  now: number,
+): void {
+  db.prepare(
+    `INSERT INTO executor_attempts
+       (attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+        state, attempt_number, started_at, heartbeat_at, finished_at,
+        created_at, updated_at)
+     SELECT workflow_run_id || '::' || step_run_id || '::attempt-' || ?,
+            workflow_run_id, step_run_id, step_key, executor_family,
+            ?, ?, ?, ?, ?, ?, ?
+       FROM executor_attempts
+      WHERE attempt_id = ?`,
+  ).run(
+    attemptNumber,
+    state,
+    attemptNumber,
+    now,
+    now,
+    now,
+    now,
+    now,
+    dispatchAttemptId(stepId),
+  );
+}
+
+/** Drive the dispatch attempt to a terminal executor-attempt state. */
+function driveAttemptTerminal(
+  db: MomentumDb,
+  stepId: string,
+  state: ExecutorAttemptState,
   runId: string = RUN_ID,
 ): void {
-  updateExecutorInvocationState(
-    db,
-    dispatchInvocationId(stepId, runId),
-    state,
-    {
-      now: TERMINAL_AT,
-      finishedAt: TERMINAL_AT,
-    },
-  );
+  updateExecutorAttemptState(db, dispatchAttemptId(stepId, runId), state, {
+    now: TERMINAL_AT,
+    finishedAt: TERMINAL_AT,
+  });
 }
 
 function stepRow(
@@ -169,10 +195,10 @@ function stepRow(
   };
 }
 
-function countInvocations(db: MomentumDb, runId: string = RUN_ID): number {
+function countAttempts(db: MomentumDb, runId: string = RUN_ID): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
+      "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -186,17 +212,17 @@ function runUpdatedAt(db: MomentumDb, runId: string = RUN_ID): number {
 }
 
 describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence", () => {
-  const CLEAN: ReadonlyArray<[ExecutorInvocationState, string]> = [
+  const CLEAN: ReadonlyArray<[ExecutorAttemptState, string]> = [
     ["succeeded", "succeeded"],
     ["failed", "failed"],
     ["cancelled", "canceled"],
   ];
 
-  for (const [invocationState, stepState] of CLEAN) {
-    it(`finalizes the step ${stepState} from a terminal ${invocationState} invocation`, () => {
+  for (const [attemptState, stepState] of CLEAN) {
+    it(`finalizes the step ${stepState} from a terminal ${attemptState} attempt`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", invocationState);
+      driveAttemptTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -223,11 +249,11 @@ describe("reconcileDispatchedWorkflowStep — finalizes from terminal evidence",
       expect(runUpdatedAt(db)).toBe(RECONCILE_AT);
 
       // The seam reads executor evidence but never writes executor rows — the
-      // dispatch invocation is left in its terminal state, unchanged.
-      expect(countInvocations(db)).toBe(1);
+      // dispatch attempt is left in its terminal state, unchanged.
+      expect(countAttempts(db)).toBe(1);
       expect(
-        loadExecutorInvocation(db, dispatchInvocationId("preflight"))?.state,
-      ).toBe(invocationState);
+        loadExecutorAttempt(db, dispatchAttemptId("preflight"))?.state,
+      ).toBe(attemptState);
     });
   }
 });
@@ -236,7 +262,7 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
   it("leaves a running step running and holds the dispatch lease", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    // Invocation left `running` (the bounded executor session is still active).
+    // Attempt left `running` (the bounded executor session is still active).
 
     const result = reconcileDispatchedWorkflowStep({
       db,
@@ -256,16 +282,16 @@ describe("reconcileDispatchedWorkflowStep — defers while non-terminal", () => 
 });
 
 describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual recovery", () => {
-  const UNCLEAN: ReadonlyArray<ExecutorInvocationState> = [
+  const UNCLEAN: ReadonlyArray<ExecutorAttemptState> = [
     "blocked",
     "manual_recovery_required",
   ];
 
-  for (const invocationState of UNCLEAN) {
-    it(`parks the run for manual recovery on a terminal ${invocationState} invocation`, () => {
+  for (const attemptState of UNCLEAN) {
+    it(`parks the run for manual recovery on a terminal ${attemptState} attempt`, () => {
       const db = openSeededDb();
       dispatchStep(db, "preflight");
-      driveInvocationTerminal(db, "preflight", invocationState);
+      driveAttemptTerminal(db, "preflight", attemptState);
 
       const result = reconcileDispatchedWorkflowStep({
         db,
@@ -292,7 +318,7 @@ describe("reconcileDispatchedWorkflowStep — routes unclean terminals to manual
         gateType: "manual_recovery_required",
         targetScope: "step",
         stepRunId: "preflight",
-        evidence: invocationState,
+        evidence: attemptState,
         resolvedAt: null,
       });
 
@@ -308,7 +334,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not double-finalize or duplicate writes on re-entry", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
 
     const first = reconcileDispatchedWorkflowStep({
       db,
@@ -340,9 +366,9 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?",
-    ).run(dispatchInvocationId("preflight"));
-    driveInvocationTerminal(db, "preflight", "succeeded");
+      "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
+    ).run(dispatchAttemptId("preflight"));
+    driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
     if (!oldLease) throw new Error("test setup: missing dispatch lease");
     releaseWorkflowLease(db, {
@@ -378,9 +404,9 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_invocations SET executor_family = 'fixture-executor' WHERE invocation_id = ?",
-    ).run(dispatchInvocationId("preflight"));
-    driveInvocationTerminal(db, "preflight", "succeeded");
+      "UPDATE executor_attempts SET executor_family = 'fixture-executor' WHERE attempt_id = ?",
+    ).run(dispatchAttemptId("preflight"));
+    driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
     if (!oldLease) throw new Error("test setup: missing dispatch lease");
     releaseWorkflowLease(db, {
@@ -419,7 +445,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not release a newer dispatch lease while reconciling old terminal evidence", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    driveAttemptTerminal(db, "preflight", "succeeded");
     finishWorkflowStep(db, {
       runId: RUN_ID,
       stepId: "preflight",
@@ -461,7 +487,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not open a duplicate manual-recovery gate on re-entry", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "blocked");
+    driveAttemptTerminal(db, "preflight", "blocked");
 
     reconcileDispatchedWorkflowStep({
       db,
@@ -483,10 +509,14 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("reuses an unresolved legacy recovery gate from a later attempt", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
-    db.prepare(
-      "UPDATE executor_invocations SET attempt = 2 WHERE invocation_id = ?",
-    ).run(dispatchInvocationId("preflight"));
+    driveAttemptTerminal(db, "preflight", "manual_recovery_required");
+    insertRetryAttemptRow(
+      db,
+      "preflight",
+      2,
+      "manual_recovery_required",
+      RECONCILE_AT - 2,
+    );
     const legacyGateId = `${RUN_ID}::preflight::reconcile-recovery::manual_recovery_required`;
     insertWorkflowGate(
       db,
@@ -519,7 +549,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("opens a new gate when a retry reaches the same recovery state", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "manual_recovery_required");
+    driveAttemptTerminal(db, "preflight", "manual_recovery_required");
     reconcileDispatchedWorkflowStep({
       db,
       runId: RUN_ID,
@@ -543,17 +573,12 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
         now: RECONCILE_AT + 1,
       }).ok,
     ).toBe(true);
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2,
-              state = 'manual_recovery_required',
-              finished_at = ?,
-              updated_at = ?
-        WHERE invocation_id = ?`,
-    ).run(
+    insertRetryAttemptRow(
+      db,
+      "preflight",
+      2,
+      "manual_recovery_required",
       RECONCILE_AT + 2,
-      RECONCILE_AT + 2,
-      dispatchInvocationId("preflight"),
     );
 
     reconcileDispatchedWorkflowStep({
@@ -575,7 +600,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
   it("does not park manual recovery over an already-terminal step", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    driveInvocationTerminal(db, "preflight", "blocked");
+    driveAttemptTerminal(db, "preflight", "blocked");
     finishWorkflowStep(db, {
       runId: RUN_ID,
       stepId: "preflight",
@@ -603,10 +628,10 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
 });
 
 describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
-  it("refuses a step with no dispatch invocation (the M9 direct-finalize lane)", () => {
+  it("refuses a step with no dispatch attempt (the M9 direct-finalize lane)", () => {
     const db = openSeededDb();
     // M9 live wrappers own the full lifecycle directly: startWorkflowStep ->
-    // finishWorkflowStep, writing ZERO executor invocation/round rows.
+    // finishWorkflowStep, writing ZERO executor attempt/round rows.
     db.prepare(
       "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
     ).run(RUN_ID, "preflight");
@@ -617,7 +642,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
       state: "succeeded",
       now: NOW + 2,
     });
-    expect(countInvocations(db)).toBe(0);
+    expect(countAttempts(db)).toBe(0);
 
     const result = reconcileDispatchedWorkflowStep({
       db,
@@ -627,12 +652,12 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     });
 
     // The reconciliation seam owns ONLY dispatched steps, keyed on the
-    // deterministic `::dispatch` id. With no such invocation it refuses and
+    // deterministic `::dispatch` id. With no such attempt it refuses and
     // writes nothing — so M9 direct-finalize and M10 reconciliation can never
     // both finalize the same step.
     expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.notDispatched);
     expect(stepRow(db, "preflight").state).toBe("succeeded");
-    expect(countInvocations(db)).toBe(0);
+    expect(countAttempts(db)).toBe(0);
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(false);
@@ -641,8 +666,8 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
   it("never overrides an existing terminal result (terminal immutability)", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
-    // The dispatch invocation reports a clean `succeeded`...
-    driveInvocationTerminal(db, "preflight", "succeeded");
+    // The dispatch attempt reports a clean `succeeded`...
+    driveAttemptTerminal(db, "preflight", "succeeded");
     // ...but the step was already moved to a DIFFERENT terminal (e.g. an operator
     // cancel) out of band before reconciliation runs.
     finishWorkflowStep(db, {

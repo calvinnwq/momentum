@@ -21,7 +21,7 @@
  *     {@link InvalidWorkflowGateError} *before* any row is written, so a durable
  *     gate can never carry a vocabulary string outside the contract or an
  *     incoherent scope anchor. A gate hangs from exactly one layer of the
- *     `workflow -> step -> invocation -> round` tree: the scope's anchor id plus
+ *     `workflow -> step -> attempt -> round` tree: the scope's anchor id plus
  *     its ancestry must be present, and any id deeper than the scope must be
  *     null.
  *   - Resolution runs through the same pure {@link evaluateGateDecision} brain
@@ -42,8 +42,9 @@ import {
   type GateDecisionMode,
   type GateDecisionRefusalCode,
   type GateDecisionRequest,
+  type WorkflowGateReadScope,
   type WorkflowGateScope,
-  type WorkflowGateType
+  type WorkflowGateType,
 } from "./gate.js";
 
 /** One typed validation problem with a field of a {@link NewWorkflowGate}. */
@@ -115,7 +116,7 @@ export type NewWorkflowGate = {
   gateId: string;
   workflowRunId: string;
   stepRunId?: string | null;
-  invocationId?: string | null;
+  attemptId?: string | null;
   roundId?: string | null;
   targetScope: WorkflowGateScope;
   gateType: WorkflowGateType;
@@ -126,14 +127,19 @@ export type NewWorkflowGate = {
   policyEnvelope?: readonly string[];
 };
 
-/** A durable gate record loaded from `workflow_gates`. */
+/**
+ * A durable gate record loaded from `workflow_gates`.
+ *
+ * Historical SDK-05 rows may retain the read-only `invocation` scope so replay
+ * event ids remain stable; new rows are restricted to {@link WorkflowGateScope}.
+ */
 export type WorkflowGateRecord = {
   gateId: string;
   workflowRunId: string;
   stepRunId: string | null;
-  invocationId: string | null;
+  attemptId: string | null;
   roundId: string | null;
-  targetScope: WorkflowGateScope;
+  targetScope: WorkflowGateReadScope;
   gateType: WorkflowGateType;
   reason: string;
   evidence: string | null;
@@ -163,7 +169,7 @@ export type InsertWorkflowGateOptions = {
 export function insertWorkflowGate(
   db: MomentumDb,
   gate: NewWorkflowGate,
-  options: InsertWorkflowGateOptions = {}
+  options: InsertWorkflowGateOptions = {},
 ): WorkflowGateRecord {
   const errors = validateNewGate(gate);
   if (errors.length > 0) {
@@ -174,7 +180,7 @@ export function insertWorkflowGate(
     gateId: gate.gateId,
     workflowRunId: gate.workflowRunId,
     stepRunId: gate.stepRunId ?? null,
-    invocationId: gate.invocationId ?? null,
+    attemptId: gate.attemptId ?? null,
     roundId: gate.roundId ?? null,
     targetScope: gate.targetScope,
     gateType: gate.gateType,
@@ -187,21 +193,21 @@ export function insertWorkflowGate(
     resolvedBy: null,
     resolutionMode: null,
     chosenAction: null,
-    resolution: null
+    resolution: null,
   };
   try {
     db.prepare(
       `INSERT INTO workflow_gates (
-         gate_id, workflow_run_id, step_run_id, invocation_id, round_id,
+         gate_id, workflow_run_id, step_run_id, attempt_id, round_id,
          target_scope, gate_type, reason, evidence, allowed_actions,
          recommended_action, policy_envelope, resolved_at, resolved_by,
          resolution_mode, chosen_action, resolution, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       record.gateId,
       record.workflowRunId,
       record.stepRunId,
-      record.invocationId,
+      record.attemptId,
       record.roundId,
       record.targetScope,
       record.gateType,
@@ -216,7 +222,7 @@ export function insertWorkflowGate(
       record.chosenAction,
       record.resolution,
       now,
-      now
+      now,
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -230,22 +236,21 @@ export function insertWorkflowGate(
 /** Load a persisted gate; `undefined` when none matches. */
 export function loadWorkflowGate(
   db: MomentumDb,
-  gateId: string
+  gateId: string,
 ): WorkflowGateRecord | undefined {
-  const row = db
-    .prepare(`${GATE_SELECT} WHERE gate_id = ?`)
-    .get(gateId) as WorkflowGateRow | undefined;
+  const row = db.prepare(`${GATE_SELECT} WHERE gate_id = ?`).get(gateId) as
+    WorkflowGateRow | undefined;
   return row === undefined ? undefined : rowToGate(row);
 }
 
 /** List every gate for a run, oldest first. */
 export function listWorkflowGatesForRun(
   db: MomentumDb,
-  workflowRunId: string
+  workflowRunId: string,
 ): WorkflowGateRecord[] {
   const rows = db
     .prepare(
-      `${GATE_SELECT} WHERE workflow_run_id = ? ORDER BY created_at, gate_id`
+      `${GATE_SELECT} WHERE workflow_run_id = ? ORDER BY created_at, gate_id`,
     )
     .all(workflowRunId) as WorkflowGateRow[];
   return rows.map(rowToGate);
@@ -258,13 +263,13 @@ export function listWorkflowGatesForRun(
  */
 export function listOpenWorkflowGatesForRun(
   db: MomentumDb,
-  workflowRunId: string
+  workflowRunId: string,
 ): WorkflowGateRecord[] {
   const rows = db
     .prepare(
       `${GATE_SELECT}
          WHERE workflow_run_id = ? AND resolved_at IS NULL
-         ORDER BY created_at, gate_id`
+         ORDER BY created_at, gate_id`,
     )
     .all(workflowRunId) as WorkflowGateRow[];
   return rows.map(rowToGate);
@@ -290,7 +295,7 @@ export function resolveWorkflowGate(
   db: MomentumDb,
   gateId: string,
   request: GateDecisionRequest,
-  options: ResolveWorkflowGateOptions = {}
+  options: ResolveWorkflowGateOptions = {},
 ): WorkflowGateRecord {
   const current = loadWorkflowGate(db, gateId);
   if (current === undefined) {
@@ -300,9 +305,9 @@ export function resolveWorkflowGate(
     {
       resolved: current.resolvedAt !== null,
       allowedActions: current.allowedActions,
-      policyEnvelope: current.policyEnvelope
+      policyEnvelope: current.policyEnvelope,
     },
-    request
+    request,
   );
   if (!outcome.ok) {
     throw new WorkflowGateDecisionError(outcome.code, outcome.message);
@@ -314,7 +319,7 @@ export function resolveWorkflowGate(
       `UPDATE workflow_gates
          SET resolved_at = ?, resolved_by = ?, resolution_mode = ?,
              chosen_action = ?, resolution = ?, updated_at = ?
-       WHERE gate_id = ? AND resolved_at IS NULL`
+       WHERE gate_id = ? AND resolved_at IS NULL`,
     )
     .run(now, resolvedBy, mode, chosenAction, resolution, now, gateId);
   if (Number(updateResult.changes) === 0) {
@@ -324,7 +329,7 @@ export function resolveWorkflowGate(
     }
     throw new WorkflowGateDecisionError(
       "gate_already_resolved",
-      "The gate is already resolved; refusing to re-decide it."
+      "The gate is already resolved; refusing to re-decide it.",
     );
   }
   return {
@@ -333,7 +338,7 @@ export function resolveWorkflowGate(
     resolvedBy,
     resolutionMode: mode,
     chosenAction,
-    resolution
+    resolution,
   };
 }
 
@@ -345,7 +350,7 @@ type WorkflowGateRow = {
   gate_id: string;
   workflow_run_id: string;
   step_run_id: string | null;
-  invocation_id: string | null;
+  attempt_id: string | null;
   round_id: string | null;
   target_scope: string;
   gate_type: string;
@@ -362,7 +367,7 @@ type WorkflowGateRow = {
 };
 
 const GATE_SELECT = `
-  SELECT gate_id, workflow_run_id, step_run_id, invocation_id, round_id,
+  SELECT gate_id, workflow_run_id, step_run_id, attempt_id, round_id,
          target_scope, gate_type, reason, evidence, allowed_actions,
          recommended_action, policy_envelope, resolved_at, resolved_by,
          resolution_mode, chosen_action, resolution
@@ -373,9 +378,9 @@ function rowToGate(row: WorkflowGateRow): WorkflowGateRecord {
     gateId: row.gate_id,
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
-    invocationId: row.invocation_id,
+    attemptId: row.attempt_id,
     roundId: row.round_id,
-    targetScope: row.target_scope as WorkflowGateScope,
+    targetScope: row.target_scope as WorkflowGateReadScope,
     gateType: row.gate_type as WorkflowGateType,
     reason: row.reason,
     evidence: row.evidence,
@@ -386,42 +391,35 @@ function rowToGate(row: WorkflowGateRow): WorkflowGateRecord {
     resolvedBy: row.resolved_by,
     resolutionMode: row.resolution_mode as GateDecisionMode | null,
     chosenAction: row.chosen_action,
-    resolution: row.resolution
+    resolution: row.resolution,
   };
 }
 
 /**
  * The four gate target scopes name a layer of the `workflow -> step ->
- * invocation -> round` tree. A gate must carry the scope's anchor id and every
+ * attempt -> round` tree. A gate must carry the scope's anchor id and every
  * ancestor id, and must not carry an id deeper than the scope.
  */
-const GATE_ANCESTRY_LAYERS = [
-  "workflow",
-  "step",
-  "invocation",
-  "round"
-] as const;
+const GATE_ANCESTRY_LAYERS = ["workflow", "step", "attempt", "round"] as const;
 
-function validateNewGate(
-  gate: NewWorkflowGate
-): WorkflowGateValidationError[] {
+function validateNewGate(gate: NewWorkflowGate): WorkflowGateValidationError[] {
   const errors: WorkflowGateValidationError[] = [];
   if (!isWorkflowGateType(gate.gateType)) {
     errors.push({
       code: "workflow_gate_unknown_type",
-      message: `unknown gate type: ${String(gate.gateType)}`
+      message: `unknown gate type: ${String(gate.gateType)}`,
     });
   }
   if (gate.reason.trim().length === 0) {
     errors.push({
       code: "workflow_gate_blank_reason",
-      message: "a gate requires a non-blank reason"
+      message: "a gate requires a non-blank reason",
     });
   }
   if (!isWorkflowGateScope(gate.targetScope)) {
     errors.push({
       code: "workflow_gate_unknown_scope",
-      message: `unknown gate target scope: ${String(gate.targetScope)}`
+      message: `unknown gate target scope: ${String(gate.targetScope)}`,
     });
     // Without a valid scope the ancestry check has no anchor index to apply.
     return errors;
@@ -430,21 +428,21 @@ function validateNewGate(
   const ids = [
     gate.workflowRunId,
     gate.stepRunId,
-    gate.invocationId,
-    gate.roundId
+    gate.attemptId,
+    gate.roundId,
   ];
   ids.forEach((id, index) => {
     const present = id !== null && id !== undefined && id !== "";
     if (index <= scopeIndex && !present) {
       errors.push({
         code: "workflow_gate_missing_scope_anchor",
-        message: `a ${gate.targetScope}-scoped gate requires the ${GATE_ANCESTRY_LAYERS[index]} id`
+        message: `a ${gate.targetScope}-scoped gate requires the ${GATE_ANCESTRY_LAYERS[index]} id`,
       });
     }
     if (index > scopeIndex && present) {
       errors.push({
         code: "workflow_gate_scope_id_overflow",
-        message: `a ${gate.targetScope}-scoped gate must not carry a ${GATE_ANCESTRY_LAYERS[index]} id`
+        message: `a ${gate.targetScope}-scoped gate must not carry a ${GATE_ANCESTRY_LAYERS[index]} id`,
       });
     }
   });

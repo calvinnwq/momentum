@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
@@ -10,7 +11,7 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type {
@@ -18,7 +19,7 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
+  ExecutorAttemptRecord,
   ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
@@ -65,15 +66,15 @@ async function run(argv: string[]): Promise<RunResult> {
   return { code, stdout, stderr };
 }
 
-function makeInvocation(runId: string): ExecutorInvocationRecord {
+function makeAttempt(runId: string): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 10,
     heartbeatAt: 10,
     finishedAt: null,
@@ -86,12 +87,12 @@ function makeRound(
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
     classification: "complete",
@@ -184,7 +185,7 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
        VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
   ).run(runId);
-  insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+  insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
   insertExecutorRound(db, makeRound(runId), { now: 1 });
   insertExecutorArtifact(db, makeArtifact(runId), { now: 5 });
   insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -354,11 +355,11 @@ describe("momentum workflow run logs", () => {
           risk: string;
         };
       }>;
-      invocations: Array<{
-        invocationId: string;
+      attempts: Array<{
+        attemptId: string;
         stepKey: string;
         executorFamily: string;
-        attempt: number;
+        attemptNumber: number;
         state: string;
         startedAt: number | null;
         heartbeatAt: number | null;
@@ -408,7 +409,27 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(1);
+    expect(payload.schemaVersion).toBe(2);
+    expect(Object.keys(payload).sort()).toEqual(
+      [
+        "approvals",
+        "attempts",
+        "command",
+        "dataDir",
+        "evidence",
+        "gates",
+        "generatedAt",
+        "leases",
+        "monitor",
+        "nextAction",
+        "ok",
+        "rounds",
+        "run",
+        "schemaVersion",
+        "steps",
+      ].sort(),
+    );
+    expect(payload).not.toHaveProperty("invocations");
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-logs01");
     expect(payload.steps.map((s) => s.stepId)).toEqual(["implementation"]);
@@ -436,20 +457,102 @@ describe("momentum workflow run logs", () => {
         }),
       }),
     ]);
-    expect(payload.invocations).toEqual([
+    expect(Object.keys(payload.gates[0]!).sort()).toEqual(
+      [
+        "allowedActions",
+        "attemptId",
+        "chosenAction",
+        "evidence",
+        "gateId",
+        "gateType",
+        "open",
+        "policyEnvelope",
+        "reason",
+        "recommendedAction",
+        "recommendedActionPolicy",
+        "resolution",
+        "resolutionMode",
+        "resolvedAt",
+        "resolvedBy",
+        "roundId",
+        "stepRunId",
+        "targetScope",
+        "workflowRunId",
+      ].sort(),
+    );
+    expect(payload.gates[0]).not.toHaveProperty("invocationId");
+    expect(payload.attempts).toEqual([
       expect.objectContaining({
-        invocationId: "inv-1",
+        attemptId: "inv-1",
         stepKey: "implementation",
         executorFamily: "goal-loop",
-        attempt: 1,
+        attemptNumber: 1,
         state: "running",
         startedAt: 10,
         heartbeatAt: 10,
         finishedAt: null,
       }),
     ]);
+    expect(Object.keys(payload.attempts[0]!).sort()).toEqual(
+      [
+        "attemptId",
+        "attemptNumber",
+        "executorFamily",
+        "finishedAt",
+        "heartbeatAt",
+        "startedAt",
+        "state",
+        "stepKey",
+        "stepRunId",
+        "workflowRunId",
+      ].sort(),
+    );
+    expect(payload.attempts[0]).not.toHaveProperty("attempt");
     expect(payload.rounds).toHaveLength(1);
     const round = payload.rounds[0]!;
+    expect(Object.keys(round).sort()).toEqual(
+      [
+        "agentProvider",
+        "artifactRoot",
+        "artifacts",
+        "attemptId",
+        "attemptNumber",
+        "changedFiles",
+        "checkpoints",
+        "classification",
+        "commitSha",
+        "decisions",
+        "effort",
+        "executorFamily",
+        "executorRecommendation",
+        "findings",
+        "finishedAt",
+        "heartbeatAt",
+        "humanGate",
+        "inputDigest",
+        "keyChanges",
+        "keyLearnings",
+        "learnings",
+        "logPaths",
+        "model",
+        "nativeRoundEvidence",
+        "outcome",
+        "recoveryCode",
+        "recoveryReason",
+        "remainingWork",
+        "resultDigest",
+        "roundId",
+        "roundIndex",
+        "startedAt",
+        "state",
+        "stepKey",
+        "stepRunId",
+        "summary",
+        "verificationStatus",
+      ].sort(),
+    );
+    expect(round).not.toHaveProperty("invocationId");
+    expect(round).not.toHaveProperty("attempt");
     expect(round.roundId).toBe("round-1");
     expect(round.summary).toBe("implemented the slice");
     expect(round.keyLearnings).toEqual([
@@ -522,7 +625,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
 
       const cases: Array<
         [
@@ -717,7 +820,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {
@@ -785,7 +888,7 @@ describe("momentum workflow run logs", () => {
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
            VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
       ).run(runId);
-      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
       insertExecutorRound(
         db,
         makeRound(runId, {
@@ -849,7 +952,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 1");
+    expect(result.stdout).toContain("Schema version: 2");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -864,7 +967,7 @@ describe("momentum workflow run logs", () => {
     );
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
-    expect(result.stdout).toContain("Executor invocations: 1");
+    expect(result.stdout).toContain("Executor attempts: 1");
     expect(result.stdout).toContain(
       "- inv-1 [implementation/running] attempt=1",
     );
@@ -898,5 +1001,57 @@ describe("momentum workflow run logs", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Implementation engine: native-goal-loop");
+  });
+
+  it("projects migrated invocation gate scopes into the v2 attempt vocabulary", async () => {
+    const dataDir = makeTempDir();
+    const legacyDb = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacyDb.exec(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/sdk05-legacy-executor-invocations.sql",
+          ),
+          "utf8",
+        ),
+      );
+    } finally {
+      legacyDb.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      "run-1",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      schemaVersion: number;
+      gates: Array<{
+        gateId: string;
+        targetScope: string;
+        attemptId: string | null;
+        roundId: string | null;
+      }>;
+    };
+    expect(payload.schemaVersion).toBe(2);
+    expect(
+      payload.gates.find((gate) => gate.gateId === "gate-invocation"),
+    ).toEqual(
+      expect.objectContaining({
+        targetScope: "attempt",
+        attemptId: "run-1::implementation::dispatch",
+        roundId: null,
+      }),
+    );
+    expect(
+      payload.gates.some((gate) => gate.targetScope === "invocation"),
+    ).toBe(false);
   });
 });

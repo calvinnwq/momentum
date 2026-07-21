@@ -2,22 +2,22 @@
  * Side-effecting twin of the pure workflow-step reconciliation decider.
  *
  * `dispatch/reconcile.ts` owns the *pure* half — the deterministic decision that
- * maps a dispatched step's terminal executor-invocation state to a finalization
+ * maps a dispatched step's terminal executor-attempt state to a finalization
  * outcome. This module owns the durable half: the single production seam the
  * runtime-consolidation plan names the reconciliation seam. It is to `dispatch/reconcile.ts` exactly
  * what `dispatch/execute.ts` is to `dispatch.ts`.
  *
- * The seam reads the deterministic `<run>::<step>::dispatch` invocation the
+ * The seam reads the newest dispatch attempt the
  * production dispatcher (`dispatch/execute.ts`) created, asks
  * {@link planWorkflowStepReconciliation} what to do, and applies that decision
  * inside a single `BEGIN IMMEDIATE` transaction:
  *
- *   - **finalize** (`succeeded` / `failed` / `cancelled` invocation): move the
+ *   - **finalize** (`succeeded` / `failed` / `cancelled` attempt): move the
  *     owning `workflow_steps` row to the matching clean terminal via
  *     `finishWorkflowStep`, release the held `dispatch` lease (honouring the
  *     scheduler contract's "release on terminal" half), and refresh the cached
  *     run-state / monitor columns through the ARCH-08 `run/runtime-state.ts` seam.
- *   - **manual_recovery** (`blocked` / `manual_recovery_required` invocation): the
+ *   - **manual_recovery** (`blocked` / `manual_recovery_required` attempt): the
  *     bounded attempt ended needing operator inspection, so the seam parks the run
  *     (`needs_manual_recovery`) and opens an operator-visible `manual_recovery_required`
  *     gate hung from the step instead of fabricating a clean terminal, then
@@ -29,29 +29,28 @@
  * Two structural guarantees from the runtime-consolidation plan ("The live-wrapper / executor-loop
  * step-finalization boundary"):
  *
- *   1. **Single owner, keyed on the dispatch id.** The seam acts only when a
- *      `<run>::<step>::dispatch` invocation exists. A step finalized by an live
- *      wrapper writes no executor invocation, so the seam refuses it
+ *   1. **Single owner, keyed on dispatch attempt rows.** The seam acts only when a
+ *      dispatch attempt row exists for the step. A step finalized by a live
+ *      wrapper writes no executor attempt, so the seam refuses it
  *      (`not_dispatched`) and writes nothing — there is no path where both live-wrapper
  *      direct-finalize and executor-loop reconciliation finalize the same step.
  *   2. **Idempotent on re-entry.** A second reconciliation of the same terminal
  *      evidence recognises the already-terminal step and makes no second
  *      finalization: the immutable terminal record (state / `finished_at` /
  *      `result_digest`) is preserved and the terminal result semantics never
- *      change, even if the durable invocation reports a different clean terminal.
+ *      change, even if the durable attempt reports a different clean terminal.
  *
- * Like the dispatcher, this module never writes `executor_invocations` /
+ * Like the dispatcher, this module never writes `executor_attempts` /
  * `executor_rounds`: the executor adapters own per-round evidence, and the daemon
  * — through this seam — decides step progress (`executor-loop.md` Core Boundary).
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
 import type { ExecutorName } from "../../executors/loop/reducer.js";
-import { deriveDispatchInvocationId } from "./execute.js";
 import { planWorkflowStepReconciliation } from "./reconcile.js";
 import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import { getWorkflowLease, releaseWorkflowLease } from "../leases.js";
@@ -71,11 +70,11 @@ import {
  * returns without explaining what it did to a dispatched step.
  */
 export const WORKFLOW_RECONCILE_RESULT_STATUS = {
-  /** No `<run>::<step>::dispatch` invocation: not this seam's step (live-wrapper lane). */
+  /** No dispatch attempt rows: not this seam's step (live-wrapper lane). */
   notDispatched: "reconcile_not_dispatched",
   /** The bounded executor session is still in progress; left running. */
   deferred: "reconcile_deferred",
-  /** A clean terminal invocation finalized the step this call. */
+  /** A clean terminal attempt finalized the step this call. */
   finalized: "reconcile_finalized",
   /** The step was already terminal; the immutable record was preserved. */
   alreadyFinalized: "reconcile_already_finalized",
@@ -129,40 +128,41 @@ export function reconcileDispatchedWorkflowStep(
   input: ReconcileDispatchedWorkflowStepInput,
 ): WorkflowStepReconciliationResult {
   const { db, runId, stepId, now, leaseIdentity } = input;
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  const invocation = loadExecutorInvocation(db, invocationId);
-  if (invocation === undefined) {
-    // No phase-1 dispatch invocation: this step was never dispatched through the
+  const attempt = loadLatestExecutorAttemptForStep(db, runId, stepId);
+  if (attempt === undefined) {
+    // No dispatch attempt rows: this step was never dispatched through the
     // executor-loop lane (a live-wrapper / imported step, which writes no executor
     // rows). The seam owns only dispatched steps, so it refuses and writes
-    // nothing — the structural guard against a double finalize.
+    // nothing — the structural guard against a double finalize. Only the newest
+    // attempt is consulted for terminal evidence: earlier attempts are
+    // immutable history.
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.notDispatched,
-      detail: invocationId,
+      detail: `${runId}::${stepId}`,
     };
   }
 
-  const plan = planWorkflowStepReconciliation(invocation.state);
+  const plan = planWorkflowStepReconciliation(attempt.state);
   if (plan.action === "not_terminal") {
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.deferred,
-      detail: invocation.state,
+      detail: attempt.state,
     };
   }
   if (plan.action === "manual_recovery") {
-    const recovery = readDispatchRecoveryEvidence(db, invocationId);
+    const recovery = readDispatchRecoveryEvidence(db, attempt.attemptId);
     return parkForManualRecovery(db, {
       runId,
       stepId,
-      dispatchStartedAt: invocation.startedAt,
-      executorFamily: invocation.executorFamily,
-      invocationAttempt: invocation.attempt,
-      invocationState: plan.invocationState,
+      dispatchStartedAt: attempt.startedAt,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
+      attemptState: plan.attemptState,
       reason:
         recovery === null
           ? plan.reason
           : `${recovery.code}: ${recovery.summary}`,
-      evidence: recovery?.code ?? plan.invocationState,
+      evidence: recovery?.code ?? plan.attemptState,
       ...(leaseIdentity !== undefined ? { leaseIdentity } : {}),
       now,
     });
@@ -170,8 +170,8 @@ export function reconcileDispatchedWorkflowStep(
   return finalizeDispatchedStep(db, {
     runId,
     stepId,
-    dispatchStartedAt: invocation.startedAt,
-    executorFamily: invocation.executorFamily,
+    dispatchStartedAt: attempt.startedAt,
+    executorFamily: attempt.executorFamily,
     stepState: plan.stepState,
     ...(leaseIdentity !== undefined ? { leaseIdentity } : {}),
     now,
@@ -308,8 +308,8 @@ function parkForManualRecovery(
     stepId: string;
     dispatchStartedAt: number | null;
     executorFamily: ExecutorName;
-    invocationAttempt: number;
-    invocationState: string;
+    attemptNumber: number;
+    attemptState: string;
     reason: string;
     evidence: string;
     leaseIdentity?: { holder: string; acquiredAt: number };
@@ -321,8 +321,8 @@ function parkForManualRecovery(
     stepId,
     dispatchStartedAt,
     executorFamily,
-    invocationAttempt,
-    invocationState,
+    attemptNumber,
+    attemptState,
     reason,
     evidence,
     leaseIdentity,
@@ -371,13 +371,13 @@ function parkForManualRecovery(
       const qualifiedGateId = deriveReconcileRecoveryGateId(
         runId,
         stepId,
-        invocationAttempt,
-        invocationState,
+        attemptNumber,
+        attemptState,
       );
       const legacyGateId = deriveLegacyReconcileRecoveryGateId(
         runId,
         stepId,
-        invocationState,
+        attemptState,
       );
       const legacyGate = loadWorkflowGate(db, legacyGateId);
       const gateId =
@@ -386,8 +386,8 @@ function parkForManualRecovery(
           : qualifiedGateId;
       if (loadWorkflowGate(db, gateId) === undefined) {
         // A step-scoped gate carries the run + step anchors only; the terminal
-        // invocation state is recorded as `evidence` (the gate ancestry model
-        // forbids an invocation id on a step-scoped gate).
+        // attempt state is recorded as `evidence` (the gate ancestry model
+        // forbids an attempt id on a step-scoped gate).
         insertWorkflowGate(
           db,
           {
@@ -417,7 +417,7 @@ function parkForManualRecovery(
     db.exec("COMMIT");
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
-      detail: invocationState,
+      detail: attemptState,
     };
   } catch (error) {
     safeRollback(db);
@@ -427,9 +427,9 @@ function parkForManualRecovery(
 
 function readDispatchRecoveryEvidence(
   db: MomentumDb,
-  invocationId: string,
+  attemptId: string,
 ): { code: string; summary: string } | null {
-  const latest = listExecutorRoundsForInvocation(db, invocationId).at(-1);
+  const latest = listExecutorRoundsForAttempt(db, attemptId).at(-1);
   if (
     latest?.recoveryCode === null ||
     latest?.recoveryCode === undefined ||
@@ -523,18 +523,18 @@ function releaseHeldDispatchLease(
 function deriveReconcileRecoveryGateId(
   runId: string,
   stepId: string,
-  invocationAttempt: number,
-  invocationState: string,
+  attemptNumber: number,
+  attemptState: string,
 ): string {
-  return `${runId}::${stepId}::reconcile-recovery::attempt-${invocationAttempt}::${invocationState}`;
+  return `${runId}::${stepId}::reconcile-recovery::attempt-${attemptNumber}::${attemptState}`;
 }
 
 function deriveLegacyReconcileRecoveryGateId(
   runId: string,
   stepId: string,
-  invocationState: string,
+  attemptState: string,
 ): string {
-  return `${runId}::${stepId}::reconcile-recovery::${invocationState}`;
+  return `${runId}::${stepId}::reconcile-recovery::${attemptState}`;
 }
 
 function safeRollback(db: MomentumDb): void {

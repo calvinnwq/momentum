@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_MS } from "../../../shared/process-limits.js";
-import type { ExecutorRoundRecord } from "../loop/reducer.js";
+import {
+  executorRoundReplayAttemptNumber,
+  nextExecutorRoundIndex,
+  type ExecutorRoundRecord,
+} from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import type {
   Executor,
@@ -15,7 +19,7 @@ import type {
 } from "../sdk/types.js";
 import {
   goalLoopRoundId,
-  invocationStateForRoundClassification,
+  attemptStateForRoundClassification,
   planGoalLoopRoundArtifacts,
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
@@ -92,9 +96,9 @@ export class GoalLoopSdkExecutor implements Executor<
       GoalLoopExecutorHostBindings
     >,
   ): ExecutorTickResult {
-    if (context.state.invocation.executorFamily !== this.name) {
+    if (context.state.attempt.executorFamily !== this.name) {
       throw new Error(
-        `GoalLoopSdkExecutor cannot run invocation ${context.state.invocation.invocationId} for ${context.state.invocation.executorFamily}.`,
+        `GoalLoopSdkExecutor cannot run attempt ${context.state.attempt.attemptId} for ${context.state.attempt.executorFamily}.`,
       );
     }
     const selection =
@@ -102,7 +106,7 @@ export class GoalLoopSdkExecutor implements Executor<
     const current = context.state.currentRound;
     const reusingMaterializedRound =
       current !== null &&
-      current.round.attempt === context.state.invocation.attempt &&
+      current.round.attemptNumber === context.state.attempt.attemptNumber &&
       current.round.classification === null &&
       context.hostBindings.roundAlreadyMaterialized === true &&
       !current.checkpoints.some(
@@ -110,7 +114,7 @@ export class GoalLoopSdkExecutor implements Executor<
       );
     if (
       current !== null &&
-      current.round.attempt === context.state.invocation.attempt &&
+      current.round.attemptNumber === context.state.attempt.attemptNumber &&
       current.round.classification === null &&
       !reusingMaterializedRound
     ) {
@@ -135,17 +139,18 @@ export class GoalLoopSdkExecutor implements Executor<
 
     const expectedRoundIndex = reusingMaterializedRound
       ? current.round.roundIndex
-      : context.state.rounds.length;
+      : nextExecutorRoundIndex(
+          context.state.rounds.map((snapshot) => snapshot.round),
+        );
+    const expectedRoundId = reusingMaterializedRound
+      ? current.round.roundId
+      : goalLoopRoundId(context.state.attempt.attemptId, expectedRoundIndex);
     const hostStart = context.hostBindings.start;
     if (
-      hostStart.invocationId !== context.state.invocation.invocationId ||
-      hostStart.attempt !== context.state.invocation.attempt ||
+      hostStart.attemptId !== context.state.attempt.attemptId ||
+      hostStart.attemptNumber !== context.state.attempt.attemptNumber ||
       hostStart.roundIndex !== expectedRoundIndex ||
-      hostStart.roundId !==
-        goalLoopRoundId(
-          context.state.invocation.invocationId,
-          expectedRoundIndex,
-        )
+      hostStart.roundId !== expectedRoundId
     ) {
       throw new Error(
         "Native goal-loop host round binding is stale or invalid.",
@@ -175,6 +180,7 @@ export class GoalLoopSdkExecutor implements Executor<
       ]);
     }
 
+    const roundId = durableRound.roundId;
     let completionDurable = false;
     try {
       context.signal.throwIfAborted();
@@ -196,21 +202,18 @@ export class GoalLoopSdkExecutor implements Executor<
           : {}),
       });
       const artifacts = planGoalLoopRoundArtifacts({
-        roundId: start.roundId,
+        roundId,
         logPaths: durableRound.logPaths,
         ...(mechanism.artifacts !== undefined
           ? { artifacts: mechanism.artifacts }
           : {}),
       });
       for (const artifact of artifacts) {
-        context.envelope.recordArtifact(
-          start.roundId,
-          withoutRoundId(artifact),
-        );
+        context.envelope.recordArtifact(roundId, withoutRoundId(artifact));
       }
       const checkpoints = [
         {
-          checkpointId: `${start.roundId}-checkpoint-1`,
+          checkpointId: `${roundId}-checkpoint-1`,
           sequence: 1,
           stage: "mechanism_completed",
           detail: durableDecisionDetail(plan.decision, mechanism),
@@ -219,14 +222,14 @@ export class GoalLoopSdkExecutor implements Executor<
           ? []
           : [
               {
-                checkpointId: `${start.roundId}-checkpoint-2`,
+                checkpointId: `${roundId}-checkpoint-2`,
                 sequence: 2,
                 stage: "result_captured",
                 detail: null,
               },
             ]),
       ];
-      context.envelope.recordRoundProgress(start.roundId, {
+      context.envelope.recordRoundProgress(roundId, {
         observation: observationFromPersistencePlan(
           plan.captureUpdate,
           plan.terminalUpdate,
@@ -234,7 +237,7 @@ export class GoalLoopSdkExecutor implements Executor<
         checkpoints,
       });
       completionDurable = true;
-      return tickResult(start.roundId, plan.decision);
+      return tickResult(roundId, plan.decision);
     } finally {
       context.hostBindings.settleRepoOwnership?.(completionDurable);
     }
@@ -270,7 +273,15 @@ function assertGoalLoopRoundMatchesHost(
     hostBindings,
     selection,
   );
-  if (binding?.detail !== expectedBinding) {
+  const replayBinding = goalLoopDispatchBindingDetailForAttempt(
+    hostBindings,
+    selection,
+    executorRoundReplayAttemptNumber(round),
+  );
+  if (
+    binding?.detail !== expectedBinding &&
+    binding?.detail !== replayBinding
+  ) {
     // Rounds written before the versioned binding shipped carried a null
     // checkpoint detail. That legacy evidence is sufficient only to classify
     // an already-completed mechanism. Relaunching incomplete work requires the
@@ -291,18 +302,33 @@ export function goalLoopDispatchBindingDetail(
   hostBindings: Readonly<GoalLoopExecutorHostBindings>,
   selection: Readonly<GoalLoopRoundSelection>,
 ): string {
+  return goalLoopDispatchBindingDetailForAttempt(
+    hostBindings,
+    selection,
+    hostBindings.start.attemptNumber,
+  );
+}
+
+function goalLoopDispatchBindingDetailForAttempt(
+  hostBindings: Readonly<GoalLoopExecutorHostBindings>,
+  selection: Readonly<GoalLoopRoundSelection>,
+  attemptNumber: number,
+): string {
   const start = hostBindings.start;
   const payload = canonicalJson({
     version: 2,
     selection,
     hostBindingIdentity: hostBindings.hostBindingIdentity ?? null,
     start: {
+      // Frozen digest schema: the payload keys keep their pre-attempt-model
+      // wire names so binding digests recorded before the migration keep
+      // verifying. The keys never leave this hash.
       roundId: start.roundId,
-      invocationId: start.invocationId,
+      invocationId: start.attemptId,
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
-      attempt: start.attempt,
+      attempt: attemptNumber,
       roundIndex: start.roundIndex,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
@@ -357,12 +383,12 @@ function selectionFromConfig(
 function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
   return {
     roundId: round.roundId,
-    invocationId: round.invocationId,
+    attemptId: round.attemptId,
     workflowRunId: round.workflowRunId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
     executorFamily: round.executorFamily,
-    attempt: round.attempt,
+    attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: "running",
     agentProvider: round.agentProvider,
@@ -446,7 +472,7 @@ function tickResult(
     roundId,
     recommendation: decision.classification,
     recommendedRoundState: decision.roundState,
-    recommendedInvocationState: invocationStateForRoundClassification(
+    recommendedAttemptState: attemptStateForRoundClassification(
       decision.classification,
     ),
     recoveryCode: decision.recoveryCode,

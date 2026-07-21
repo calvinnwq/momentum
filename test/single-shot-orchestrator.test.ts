@@ -5,20 +5,20 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  ExecutorInvocationConflictError,
+  ExecutorAttemptConflictError,
   insertExecutorCheckpoint,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
   loadExecutorRound,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import {
   resolveSingleShotRoundSelection,
-  singleShotInvocationId,
+  singleShotAttemptId,
   singleShotRoundId,
   type PlanSingleShotRoundStartInput,
   type SingleShotExecutorFamily,
@@ -32,8 +32,8 @@ import {
 // Drives the single-shot executor step (one-shot / script families) through the
 // *real* executor-loop persistence layer and round transition graph around an
 // injected bounded mechanism. Unlike the goal-loop driver there is no loop — a
-// single shot owns exactly one round — so the entrypoint inserts the invocation,
-// drives the one round, and settles the invocation directly into the round
+// single shot owns exactly one round — so the entrypoint inserts the attempt,
+// drives the one round, and settles the attempt directly into the round
 // decision's terminal state. Proves: the per-round agent/model/input evidence
 // frozen at start composes with the result/verification/commit evidence persisted
 // at the end; a *script* success reaches `succeeded` through a bare capture (no
@@ -59,9 +59,9 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so a round needs a real invocation, which needs a
+// Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows + an
-// invocation; the driver itself inserts the round.
+// attempt; the driver itself inserts the round.
 function openRoundDb(
   family: SingleShotExecutorFamily = "one-shot",
 ): MomentumDb {
@@ -73,23 +73,23 @@ function openRoundDb(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "inv-1",
+  const attempt: ExecutorAttemptRecord = {
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: family,
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
 }
 
-// Only the parent workflow rows — runSingleShotStep inserts the invocation itself.
+// Only the parent workflow rows — runSingleShotStep inserts the attempt itself.
 function openStepDb(): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
@@ -119,12 +119,12 @@ function buildStart(
       : resolveSingleShotRoundSelection({});
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     family,
-    attempt: 1,
+    attemptNumber: 1,
     selection,
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-1",
@@ -214,7 +214,7 @@ describe("runSingleShotRound — one-shot success", () => {
     // Terminal classification + persisted result / repo-safety evidence.
     expect(outcome.round.state).toBe("succeeded");
     expect(outcome.round.classification).toBe("complete");
-    expect(outcome.decision.invocationState).toBe("succeeded");
+    expect(outcome.decision.attemptState).toBe("succeeded");
     expect(outcome.round.summary).toBe("ran the single shot");
     expect(outcome.round.keyChanges).toEqual(["added the single-shot driver"]);
     expect(outcome.round.resultDigest).toBe("sha256:result");
@@ -257,7 +257,7 @@ describe("runSingleShotRound — one-shot success", () => {
     expect(outcome.round.startedAt).toBe(1_500);
     expect(outcome.round.finishedAt).toBe(5_000);
     expect(outcome.round.heartbeatAt).toBe(5_000);
-    expect(outcome.invocation.finishedAt).toBe(5_000);
+    expect(outcome.attempt.finishedAt).toBe(5_000);
   });
 
   it("atomically settles an in-flight aborted runner as cancelled", async () => {
@@ -278,7 +278,7 @@ describe("runSingleShotRound — one-shot success", () => {
       }),
     ).rejects.toThrow(/aborted/i);
 
-    expect(loadExecutorInvocation(db, "inv-1")).toMatchObject({
+    expect(loadExecutorAttempt(db, "inv-1")).toMatchObject({
       state: "cancelled",
       finishedAt: 3_000,
     });
@@ -323,7 +323,7 @@ describe("runSingleShotRound — one-shot success", () => {
       },
     });
 
-    expect(outcome.invocation.state).toBe("succeeded");
+    expect(outcome.attempt.state).toBe("succeeded");
     expect(outcome.round.state).toBe("succeeded");
     expect(outcome.round.classification).toBe("complete");
   });
@@ -348,7 +348,7 @@ describe("runSingleShotRound — one-shot success", () => {
     ).rejects.toThrow(/aborted/i);
 
     expect(ran).toBe(false);
-    expect(loadExecutorInvocation(db, "inv-1")?.state).toBe("cancelled");
+    expect(loadExecutorAttempt(db, "inv-1")?.state).toBe("cancelled");
     expect(loadExecutorRound(db, "round-1")).toMatchObject({
       state: "cancelled",
       classification: "cancelled",
@@ -431,7 +431,7 @@ describe("runSingleShotRound — one-shot success", () => {
       }),
     ).rejects.toThrow("repository cleanup failed");
 
-    expect(loadExecutorInvocation(db, "inv-1")).toMatchObject({
+    expect(loadExecutorAttempt(db, "inv-1")).toMatchObject({
       state: "running",
       finishedAt: null,
     });
@@ -800,8 +800,8 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
   });
 });
 
-describe("runSingleShotStep — invocation/round materialization", () => {
-  it("materializes a one-shot invocation + single round and drives to a terminal success", async () => {
+describe("runSingleShotStep — attempt/round materialization", () => {
+  it("materializes a one-shot attempt + single round and drives to a terminal success", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
@@ -809,7 +809,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({
         stepConfig: {
           agentProvider: "claude",
@@ -822,31 +822,26 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
     });
 
-    const invocationId = singleShotInvocationId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
-    expect(result.invocation.invocationId).toBe(invocationId);
-    expect(result.invocation.executorFamily).toBe("one-shot");
-    expect(result.invocation.state).toBe("succeeded");
-    expect(result.invocation.finishedAt).not.toBeNull();
-    expect(loadExecutorInvocation(db, invocationId)).toEqual(result.invocation);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    expect(result.attempt.attemptId).toBe(attemptId);
+    expect(result.attempt.executorFamily).toBe("one-shot");
+    expect(result.attempt.state).toBe("succeeded");
+    expect(result.attempt.finishedAt).not.toBeNull();
+    expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
 
-    // The single round is materialized below the invocation with the deterministic id.
-    expect(result.round.round.roundId).toBe(singleShotRoundId(invocationId));
+    // The single round is materialized below the attempt with the deterministic id.
+    expect(result.round.round.roundId).toBe(singleShotRoundId(attemptId));
     expect(result.round.round.roundIndex).toBe(0);
-    const durableRounds = listExecutorRoundsForInvocation(db, invocationId);
+    const durableRounds = listExecutorRoundsForAttempt(db, attemptId);
     expect(durableRounds.map((r) => r.roundId)).toEqual([
-      singleShotRoundId(invocationId),
+      singleShotRoundId(attemptId),
     ]);
 
     // Selection frozen + runtime inputs threaded + clock stamped.
     expect(result.round.round.agentProvider).toBe("claude");
     expect(result.round.round.inputDigest).toBe("sha256:input-0");
     expect(result.round.round.artifactRoot).toBe("/artifacts/single-shot");
-    expect(result.invocation.startedAt).toBe(1_000);
+    expect(result.attempt.startedAt).toBe(1_000);
     expect(result.round.round.startedAt).toBe(1_100);
     expect(result.round.round.finishedAt).toBeGreaterThan(
       result.round.round.startedAt ?? -1,
@@ -862,7 +857,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -875,7 +870,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     });
   });
 
-  it("materializes a script invocation and reaches a terminal success", async () => {
+  it("materializes a script attempt and reaches a terminal success", async () => {
     const db = openStepDb();
     let observedCommand: string | undefined;
     const result = await runSingleShotStep({
@@ -885,7 +880,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -895,10 +890,10 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       },
     });
 
-    const invocationId = singleShotInvocationId("run-1", "step-1", "script", 1);
-    expect(result.invocation.invocationId).toBe(invocationId);
-    expect(result.invocation.executorFamily).toBe("script");
-    expect(result.invocation.state).toBe("succeeded");
+    const attemptId = singleShotAttemptId("run-1", "step-1", "script", 1);
+    expect(result.attempt.attemptId).toBe(attemptId);
+    expect(result.attempt.executorFamily).toBe("script");
+    expect(result.attempt.state).toBe("succeeded");
     expect(result.round.round.executorFamily).toBe("script");
     expect(observedCommand).toBe("test-script");
   });
@@ -930,13 +925,13 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         "portable config.command identity",
       );
       const count = db
-        .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+        .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
         .get() as { count: number };
       expect(count.count).toBe(0);
     }
   });
 
-  it("does not insert an invocation when round-input resolution aborts", async () => {
+  it("does not insert an attempt when round-input resolution aborts", async () => {
     const db = openStepDb();
     const abort = new AbortController();
 
@@ -947,7 +942,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({}),
         signal: abort.signal,
         resolveRoundInputs: () => {
@@ -959,7 +954,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).rejects.toThrow(/aborted/i);
 
     const count = db
-      .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+      .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
       .get() as { count: number };
     expect(count.count).toBe(0);
   });
@@ -1025,7 +1020,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
 
       await expect(runSingleShotStep(input)).rejects.toThrow(testCase.message);
       const count = db
-        .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+        .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
         .get() as { count: number };
       expect(count.count).toBe(0);
     }
@@ -1041,7 +1036,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({
           stepConfig: { timeoutMs: 0 },
         }),
@@ -1051,7 +1046,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).rejects.toThrow("timeoutMs must be a positive integer");
 
     const count = db
-      .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
+      .prepare("SELECT COUNT(*) AS count FROM executor_attempts")
       .get() as { count: number };
     expect(count.count).toBe(0);
 
@@ -1062,7 +1057,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 2,
+        attemptNumber: 2,
         selection: resolveSingleShotRoundSelection({
           stepConfig: { timeoutMs: 1_500 },
         }),
@@ -1072,48 +1067,43 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).rejects.toThrow("timeoutMs must be a whole number of seconds");
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
   });
 
-  it("inserts the materialized invocation before the round runs", async () => {
+  it("inserts the materialized attempt before the round runs", async () => {
     const db = openStepDb();
-    const invocationId = singleShotInvocationId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
     let durableStateDuringRound:
-      { invocation: string | undefined; round: string | undefined } | undefined;
+      { attempt: string | undefined; round: string | undefined } | undefined;
     await runSingleShotStep({
       db,
       family: "one-shot",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
       runRound: () => {
         durableStateDuringRound = {
-          invocation: loadExecutorInvocation(db, invocationId)?.state,
-          round: listExecutorRoundsForInvocation(db, invocationId)[0]?.state,
+          attempt: loadExecutorAttempt(db, attemptId)?.state,
+          round: listExecutorRoundsForAttempt(db, attemptId)[0]?.state,
         };
         return { outcome: { ok: true }, result: runnerResult() };
       },
     });
     expect(durableStateDuringRound).toEqual({
-      invocation: "running",
+      attempt: "running",
       round: "running",
     });
   });
 
-  it("rolls back the invocation when initial round materialization fails", async () => {
+  it("rolls back the attempt when initial round materialization fails", async () => {
     const db = openStepDb();
     db.exec(`
       CREATE TRIGGER reject_initial_single_shot_round
@@ -1130,7 +1120,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({}),
         resolveRoundInputs: roundInputs,
         runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
@@ -1139,9 +1129,9 @@ describe("runSingleShotStep — invocation/round materialization", () => {
 
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
     expect(
@@ -1153,7 +1143,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).toBe(0);
   });
 
-  it("rolls back the invocation and round when dispatch binding materialization fails", async () => {
+  it("rolls back the attempt and round when dispatch binding materialization fails", async () => {
     const db = openStepDb();
     db.exec(`
       CREATE TRIGGER reject_initial_dispatch_binding
@@ -1171,7 +1161,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({}),
         resolveRoundInputs: roundInputs,
         runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
@@ -1180,9 +1170,9 @@ describe("runSingleShotStep — invocation/round materialization", () => {
 
     expect(
       (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM executor_invocations")
-          .get() as { count: number }
+        db.prepare("SELECT COUNT(*) AS count FROM executor_attempts").get() as {
+          count: number;
+        }
       ).count,
     ).toBe(0);
     expect(
@@ -1201,7 +1191,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     ).toBe(0);
   });
 
-  it("routes a failing round to a terminal failed invocation", async () => {
+  it("routes a failing round to a terminal failed attempt", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
@@ -1210,7 +1200,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -1220,11 +1210,11 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     });
 
     expect(result.round.round.state).toBe("failed");
-    expect(result.invocation.state).toBe("failed");
-    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(result.attempt.state).toBe("failed");
+    expect(result.attempt.finishedAt).not.toBeNull();
   });
 
-  it("settles an auth_unavailable round into a terminal blocked invocation", async () => {
+  it("settles an auth_unavailable round into a terminal blocked attempt", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
@@ -1232,7 +1222,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -1242,12 +1232,12 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     });
 
     expect(result.round.round.state).toBe("blocked");
-    expect(result.invocation.state).toBe("blocked");
-    // `blocked` is a terminal invocation state, so finished_at is stamped.
-    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(result.attempt.state).toBe("blocked");
+    // `blocked` is a terminal attempt state, so finished_at is stamped.
+    expect(result.attempt.finishedAt).not.toBeNull();
   });
 
-  it("settles a head_mismatch round into a terminal manual_recovery_required invocation", async () => {
+  it("settles a head_mismatch round into a terminal manual_recovery_required attempt", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
@@ -1255,7 +1245,7 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -1264,23 +1254,21 @@ describe("runSingleShotStep — invocation/round materialization", () => {
       }),
     });
 
-    // The manual-recovery branch carries an `invocationState` distinct from
-    // `roundState` in the decision; the step settles the durable invocation into
+    // The manual-recovery branch carries an `attemptState` distinct from
+    // `roundState` in the decision; the step settles the durable attempt into
     // that state, not the `failed` / `blocked` the other abort terminals take. No
     // prior step test exercised this fourth terminal, so a regression of the
-    // manual-recovery `invocationState` would otherwise reach the durable row
+    // manual-recovery `attemptState` would otherwise reach the durable row
     // unobserved (the round-level head_mismatch test pins only `roundState`).
     expect(result.round.round.state).toBe("manual_recovery_required");
-    expect(result.round.decision.invocationState).toBe(
-      "manual_recovery_required",
-    );
-    expect(result.invocation.state).toBe("manual_recovery_required");
-    // `manual_recovery_required` is a terminal invocation state, so finished_at
+    expect(result.round.decision.attemptState).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
+    // `manual_recovery_required` is a terminal attempt state, so finished_at
     // is stamped.
-    expect(result.invocation.finishedAt).not.toBeNull();
-    // The durable invocation row matches the settled return value.
-    expect(loadExecutorInvocation(db, result.invocation.invocationId)).toEqual(
-      result.invocation,
+    expect(result.attempt.finishedAt).not.toBeNull();
+    // The durable attempt row matches the settled return value.
+    expect(loadExecutorAttempt(db, result.attempt.attemptId)).toEqual(
+      result.attempt,
     );
   });
 });
@@ -1289,10 +1277,10 @@ describe("runSingleShotStep — invocation/round materialization", () => {
 // runSingleShotStep — single-owner enforcement.
 // ---------------------------------------------------------------------------
 //
-// The deterministic invocation id `(workflowRunId, stepRunId, family, attempt)`
+// The deterministic attempt id `(workflowRunId, stepRunId, family, attempt)`
 // is the adapter's single-owner key. A non-terminal owner can reattach for crash
 // recovery; a settled duplicate cannot mint a second owner. A genuine re-run
-// uses a fresh `attempt`, minting an independent invocation.
+// uses a fresh `attempt`, minting an independent attempt.
 
 describe("runSingleShotStep — single-owner enforcement", () => {
   function dispatch(db: MomentumDb, attempt: number) {
@@ -1302,7 +1290,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt,
+      attemptNumber: attempt,
       selection: resolveSingleShotRoundSelection({
         stepConfig: {
           agentProvider: "claude",
@@ -1319,49 +1307,35 @@ describe("runSingleShotStep — single-owner enforcement", () => {
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", async () => {
     const db = openStepDb();
     const first = await dispatch(db, 1);
-    const invocationId = singleShotInvocationId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
 
     // Snapshot the durable owner + round the first dispatch settled.
-    const ownerBefore = loadExecutorInvocation(db, invocationId);
-    const roundsBefore = listExecutorRoundsForInvocation(db, invocationId);
-    expect(ownerBefore).toEqual(first.invocation);
+    const ownerBefore = loadExecutorAttempt(db, attemptId);
+    const roundsBefore = listExecutorRoundsForAttempt(db, attemptId);
+    expect(ownerBefore).toEqual(first.attempt);
 
-    // A second dispatch under the same identity collides on the invocation id and
+    // A second dispatch under the same identity collides on the attempt id and
     // fails closed before any work — never a silent second owner.
-    await expect(dispatch(db, 1)).rejects.toThrow(
-      ExecutorInvocationConflictError,
-    );
+    await expect(dispatch(db, 1)).rejects.toThrow(ExecutorAttemptConflictError);
 
     // The durable owner + its round are byte-for-byte unchanged.
-    expect(loadExecutorInvocation(db, invocationId)).toEqual(ownerBefore);
-    expect(listExecutorRoundsForInvocation(db, invocationId)).toEqual(
-      roundsBefore,
-    );
+    expect(loadExecutorAttempt(db, attemptId)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForAttempt(db, attemptId)).toEqual(roundsBefore);
   });
 
-  it("refuses invocation-only reattach without a durable dispatch binding", async () => {
+  it("refuses attempt-only reattach without a durable dispatch binding", async () => {
     const db = openStepDb();
-    const invocationId = singleShotInvocationId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
-    insertExecutorInvocation(
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    insertExecutorAttempt(
       db,
       {
-        invocationId,
+        attemptId,
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
         executorFamily: "one-shot",
         state: "running",
-        attempt: 1,
+        attemptNumber: 1,
         startedAt: 1,
         heartbeatAt: 1,
         finishedAt: null,
@@ -1372,10 +1346,10 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     await expect(dispatch(db, 1)).rejects.toThrow(
       "no durable round dispatch binding",
     );
-    expect(listExecutorRoundsForInvocation(db, invocationId)).toEqual([]);
+    expect(listExecutorRoundsForAttempt(db, attemptId)).toEqual([]);
   });
 
-  it("reattaches a non-terminal invocation and classifies completed durable work", async () => {
+  it("reattaches a non-terminal attempt and classifies completed durable work", async () => {
     const db = openStepDb();
     let mechanismRuns = 0;
     db.exec(`
@@ -1394,7 +1368,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({}),
         resolveRoundInputs: roundInputs,
         now: monotonicClock(),
@@ -1405,16 +1379,12 @@ describe("runSingleShotStep — single-owner enforcement", () => {
       }),
     ).rejects.toThrow("simulated daemon crash");
 
-    const invocationId = singleShotInvocationId(
-      "run-1",
-      "step-1",
-      "one-shot",
-      1,
-    );
-    expect(loadExecutorInvocation(db, invocationId)?.state).toBe("running");
-    expect(
-      loadExecutorRound(db, singleShotRoundId(invocationId)),
-    ).toMatchObject({ state: "capturing_result", classification: null });
+    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    expect(loadExecutorAttempt(db, attemptId)?.state).toBe("running");
+    expect(loadExecutorRound(db, singleShotRoundId(attemptId))).toMatchObject({
+      state: "capturing_result",
+      classification: null,
+    });
     db.exec("DROP TRIGGER reject_single_shot_classification");
 
     await expect(
@@ -1424,7 +1394,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        attempt: 1,
+        attemptNumber: 1,
         selection: resolveSingleShotRoundSelection({}),
         resolveRoundInputs: () => ({
           ...roundInputs(),
@@ -1444,7 +1414,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       selection: resolveSingleShotRoundSelection({}),
       resolveRoundInputs: roundInputs,
       now: monotonicClock(),
@@ -1455,31 +1425,29 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     });
 
     expect(mechanismRuns).toBe(1);
-    expect(resumed.invocation.state).toBe("succeeded");
+    expect(resumed.attempt.state).toBe("succeeded");
     expect(resumed.round.round.classification).toBe("complete");
   });
 
-  it("mints a distinct, independent invocation for a fresh re-run attempt", async () => {
+  it("mints a distinct, independent attempt for a fresh re-run attempt", async () => {
     const db = openStepDb();
     const first = await dispatch(db, 1);
     const second = await dispatch(db, 2);
 
-    expect(first.invocation.invocationId).toBe(
-      singleShotInvocationId("run-1", "step-1", "one-shot", 1),
+    expect(first.attempt.attemptId).toBe(
+      singleShotAttemptId("run-1", "step-1", "one-shot", 1),
     );
-    expect(second.invocation.invocationId).toBe(
-      singleShotInvocationId("run-1", "step-1", "one-shot", 2),
+    expect(second.attempt.attemptId).toBe(
+      singleShotAttemptId("run-1", "step-1", "one-shot", 2),
     );
-    expect(first.invocation.invocationId).not.toBe(
-      second.invocation.invocationId,
-    );
+    expect(first.attempt.attemptId).not.toBe(second.attempt.attemptId);
 
     // Both owners coexist durably; the re-run did not overwrite the prior attempt.
-    expect(loadExecutorInvocation(db, first.invocation.invocationId)).toEqual(
-      first.invocation,
+    expect(loadExecutorAttempt(db, first.attempt.attemptId)).toEqual(
+      first.attempt,
     );
-    expect(loadExecutorInvocation(db, second.invocation.invocationId)).toEqual(
-      second.invocation,
+    expect(loadExecutorAttempt(db, second.attempt.attemptId)).toEqual(
+      second.attempt,
     );
   });
 });

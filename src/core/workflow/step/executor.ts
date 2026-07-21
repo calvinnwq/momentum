@@ -118,7 +118,7 @@ export type WorkflowStepExecutorInput = {
   runId: string;
   stepId: string;
   kind: WorkflowStepExecutorKind;
-  attempt: number;
+  attemptNumber: number;
   agentProvider?: string | null;
   model?: string | null;
   effort?: string | null;
@@ -340,12 +340,12 @@ function validateInput(
       input.resultJsonPath,
     );
   }
-  if (!Number.isInteger(input.attempt) || input.attempt < 1) {
+  if (!Number.isInteger(input.attemptNumber) || input.attemptNumber < 1) {
     return invalidInputError(
-      "attempt",
+      "attemptNumber",
       input.executorLogPath,
       input.resultJsonPath,
-      "WorkflowStepExecutorInput.attempt must be a positive integer.",
+      "WorkflowStepExecutorInput.attemptNumber must be a positive integer.",
     );
   }
   if (

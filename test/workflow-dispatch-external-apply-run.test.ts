@@ -16,12 +16,12 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  listExecutorRoundsForInvocation,
+  loadExecutorAttempt,
+  listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
@@ -53,7 +53,7 @@ import type { UpdateIntent } from "../src/core/intent/update-intents.js";
  *     evidence, and RC-2 finalizes the step succeeded;
  *   - every M6 failure parks the run for manual recovery with operator-visible
  *     evidence (the fail-closed default for high-risk external writes);
- *   - re-entry over an already-terminal dispatch invocation NEVER re-runs the
+ *   - re-entry over an already-terminal dispatch attempt NEVER re-runs the
  *     external write (no duplicate Linear mutation, no second terminalization);
  *   - a step with no dispatch scaffold (the M9 direct-finalize lane) is refused
  *     without ever running the write.
@@ -120,7 +120,7 @@ function approveAndClaim(
 
 /**
  * Drive a (dispatchable) step through the production base dispatch so it lands
- * `running` with a `<run>::<step>::dispatch` invocation (`running`) + scaffold
+ * `running` with a `<run>::<step>::dispatch` attempt (`running`) + scaffold
  * round (`pending`) and a held dispatch lease — the exact substrate the
  * external-apply producer runs against. The producer is family-gated: it only runs the injected M6 write path when the
  * scaffold records `external-apply`, so tests set the definition executor before
@@ -183,9 +183,9 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
 }
 
 function dispatchRounds(db: MomentumDb, stepId: string = STEP_ID) {
-  return listExecutorRoundsForInvocation(
+  return listExecutorRoundsForAttempt(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId),
+    deriveDispatchAttemptId(RUN_ID, stepId, 1),
   );
 }
 
@@ -371,7 +371,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
 
     expect(runner.calls()).toBe(1);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.executorFamily,
     ).toBe("external-apply");
     expect(stepState(db)).toBe("succeeded");
@@ -392,11 +392,11 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     await dispatchStepThroughExternalApplyWrapper(db, runner);
 
     expect(runner.calls()).toBe(1);
-    const invocation = loadExecutorInvocation(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(attempt?.state).toBe("manual_recovery_required");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
@@ -430,12 +430,12 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       WORKFLOW_RECONCILE_RESULT_STATUS.finalized,
     );
 
-    // The dispatch invocation + round carry the captured terminal evidence.
-    const invocation = loadExecutorInvocation(
+    // The dispatch attempt + round carry the captured terminal evidence.
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("succeeded");
+    expect(attempt?.state).toBe("succeeded");
     const rounds = dispatchRounds(db);
     expect(rounds).toHaveLength(1);
     expect(rounds[0]?.state).toBe("succeeded");
@@ -533,13 +533,13 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
       WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery,
     );
 
-    // The invocation carries terminal manual-recovery evidence — not a fake clean
+    // The attempt carries terminal manual-recovery evidence — not a fake clean
     // terminal — and the precise M6 cause is preserved for the operator.
-    const invocation = loadExecutorInvocation(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, STEP_ID),
+      deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
     );
-    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(attempt?.state).toBe("manual_recovery_required");
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("manual_recovery_required");
     expect(round?.summary).toContain("policy_denied");
@@ -619,7 +619,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
     expect(runner.calls()).toBe(1);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("succeeded");
 
@@ -627,7 +627,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     const reentryDispatch = createExternalApplyWorkflowDispatch(
       () => ({
         status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
-        detail: deriveDispatchInvocationId(RUN_ID, STEP_ID),
+        detail: deriveDispatchAttemptId(RUN_ID, STEP_ID, 1),
       }),
       {
         deriveExternalApply: () => {
@@ -657,7 +657,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     expect(stepState(db)).toBe("succeeded");
   });
 
-  it("never re-runs the external write once the dispatch invocation is terminal", async () => {
+  it("never re-runs the external write once the dispatch attempt is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
     const evidence = makeWritableEvidence();
@@ -676,7 +676,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
     );
     expect(runner.calls()).toBe(1);
 
-    // A re-entered tick recognises the already-terminal invocation, NEVER
+    // A re-entered tick recognises the already-terminal attempt, NEVER
     // re-issues the external write, and converges the finalization idempotently.
     const second = await executeAndReconcileDispatchedExternalApplyStep({
       db,
@@ -732,7 +732,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
     // The external write is recorded as terminal evidence; the step stays running
     // with the lease held so a later tick re-drives only the reconciliation.
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("succeeded");
     expect(stepState(db)).toBe("running");
@@ -758,16 +758,16 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
         ?.state,
     ).toBe("running");
     expect(stepState(db)).toBe("running");
   });
 
-  it("refuses a step with no dispatch invocation and never runs the external write", async () => {
+  it("refuses a step with no dispatch attempt and never runs the external write", async () => {
     const db = openSeededDb();
     // No dispatch: an M9 direct-finalize / never-dispatched step writes no
-    // executor invocation, so the producer must refuse it untouched.
+    // executor attempt, so the producer must refuse it untouched.
     const runner = countingRunner(makeSuccess());
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
@@ -782,7 +782,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
     expect(runner.calls()).toBe(0);
     expect(
-      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID)),
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1)),
     ).toBeUndefined();
     // The step is left exactly as it was; nothing was finalized.
     expect(stepState(db)).toBe("pending");

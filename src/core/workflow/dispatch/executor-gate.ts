@@ -2,9 +2,9 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
-  updateExecutorInvocationState,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
+  updateExecutorAttemptState,
   updateExecutorRound,
 } from "../../executors/loop/persist.js";
 import { selectExecutorDecisionForHumanGate } from "../../executors/loop/reducer.js";
@@ -25,12 +25,12 @@ import type { ClaimedWorkflowStep } from "./scheduler.js";
 export function parkRegisteredExecutorAtHumanGate(input: {
   db: MomentumDb;
   claim: ClaimedWorkflowStep;
-  invocationId: string;
+  attemptId: string;
   decisionId?: string | null;
   now: number;
   requireStaleLeaseAt?: { now: number; graceMs: number };
 }): WorkflowGateRecord {
-  const { db, claim, invocationId, now } = input;
+  const { db, claim, attemptId, now } = input;
   db.exec("BEGIN IMMEDIATE");
   try {
     if (input.requireStaleLeaseAt !== undefined) {
@@ -47,17 +47,17 @@ export function parkRegisteredExecutorAtHumanGate(input: {
           "stale-auto-release"
       ) {
         throw new Error(
-          `Cannot recover registered executor invocation ${invocationId}: dispatch lease is no longer stale.`,
+          `Cannot recover registered executor attempt ${attemptId}: dispatch lease is no longer stale.`,
         );
       }
     }
-    const invocation = loadExecutorInvocation(db, invocationId);
-    if (invocation?.state !== "waiting_operator") {
+    const attempt = loadExecutorAttempt(db, attemptId);
+    if (attempt?.state !== "waiting_operator") {
       throw new Error(
-        `Cannot park registered executor invocation ${invocationId}: expected waiting_operator.`,
+        `Cannot park registered executor attempt ${attemptId}: expected waiting_operator.`,
       );
     }
-    const round = listExecutorRoundsForInvocation(db, invocationId).at(-1);
+    const round = listExecutorRoundsForAttempt(db, attemptId).at(-1);
     if (
       round === undefined ||
       !["waiting_operator", "succeeded", "failed"].includes(round.state) ||
@@ -66,7 +66,7 @@ export function parkRegisteredExecutorAtHumanGate(input: {
       round.humanGate === null
     ) {
       throw new Error(
-        `Cannot park registered executor invocation ${invocationId}: no resumable operator round exists.`,
+        `Cannot park registered executor attempt ${attemptId}: no resumable operator round exists.`,
       );
     }
     const decision = selectExecutorDecisionForHumanGate(
@@ -89,7 +89,7 @@ export function parkRegisteredExecutorAtHumanGate(input: {
           gateId,
           workflowRunId: round.workflowRunId,
           stepRunId: round.stepRunId,
-          invocationId: round.invocationId,
+          attemptId: round.attemptId,
           roundId: round.roundId,
           targetScope: "round",
           gateType: round.humanGate,
@@ -171,20 +171,19 @@ export function resolveWorkflowGateAndResumeRegisteredExecutor(
     const resolved = resolveWorkflowGate(db, gateId, request, { now });
     if (
       resolved.targetScope === "round" &&
-      resolved.invocationId !== null &&
+      resolved.attemptId !== null &&
       resolved.roundId !== null &&
       resolved.evidence !== null
     ) {
-      const invocation = loadExecutorInvocation(db, resolved.invocationId);
-      const round = listExecutorRoundsForInvocation(
-        db,
-        resolved.invocationId,
-      ).find((candidate) => candidate.roundId === resolved.roundId);
+      const attempt = loadExecutorAttempt(db, resolved.attemptId);
+      const round = listExecutorRoundsForAttempt(db, resolved.attemptId).find(
+        (candidate) => candidate.roundId === resolved.roundId,
+      );
       const decision = listExecutorDecisionsForRound(db, resolved.roundId).find(
         (candidate) => candidate.decisionId === resolved.evidence,
       );
       if (
-        invocation?.state === "waiting_operator" &&
+        attempt?.state === "waiting_operator" &&
         round !== undefined &&
         ["waiting_operator", "succeeded", "failed"].includes(round.state) &&
         decision?.chosenAction === null
@@ -223,7 +222,7 @@ export function resolveWorkflowGateAndResumeRegisteredExecutor(
             { now },
           );
         }
-        updateExecutorInvocationState(db, invocation.invocationId, "running", {
+        updateExecutorAttemptState(db, attempt.attemptId, "running", {
           finishedAt: null,
           now,
         });

@@ -6,9 +6,9 @@
  * dispatch so a successfully-dispatched `subworkflow` step's child run is observed
  * and reconciled in the same tick, through the landed producer
  * {@link executeAndReconcileDispatchedSubworkflowStep}. The base dispatch creates
- * the `<run>::<step>::dispatch` scaffold; this wrapper then runs the producer
+ * the dispatch attempt scaffold; this wrapper then runs the producer
  * against it, gated on the shared dispatch-status predicate and the dispatched
- * invocation's executor family.
+ * attempt's executor family.
  *
  * Boundary discipline (mirrors the external-apply lane so the reconciliation seam stays the single
  * finalization owner):
@@ -16,9 +16,9 @@
  *   - The producer runs only after a base dispatch that genuinely started (or
  *     re-entered) a scaffold; a fail-closed / not-startable base result already
  *     parked the run and released its lease, so the wrapper echoes it untouched.
- *   - It runs the producer ONLY for a `subworkflow`-family invocation. The
+ *   - It runs the producer ONLY for a `subworkflow`-family attempt. The
  *     registered SDK lane and the external-apply lane own the other families;
- *     routing a non-`subworkflow` invocation here would
+ *     routing a non-`subworkflow` attempt here would
  *     run the wrong producer against a foreign scaffold.
  *   - The child-run start/attach is derived by injection
  *     ({@link DeriveDispatchedSubworkflowContext}): the daemon caller owns building
@@ -36,8 +36,7 @@
  *     dispatch outcome), exactly as the external-apply wrapper layers its run.
  */
 
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 import {
   recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
@@ -103,11 +102,12 @@ export function createSubworkflowWorkflowDispatch(
     const result = await baseDispatch(claim, context);
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
-    const invocation = loadExecutorInvocation(
+    const attempt = loadLatestExecutorAttemptForStep(
       context.db,
-      deriveDispatchInvocationId(claim.runId, claim.stepId),
+      claim.runId,
+      claim.stepId,
     );
-    if (invocation?.executorFamily !== "subworkflow") return result;
+    if (attempt?.executorFamily !== "subworkflow") return result;
 
     try {
       const resolved = await deps.deriveSubworkflow(claim, context);

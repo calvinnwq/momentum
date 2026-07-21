@@ -13,7 +13,7 @@
  *
  *   - `dispatch/executor-evidence.ts` records a finished
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
- *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
+ *     the dispatch attempt scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
  *   - `dispatch/reconcile-execute.ts` (the reconciliation seam) finalizes the owning
  *     `workflow_steps` row from that terminal evidence, exactly once.

@@ -16,7 +16,7 @@ import {
  * ({@link WorkflowRunState}) into either a "defer" signal (the child is still in
  * flight, so the parent step must NOT finalize) or the
  * `WorkflowStepExecutorDispatchResult` evidence the existing terminalize bridge
- * (`terminalizeDispatchedExecutorInvocation`) consumes, so a dispatched
+ * (`terminalizeDispatchedExecutorAttempt`) consumes, so a dispatched
  * `subworkflow` step can record durable terminal executor evidence the RC-2
  * reconciliation seam finalizes exactly once — reusing the workflow-owned run
  * substrate rather than inventing a parallel runtime.
@@ -157,7 +157,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     expect(planDispatchedExecutorTerminalization(plan.result)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -168,7 +168,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     expect(planDispatchedExecutorTerminalization(plan.result)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "failed",
+      attemptState: "failed",
       roundState: "failed",
       classification: "failed",
     });
@@ -179,7 +179,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     const terminalize = planDispatchedExecutorTerminalization(plan.result);
     expect(terminalize.outcome).toBe("manual_recovery");
-    expect(terminalize.invocationState).toBe("manual_recovery_required");
+    expect(terminalize.attemptState).toBe("manual_recovery_required");
   });
 
   it("produces evidence the terminalize decider routes to manual recovery for a blocked child", () => {
@@ -187,7 +187,7 @@ describe("planSubworkflowChildMirror — composes with the terminalize bridge", 
     if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
     const terminalize = planDispatchedExecutorTerminalization(plan.result);
     expect(terminalize.outcome).toBe("manual_recovery");
-    expect(terminalize.invocationState).toBe("manual_recovery_required");
+    expect(terminalize.attemptState).toBe("manual_recovery_required");
   });
 });
 

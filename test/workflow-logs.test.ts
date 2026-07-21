@@ -9,20 +9,20 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
-  insertExecutorRound
+  insertExecutorAttempt,
+  insertExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
-  ExecutorRoundRecord
+  ExecutorAttemptRecord,
+  ExecutorRoundRecord,
 } from "../src/core/executors/loop/reducer.js";
 import {
   WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
-  loadWorkflowRunLogs
+  loadWorkflowRunLogs,
 } from "../src/core/workflow/run/logs.js";
 
 const tempRoots: string[] = [];
@@ -45,44 +45,44 @@ function seedRun(db: MomentumDb, runId: string): void {
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, objective, issue_scope_json, route_json,
         needs_manual_recovery, created_at, updated_at)
-       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+       VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
   ).run(runId);
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-       VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+       VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
   ).run(runId);
 }
 
-function makeInvocation(
-  overrides: Partial<ExecutorInvocationRecord> = {}
-): ExecutorInvocationRecord {
+function makeAttempt(
+  overrides: Partial<ExecutorAttemptRecord> = {},
+): ExecutorAttemptRecord {
   return {
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-logs-1",
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 10,
     heartbeatAt: 10,
     finishedAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeRound(
-  overrides: Partial<ExecutorRoundRecord> = {}
+  overrides: Partial<ExecutorRoundRecord> = {},
 ): ExecutorRoundRecord {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-logs-1",
     stepRunId: "implementation",
     stepKey: "implementation",
     executorFamily: "goal-loop",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
     classification: "complete",
@@ -105,12 +105,12 @@ function makeRound(
     commitSha: "abc123",
     recoveryCode: null,
     humanGate: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeArtifact(
-  overrides: Partial<ExecutorArtifactRecord> = {}
+  overrides: Partial<ExecutorArtifactRecord> = {},
 ): ExecutorArtifactRecord {
   return {
     artifactId: "artifact-1",
@@ -119,12 +119,12 @@ function makeArtifact(
     path: "/runs/run-logs-1/round-1/verify.txt",
     digest: "sha256:verify",
     description: "verification output",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeCheckpoint(
-  overrides: Partial<ExecutorCheckpointRecord> = {}
+  overrides: Partial<ExecutorCheckpointRecord> = {},
 ): ExecutorCheckpointRecord {
   return {
     checkpointId: "checkpoint-1",
@@ -132,12 +132,12 @@ function makeCheckpoint(
     sequence: 0,
     stage: "verify",
     detail: "pnpm test passed",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeFinding(
-  overrides: Partial<ExecutorFindingRecord> = {}
+  overrides: Partial<ExecutorFindingRecord> = {},
 ): ExecutorFindingRecord {
   return {
     findingId: "finding-1",
@@ -147,12 +147,12 @@ function makeFinding(
     detail: "round evidence was not attached",
     selected: true,
     externalRef: "nomistakes:F-1",
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeDecision(
-  overrides: Partial<ExecutorDecisionRecord> = {}
+  overrides: Partial<ExecutorDecisionRecord> = {},
 ): ExecutorDecisionRecord {
   return {
     decisionId: "decision-1",
@@ -163,7 +163,7 @@ function makeDecision(
     chosenAction: "retry",
     resolution: "delegated:within-envelope",
     externalRef: "nomistakes:D-1",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -181,11 +181,11 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
 
       const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
-        generatedAt: 999
+        generatedAt: 999,
       });
       expect(envelope).not.toBeNull();
       const value = envelope!;
@@ -195,7 +195,7 @@ describe("loadWorkflowRunLogs", () => {
       // The full run detail is reused verbatim (run / steps / evidence / monitor).
       expect(value.detail.run.runId).toBe("run-logs-1");
       expect(value.detail.steps.map((s) => s.stepId)).toEqual([
-        "implementation"
+        "implementation",
       ]);
 
       // The genuine new value: per-round executor logs the run-detail loader
@@ -204,9 +204,7 @@ describe("loadWorkflowRunLogs", () => {
       const round = value.rounds[0]!;
       expect(round.roundId).toBe("round-1");
       expect(round.summary).toBe("implemented the slice");
-      expect(round.logPaths).toEqual([
-        "/runs/run-logs-1/round-1/agent.log"
-      ]);
+      expect(round.logPaths).toEqual(["/runs/run-logs-1/round-1/agent.log"]);
       expect(round.verificationStatus).toBe("passed");
       expect(round.commitSha).toBe("abc123");
       expect(round.changedFiles).toEqual(["src/core/workflow/run/logs.ts"]);
@@ -219,7 +217,7 @@ describe("loadWorkflowRunLogs", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
       insertExecutorRound(db, makeRound(), { now: 1 });
       insertExecutorArtifact(db, makeArtifact(), { now: 5 });
       insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
@@ -227,7 +225,7 @@ describe("loadWorkflowRunLogs", () => {
       insertExecutorDecision(db, makeDecision(), { now: 9 });
 
       const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
-        generatedAt: 999
+        generatedAt: 999,
       });
       const round = envelope!.rounds[0]! as ExecutorRoundRecord & {
         artifacts?: ExecutorArtifactRecord[];
@@ -245,50 +243,50 @@ describe("loadWorkflowRunLogs", () => {
     }
   });
 
-  it("orders rounds across invocations by step key then attempt and round index", () => {
+  it("orders rounds across attempts by step key then attempt and round index", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
-           VALUES ('run-logs-1', 'preflight', 'preflight', 'succeeded', 0, 1, 1, 1)`
+           VALUES ('run-logs-1', 'preflight', 'preflight', 'succeeded', 0, 1, 1, 1)`,
       ).run();
-      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
-      insertExecutorInvocation(
+      insertExecutorAttempt(db, makeAttempt(), { now: 1 });
+      insertExecutorAttempt(
         db,
-        makeInvocation({
-          invocationId: "inv-2",
+        makeAttempt({
+          attemptId: "inv-2",
           stepRunId: "preflight",
-          stepKey: "preflight"
+          stepKey: "preflight",
         }),
-        { now: 1 }
+        { now: 1 },
       );
       insertExecutorRound(db, makeRound({ roundId: "impl-b", roundIndex: 1 }), {
-        now: 1
+        now: 1,
       });
       insertExecutorRound(db, makeRound({ roundId: "impl-a", roundIndex: 0 }), {
-        now: 1
+        now: 1,
       });
       insertExecutorRound(
         db,
         makeRound({
           roundId: "pre-a",
           roundIndex: 0,
-          invocationId: "inv-2",
+          attemptId: "inv-2",
           stepRunId: "preflight",
-          stepKey: "preflight"
+          stepKey: "preflight",
         }),
-        { now: 1 }
+        { now: 1 },
       );
 
       const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
-        generatedAt: 1
+        generatedAt: 1,
       });
       expect(envelope!.rounds.map((r) => r.roundId)).toEqual([
         "impl-a",
         "impl-b",
-        "pre-a"
+        "pre-a",
       ]);
     } finally {
       db.close();

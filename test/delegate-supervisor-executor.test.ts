@@ -31,11 +31,11 @@ import type {
   DelegateSupervisorToolAdapter,
 } from "../src/core/executors/delegate-supervisor/types.js";
 import {
-  insertExecutorInvocation,
-  updateExecutorInvocationState,
+  insertExecutorAttempt,
+  updateExecutorAttemptState,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import { driveExecutorTicks } from "../src/core/executors/sdk/driver.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../src/core/workflow/dispatch/executor-gate.js";
@@ -52,7 +52,7 @@ afterEach(() => {
 
 function openDelegateDb(): {
   db: MomentumDb;
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   root: string;
 } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "delegate-supervisor-"));
@@ -65,20 +65,39 @@ function openDelegateDb(): {
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
      VALUES ('run-1', 'step-1', 'no-mistakes', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "run-1::step-1::dispatch",
+  const attempt: ExecutorAttemptRecord = {
+    attemptId: "run-1::step-1::dispatch",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "no-mistakes",
     executorFamily: "delegate-supervisor",
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
     finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
-  return { db, invocation, root };
+  insertExecutorAttempt(db, attempt, { now: 1 });
+  return { db, attempt, root };
+}
+
+function startRetryAttempt(
+  db: MomentumDb,
+  attempt: ExecutorAttemptRecord,
+  attemptNumber: number,
+  now = 1,
+): ExecutorAttemptRecord {
+  const retry: ExecutorAttemptRecord = {
+    ...attempt,
+    attemptId: `${attempt.workflowRunId}::${attempt.stepRunId}::attempt-${attemptNumber}`,
+    attemptNumber,
+    state: "running",
+    startedAt: now,
+    heartbeatAt: now,
+    finishedAt: null,
+  };
+  insertExecutorAttempt(db, retry, { now });
+  return retry;
 }
 
 function state(
@@ -105,14 +124,14 @@ function writeState(statePath: string, value: DelegateSupervisorExternalState) {
 
 function seedCurrentRoundCheckpoint(
   db: MomentumDb,
-  invocation: ExecutorInvocationRecord,
+  attempt: ExecutorAttemptRecord,
   stage: string,
   detail: string | null,
 ): string {
-  const roundId = seedRound(db, invocation, 0);
+  const roundId = seedRound(db, attempt, 0);
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId: invocation.invocationId,
+    attemptId: attempt.attemptId,
     now: () => 5,
   });
   envelope.facade.recordCheckpoint(roundId, {
@@ -126,23 +145,23 @@ function seedCurrentRoundCheckpoint(
 
 function seedRound(
   db: MomentumDb,
-  invocation: ExecutorInvocationRecord,
+  attempt: ExecutorAttemptRecord,
   roundIndex: number,
 ): string {
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId: invocation.invocationId,
+    attemptId: attempt.attemptId,
     now: () => 5,
   });
-  const roundId = `${invocation.invocationId}::round-${roundIndex + 1}`;
+  const roundId = `${attempt.attemptId}::round-${roundIndex + 1}`;
   envelope.facade.startRound({
     roundId,
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    attempt: invocation.attempt,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "running",
     agentProvider: null,
@@ -165,21 +184,115 @@ function seedRound(
 
 describe("delegate-supervisor SDK executor", () => {
   it("settles a legacy completed live-step checkpoint without repeating handoff", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${attempt.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
+      roundIndex: 0,
+      state: "running",
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+    });
+    envelope.facade.recordRoundProgress(roundId, {
+      observation: {
+        phase: "capturing_result",
+        summary: "legacy wrapper completed cleanly",
+      },
+      checkpoints: [
+        {
+          checkpointId: `${roundId}-legacy-complete`,
+          sequence: 0,
+          stage: "mechanism_completed",
+          detail: JSON.stringify({
+            recommendation: "complete",
+            recommendedRoundState: "succeeded",
+            recommendedAttemptState: "succeeded",
+            recoveryCode: null,
+            humanGate: null,
+            reason: "legacy wrapper completed cleanly",
+          }),
+        },
+      ],
+    });
+    let handoffs = 0;
+    let settled: boolean | undefined;
+    const result = await driveExecutorTicks({
+      db,
+      attemptId: attempt.attemptId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              handoffs += 1;
+              throw new Error("legacy replay must not hand off again");
+            },
+            readExternalState: () => ({
+              ok: false,
+              error: "legacy replay must not read external state",
+            }),
+          },
+        },
+        settleHandoff: (provenClean: boolean) => {
+          settled = provenClean;
+        },
+      },
+      now: () => 6,
+    });
+    expect(result.lastRound).toMatchObject({
+      state: "succeeded",
+      classification: "complete",
+      recoveryCode: null,
+    });
+    expect(handoffs).toBe(0);
+    expect(settled).toBe(true);
+    db.close();
+  });
+
+  it("settles a pre-migration completion checkpoint carrying the legacy attempt-state key", async () => {
+    // Checkpoints recorded before the attempt/round migration serialized the
+    // daemon decision with `recommendedInvocationState`; the migration
+    // preserves those payloads verbatim, so replay must accept the legacy key.
+    const { db, attempt } = openDelegateDb();
+    const envelope = createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 5,
+    });
+    const roundId = `${attempt.attemptId}::round-1`;
+    envelope.facade.startRound({
+      roundId,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -219,10 +332,9 @@ describe("delegate-supervisor SDK executor", () => {
       ],
     });
     let handoffs = 0;
-    let settled: boolean | undefined;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -239,9 +351,6 @@ describe("delegate-supervisor SDK executor", () => {
             }),
           },
         },
-        settleHandoff: (provenClean: boolean) => {
-          settled = provenClean;
-        },
       },
       now: () => 6,
     });
@@ -251,20 +360,19 @@ describe("delegate-supervisor SDK executor", () => {
       recoveryCode: null,
     });
     expect(handoffs).toBe(0);
-    expect(settled).toBe(true);
     db.close();
   });
 
   it("replays legacy completion from a prior attempt without relaunching", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const roundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper completed cleanly",
@@ -279,16 +387,12 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: 5,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
-    const activeReplayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
+    const activeReplayRoundId = seedRound(db, retryAttempt, 1);
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -315,26 +419,29 @@ describe("delegate-supervisor SDK executor", () => {
       state: "succeeded",
       summary: "legacy wrapper completed cleanly",
     });
-    expect(result.invocation).toMatchObject({ state: "succeeded", attempt: 2 });
+    expect(result.attempt).toMatchObject({
+      state: "succeeded",
+      attemptNumber: 2,
+    });
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: retryAttempt.attemptId,
       }).snapshot().rounds,
     ).toHaveLength(2);
     db.close();
   });
 
   it("replays an unclassified durable legacy-completion marker without relaunching", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper completed cleanly",
@@ -349,15 +456,11 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: 5,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
-    const replayRoundId = seedRound(db, { ...invocation, attempt: 2 }, 1);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
+    const replayRoundId = seedRound(db, retryAttempt, 1);
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       now: () => 6,
     });
     envelope.facade.recordCheckpoint(replayRoundId, {
@@ -370,7 +473,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -400,15 +503,15 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("consumes a prior nonterminal legacy completion before handoff", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       JSON.stringify({
         recommendation: "continue",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "running",
+        recommendedAttemptState: "running",
         recoveryCode: null,
         humanGate: null,
         reason: "legacy wrapper requested another round",
@@ -423,15 +526,11 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: 5,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -466,7 +565,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const rounds = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
     }).snapshot().rounds;
     expect(rounds).toHaveLength(3);
     expect(
@@ -479,15 +578,15 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("consumes a retryable legacy recovery before the next repaired attempt", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       JSON.stringify({
         recommendation: "manual_recovery_required",
         recommendedRoundState: "manual_recovery_required",
-        recommendedInvocationState: "manual_recovery_required",
+        recommendedAttemptState: "manual_recovery_required",
         recoveryCode: "external_state_unreadable",
         humanGate: "manual_recovery_required",
         reason: "legacy state could not be read",
@@ -502,11 +601,7 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: "manual_recovery_required",
       finishedAt: 5,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     let repaired = false;
     let handoffs = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -530,24 +625,20 @@ describe("delegate-supervisor SDK executor", () => {
 
     const replayed = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
       now: () => 6,
     });
-    expect(replayed.invocation.state).toBe("manual_recovery_required");
+    expect(replayed.attempt.state).toBe("manual_recovery_required");
     expect(handoffs).toBe(0);
 
     repaired = true;
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 3, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const secondRetryAttempt = startRetryAttempt(db, attempt, 3);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: secondRetryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -562,15 +653,15 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("prefers newer delegated handoff evidence over legacy completion", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const legacyRoundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       JSON.stringify({
         recommendation: "complete",
         recommendedRoundState: "succeeded",
-        recommendedInvocationState: "succeeded",
+        recommendedAttemptState: "succeeded",
         recoveryCode: null,
         humanGate: null,
         reason: "stale legacy completion",
@@ -585,10 +676,10 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: 5,
     });
-    const handoffRoundId = seedRound(db, invocation, 1);
+    const handoffRoundId = seedRound(db, attempt, 1);
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       now: () => 6,
     });
     envelope.facade.recordCheckpoint(handoffRoundId, {
@@ -597,8 +688,8 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
-        attempt: invocation.attempt,
+        attemptId: attempt.attemptId,
+        attempt: attempt.attemptNumber,
       }),
     });
     envelope.facade.recordCheckpoint(handoffRoundId, {
@@ -626,7 +717,7 @@ describe("delegate-supervisor SDK executor", () => {
     let reads = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -651,7 +742,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
 
     expect(reads).toBe(1);
-    expect(result.invocation.state).toBe("running");
+    expect(result.attempt.state).toBe("running");
     expect(result.lastRound).toMatchObject({ classification: "continue" });
     db.close();
   });
@@ -663,13 +754,13 @@ describe("delegate-supervisor SDK executor", () => {
   ])(
     "fails closed on malformed %s evidence without repeating handoff",
     async (_label, stage, detail) => {
-      const { db, invocation } = openDelegateDb();
-      seedCurrentRoundCheckpoint(db, invocation, stage, detail);
+      const { db, attempt } = openDelegateDb();
+      seedCurrentRoundCheckpoint(db, attempt, stage, detail);
       let handoffs = 0;
       let settled: boolean | undefined;
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: {
@@ -705,10 +796,10 @@ describe("delegate-supervisor SDK executor", () => {
   );
 
   it("uses the active round to report corrupt evidence from a prior round", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const priorRoundId = seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       "mechanism_completed",
       "null",
     );
@@ -723,11 +814,11 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: 5,
     });
-    const activeRoundId = seedRound(db, invocation, 1);
+    const activeRoundId = seedRound(db, attempt, 1);
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -757,23 +848,23 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("recovers an interrupted handoff intent without launching again", async () => {
-    const { db, invocation, root } = openDelegateDb();
+    const { db, attempt, root } = openDelegateDb();
     const evidencePath = path.join(root, "handoff.log");
     const recoveredEvidencePath = path.join(root, "recovered.log");
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${attempt.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -797,8 +888,8 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
-        attempt: invocation.attempt,
+        attemptId: attempt.attemptId,
+        attempt: attempt.attemptNumber,
       }),
     });
     envelope.facade.recordArtifact(roundId, {
@@ -808,6 +899,20 @@ describe("delegate-supervisor SDK executor", () => {
       digest: null,
       description: "partially persisted handoff evidence",
     });
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(
+      attempt.attemptId,
+      JSON.stringify({ legacyAttemptNumber: 1 }),
+      attempt.attemptId,
+    );
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE round_id = ?",
+    ).run(roundId);
     let handoffs = 0;
     let recoveries = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -834,7 +939,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -849,7 +954,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const resumed = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     }).snapshot();
     expect(resumed.rounds).toHaveLength(1);
     expect(resumed.currentRound?.artifacts).toHaveLength(2);
@@ -866,22 +971,94 @@ describe("delegate-supervisor SDK executor", () => {
     db.close();
   });
 
+  it("recovers an interrupted intent written after attempt renumbering", async () => {
+    const { db, attempt } = openDelegateDb();
+    const roundId = seedRound(db, attempt, 0);
+    db.prepare(
+      `UPDATE executor_attempts
+          SET attempt_number = 2,
+              legacy_invocation_id = ?,
+              legacy_provenance = ?
+        WHERE attempt_id = ?`,
+    ).run(
+      attempt.attemptId,
+      JSON.stringify({ legacyAttemptNumber: 1 }),
+      attempt.attemptId,
+    );
+    db.prepare(
+      "UPDATE executor_rounds SET attempt_number = 2 WHERE round_id = ?",
+    ).run(roundId);
+    createDurableExecutorEnvelope({
+      db,
+      attemptId: attempt.attemptId,
+      now: () => 5,
+    }).facade.recordCheckpoint(roundId, {
+      checkpointId: `${roundId}-delegate_handoff_intent`,
+      sequence: 0,
+      stage: "delegate_handoff_intent",
+      detail: JSON.stringify({
+        tool: "no-mistakes",
+        attemptId: attempt.attemptId,
+        attempt: 2,
+      }),
+    });
+    let recoveries = 0;
+    const result = await driveExecutorTicks({
+      db,
+      attemptId: attempt.attemptId,
+      executor: new DelegateSupervisorExecutor(),
+      config: { tool: "no-mistakes" },
+      hostBindings: {
+        tools: {
+          "no-mistakes": {
+            name: "no-mistakes",
+            handoff: () => {
+              throw new Error("interrupted handoff must not launch again");
+            },
+            recoverHandoff: () => {
+              recoveries += 1;
+              return {
+                externalIdentity: {
+                  externalRunId: "nm-run-1",
+                  branch: "feature/delegate-supervisor",
+                  headSha: HEAD,
+                },
+                summary: "reattached post-migration handoff",
+              };
+            },
+            readExternalState: () => {
+              throw new Error("first resumed tick only settles handoff");
+            },
+          },
+        },
+      },
+      now: () => 6,
+    });
+    expect(recoveries).toBe(1);
+    expect(result.lastRound).toMatchObject({
+      roundId,
+      state: "succeeded",
+      classification: "continue",
+    });
+    db.close();
+  });
+
   it("refuses to recover an interrupted intent with a newly configured adapter", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     seedCurrentRoundCheckpoint(
       db,
-      invocation,
+      attempt,
       DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
       JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
-        attempt: invocation.attempt,
+        attemptId: attempt.attemptId,
+        attempt: attempt.attemptNumber,
       }),
     );
     let recoveries = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: {
@@ -913,11 +1090,11 @@ describe("delegate-supervisor SDK executor", () => {
   it.each([HEAD.slice(0, 8), "A".repeat(40)])(
     "rejects a non-canonical handoff head SHA %s",
     async (headSha) => {
-      const { db, invocation } = openDelegateDb();
+      const { db, attempt } = openDelegateDb();
       let settled: boolean | undefined;
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: {
@@ -958,7 +1135,7 @@ describe("delegate-supervisor SDK executor", () => {
       expect(
         createDurableExecutorEnvelope({
           db,
-          invocationId: invocation.invocationId,
+          attemptId: attempt.attemptId,
         })
           .snapshot()
           .currentRound?.checkpoints.some(
@@ -970,7 +1147,7 @@ describe("delegate-supervisor SDK executor", () => {
   );
 
   it("settles cached terminal state only after fresh adapter corroboration", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let reads = 0;
     const completed = state({
       activeStep: null,
@@ -1015,7 +1192,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1023,26 +1200,22 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
     expect(reads).toBe(1);
-    expect(result.invocation.state).toBe("succeeded");
+    expect(result.attempt.state).toBe("succeeded");
     expect(result.lastRound).toMatchObject({
       classification: "complete",
       state: "succeeded",
       inputDigest: expect.stringMatching(/^sha256:/),
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: {} },
       now: () => 7,
     });
-    expect(retried.invocation.state).toBe("manual_recovery_required");
+    expect(retried.attempt.state).toBe("manual_recovery_required");
     expect(retried.lastRound).toMatchObject({
       classification: "manual_recovery_required",
       recoveryCode: "tool_adapter_unavailable",
@@ -1052,11 +1225,11 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("rejects a host binding whose adapter name does not match the tool key", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let handoffs = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1084,7 +1257,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("refuses to give a durable handoff to a newly configured adapter", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const handoff: DelegateSupervisorToolAdapter = {
       name: "no-mistakes",
       handoff: () => ({
@@ -1101,7 +1274,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": handoff } },
@@ -1121,7 +1294,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: { tools: { gnhf: replacement } },
@@ -1129,7 +1302,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
 
     expect(replacementReads).toBe(0);
-    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
     expect(result.lastRound).toMatchObject({
       recoveryCode: "delegate_adapter_identity_mismatch",
     });
@@ -1137,10 +1310,10 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("refuses to recover a prior-attempt handoff with a newly configured adapter", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1163,15 +1336,11 @@ describe("delegate-supervisor SDK executor", () => {
       },
       now: () => 6,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     let recoveries = 0;
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "gnhf" },
       hostBindings: {
@@ -1201,7 +1370,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("does not settle cached terminal state while fresh work remains active", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const completed = state({
       activeStep: null,
       stepStatus: "completed",
@@ -1234,7 +1403,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1242,7 +1411,7 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
 
-    expect(result.invocation.state).toBe("running");
+    expect(result.attempt.state).toBe("running");
     expect(result.lastRound).toMatchObject({
       classification: "continue",
       state: "succeeded",
@@ -1251,7 +1420,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("classifies malformed terminal corroboration as unreadable", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const completed = state({
       activeStep: null,
       stepStatus: "completed",
@@ -1283,7 +1452,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1291,7 +1460,7 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => 6,
     });
 
-    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
     expect(result.lastRound).toMatchObject({
       classification: "manual_recovery_required",
       recoveryCode: "external_state_unreadable",
@@ -1300,7 +1469,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("does not replace a fresh terminal failure with cached success", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let reads = 0;
     const completed = state({
       activeStep: null,
@@ -1337,7 +1506,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1346,7 +1515,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
 
     expect(reads).toBe(1);
-    expect(result.invocation.state).toBe("failed");
+    expect(result.attempt.state).toBe("failed");
     expect(result.lastRound).toMatchObject({
       classification: "failed",
       recoveryCode: "external_run_failed",
@@ -1355,21 +1524,21 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("recovers a prior-attempt handoff intent without launching again", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       now: () => 5,
     });
-    const priorRoundId = `${invocation.invocationId}::round-1`;
+    const priorRoundId = `${attempt.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId: priorRoundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: 1,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -1393,7 +1562,7 @@ describe("delegate-supervisor SDK executor", () => {
       stage: "delegate_handoff_intent",
       detail: JSON.stringify({
         tool: "no-mistakes",
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         attempt: 1,
       }),
     });
@@ -1403,7 +1572,7 @@ describe("delegate-supervisor SDK executor", () => {
         classification: "manual_recovery_required",
         executorRecommendation: "manual_recovery_required",
         roundState: "manual_recovery_required",
-        invocationState: "manual_recovery_required",
+        attemptState: "manual_recovery_required",
         recoveryCode: "executor_threw",
         humanGate: "manual_recovery_required",
       },
@@ -1416,11 +1585,7 @@ describe("delegate-supervisor SDK executor", () => {
         },
       },
     );
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     let handoffs = 0;
     let recoveries = 0;
     const adapter: DelegateSupervisorToolAdapter = {
@@ -1448,7 +1613,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1464,7 +1629,7 @@ describe("delegate-supervisor SDK executor", () => {
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: retryAttempt.attemptId,
       })
         .snapshot()
         .currentRound?.checkpoints.map(({ stage }) => stage),
@@ -1473,14 +1638,10 @@ describe("delegate-supervisor SDK executor", () => {
       "delegate_handoff_completed",
       "classified",
     ]);
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 3, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const secondRetryAttempt = startRetryAttempt(db, attempt, 3);
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: secondRetryAttempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1495,7 +1656,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("reattaches a completed handoff when retrying an external-state read", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let handoffs = 0;
     let recoveries = 0;
     let reads = 0;
@@ -1533,7 +1694,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1545,12 +1706,11 @@ describe("delegate-supervisor SDK executor", () => {
       recoveryCode: "external_state_unreadable",
     });
 
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
-    const recovered = await driveExecutorTicks(input);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
+    const recovered = await driveExecutorTicks({
+      ...input,
+      attemptId: retryAttempt.attemptId,
+    });
 
     expect(handoffs).toBe(1);
     expect(recoveries).toBe(1);
@@ -1561,7 +1721,10 @@ describe("delegate-supervisor SDK executor", () => {
       recoveryCode: null,
     });
 
-    const retried = await driveExecutorTicks(input);
+    const retried = await driveExecutorTicks({
+      ...input,
+      attemptId: retryAttempt.attemptId,
+    });
 
     expect(recoveries).toBe(1);
     expect(reads).toBe(2);
@@ -1574,7 +1737,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("resets the semantic stall window for a new retry attempt", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const handoff = {
       externalIdentity: {
         externalRunId: "nm-run-1",
@@ -1596,7 +1759,7 @@ describe("delegate-supervisor SDK executor", () => {
     const executor = new DelegateSupervisorExecutor();
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter }, now: () => 1 },
@@ -1604,22 +1767,18 @@ describe("delegate-supervisor SDK executor", () => {
     });
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter }, now: () => 2 },
       now: () => 2,
     });
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     const retriedAt = DELEGATE_SUPERVISOR_STALL_AFTER_MS + 10;
 
     const retried = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: retryAttempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1629,7 +1788,7 @@ describe("delegate-supervisor SDK executor", () => {
       now: () => retriedAt,
     });
 
-    expect(retried.invocation.state).toBe("running");
+    expect(retried.attempt.state).toBe("running");
     expect(retried.lastRound).toMatchObject({
       classification: "continue",
       recoveryCode: null,
@@ -1638,7 +1797,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("carries prior-attempt mirrored decisions into terminal corroboration", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let external = state({
       stepStatus: "awaiting_decision",
       decisions: [
@@ -1678,7 +1837,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -1686,12 +1845,8 @@ describe("delegate-supervisor SDK executor", () => {
     };
     await driveExecutorTicks(input);
     const gated = await driveExecutorTicks(input);
-    expect(gated.invocation.state).toBe("waiting_operator");
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    expect(gated.attempt.state).toBe("waiting_operator");
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     external = state({
       activeStep: null,
       stepStatus: "completed",
@@ -1699,10 +1854,13 @@ describe("delegate-supervisor SDK executor", () => {
       decisions: [],
     });
 
-    await driveExecutorTicks(input);
-    const retried = await driveExecutorTicks(input);
+    await driveExecutorTicks({ ...input, attemptId: retryAttempt.attemptId });
+    const retried = await driveExecutorTicks({
+      ...input,
+      attemptId: retryAttempt.attemptId,
+    });
 
-    expect(retried.invocation.state).toBe("manual_recovery_required");
+    expect(retried.attempt.state).toBe("manual_recovery_required");
     expect(retried.lastRound).toMatchObject({
       recoveryCode: "external_state_inconsistent",
       summary: expect.stringContaining(
@@ -1713,7 +1871,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("does not carry decisions from a replaced external run", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let external = state({
       stepStatus: "awaiting_decision",
       decisions: [
@@ -1752,21 +1910,17 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
       now: () => 6,
     };
     await driveExecutorTicks(input);
-    expect((await driveExecutorTicks(input)).invocation.state).toBe(
+    expect((await driveExecutorTicks(input)).attempt.state).toBe(
       "waiting_operator",
     );
-    db.prepare(
-      `UPDATE executor_invocations
-          SET attempt = 2, state = 'running', finished_at = NULL
-        WHERE invocation_id = ?`,
-    ).run(invocation.invocationId);
+    const retryAttempt = startRetryAttempt(db, attempt, 2);
     external = state({
       externalRunId: "nm-run-2",
       activeStep: null,
@@ -1775,10 +1929,13 @@ describe("delegate-supervisor SDK executor", () => {
       decisions: [],
     });
 
-    await driveExecutorTicks(input);
-    const retried = await driveExecutorTicks(input);
+    await driveExecutorTicks({ ...input, attemptId: retryAttempt.attemptId });
+    const retried = await driveExecutorTicks({
+      ...input,
+      attemptId: retryAttempt.attemptId,
+    });
 
-    expect(retried.invocation.state).toBe("succeeded");
+    expect(retried.attempt.state).toBe("succeeded");
     expect(retried.lastRound).toMatchObject({
       classification: "complete",
       recoveryCode: null,
@@ -1787,21 +1944,21 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("finishes an interrupted checkpointed handoff round before supervision", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const envelope = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       now: () => 5,
     });
-    const roundId = `${invocation.invocationId}::round-1`;
+    const roundId = `${attempt.attemptId}::round-1`;
     envelope.facade.startRound({
       roundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: 0,
       state: "running",
       agentProvider: null,
@@ -1863,7 +2020,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: {
@@ -1876,14 +2033,14 @@ describe("delegate-supervisor SDK executor", () => {
       maxTicks: 2,
       now: () => 6,
     });
-    expect(result.invocation.state).toBe("succeeded");
+    expect(result.attempt.state).toBe("succeeded");
     expect(handoffs).toBe(0);
     expect(settled).toBe(1);
     db.close();
   });
 
   it("hands off to no-mistakes, mirrors progress rounds, and corroborates terminal success", async () => {
-    const { db, invocation, root } = openDelegateDb();
+    const { db, attempt, root } = openDelegateDb();
     const statePath = path.join(root, "no-mistakes-state.json");
     writeState(statePath, state());
     let handoffs = 0;
@@ -1907,14 +2064,14 @@ describe("delegate-supervisor SDK executor", () => {
 
     const handedOff = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
       now: () => 10,
     });
     expect(handoffs).toBe(1);
-    expect(handedOff.invocation.state).toBe("running");
+    expect(handedOff.attempt.state).toBe("running");
     expect(handedOff.lastRound).toMatchObject({
       state: "succeeded",
       classification: "continue",
@@ -1922,13 +2079,13 @@ describe("delegate-supervisor SDK executor", () => {
 
     const mirrored = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { ...bindings, now: () => 20 },
       now: () => 20,
     });
-    expect(mirrored.invocation.state).toBe("running");
+    expect(mirrored.attempt.state).toBe("running");
     expect(mirrored.lastRound).toMatchObject({
       state: "succeeded",
       classification: "continue",
@@ -1947,14 +2104,14 @@ describe("delegate-supervisor SDK executor", () => {
     );
     const completed = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { ...bindings, now: () => 30 },
       now: () => 30,
     });
     expect(handoffs).toBe(1);
-    expect(completed.invocation.state).toBe("succeeded");
+    expect(completed.attempt.state).toBe("succeeded");
     expect(completed.lastRound).toMatchObject({
       state: "succeeded",
       classification: "complete",
@@ -1979,7 +2136,7 @@ describe("delegate-supervisor SDK executor", () => {
   ])(
     "requires approve to clear a durable synthetic approval ($action)",
     async ({ action, expectedState, expectedRecovery }) => {
-      const { db, invocation } = openDelegateDb();
+      const { db, attempt } = openDelegateDb();
       let external = state({
         activeStep: "review",
         stepStatus: "awaiting_approval",
@@ -2002,7 +2159,7 @@ describe("delegate-supervisor SDK executor", () => {
       };
       const input = {
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "no-mistakes" },
         hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2010,10 +2167,10 @@ describe("delegate-supervisor SDK executor", () => {
       };
       await driveExecutorTicks(input);
       const gated = await driveExecutorTicks(input);
-      expect(gated.invocation.state).toBe("waiting_operator");
+      expect(gated.attempt.state).toBe("waiting_operator");
       const approval = createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
       })
         .snapshot()
         .currentRound?.decisions.find(
@@ -2026,9 +2183,9 @@ describe("delegate-supervisor SDK executor", () => {
         db,
         {
           gateId,
-          workflowRunId: invocation.workflowRunId,
-          stepRunId: invocation.stepRunId,
-          invocationId: invocation.invocationId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          attemptId: attempt.attemptId,
           roundId: gated.lastRound!.roundId,
           targetScope: "round",
           gateType: "approval_required",
@@ -2059,14 +2216,14 @@ describe("delegate-supervisor SDK executor", () => {
 
       const completed = await driveExecutorTicks(input);
 
-      expect(completed.invocation.state).toBe(expectedState);
+      expect(completed.attempt.state).toBe(expectedState);
       expect(completed.lastRound?.recoveryCode).toBe(expectedRecovery);
       db.close();
     },
   );
 
   it("uses the latest synthetic approval when a rejected boundary is presented again", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let external = state({
       activeStep: "review",
       stepStatus: "awaiting_approval",
@@ -2089,7 +2246,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2104,7 +2261,7 @@ describe("delegate-supervisor SDK executor", () => {
     ) => {
       const snapshot = createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
       }).snapshot();
       const round = snapshot.currentRound!;
       const approval = [...round.decisions]
@@ -2119,9 +2276,9 @@ describe("delegate-supervisor SDK executor", () => {
         db,
         {
           gateId,
-          workflowRunId: invocation.workflowRunId,
-          stepRunId: invocation.stepRunId,
-          invocationId: invocation.invocationId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          attemptId: attempt.attemptId,
           roundId: round.round.roundId,
           targetScope: "round",
           gateType: "approval_required",
@@ -2148,10 +2305,10 @@ describe("delegate-supervisor SDK executor", () => {
 
     resolveCurrentApproval("reject", 11);
     const represented = await driveExecutorTicks(input);
-    expect(represented.invocation.state).toBe("waiting_operator");
+    expect(represented.attempt.state).toBe("waiting_operator");
     resolveCurrentApproval("approve", 13);
     const representedAgain = await driveExecutorTicks(input);
-    expect(representedAgain.invocation.state).toBe("waiting_operator");
+    expect(representedAgain.attempt.state).toBe("waiting_operator");
     resolveCurrentApproval("approve", 15);
     external = state({
       activeStep: null,
@@ -2161,10 +2318,10 @@ describe("delegate-supervisor SDK executor", () => {
 
     const completed = await driveExecutorTicks(input);
 
-    expect(completed.invocation.state).toBe("succeeded");
+    expect(completed.attempt.state).toBe("succeeded");
     const approvalActions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     })
       .snapshot()
       .rounds.flatMap(({ decisions }) =>
@@ -2182,7 +2339,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("synthesizes an approval decision alongside resolved history", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const external = state({
       activeStep: "publish",
       stepStatus: "awaiting_approval",
@@ -2215,7 +2372,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2224,10 +2381,10 @@ describe("delegate-supervisor SDK executor", () => {
     await driveExecutorTicks(input);
     const gated = await driveExecutorTicks(input);
 
-    expect(gated.invocation.state).toBe("waiting_operator");
+    expect(gated.attempt.state).toBe("waiting_operator");
     const decisions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     }).snapshot().currentRound?.decisions;
     expect(decisions).toEqual(
       expect.arrayContaining([
@@ -2245,7 +2402,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("keeps the synthetic approval current alongside unresolved history", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const external = state({
       activeStep: "publish",
       stepStatus: "awaiting_approval",
@@ -2278,7 +2435,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2287,10 +2444,10 @@ describe("delegate-supervisor SDK executor", () => {
     await driveExecutorTicks(input);
     const gated = await driveExecutorTicks(input);
 
-    expect(gated.invocation.state).toBe("waiting_operator");
+    expect(gated.attempt.state).toBe("waiting_operator");
     const unresolved = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     })
       .snapshot()
       .currentRound?.decisions.filter(
@@ -2312,7 +2469,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("versions resolved decision evidence when a gated round resumes", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     let external = state({
       activeStep: "review",
       stepStatus: "awaiting_decision",
@@ -2345,7 +2502,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "no-mistakes" },
       hostBindings: { tools: { "no-mistakes": adapter } },
@@ -2353,7 +2510,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     await driveExecutorTicks(input);
     const gated = await driveExecutorTicks(input);
-    expect(gated.invocation.state).toBe("waiting_operator");
+    expect(gated.attempt.state).toBe("waiting_operator");
     external = state({
       activeStep: null,
       stepStatus: "completed",
@@ -2377,14 +2534,14 @@ describe("delegate-supervisor SDK executor", () => {
       humanGate: null,
       finishedAt: null,
     });
-    updateExecutorInvocationState(db, invocation.invocationId, "running", {
+    updateExecutorAttemptState(db, attempt.attemptId, "running", {
       finishedAt: null,
     });
     const completed = await driveExecutorTicks(input);
-    expect(completed.invocation.state).toBe("succeeded");
+    expect(completed.attempt.state).toBe("succeeded");
     const decisions = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     }).snapshot().currentRound?.decisions;
     expect(decisions).toHaveLength(2);
     expect(decisions?.at(-1)).toMatchObject({
@@ -2396,7 +2553,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("parks unchanged semantic progress after the four-minute stall boundary", async () => {
-    const { db, invocation, root } = openDelegateDb();
+    const { db, attempt, root } = openDelegateDb();
     const statePath = path.join(root, "no-mistakes-state.json");
     const initialState = state({
       findings: [
@@ -2450,7 +2607,7 @@ describe("delegate-supervisor SDK executor", () => {
 
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => 10 },
@@ -2458,7 +2615,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => 20 },
@@ -2506,13 +2663,13 @@ describe("delegate-supervisor SDK executor", () => {
     const stalledAt = 20 + DELEGATE_SUPERVISOR_STALL_AFTER_MS;
     const stalled = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools, now: () => stalledAt },
       now: () => stalledAt,
     });
-    expect(stalled.invocation.state).toBe("manual_recovery_required");
+    expect(stalled.attempt.state).toBe("manual_recovery_required");
     expect(stalled.lastRound).toMatchObject({
       state: "manual_recovery_required",
       classification: "manual_recovery_required",
@@ -2523,7 +2680,7 @@ describe("delegate-supervisor SDK executor", () => {
   });
 
   it("refuses a completed claim contradicted by pending CI", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const adapter: DelegateSupervisorToolAdapter = {
       name: "no-mistakes",
       handoff: () => ({
@@ -2544,7 +2701,7 @@ describe("delegate-supervisor SDK executor", () => {
     const bindings = { tools: { "no-mistakes": adapter }, now: () => 20 };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2552,19 +2709,19 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
       now: () => 20,
     });
-    expect(result.invocation.state).toBe("manual_recovery_required");
+    expect(result.attempt.state).toBe("manual_recovery_required");
     expect(result.lastRound?.recoveryCode).toBe("external_state_inconsistent");
     db.close();
   });
 
   it("routes malformed adapter containers to unreadable recovery", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const adapter: DelegateSupervisorToolAdapter = {
       name: "no-mistakes",
       handoff: () => ({
@@ -2588,7 +2745,7 @@ describe("delegate-supervisor SDK executor", () => {
     const bindings = { tools: new Map([[adapter.name, adapter]]) };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2596,7 +2753,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: bindings,
@@ -2634,7 +2791,7 @@ describe("delegate-supervisor SDK executor", () => {
   ] as const)(
     "routes malformed adapter envelope %s to unreadable recovery",
     async (_label, malformedRead) => {
-      const { db, invocation } = openDelegateDb();
+      const { db, attempt } = openDelegateDb();
       const adapter: DelegateSupervisorToolAdapter = {
         name: "no-mistakes",
         handoff: () => ({
@@ -2651,7 +2808,7 @@ describe("delegate-supervisor SDK executor", () => {
       const bindings = { tools: new Map([[adapter.name, adapter]]) };
       await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor,
         config: { tool: "no-mistakes" },
         hostBindings: bindings,
@@ -2659,7 +2816,7 @@ describe("delegate-supervisor SDK executor", () => {
       });
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor,
         config: { tool: "no-mistakes" },
         hostBindings: bindings,
@@ -2675,7 +2832,7 @@ describe("delegate-supervisor SDK executor", () => {
   );
 
   it("propagates cancellation raised while reading delegated state", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const controller = new AbortController();
     const reason = new Error("daemon claim cancelled");
     const adapter: DelegateSupervisorToolAdapter = {
@@ -2696,7 +2853,7 @@ describe("delegate-supervisor SDK executor", () => {
     const executor = new DelegateSupervisorExecutor();
     const input = {
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "no-mistakes" },
       hostBindings: { tools: new Map([[adapter.name, adapter]]) },
@@ -2708,14 +2865,14 @@ describe("delegate-supervisor SDK executor", () => {
     expect(
       createDurableExecutorEnvelope({
         db,
-        invocationId: invocation.invocationId,
-      }).snapshot().invocation.state,
+        attemptId: attempt.attemptId,
+      }).snapshot().attempt.state,
     ).toBe("running");
     db.close();
   });
 
   it("supervises a second tool through adapter registration and portable config only", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const ciAdapter: DelegateSupervisorToolAdapter = {
       name: "ci-run",
       handoff: () => ({
@@ -2741,7 +2898,7 @@ describe("delegate-supervisor SDK executor", () => {
     const hostBindings = { tools: new Map([[ciAdapter.name, ciAdapter]]) };
     await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "ci-run" },
       hostBindings,
@@ -2749,13 +2906,13 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor,
       config: { tool: "ci-run" },
       hostBindings,
       now: () => 20,
     });
-    expect(result.invocation.state).toBe("succeeded");
+    expect(result.attempt.state).toBe("succeeded");
     expect(DELEGATE_SUPERVISOR_CONFIG_SCHEMA.properties.tool).toEqual({
       type: "string",
       minLength: 1,
@@ -2777,7 +2934,7 @@ describe("delegate-supervisor SDK executor", () => {
   ])(
     "requires an adapter proof for changed external heads ($expectedState)",
     async ({ relation, expectedState, expectedRecovery }) => {
-      const { db, invocation } = openDelegateDb();
+      const { db, attempt } = openDelegateDb();
       const adapter: DelegateSupervisorToolAdapter = {
         name: "ci-run",
         handoff: () => ({
@@ -2803,21 +2960,21 @@ describe("delegate-supervisor SDK executor", () => {
       };
       const result = await driveExecutorTicks({
         db,
-        invocationId: invocation.invocationId,
+        attemptId: attempt.attemptId,
         executor: new DelegateSupervisorExecutor(),
         config: { tool: "ci-run" },
         hostBindings: { tools: { "ci-run": adapter } },
         maxTicks: 2,
         now: () => 20,
       });
-      expect(result.invocation.state).toBe(expectedState);
+      expect(result.attempt.state).toBe(expectedState);
       expect(result.lastRound?.recoveryCode).toBe(expectedRecovery);
       db.close();
     },
   );
 
   it("does not checkpoint state from a mismatched external identity", async () => {
-    const { db, invocation } = openDelegateDb();
+    const { db, attempt } = openDelegateDb();
     const adapter: DelegateSupervisorToolAdapter = {
       name: "ci-run",
       handoff: () => ({
@@ -2836,7 +2993,7 @@ describe("delegate-supervisor SDK executor", () => {
     };
     const result = await driveExecutorTicks({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
       executor: new DelegateSupervisorExecutor(),
       config: { tool: "ci-run" },
       hostBindings: { tools: { "ci-run": adapter } },
@@ -2853,7 +3010,7 @@ describe("delegate-supervisor SDK executor", () => {
     });
     const currentRound = createDurableExecutorEnvelope({
       db,
-      invocationId: invocation.invocationId,
+      attemptId: attempt.attemptId,
     }).snapshot().currentRound;
     expect(
       currentRound?.checkpoints.some(
@@ -2866,7 +3023,7 @@ describe("delegate-supervisor SDK executor", () => {
 
 describe("profile-backed persisted delegate state", () => {
   it("rejects an external-state path with a symlinked parent directory", async () => {
-    const { db, invocation, root } = openDelegateDb();
+    const { db, attempt, root } = openDelegateDb();
     const outside = fs.mkdtempSync(
       path.join(os.tmpdir(), "delegate-supervisor-outside-"),
     );
@@ -2888,7 +3045,7 @@ describe("profile-backed persisted delegate state", () => {
     });
 
     const read = await adapter.readExternalState({
-      invocation,
+      attempt,
       config: { tool: "gnhf" },
       signal: new AbortController().signal,
       handoff: {
@@ -2944,7 +3101,7 @@ describe("profile-backed persisted delegate state", () => {
   it.each(["symbolic link", "oversized file", "named pipe"])(
     "rejects a %s before reading external-state bytes",
     async (artifactKind) => {
-      const { db, invocation, root } = openDelegateDb();
+      const { db, attempt, root } = openDelegateDb();
       const statePath = path.join(root, "delegate-external-state.json");
       if (artifactKind === "symbolic link") {
         const targetPath = path.join(root, "external-state-target.json");
@@ -2965,7 +3122,7 @@ describe("profile-backed persisted delegate state", () => {
       });
 
       const read = await adapter.readExternalState({
-        invocation,
+        attempt,
         config: { tool: "gnhf" },
         signal: new AbortController().signal,
         handoff: {
@@ -2990,7 +3147,7 @@ describe("profile-backed persisted delegate state", () => {
   );
 
   it("does not refresh no-mistakes state through a symbolic link", async () => {
-    const { db, invocation, root } = openDelegateDb();
+    const { db, attempt, root } = openDelegateDb();
     const targetPath = path.join(root, "protected-target.json");
     const original = JSON.stringify({ protected: true });
     fs.writeFileSync(targetPath, original);
@@ -3009,7 +3166,7 @@ describe("profile-backed persisted delegate state", () => {
 
     await expect(
       adapter.readExternalState({
-        invocation,
+        attempt,
         config: { tool: "no-mistakes" },
         signal: new AbortController().signal,
         handoff: {
@@ -4090,10 +4247,10 @@ describe("no-mistakes tool adapter", () => {
         throw new Error("normalized fallback should not run after refresh");
       },
     });
-    const { invocation, db } = openDelegateDb();
+    const { attempt, db } = openDelegateDb();
     await expect(
       adapter.readExternalState({
-        invocation,
+        attempt,
         config: { tool: "no-mistakes" },
         signal: new AbortController().signal,
         handoff: { externalIdentity: identity, summary: "handed off" },

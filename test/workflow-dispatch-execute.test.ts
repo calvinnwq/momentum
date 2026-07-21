@@ -23,6 +23,11 @@ import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
+import {
+  insertExecutorCheckpoint,
+  insertExecutorAttempt,
+  insertExecutorRound,
+} from "../src/core/executors/loop/persist.js";
 
 const NOW = 1_700_000_000_000;
 const RUN_ID = "run-dispatch-exec-001";
@@ -160,10 +165,10 @@ function approveAndClaim(
   return claim.claim;
 }
 
-function countInvocations(db: MomentumDb, runId: string): number {
+function countAttempts(db: MomentumDb, runId: string): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM executor_invocations WHERE workflow_run_id = ?",
+      "SELECT COUNT(*) AS n FROM executor_attempts WHERE workflow_run_id = ?",
     )
     .get(runId) as { n: number };
   return row.n;
@@ -220,13 +225,13 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-    const invocation = db
+    const attempt = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
-    expect(invocation.executor_family).toBe("one-shot");
+    expect(attempt.executor_family).toBe("one-shot");
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
 
@@ -252,16 +257,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
-    const invocation = db
+    const attempt = db
       .prepare(
         `SELECT executor_family
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as { executor_family: string };
-    expect(invocation.executor_family).toBe("one-shot");
+    expect(attempt.executor_family).toBe("one-shot");
   });
 
-  it("creates the executor invocation + round scaffold and advances the step", () => {
+  it("creates the executor attempt + round scaffold and advances the step", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
 
@@ -273,22 +278,23 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
-    // A durable invocation row proves the bounded unit started through the
+    // A durable attempt row proves the bounded unit started through the
     // production path (preflight resolves to the one-shot family).
-    const invocation = db
+    const attempt = db
       .prepare(
-        `SELECT invocation_id, step_run_id, step_key, executor_family, state, attempt
-           FROM executor_invocations WHERE workflow_run_id = ?`,
+        `SELECT attempt_id, step_run_id, step_key, executor_family, state,
+                attempt_number AS attempt
+           FROM executor_attempts WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
-      invocation_id: string;
+      attempt_id: string;
       step_run_id: string;
       step_key: string;
       executor_family: string;
       state: string;
       attempt: number;
     };
-    expect(invocation).toMatchObject({
+    expect(attempt).toMatchObject({
       step_run_id: "preflight",
       step_key: "preflight",
       executor_family: "one-shot",
@@ -299,16 +305,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // The first round scaffold exists, created before external work runs.
     const round = db
       .prepare(
-        `SELECT invocation_id, round_index, state, executor_family
+        `SELECT attempt_id, round_index, state, executor_family
            FROM executor_rounds WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
-      invocation_id: string;
+      attempt_id: string;
       round_index: number;
       state: string;
       executor_family: string;
     };
-    expect(round.invocation_id).toBe(invocation.invocation_id);
+    expect(round.attempt_id).toBe(attempt.attempt_id);
     expect(round.executor_family).toBe("one-shot");
     expect(round.state).toBe("pending");
 
@@ -328,25 +334,25 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: NOW + 1 });
 
-    // The invocation id is the deterministic `<run>::<step>::dispatch` triple,
+    // The attempt id is the deterministic `<run>::<step>::attempt-1` triple,
     // not a random handle: it is recomputable from durable state (so idempotent
-    // re-entry finds the same row) and the `::dispatch` namespace keeps it
-    // distinct from a future landed adapter's reattachable invocation id.
-    const invocation = db
+    // re-entry finds the same row) and each retry derives the next immutable
+    // attempt number instead of reopening this row.
+    const attempt = db
       .prepare(
-        "SELECT invocation_id FROM executor_invocations WHERE workflow_run_id = ?",
+        "SELECT attempt_id FROM executor_attempts WHERE workflow_run_id = ?",
       )
-      .get(RUN_ID) as { invocation_id: string };
-    expect(invocation.invocation_id).toBe(`${RUN_ID}::preflight::dispatch`);
+      .get(RUN_ID) as { attempt_id: string };
+    expect(attempt.attempt_id).toBe(`${RUN_ID}::preflight::attempt-1`);
 
-    // The first round id is the invocation id suffixed with `::round-1`, equally
+    // The first round id is the attempt id suffixed with `::round-1`, equally
     // recomputable so re-entry never forks a second round.
     const round = db
       .prepare(
         "SELECT round_id, round_index FROM executor_rounds WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { round_id: string; round_index: number };
-    expect(round.round_id).toBe(`${RUN_ID}::preflight::dispatch::round-1`);
+    expect(round.round_id).toBe(`${RUN_ID}::preflight::attempt-1::round-1`);
     expect(round.round_index).toBe(1);
   });
 
@@ -464,7 +470,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
@@ -493,13 +499,189 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(second.status).toBe(
       WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
     );
-    expect(countInvocations(db, RUN_ID)).toBe(1);
+    expect(countAttempts(db, RUN_ID)).toBe(1);
     const rounds = db
       .prepare(
         "SELECT COUNT(*) AS n FROM executor_rounds WHERE workflow_run_id = ?",
       )
       .get(RUN_ID) as { n: number };
     expect(rounds.n).toBe(1);
+  });
+
+  it("allocates a collision-safe native-owned round id on retry", () => {
+    const db = openSeededDb();
+    const targetAttemptId = `${RUN_ID}::implementation::attempt-1`;
+    const collidingRoundId = `${RUN_ID}::implementation::attempt-2::round::1`;
+
+    insertExecutorAttempt(db, {
+      attemptId: targetAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      state: "manual_recovery_required",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+    });
+    insertExecutorRound(db, {
+      roundId: `${targetAttemptId}::round::0`,
+      attemptId: targetAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "implementation",
+      stepKey: "implementation",
+      executorFamily: "goal-loop",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: "executor_threw",
+      humanGate: null,
+    });
+    const collisionOwnerAttemptId = `${RUN_ID}::preflight::legacy-owner`;
+    insertExecutorAttempt(db, {
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "preflight",
+      stepKey: "preflight",
+      executorFamily: "one-shot",
+      state: "succeeded",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+    });
+    insertExecutorRound(db, {
+      roundId: collidingRoundId,
+      attemptId: collisionOwnerAttemptId,
+      workflowRunId: RUN_ID,
+      stepRunId: "preflight",
+      stepKey: "preflight",
+      executorFamily: "one-shot",
+      attemptNumber: 1,
+      roundIndex: 0,
+      state: "succeeded",
+      classification: "complete",
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: NOW + 1,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: [],
+      summary: null,
+      keyChanges: [],
+      keyLearnings: [],
+      remainingWork: [],
+      changedFiles: [],
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: null,
+      humanGate: null,
+    });
+    insertExecutorCheckpoint(db, {
+      checkpointId: `${collidingRoundId}-checkpoint-0`,
+      roundId: collidingRoundId,
+      sequence: 0,
+      stage: "round_started",
+      detail: null,
+    });
+
+    const claim = approveAndClaim(db, "implementation");
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 2,
+      executorOwnsRounds: true,
+      materializeOwnedRound: ({ attempt, roundId }) => ({
+        round: {
+          roundId: roundId ?? collidingRoundId,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
+          executorFamily: attempt.executorFamily,
+          attemptNumber: attempt.attemptNumber,
+          roundIndex: 1,
+          state: "running",
+          classification: null,
+          startedAt: NOW + 2,
+          heartbeatAt: NOW + 2,
+          finishedAt: null,
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: null,
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+          recoveryCode: null,
+          humanGate: null,
+        },
+        checkpoint: {
+          checkpointId: `${roundId ?? collidingRoundId}-checkpoint-0`,
+          roundId: roundId ?? collidingRoundId,
+          sequence: 0,
+          stage: "round_started",
+          detail: null,
+        },
+      }),
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(
+      db
+        .prepare(
+          `SELECT round_id, attempt_id, round_index
+             FROM executor_rounds
+            WHERE attempt_id = ?`,
+        )
+        .get(`${RUN_ID}::implementation::attempt-2`),
+    ).toEqual({
+      round_id: `${collidingRoundId}::allocated-1`,
+      attempt_id: `${RUN_ID}::implementation::attempt-2`,
+      round_index: 1,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT checkpoint_id, round_id
+             FROM executor_checkpoints
+            WHERE round_id = ?`,
+        )
+        .get(`${collidingRoundId}::allocated-1`),
+    ).toEqual({
+      checkpoint_id: `${collidingRoundId}::allocated-1-checkpoint-0`,
+      round_id: `${collidingRoundId}::allocated-1`,
+    });
   });
 });
 
@@ -535,7 +717,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     const lease = getWorkflowLease(db, RUN_ID, "dispatch");
     expect(lease?.releasedAt).toBeNull();
 
-    expect(countInvocations(db, RUN_ID)).toBe(1);
+    expect(countAttempts(db, RUN_ID)).toBe(1);
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
 
@@ -563,7 +745,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
   });
 
   it("routes an invalid executor name (corrupt step definition) to manual recovery", () => {
@@ -607,7 +789,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
@@ -646,7 +828,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
@@ -679,7 +861,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
@@ -712,7 +894,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     // The dispatch lease is still released so the run is not held busy on a no-op,
     // no executor scaffold was created, and the orphaned step was not advanced.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 });
@@ -736,7 +918,7 @@ describe("executeWorkflowStepDispatch — safety", () => {
     expect(result.status).toBe(
       WORKFLOW_DISPATCH_RESULT_STATUS.stepNotStartable,
     );
-    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
     // The dispatch lease is released so the run is not held busy on a no-op.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });

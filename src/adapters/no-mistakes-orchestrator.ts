@@ -10,7 +10,7 @@
  * {@link NoMistakesExternalState} snapshot shape, the daemon classification
  * ({@link decideNoMistakesMirror} / {@link decideNoMistakesUnreadable}), the
  * decision -> round-patch projection ({@link noMistakesRoundUpdate}), and the
- * durable invocation / round-start / finding / decision projections.
+ * durable attempt / round-start / finding / decision projections.
  * `no-mistakes/mechanism.ts` owns the IO seam that turns the untrusted external
  * state store into a typed snapshot ({@link NoMistakesExternalStateRead}). This
  * module is the stateful seam that composes both with the real
@@ -48,10 +48,10 @@
  *     evidence.
  *
  * {@link runNoMistakesMirrorStep} is the entrypoint a daemon / scheduler calls with
- * a `StepRun` identity to *start* a mirror: it materializes the durable invocation
+ * a `StepRun` identity to *start* a mirror: it materializes the durable attempt
  * and the single round-start row, then runs the first poll and settles the
- * invocation into that poll's decision. Subsequent polls are
- * {@link runNoMistakesMirrorRound} on the existing round; both the invocation and
+ * attempt into that poll's decision. Subsequent polls are
+ * {@link runNoMistakesMirrorRound} on the existing round; both the attempt and
  * the round can stay non-terminal (`running` / `mirroring_external_state` /
  * `waiting_operator`) across many ticks.
  *
@@ -72,23 +72,23 @@ import {
   insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
-  loadExecutorInvocation,
+  loadExecutorAttempt,
   loadExecutorRound,
-  updateExecutorInvocationState,
+  updateExecutorAttemptState,
   updateExecutorRound,
   type ExecutorRoundUpdate,
 } from "../core/executors/loop/persist.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   type ExecutorDecisionRecord,
   type ExecutorFindingRecord,
-  type ExecutorInvocationRecord,
+  type ExecutorAttemptRecord,
   type ExecutorRoundRecord,
 } from "../core/executors/loop/reducer.js";
 import {
@@ -96,7 +96,7 @@ import {
   decideNoMistakesUnreadable,
   isNoMistakesExecutorFamily,
   noMistakesRoundUpdate,
-  planNoMistakesInvocation,
+  planNoMistakesAttempt,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
   planNoMistakesRoundStart,
@@ -305,7 +305,7 @@ function noMistakesExternalStateInconsistent(
   return {
     classification: "manual_recovery_required",
     roundState: "manual_recovery_required",
-    invocationState: "manual_recovery_required",
+    attemptState: "manual_recovery_required",
     humanGate: "manual_recovery_required",
     recoveryCode: "external_state_inconsistent",
     reason,
@@ -527,31 +527,31 @@ function noMistakesPollRoundUpdate(
     : { ...baseUpdate, heartbeatAt, finishedAt };
 }
 
-function updateInvocationForDecision(
+function updateAttemptForDecision(
   db: MomentumDb,
-  invocationId: string,
+  attemptId: string,
   decision: NoMistakesMirrorDecision,
   polledAt: number,
 ): void {
-  updateExecutorInvocationState(db, invocationId, decision.invocationState, {
+  updateExecutorAttemptState(db, attemptId, decision.attemptState, {
     heartbeatAt: polledAt,
-    finishedAt: isTerminalExecutorInvocationState(decision.invocationState)
+    finishedAt: isTerminalExecutorAttemptState(decision.attemptState)
       ? polledAt
       : null,
     now: polledAt,
   });
 }
 
-function resumeWaitingInvocationBeforeSuccess(
+function resumeWaitingAttemptBeforeSuccess(
   db: MomentumDb,
-  invocationId: string,
+  attemptId: string,
   polledAt: number,
 ): void {
-  const invocation = loadExecutorInvocation(db, invocationId);
-  if (invocation?.state !== "waiting_operator") {
+  const attempt = loadExecutorAttempt(db, attemptId);
+  if (attempt?.state !== "waiting_operator") {
     return;
   }
-  updateExecutorInvocationState(db, invocationId, "running", {
+  updateExecutorAttemptState(db, attemptId, "running", {
     heartbeatAt: polledAt,
     finishedAt: null,
     now: polledAt,
@@ -809,8 +809,8 @@ export function runNoMistakesMirrorRound(
       stateRead,
       polledAt,
     );
-    if (decision.invocationState === "succeeded") {
-      resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
+    if (decision.attemptState === "succeeded") {
+      resumeWaitingAttemptBeforeSuccess(db, current.attemptId, polledAt);
     }
     if (
       current.state === "waiting_operator" &&
@@ -831,7 +831,7 @@ export function runNoMistakesMirrorRound(
     const round = updateExecutorRound(db, roundId, roundUpdate, {
       now: polledAt,
     });
-    updateInvocationForDecision(db, current.invocationId, decision, polledAt);
+    updateAttemptForDecision(db, current.attemptId, decision, polledAt);
 
     // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
     //    it mirrors nothing and preserves prior evidence.
@@ -872,7 +872,7 @@ export function runNoMistakesMirrorRound(
 /**
  * The inputs to {@link runNoMistakesMirrorStep}: the `StepRun` identity
  * (`workflowRunId` / `stepRunId` / `stepKey` / `attempt`), the bounded reader, a
- * per-round runtime-input resolver, and a clock. The adapter mints the invocation
+ * per-round runtime-input resolver, and a clock. The adapter mints the attempt
  * / round identities itself, so the caller supplies a `StepRun`, not pre-built
  * executor-loop records. There is no `family` (the mirror serves exactly
  * `no-mistakes`), no selection (no-mistakes owns its own pipeline, so Momentum
@@ -884,53 +884,53 @@ export type RunNoMistakesMirrorStepInput = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  /** Re-run counter; a fresh attempt mints a fresh invocation, never mutating the prior one. */
-  attempt: number;
+  /** Re-run counter; a fresh attempt mints a fresh attempt, never mutating the prior one. */
+  attemptNumber: number;
   /** The bounded reader the first poll runs (the real reader plugs in here). */
   read: NoMistakesMirrorReader;
   /** Caller-known identity used to corroborate the first readable poll. */
   expectedExternalIdentity: NoMistakesExpectedExternalIdentity;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => NoMistakesRoundRuntimeInputs;
-  /** Clock for the invocation + round + poll timestamps; defaults to {@link Date.now}. */
+  /** Clock for the attempt + round + poll timestamps; defaults to {@link Date.now}. */
   now?: () => number;
 };
 
 /**
- * The durable result of starting a mirror: the settled invocation record and the
- * first poll's outcome. The invocation can be non-terminal (`running` while the
+ * The durable result of starting a mirror: the settled attempt record and the
+ * first poll's outcome. The attempt can be non-terminal (`running` while the
  * external run is still in progress, or a durable `waiting_operator` pause), so a
  * daemon scheduler keeps ticking {@link runNoMistakesMirrorRound} until a poll
  * settles it.
  */
 export type RunNoMistakesMirrorStepResult = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   round: RunNoMistakesMirrorRoundResult;
 };
 
 /**
  * The legacy no-mistakes mirror entrypoint below `StepRun`, with exactly one long-lived
- * mirror round). It {@link planNoMistakesInvocation | materializes} the durable
- * `executor_invocations` row with a deterministic, reattachable id, inserts the
+ * mirror round). It {@link planNoMistakesAttempt | materializes} the durable
+ * `executor_attempts` row with a deterministic, reattachable id, inserts the
  * single {@link planNoMistakesRoundStart | round-start} row (born directly in
  * `mirroring_external_state`, with no agent/model — no-mistakes owns its own
  * pipeline), then runs the first poll through {@link runNoMistakesMirrorRound} and
- * settles the invocation into that poll's decision.
+ * settles the attempt into that poll's decision.
  *
- * The durable invocation + round rows are inserted *before* the first read, so a
+ * The durable attempt + round rows are inserted *before* the first read, so a
  * lost process leaves a durable `running` mirror to reattach to. Unlike the single-shot driver, the settle is not always
- * terminal: a still-running external run leaves the invocation `running` and a gate
+ * terminal: a still-running external run leaves the attempt `running` and a gate
  * leaves it in the durable non-terminal `waiting_operator` (no `finished_at`), for
  * a later {@link runNoMistakesMirrorRound} tick to advance — only a settle stamps
  * `finished_at`.
  *
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
- * invocation reattaches from `(workflowRunId, stepRunId, attempt)` and the round
- * from the invocation id alone (the mirror is always round 0), both recomputable
+ * attempt reattaches from `(workflowRunId, stepRunId, attempt)` and the round
+ * from the attempt id alone (the mirror is always round 0), both recomputable
  * from durable state. A re-run is a fresh
- * `attempt` minting a fresh invocation, never a mutation of the prior one.
+ * `attempt` minting a fresh attempt, never a mutation of the prior one.
  *
- * @throws {ExecutorInvocationConflictError} if the invocation id already exists
+ * @throws {ExecutorAttemptConflictError} if the attempt id already exists
  * (a re-run must use a fresh `attempt`).
  * @throws {ExecutorRoundConflictError} if the round id already exists.
  */
@@ -940,27 +940,27 @@ export function runNoMistakesMirrorStep(
   const now = input.now ?? Date.now;
   const { db } = input;
 
-  // 1. Materialize + insert the durable invocation (running) before any read.
-  const { invocation, startRecord } = withSavepoint(
+  // 1. Materialize + insert the durable attempt (running) before any read.
+  const { attempt, startRecord } = withSavepoint(
     db,
     "no_mistakes_mirror_start",
     () => {
-      const invocationStartedAt = now();
-      const invocation = planNoMistakesInvocation({
+      const attemptStartedAt = now();
+      const attempt = planNoMistakesAttempt({
         workflowRunId: input.workflowRunId,
         stepRunId: input.stepRunId,
         stepKey: input.stepKey,
-        attempt: input.attempt,
-        startedAt: invocationStartedAt,
+        attemptNumber: input.attemptNumber,
+        startedAt: attemptStartedAt,
       });
-      insertExecutorInvocation(db, invocation, { now: invocationStartedAt });
+      insertExecutorAttempt(db, attempt, { now: attemptStartedAt });
 
       // 2. Insert the single mirror round-start row (born in mirroring_external_state),
-      //    inheriting the invocation's identity + family and freezing the daemon's
+      //    inheriting the attempt's identity + family and freezing the daemon's
       //    runtime inputs in.
       const roundStartedAt = now();
       const startRecord = planNoMistakesRoundStart({
-        invocation,
+        attempt,
         runtime: input.resolveRoundInputs(),
         startedAt: roundStartedAt,
       });
@@ -971,7 +971,7 @@ export function runNoMistakesMirrorStep(
         input.expectedExternalIdentity,
         roundStartedAt,
       );
-      return { invocation, startRecord };
+      return { attempt, startRecord };
     },
   );
 
@@ -986,23 +986,23 @@ export function runNoMistakesMirrorStep(
   };
   const round = runNoMistakesMirrorRound(roundInput);
 
-  // 4. Settle the invocation into the state the first poll's decision maps to. The
-  //    mirror's invocation states are the same as the round's, so a continue keeps
+  // 4. Settle the attempt into the state the first poll's decision maps to. The
+  //    mirror's attempt states are the same as the round's, so a continue keeps
   //    it `running`, a gate pauses it in non-terminal `waiting_operator`, and only a
   //    terminal settle stamps `finished_at`.
-  const invocationState = round.decision.invocationState;
-  const finalInvocation = updateExecutorInvocationState(
+  const attemptState = round.decision.attemptState;
+  const finalAttempt = updateExecutorAttemptState(
     db,
-    invocation.invocationId,
-    invocationState,
+    attempt.attemptId,
+    attemptState,
     {
       heartbeatAt: polledAt,
-      finishedAt: isTerminalExecutorInvocationState(invocationState)
+      finishedAt: isTerminalExecutorAttemptState(attemptState)
         ? polledAt
         : null,
       now: polledAt,
     },
   );
 
-  return { invocation: finalInvocation, round };
+  return { attempt: finalAttempt, round };
 }

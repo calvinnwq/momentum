@@ -2,10 +2,10 @@
  * Pure state model for the executor loop nested below a `StepRun`.
  *
  * This module owns only the canonical vocabulary, the transition reducers, and
- * the record *shapes* for the `ExecutorDefinition` / `ExecutorInvocation` /
+ * the record *shapes* for the `ExecutorDefinition` / `ExecutorAttempt` /
  * `ExecutorRound` layer described in SPEC.md. It
  * follows the same discipline as `src/core/workflow/run/reducer.ts` and
- * `src/core/workflow/definition/definition.ts`: no SQLite, no file system, no executor invocation.
+ * `src/core/workflow/definition/definition.ts`: no SQLite, no file system, no executor execution.
  * Durable `executor_*` tables and the persistence twin layer on top of these
  * primitives, exactly as workflow persistence layered `src/core/workflow/run/import-persist.ts` on top of
  * `src/core/workflow/run/reducer.ts`.
@@ -13,17 +13,17 @@
  * The contract pins this nesting so bounded autonomy never flattens into
  * top-level workflow steps:
  *
- *   StepRun -> ExecutorInvocation -> ExecutorRound[]
+ *   StepRun -> ExecutorAttempt -> ExecutorRound[]
  *
  * Scope decisions pinned here, grounded in SPEC.md:
  *
- *   - The invocation/round *state* `blocked` is terminal (contract "Executor
- *     States": "Terminal invocation states are `manual_recovery_required`,
+ *   - The attempt/round *state* `blocked` is terminal (contract "Executor
+ *     States": "Terminal attempt states are `manual_recovery_required`,
  *     `blocked`, `failed`, `succeeded`, and `cancelled`. Terminal round states
  *     are the same."). This is distinct from the daemon *classification*
- *     `blocked` ("durable non-terminal blockage"): the round/invocation record
- *     is an immutable attempt that ends blocked, while the *workflow* can later
- *     recover by starting a fresh invocation/round once the blocker clears.
+ *     `blocked` ("durable non-terminal blockage"): the round/attempt record
+ *     is immutable once it ends blocked, while the *workflow* can later
+ *     recover by starting a fresh attempt/round once the blocker clears.
  *   - `waiting_operator` is the one durable, non-terminal pause: it requires an
  *     explicit operator command / API decision / approved delegated policy
  *     before the daemon may continue, so it can always resume into an active
@@ -35,7 +35,7 @@
  *     families capture a normalized result or mirrored external state there;
  *     the `script` family may use `capturing_result` as a bare transition for
  *     exit-code-plus-log success.
- *   - An invocation must `preparing` before it can `running` (resolve agent /
+ *   - An attempt must `preparing` before it can `running` (resolve agent /
  *     model / leases first), mirroring the step reducer's
  *     pending -> approved -> running ordering.
  *   - `executorFamily` reuses the {@link WorkflowExecutorFamily}
@@ -52,10 +52,11 @@ export type {
 } from "../../workflow/definition/definition.js";
 
 /**
- * Executor invocation states (contract "Executor States"). One invocation is a
- * single configured executor session for a step.
+ * Executor attempt states (contract "Executor States"). One attempt is one
+ * executor go for one step and one executor identity; a retry inserts a new
+ * attempt instead of reopening a terminal one.
  */
-export const EXECUTOR_INVOCATION_STATES = [
+export const EXECUTOR_ATTEMPT_STATES = [
   "pending",
   "preparing",
   "running",
@@ -67,23 +68,22 @@ export const EXECUTOR_INVOCATION_STATES = [
   "succeeded",
   "cancelled",
 ] as const;
-export type ExecutorInvocationState =
-  (typeof EXECUTOR_INVOCATION_STATES)[number];
+export type ExecutorAttemptState = (typeof EXECUTOR_ATTEMPT_STATES)[number];
 
-export const EXECUTOR_INVOCATION_TERMINAL_STATES = [
+export const EXECUTOR_ATTEMPT_TERMINAL_STATES = [
   "manual_recovery_required",
   "blocked",
   "failed",
   "succeeded",
   "cancelled",
-] as const satisfies readonly ExecutorInvocationState[];
-export type ExecutorInvocationTerminalState =
-  (typeof EXECUTOR_INVOCATION_TERMINAL_STATES)[number];
+] as const satisfies readonly ExecutorAttemptState[];
+export type ExecutorAttemptTerminalState =
+  (typeof EXECUTOR_ATTEMPT_TERMINAL_STATES)[number];
 
 /**
  * Executor round states (contract "Executor States"). One round is either a
- * single bounded loop attempt or a long-lived external mirror lane under an
- * invocation.
+ * single bounded loop iteration or a long-lived external mirror lane under an
+ * attempt.
  */
 export const EXECUTOR_ROUND_STATES = [
   "pending",
@@ -128,8 +128,8 @@ export const EXECUTOR_COMPLETION_CLASSIFICATIONS = [
 export type ExecutorCompletionClassification =
   (typeof EXECUTOR_COMPLETION_CLASSIFICATIONS)[number];
 
-const INVOCATION_STATE_BY_CLASSIFICATION: Readonly<
-  Record<ExecutorCompletionClassification, ExecutorInvocationState>
+const ATTEMPT_STATE_BY_CLASSIFICATION: Readonly<
+  Record<ExecutorCompletionClassification, ExecutorAttemptState>
 > = {
   complete: "succeeded",
   continue: "running",
@@ -154,10 +154,10 @@ const ROUND_STATES_BY_CLASSIFICATION: Readonly<
   cancelled: ["cancelled"],
 };
 
-export function executorInvocationStateForClassification(
+export function executorAttemptStateForClassification(
   classification: ExecutorCompletionClassification,
-): ExecutorInvocationState {
-  return INVOCATION_STATE_BY_CLASSIFICATION[classification];
+): ExecutorAttemptState {
+  return ATTEMPT_STATE_BY_CLASSIFICATION[classification];
 }
 
 export function isExecutorRoundStateCompatibleWithClassification(
@@ -258,11 +258,11 @@ export const EXECUTOR_ARTIFACT_CLASSES = [
 ] as const;
 export type ExecutorArtifactClass = (typeof EXECUTOR_ARTIFACT_CLASSES)[number];
 
-const INVOCATION_STATE_SET: ReadonlySet<ExecutorInvocationState> = new Set(
-  EXECUTOR_INVOCATION_STATES,
+const ATTEMPT_STATE_SET: ReadonlySet<ExecutorAttemptState> = new Set(
+  EXECUTOR_ATTEMPT_STATES,
 );
-const INVOCATION_TERMINAL_SET: ReadonlySet<ExecutorInvocationState> = new Set(
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+const ATTEMPT_TERMINAL_SET: ReadonlySet<ExecutorAttemptState> = new Set(
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
 );
 const ROUND_STATE_SET: ReadonlySet<ExecutorRoundState> = new Set(
   EXECUTOR_ROUND_STATES,
@@ -272,9 +272,9 @@ const ROUND_TERMINAL_SET: ReadonlySet<ExecutorRoundState> = new Set(
 );
 
 // Failure-ish terminals reachable from any active (non-terminal) state. A round
-// or invocation can abort to a recovery, blockage, failure, or cancellation at
+// or attempt can abort to a recovery, blockage, failure, or cancellation at
 // any stage; the daemon's recovery taxonomy decides which one applies.
-const INVOCATION_ABORTS: readonly ExecutorInvocationState[] = [
+const ATTEMPT_ABORTS: readonly ExecutorAttemptState[] = [
   "blocked",
   "failed",
   "manual_recovery_required",
@@ -287,16 +287,16 @@ const ROUND_ABORTS: readonly ExecutorRoundState[] = [
   "cancelled",
 ];
 
-const INVOCATION_ALLOWED: Readonly<
-  Record<ExecutorInvocationState, readonly ExecutorInvocationState[]>
+const ATTEMPT_ALLOWED: Readonly<
+  Record<ExecutorAttemptState, readonly ExecutorAttemptState[]>
 > = {
-  pending: ["preparing", ...INVOCATION_ABORTS],
-  preparing: ["running", "waiting_operator", ...INVOCATION_ABORTS],
-  running: ["pausing", "waiting_operator", "succeeded", ...INVOCATION_ABORTS],
-  pausing: ["waiting_operator", ...INVOCATION_ABORTS],
+  pending: ["preparing", ...ATTEMPT_ABORTS],
+  preparing: ["running", "waiting_operator", ...ATTEMPT_ABORTS],
+  running: ["pausing", "waiting_operator", "succeeded", ...ATTEMPT_ABORTS],
+  pausing: ["waiting_operator", ...ATTEMPT_ABORTS],
   // Durable pause: resume into an active state, or settle to a failure-ish
-  // terminal. Never straight to `succeeded` — a resumed invocation must run.
-  waiting_operator: ["running", "preparing", ...INVOCATION_ABORTS],
+  // terminal. Never straight to `succeeded` — a resumed attempt must run.
+  waiting_operator: ["running", "preparing", ...ATTEMPT_ABORTS],
   manual_recovery_required: [],
   blocked: [],
   failed: [],
@@ -350,20 +350,20 @@ const ROUND_ALLOWED: Readonly<
   cancelled: [],
 };
 
-export type ExecutorInvocationTransitionErrorCode =
-  | "executor_invocation_unknown_state"
-  | "executor_invocation_terminal"
-  | "executor_invocation_invalid_transition";
+export type ExecutorAttemptTransitionErrorCode =
+  | "executor_attempt_unknown_state"
+  | "executor_attempt_terminal"
+  | "executor_attempt_invalid_transition";
 
 export type ExecutorRoundTransitionErrorCode =
   | "executor_round_unknown_state"
   | "executor_round_terminal"
   | "executor_round_invalid_transition";
 
-export function isTerminalExecutorInvocationState(
-  state: ExecutorInvocationState,
+export function isTerminalExecutorAttemptState(
+  state: ExecutorAttemptState,
 ): boolean {
-  return INVOCATION_TERMINAL_SET.has(state);
+  return ATTEMPT_TERMINAL_SET.has(state);
 }
 
 export function isTerminalExecutorRoundState(
@@ -373,39 +373,36 @@ export function isTerminalExecutorRoundState(
 }
 
 /**
- * Validate an executor invocation state transition. Refuses unknown states,
+ * Validate an executor attempt state transition. Refuses unknown states,
  * transitions out of a terminal state, and any transition not in the allowed
  * graph. A same-state transition is a no-op success.
  */
-export function transitionExecutorInvocation(
-  from: ExecutorInvocationState,
-  to: ExecutorInvocationState,
-): TransitionResult<
-  ExecutorInvocationState,
-  ExecutorInvocationTransitionErrorCode
-> {
-  if (!INVOCATION_STATE_SET.has(from) || !INVOCATION_STATE_SET.has(to)) {
+export function transitionExecutorAttempt(
+  from: ExecutorAttemptState,
+  to: ExecutorAttemptState,
+): TransitionResult<ExecutorAttemptState, ExecutorAttemptTransitionErrorCode> {
+  if (!ATTEMPT_STATE_SET.has(from) || !ATTEMPT_STATE_SET.has(to)) {
     return {
       ok: false,
-      errorCode: "executor_invocation_unknown_state",
-      errorMessage: `unknown executor invocation state: from=${String(from)} to=${String(to)}`,
+      errorCode: "executor_attempt_unknown_state",
+      errorMessage: `unknown executor attempt state: from=${String(from)} to=${String(to)}`,
     };
   }
   if (from === to) {
     return { ok: true, state: to };
   }
-  if (INVOCATION_TERMINAL_SET.has(from)) {
+  if (ATTEMPT_TERMINAL_SET.has(from)) {
     return {
       ok: false,
-      errorCode: "executor_invocation_terminal",
-      errorMessage: `executor invocation is in terminal state ${from}; cannot transition to ${to}`,
+      errorCode: "executor_attempt_terminal",
+      errorMessage: `executor attempt is in terminal state ${from}; cannot transition to ${to}`,
     };
   }
-  if (!INVOCATION_ALLOWED[from].includes(to)) {
+  if (!ATTEMPT_ALLOWED[from].includes(to)) {
     return {
       ok: false,
-      errorCode: "executor_invocation_invalid_transition",
-      errorMessage: `executor invocation cannot transition from ${from} to ${to}`,
+      errorCode: "executor_attempt_invalid_transition",
+      errorMessage: `executor attempt cannot transition from ${from} to ${to}`,
     };
   }
   return { ok: true, state: to };
@@ -468,26 +465,29 @@ export type ExecutorDefinitionRecord = {
 };
 
 /**
- * One configured executor session for a step run (contract "State Model"). An
- * invocation owns its rounds; its identity reattaches to the owning
+ * One executor go for one step run and one executor identity (contract "State
+ * Model"). An attempt owns its rounds; its identity reattaches to the owning
  * `workflow_runs` / `workflow_steps` rows by `(workflowRunId, stepRunId)`.
+ * Attempts are immutable retry boundaries: a retry inserts a fresh attempt with
+ * the next `attemptNumber` and never reopens or rewrites an earlier attempt.
  */
-export type ExecutorInvocationRecord = {
-  invocationId: string;
+export type ExecutorAttemptRecord = {
+  attemptId: string;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
   executorFamily: ExecutorName;
-  state: ExecutorInvocationState;
-  attempt: number;
+  state: ExecutorAttemptState;
+  attemptNumber: number;
   startedAt: number | null;
   heartbeatAt: number | null;
   finishedAt: number | null;
 };
 
 /**
- * One bounded loop attempt or long-lived external mirror lane under an invocation
- * (contract "Round Schema"). The common identity, execution, and result fields
+ * One bounded loop iteration or long-lived external mirror lane under an
+ * attempt (contract "Round Schema"). Each round belongs to exactly one attempt.
+ * The common identity, execution, and result fields
  * below are what workflow status, handoff, monitor, logs, and recovery
  * surfaces rely on without understanding the executor internals.
  * Executor-specific evidence is layered on durably as
@@ -498,12 +498,13 @@ export type ExecutorInvocationRecord = {
 export type ExecutorRoundRecord = {
   // Identity and ordering.
   roundId: string;
-  invocationId: string;
+  attemptId: string;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
   executorFamily: ExecutorName;
-  attempt: number;
+  attemptNumber: number;
+  legacyAttemptNumber?: number;
   roundIndex: number;
   // Execution.
   state: ExecutorRoundState;
@@ -531,6 +532,12 @@ export type ExecutorRoundRecord = {
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
 };
+
+export function executorRoundReplayAttemptNumber(
+  round: Pick<ExecutorRoundRecord, "attemptNumber" | "legacyAttemptNumber">,
+): number {
+  return round.legacyAttemptNumber ?? round.attemptNumber;
+}
 
 /**
  * One verification command result captured by a round.
@@ -605,6 +612,22 @@ export type ExecutorDecisionRecord = {
   resolution: string | null;
   externalRef?: string | null;
 };
+
+/**
+ * The next round index for a round list, computed as `max(roundIndex) + 1` -
+ * never the list length, because migrated SDK-05 data may be 1-based. The
+ * dispatch/SDK lane passes the step-spanning list so its indices stay monotone
+ * across attempts; direct executor adapters pass per-attempt lists and number
+ * each attempt's rounds from zero.
+ */
+export function nextExecutorRoundIndex(
+  rounds: readonly { roundIndex: number }[],
+): number {
+  return (
+    rounds.reduce((highest, round) => Math.max(highest, round.roundIndex), -1) +
+    1
+  );
+}
 
 /** True only when neither durable resolution field has settled the decision. */
 export function isExecutorDecisionEligibleForHumanGate(decision: {

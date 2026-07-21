@@ -10,7 +10,7 @@ import {
   isWorkflowGateScope,
   isWorkflowGateType,
   type GateDecisionInput,
-  type GateDecisionRequest
+  type GateDecisionRequest,
 } from "../src/core/workflow/gate/gate.js";
 
 function gate(overrides: Partial<GateDecisionInput> = {}): GateDecisionInput {
@@ -18,18 +18,18 @@ function gate(overrides: Partial<GateDecisionInput> = {}): GateDecisionInput {
     resolved: false,
     allowedActions: ["fix", "skip", "approve_as_is", "reject", "abort"],
     policyEnvelope: ["fix", "skip"],
-    ...overrides
+    ...overrides,
   };
 }
 
 function request(
-  overrides: Partial<GateDecisionRequest> = {}
+  overrides: Partial<GateDecisionRequest> = {},
 ): GateDecisionRequest {
   return {
     action: "fix",
     actor: "calvin",
     mode: "operator",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -45,8 +45,8 @@ describe("workflow-gate vocabulary", () => {
         "scope_boundary_exceeded",
         "credential_required",
         "external_state_required",
-        "destructive_action_requested"
-      ].sort()
+        "destructive_action_requested",
+      ].sort(),
     );
   });
 
@@ -54,12 +54,12 @@ describe("workflow-gate vocabulary", () => {
     expect([...WORKFLOW_GATE_TYPES]).toEqual([...EXECUTOR_HUMAN_GATE_TYPES]);
   });
 
-  it("exposes the four gate target scopes (workflow -> step -> invocation -> round)", () => {
+  it("exposes the four gate target scopes (workflow -> step -> attempt -> round)", () => {
     expect([...WORKFLOW_GATE_SCOPES]).toEqual([
       "workflow",
       "step",
-      "invocation",
-      "round"
+      "attempt",
+      "round",
     ]);
   });
 
@@ -81,8 +81,8 @@ describe("workflow-gate vocabulary", () => {
         "actor_required",
         "gate_already_resolved",
         "action_not_allowed",
-        "delegated_action_outside_envelope"
-      ].sort()
+        "delegated_action_outside_envelope",
+      ].sort(),
     );
   });
 });
@@ -91,7 +91,7 @@ describe("evaluateGateDecision — operator decisions", () => {
   it("resolves the gate when an operator picks an allowed action", () => {
     const outcome = evaluateGateDecision(
       gate(),
-      request({ action: "reject", actor: "calvin", mode: "operator" })
+      request({ action: "reject", actor: "calvin", mode: "operator" }),
     );
     expect(outcome).toEqual({
       ok: true,
@@ -99,8 +99,8 @@ describe("evaluateGateDecision — operator decisions", () => {
         chosenAction: "reject",
         resolvedBy: "calvin",
         mode: "operator",
-        resolution: null
-      }
+        resolution: null,
+      },
     });
   });
 
@@ -109,7 +109,7 @@ describe("evaluateGateDecision — operator decisions", () => {
     // not auto-apply it, but an explicit operator can.
     const outcome = evaluateGateDecision(
       gate(),
-      request({ action: "abort", mode: "operator" })
+      request({ action: "abort", mode: "operator" }),
     );
     expect(outcome.ok).toBe(true);
   });
@@ -117,7 +117,7 @@ describe("evaluateGateDecision — operator decisions", () => {
   it("carries the operator resolution note through to the outcome", () => {
     const outcome = evaluateGateDecision(
       gate(),
-      request({ resolutionNote: "verified locally" })
+      request({ resolutionNote: "verified locally" }),
     );
     expect(outcome).toEqual({
       ok: true,
@@ -125,15 +125,15 @@ describe("evaluateGateDecision — operator decisions", () => {
         chosenAction: "fix",
         resolvedBy: "calvin",
         mode: "operator",
-        resolution: "verified locally"
-      }
+        resolution: "verified locally",
+      },
     });
   });
 
   it("trims the requested action and actor before recording the resolution", () => {
     const outcome = evaluateGateDecision(
       gate(),
-      request({ action: "  skip  ", actor: "  calvin  " })
+      request({ action: "  skip  ", actor: "  calvin  " }),
     );
     expect(outcome).toEqual({
       ok: true,
@@ -141,8 +141,8 @@ describe("evaluateGateDecision — operator decisions", () => {
         chosenAction: "skip",
         resolvedBy: "calvin",
         mode: "operator",
-        resolution: null
-      }
+        resolution: null,
+      },
     });
   });
 });
@@ -151,7 +151,11 @@ describe("evaluateGateDecision — delegated policy", () => {
   it("auto-applies a delegated action inside the policy envelope", () => {
     const outcome = evaluateGateDecision(
       gate(),
-      request({ action: "fix", actor: "agent-recommended-important", mode: "delegated" })
+      request({
+        action: "fix",
+        actor: "agent-recommended-important",
+        mode: "delegated",
+      }),
     );
     expect(outcome).toEqual({
       ok: true,
@@ -159,15 +163,15 @@ describe("evaluateGateDecision — delegated policy", () => {
         chosenAction: "fix",
         resolvedBy: "agent-recommended-important",
         mode: "delegated",
-        resolution: null
-      }
+        resolution: null,
+      },
     });
   });
 
   it("pauses for an operator when the delegated action is outside the envelope", () => {
     const outcome = evaluateGateDecision(
       gate(),
-      request({ action: "approve_as_is", mode: "delegated" })
+      request({ action: "approve_as_is", mode: "delegated" }),
     );
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected refusal");
@@ -177,7 +181,7 @@ describe("evaluateGateDecision — delegated policy", () => {
   it("pauses for an operator when the delegated envelope is empty", () => {
     const outcome = evaluateGateDecision(
       gate({ policyEnvelope: [] }),
-      request({ action: "fix", mode: "delegated" })
+      request({ action: "fix", mode: "delegated" }),
     );
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected refusal");
@@ -187,10 +191,7 @@ describe("evaluateGateDecision — delegated policy", () => {
 
 describe("evaluateGateDecision — refusals", () => {
   it("refuses an action that is not in the gate's allowed actions", () => {
-    const outcome = evaluateGateDecision(
-      gate(),
-      request({ action: "nuke" })
-    );
+    const outcome = evaluateGateDecision(gate(), request({ action: "nuke" }));
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected refusal");
     expect(outcome.code).toBe("action_not_allowed");
@@ -198,10 +199,7 @@ describe("evaluateGateDecision — refusals", () => {
   });
 
   it("refuses a decision against an already-resolved gate", () => {
-    const outcome = evaluateGateDecision(
-      gate({ resolved: true }),
-      request()
-    );
+    const outcome = evaluateGateDecision(gate({ resolved: true }), request());
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected refusal");
     expect(outcome.code).toBe("gate_already_resolved");
@@ -224,7 +222,7 @@ describe("evaluateGateDecision — refusals", () => {
   it("checks request shape before gate state (blank action on a resolved gate)", () => {
     const outcome = evaluateGateDecision(
       gate({ resolved: true }),
-      request({ action: "" })
+      request({ action: "" }),
     );
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("expected refusal");
@@ -235,8 +233,8 @@ describe("evaluateGateDecision — refusals", () => {
     expect(() =>
       evaluateGateDecision(
         gate({ allowedActions: [], policyEnvelope: [] }),
-        request({ action: "fix", mode: "delegated" })
-      )
+        request({ action: "fix", mode: "delegated" }),
+      ),
     ).not.toThrow();
   });
 });

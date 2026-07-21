@@ -2,7 +2,7 @@
  * Single-shot executor adapter — single-round driver.
  *
  * `single-shot/executor.ts` owns the *pure* projections for one single-shot
- * invocation: the durable invocation/round identity, the deterministic
+ * attempt: the durable attempt/round identity, the deterministic
  * agent/model selection, the round-start record, the daemon classification +
  * two-phase persistence patches, and the artifact / checkpoint projections. This
  * module is the stateful seam that composes those projections with the *real*
@@ -11,27 +11,27 @@
  * goal-loop projections — but simpler, because a single shot owns exactly one
  * round and never loops:
  *
- *   atomically insert invocation + round-start + dispatch-binding checkpoint
+ *   atomically insert attempt + round-start + dispatch-binding checkpoint
  *      (running, deterministic identity and agent/model/input frozen in)
  *   -> run the bounded mechanism  (the one-shot agent pass / the script command)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
  *   -> run capture/result transition  (running -> capturing_result)
  *   -> persist non-terminal lifecycle checkpoints
  *   -> atomically persist the terminal decision, classification checkpoint,
- *      and invocation settlement (-> succeeded / failed / blocked / manual)
+ *      and attempt settlement (-> succeeded / failed / blocked / manual)
  *
  * {@link runSingleShotStep} is the single entrypoint a daemon / scheduler calls
- * with a `StepRun` identity: it {@link planSingleShotInvocation | materializes}
- * the durable single-shot `executor_invocations` row with a deterministic,
+ * with a `StepRun` identity: it {@link planSingleShotAttempt | materializes}
+ * the durable single-shot `executor_attempts` row with a deterministic,
  * reattachable id, then drives the one round through {@link runSingleShotRound}
- * and settles the invocation. There is no invocation loop and no
- * `invocationStateForRoundClassification` indirection: the single-shot decision
- * already carries the invocation state (one round *is* the invocation), and every
- * accepted single-shot invocation state — `succeeded` / `blocked` / `failed` /
+ * and settles the attempt. There is no attempt loop and no
+ * `attemptStateForRoundClassification` indirection: the single-shot decision
+ * already carries the attempt state (one round *is* the attempt), and every
+ * accepted single-shot attempt state — `succeeded` / `blocked` / `failed` /
  * `manual_recovery_required` — is terminal and receives a stamped `finished_at`.
- * A thrown runner or cleanup boundary can deliberately leave the invocation in
+ * A thrown runner or cleanup boundary can deliberately leave the attempt in
  * flight for recovery instead of manufacturing a terminal classification.
- * A re-run is a fresh `attempt` minting a fresh invocation, never a `continue`.
+ * A re-run is a fresh `attempt` minting a fresh attempt, never a `continue`.
  *
  * The bounded mechanism is injected as a {@link SingleShotRoundRunner} so the real
  * one-shot mechanism (an agent/review pass producing a normalized result
@@ -40,21 +40,21 @@
  * identical durable lifecycle. The two families differ only in what the mechanism
  * returns — `one-shot` captures a {@link RunnerResult} document, `script` is
  * exit-code based with no result document — and the driver stays family-agnostic:
- * it routes the normalized {@link SingleShotInvocationOutcome} through the pure
+ * it routes the normalized {@link SingleShotAttemptOutcome} through the pure
  * decision so the verification-authority and repo-safety boundaries hold end to
  * end.
  *
  * Ordinary mechanism outcomes encode failures as recovery codes in
- * {@link SingleShotInvocationOutcome} (and a `null` / absent result), mirroring
- * `decideSingleShotInvocation`. Cooperative cancellation propagates the signal
+ * {@link SingleShotAttemptOutcome} (and a `null` / absent result), mirroring
+ * `decideSingleShotAttempt`. Cooperative cancellation propagates the signal
  * reason only after verified process and repository cleanup. Supervisor or
  * cleanup failures throw and preserve the durable in-flight state. Two ordering
  * invariants tie the lifecycle to the contract:
  *
- *   - The durable invocation, round-start, and dispatch-binding checkpoint are
+ *   - The durable attempt, round-start, and dispatch-binding checkpoint are
  *     inserted atomically *before* the mechanism runs (contract Round Lifecycle
  *     step 4), so a lost process leaves a complete durable `running` reattach
- *     binding for recovery rather than an invocation-only owner.
+ *     binding for recovery rather than an attempt-only owner.
  *   - A *successful* outcome captures (running -> capturing_result) before
  *     terminalizing — even a `script` success with no result document emits a bare
  *     capture, because the round transition graph forbids `running -> succeeded`
@@ -69,25 +69,25 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   insertExecutorCheckpoint,
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  loadExecutorAttempt,
 } from "../loop/persist.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
-  type ExecutorInvocationRecord,
+  type ExecutorAttemptRecord,
   type ExecutorRoundRecord,
 } from "../loop/reducer.js";
 import { createDurableExecutorEnvelope } from "../sdk/envelope.js";
 import {
-  planSingleShotInvocation,
+  planSingleShotAttempt,
   planSingleShotRoundStart,
   planSingleShotRoundStartedCheckpoint,
-  planSingleShotRoundStartForInvocation,
+  planSingleShotRoundStartForAttempt,
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
   type SingleShotRoundRuntimeInputs,
@@ -130,18 +130,18 @@ export type RunSingleShotRoundInput = {
   now?: () => number;
   /** Fixed compatibility clock for direct callers and deterministic tests. */
   finishedAt?: number;
-  /** Host proof that this call atomically materialized the new round with its invocation. */
+  /** Host proof that this call atomically materialized the new round with its attempt. */
   roundAlreadyMaterialized?: boolean;
 };
 
 /**
  * The durable result of one finished single-shot round: the persisted terminal
- * round record, the daemon's decision (its `invocationState` settles the owning
- * invocation), and the durable evidence rows persisted below the round.
+ * round record, the daemon's decision (its `attemptState` settles the owning
+ * attempt), and the durable evidence rows persisted below the round.
  */
 export type RunSingleShotRoundResult = {
   round: ExecutorRoundRecord;
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   decision: SingleShotDecision;
   /** The durable artifact rows persisted below the round, in contract order. */
   artifacts: ExecutorArtifactRecord[];
@@ -159,7 +159,7 @@ export type RunSingleShotRoundResult = {
  * finished; it resumes classification without running the mechanism again.
  *
  * @throws {ExecutorRoundConflictError} if first materialization collides with a
- * different durable round id / `(invocation, index)` owner.
+ * different durable round id / `(attempt, index)` owner.
  * @throws {Error} if an existing round is terminal, incomplete, or does not
  * match the current dispatch binding.
  * @throws {Error} if the outcome carries an unknown recovery code (via
@@ -189,7 +189,7 @@ export async function runSingleShotRound(
   if (configError !== null) throw new Error(configError);
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId: start.invocationId,
+    attemptId: start.attemptId,
     now,
   });
   const executor = new SingleShotExecutor(start.family, runRound);
@@ -228,7 +228,7 @@ export async function runSingleShotRound(
           classification: "cancelled",
           executorRecommendation: null,
           roundState: "cancelled",
-          invocationState: "cancelled",
+          attemptState: "cancelled",
           recoveryCode: null,
           humanGate: null,
         },
@@ -253,7 +253,7 @@ export async function runSingleShotRound(
       classification: tick.recommendation,
       executorRecommendation: tick.recommendation,
       roundState: tick.recommendedRoundState,
-      invocationState: tick.recommendedInvocationState,
+      attemptState: tick.recommendedAttemptState,
       recoveryCode: tick.recoveryCode,
       humanGate: tick.humanGate,
     },
@@ -267,7 +267,7 @@ export async function runSingleShotRound(
   );
   return {
     round: applied.round,
-    invocation: applied.invocation,
+    attempt: applied.attempt,
     decision: tick.decision,
     artifacts: [...tick.artifacts],
     checkpoints: [...tick.checkpoints, applied.classificationCheckpoint],
@@ -295,7 +295,7 @@ function mergeSingleShotConfig(
  * (`workflowRunId` / `stepRunId` / `stepKey` / `attempt`), the single-shot
  * `family`, the resolved {@link SingleShotRoundSelection} the round runs under, the
  * bounded mechanism, a per-round runtime-input resolver, and a clock. The adapter
- * mints the invocation / round identities itself, so the caller supplies a
+ * mints the attempt / round identities itself, so the caller supplies a
  * `StepRun`, not pre-built executor-loop records. Unlike the goal-loop step there
  * is no `maxRounds` and the runtime resolver takes no round index — a single shot
  * is always the one round at index 0.
@@ -305,8 +305,8 @@ type RunSingleShotStepBase = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  /** Re-run counter; a fresh attempt mints a fresh invocation, never mutating the prior one. */
-  attempt: number;
+  /** Re-run counter; a fresh attempt mints a fresh attempt, never mutating the prior one. */
+  attemptNumber: number;
   /** The deterministic selection (from `resolveSingleShotRoundSelection`) frozen into the round. */
   selection: SingleShotRoundSelection;
   /** The bounded mechanism for a new round; completed reattach skips it. */
@@ -315,7 +315,7 @@ type RunSingleShotStepBase = {
   signal?: AbortSignal;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => SingleShotRoundRuntimeInputs;
-  /** Clock for invocation, round, checkpoint, and later writes; defaults to {@link Date.now}. */
+  /** Clock for attempt, round, checkpoint, and later writes; defaults to {@link Date.now}. */
   now?: () => number;
 };
 
@@ -333,54 +333,54 @@ export type RunSingleShotStepInput =
 
 /**
  * The durable result of one finished single-shot step: the persisted terminal
- * invocation record and the single round outcome it drove. There is no round array
+ * attempt record and the single round outcome it drove. There is no round array
  * (a single shot owns exactly one round); the round's decision is what settled the
- * invocation.
+ * attempt.
  */
 export type RunSingleShotStepResult = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   round: RunSingleShotRoundResult;
 };
 
 /**
  * The single-shot executor adapter "below `StepRun`" (contract "State Model":
- * `StepRun -> ExecutorInvocation -> ExecutorRound[]`, here exactly one round).
+ * `StepRun -> ExecutorAttempt -> ExecutorRound[]`, here exactly one round).
  * This is the single entrypoint a daemon / scheduler calls with a step-run
- * identity: it atomically materializes the durable invocation, initial round,
+ * identity: it atomically materializes the durable attempt, initial round,
  * and hashed dispatch-binding checkpoint with a deterministic, reattachable id,
  * then drives the round through {@link runSingleShotRound}. The round identity
- * comes from {@link planSingleShotRoundStartForInvocation}, inherits the
- * invocation identity and family, and uses the deterministic
- * {@link singleShotRoundId}. The final daemon decision settles the invocation
+ * comes from {@link planSingleShotRoundStartForAttempt}, inherits the
+ * attempt identity and family, and uses the deterministic
+ * {@link singleShotRoundId}. The final daemon decision settles the attempt
  * into the round decision's terminal state.
  *
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
- * invocation reattaches from `(workflowRunId, stepRunId, family, attempt)` and the
- * round from the invocation id alone (a single shot is always round 0), both
+ * attempt reattaches from `(workflowRunId, stepRunId, family, attempt)` and the
+ * round from the attempt id alone (a single shot is always round 0), both
  * recomputable from durable state (contract "Heartbeat And Reattach"). The
  * resolved selection is frozen into the round before work runs (contract "Agent
  * And Model Selection") and the round's input digest / artifact root / log paths
  * come from the injected {@link RunSingleShotStepInput.resolveRoundInputs} (the
  * daemon's filesystem concern, never invented here).
  *
- * Invocation settle: the single-shot decision carries the invocation state
- * directly (one round *is* the invocation), so round classification, its
- * checkpoint, and invocation settlement commit in one transaction.
+ * Attempt settle: the single-shot decision carries the attempt state
+ * directly (one round *is* the attempt), so round classification, its
+ * checkpoint, and attempt settlement commit in one transaction.
  *
- * Clocks: the invocation start, round start, durable observations, and terminal
+ * Clocks: the attempt start, round start, durable observations, and terminal
  * settlement are stamped from the injected `now`. Any terminal read after new
  * work happens after the awaited mechanism, so asynchronous rounds preserve
  * lifecycle order.
  *
- * A matching non-terminal invocation reattaches only through its durable round
+ * A matching non-terminal attempt reattaches only through its durable round
  * dispatch binding; a terminal duplicate remains a conflict, and a genuine
  * re-run must use a fresh `attempt`.
  *
- * @throws {ExecutorInvocationConflictError} if the deterministic invocation id
+ * @throws {ExecutorAttemptConflictError} if the deterministic attempt id
  * already belongs to a terminal attempt.
  * @throws {ExecutorRoundConflictError} if first round materialization collides
  * with a different durable owner (via {@link runSingleShotRound}).
- * @throws {Error} if a non-terminal invocation has no complete durable dispatch
+ * @throws {Error} if a non-terminal attempt has no complete durable dispatch
  * binding or its existing round does not match the current dispatch inputs.
  */
 export async function runSingleShotStep(
@@ -408,46 +408,43 @@ export async function runSingleShotStep(
   const effectiveSelection = singleShotSelectionFromSdkConfig(effectiveConfig);
 
   // Resolve caller-owned clocks and filesystem inputs before insertion. If one
-  // aborts or throws, no invocation exists without a round to carry recovery.
-  const invocationStartedAt = now();
+  // aborts or throws, no attempt exists without a round to carry recovery.
+  const attemptStartedAt = now();
   const roundStartedAt = now();
   const runtime = input.resolveRoundInputs();
   input.signal?.throwIfAborted();
 
-  // 1. Plan the durable invocation and its sole round before any external work.
+  // 1. Plan the durable attempt and its sole round before any external work.
   //    A new dispatch inserts both rows in one transaction, so a crash can leave
-  //    either no owner or a complete recovery binding, never an invocation-only
+  //    either no owner or a complete recovery binding, never an attempt-only
   //    owner that deterministic reattach cannot classify.
-  const plannedInvocation = planSingleShotInvocation({
+  const plannedAttempt = planSingleShotAttempt({
     family: input.family,
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    attempt: input.attempt,
-    startedAt: invocationStartedAt,
+    attemptNumber: input.attemptNumber,
+    startedAt: attemptStartedAt,
   });
-  const existingInvocation = loadExecutorInvocation(
-    db,
-    plannedInvocation.invocationId,
-  );
-  let invocation = plannedInvocation;
-  let start = planSingleShotRoundStartForInvocation({
-    invocation: plannedInvocation,
+  const existingAttempt = loadExecutorAttempt(db, plannedAttempt.attemptId);
+  let attempt = plannedAttempt;
+  let start = planSingleShotRoundStartForAttempt({
+    attempt: plannedAttempt,
     selection: effectiveSelection,
     runtime,
     startedAt: roundStartedAt,
   });
   let roundAlreadyMaterialized = false;
   if (
-    existingInvocation === undefined ||
-    isTerminalExecutorInvocationState(existingInvocation.state)
+    existingAttempt === undefined ||
+    isTerminalExecutorAttemptState(existingAttempt.state)
   ) {
-    // A terminal duplicate still conflicts on invocation identity. The
-    // transaction rolls back the invocation if round insertion fails.
+    // A terminal duplicate still conflicts on attempt identity. The
+    // transaction rolls back the attempt if round insertion fails.
     const { selection: _selection, ...sdkStart } = start;
     materializeSingleShotDispatch(
       db,
-      plannedInvocation,
+      plannedAttempt,
       planSingleShotRoundStart(start),
       planSingleShotRoundStartedCheckpoint(
         start.roundId,
@@ -457,22 +454,21 @@ export async function runSingleShotStep(
           sdkStart,
         ),
       ),
-      invocationStartedAt,
+      attemptStartedAt,
     );
     roundAlreadyMaterialized = true;
   } else {
-    assertMatchingSingleShotInvocation(existingInvocation, plannedInvocation);
+    assertMatchingSingleShotAttempt(existingAttempt, plannedAttempt);
     if (
-      listExecutorRoundsForInvocation(db, existingInvocation.invocationId)
-        .length === 0
+      listExecutorRoundsForAttempt(db, existingAttempt.attemptId).length === 0
     ) {
       throw new Error(
-        `Cannot reattach executor invocation ${existingInvocation.invocationId}: no durable round dispatch binding exists.`,
+        `Cannot reattach executor attempt ${existingAttempt.attemptId}: no durable round dispatch binding exists.`,
       );
     }
-    invocation = existingInvocation;
-    start = planSingleShotRoundStartForInvocation({
-      invocation,
+    attempt = existingAttempt;
+    start = planSingleShotRoundStartForAttempt({
+      attempt,
       selection: effectiveSelection,
       runtime,
       startedAt: roundStartedAt,
@@ -491,14 +487,14 @@ export async function runSingleShotStep(
     now,
   });
 
-  return { invocation: round.invocation, round };
+  return { attempt: round.attempt, round };
 }
 
 let materializationTransactionSequence = 0;
 
 function materializeSingleShotDispatch(
   db: MomentumDb,
-  invocation: ExecutorInvocationRecord,
+  attempt: ExecutorAttemptRecord,
   round: ExecutorRoundRecord,
   dispatchBinding: ExecutorCheckpointRecord,
   now: number,
@@ -507,7 +503,7 @@ function materializeSingleShotDispatch(
   const savepoint = `single_shot_materialize_${(materializationTransactionSequence += 1)}`;
   db.exec(nested ? `SAVEPOINT ${savepoint}` : "BEGIN IMMEDIATE");
   try {
-    insertExecutorInvocation(db, invocation, { now });
+    insertExecutorAttempt(db, attempt, { now });
     insertExecutorRound(db, round, { now });
     insertExecutorCheckpoint(db, dispatchBinding, { now });
     db.exec(nested ? `RELEASE SAVEPOINT ${savepoint}` : "COMMIT");
@@ -533,24 +529,24 @@ function rollbackMaterialization(
   }
 }
 
-function assertMatchingSingleShotInvocation(
-  existing: ExecutorInvocationRecord,
-  planned: ExecutorInvocationRecord,
+function assertMatchingSingleShotAttempt(
+  existing: ExecutorAttemptRecord,
+  planned: ExecutorAttemptRecord,
 ): void {
   const identityFields = [
-    "invocationId",
+    "attemptId",
     "workflowRunId",
     "stepRunId",
     "stepKey",
     "executorFamily",
-    "attempt",
+    "attemptNumber",
   ] as const;
   const mismatch = identityFields.find(
     (field) => existing[field] !== planned[field],
   );
   if (mismatch !== undefined) {
     throw new Error(
-      `Cannot reattach executor invocation ${planned.invocationId}: durable ${mismatch} does not match this dispatch.`,
+      `Cannot reattach executor attempt ${planned.attemptId}: durable ${mismatch} does not match this dispatch.`,
     );
   }
 }

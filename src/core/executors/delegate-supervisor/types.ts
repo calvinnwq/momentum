@@ -1,8 +1,8 @@
 import type {
   ExecutorCompletionClassification,
   ExecutorHumanGateType,
-  ExecutorInvocationRecord,
-  ExecutorInvocationState,
+  ExecutorAttemptRecord,
+  ExecutorAttemptState,
   ExecutorRoundState,
 } from "../loop/reducer.js";
 
@@ -84,7 +84,7 @@ export type DelegateSupervisorExternalStateRead =
 export type DelegateSupervisorDecision = {
   classification: ExecutorCompletionClassification;
   roundState: ExecutorRoundState;
-  invocationState: ExecutorInvocationState;
+  attemptState: ExecutorAttemptState;
   humanGate: ExecutorHumanGateType | null;
   recoveryCode: string | null;
   reason: string;
@@ -104,7 +104,7 @@ export type DelegateSupervisorHandoff = {
 };
 
 export type DelegateSupervisorToolContext = {
-  invocation: Readonly<ExecutorInvocationRecord>;
+  attempt: Readonly<ExecutorAttemptRecord>;
   config: Readonly<Record<string, unknown>>;
   signal: AbortSignal;
 };

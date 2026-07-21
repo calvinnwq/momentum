@@ -9,7 +9,7 @@ import { openDb } from "../src/adapters/db.js";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-evidence.js";
+import { terminalizeDispatchedExecutorAttempt } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
@@ -291,12 +291,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         { state: string; result_digest: string | null } | undefined;
       expect(step).toMatchObject({ state: "succeeded" });
 
-      const invocation = db
+      const attempt = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
-      expect(invocation).toEqual({ state: "succeeded" });
+      expect(attempt).toEqual({ state: "succeeded" });
 
       const round = db
         .prepare(
@@ -1863,12 +1863,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(runRow?.needs_manual_recovery).toBe(1);
       expect(runRow?.manual_recovery_reason).toContain("runtime_unavailable");
 
-      const invocation = db
+      const attempt = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ? AND step_key = ?",
         )
         .get(runId, "preflight") as { state: string } | undefined;
-      expect(invocation).toEqual({ state: "manual_recovery_required" });
+      expect(attempt).toEqual({ state: "manual_recovery_required" });
 
       const round = db
         .prepare(
@@ -1990,20 +1990,20 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(loop["workflowStepsDispatched"]).toBe(1);
     expect(loop["lastWorkflowCode"]).toBe("dispatched");
 
-    // The dispatched step created durable executor_invocations / executor_rounds
+    // The dispatched step created durable executor_attempts / executor_rounds
     // rows through the production path, observable after the daemon exits.
     const db = openDb(dataDir);
     try {
-      const invocations = db
+      const attempts = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
         executor_family: string;
         state: string;
       }>;
-      expect(invocations).toEqual([
+      expect(attempts).toEqual([
         {
           step_key: "preflight",
           executor_family: "one-shot",
@@ -2089,7 +2089,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             SET heartbeat_at = ?, expires_at = ?
           WHERE run_id = ? AND lease_kind = ?`,
       ).run(1, 2, runId, "dispatch");
-      terminalizeDispatchedExecutorInvocation({
+      terminalizeDispatchedExecutorAttempt({
         db,
         runId,
         stepId: "preflight",
@@ -2157,16 +2157,16 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         { step_id: "implementation", state: "approved" },
       ]);
 
-      const invocations = finalDb
+      const attempts = finalDb
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{
         step_key: string;
         executor_family: string;
         state: string;
       }>;
-      expect(invocations).toEqual([
+      expect(attempts).toEqual([
         {
           step_key: "preflight",
           executor_family: "one-shot",
@@ -2209,12 +2209,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     const db = openDb(dataDir);
     try {
-      const invocation = db
+      const attempt = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { state: string } | undefined;
-      expect(invocation?.state).toBe("manual_recovery_required");
+      expect(attempt?.state).toBe("manual_recovery_required");
       const runState = db
         .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
         .get(runId) as { needs_manual_recovery: number } | undefined;
@@ -2257,12 +2257,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     const db = openDb(dataDir);
     try {
-      const invocation = db
+      const attempt = db
         .prepare(
-          "SELECT state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get(runId) as { state: string } | undefined;
-      expect(invocation?.state).toBe("manual_recovery_required");
+      expect(attempt?.state).toBe("manual_recovery_required");
     } finally {
       db.close();
     }
@@ -2291,14 +2291,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
     const db = openDb(dataDir);
     try {
-      const invocationCount = (
+      const attemptCount = (
         db
           .prepare(
-            "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?",
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
           )
           .get(runId) as { count: number }
       ).count;
-      expect(invocationCount).toBe(0);
+      expect(attemptCount).toBe(0);
 
       const preflight = db
         .prepare(

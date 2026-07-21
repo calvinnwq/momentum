@@ -334,6 +334,7 @@ export function emitWorkflowStatusList(
     ok: true,
     command: "workflow status",
     dataDir,
+    schemaVersion: 2,
     state: parsed.state ?? null,
     filter: parsed.filter ?? null,
     count: summaries.length,
@@ -379,6 +380,7 @@ export function emitWorkflowStatusDetail(
     ok: true,
     command: "workflow status",
     dataDir,
+    schemaVersion: 2,
     run: workflowRunToJsonShape(detail.run),
     steps: detail.steps.map(workflowStepToJsonShape),
     approvals: detail.approvals.map(workflowApprovalToJsonShape),
@@ -552,7 +554,7 @@ export function emitWorkflowRunDecideSuccess(
     dataDir,
     gateId: resolved.gateId,
     runId: resolved.workflowRunId,
-    targetScope: resolved.targetScope,
+    targetScope: publicWorkflowGateTargetScope(resolved.targetScope),
     gateType: resolved.gateType,
     chosenAction: resolved.chosenAction,
     resolvedBy: resolved.resolvedBy,
@@ -568,7 +570,7 @@ export function emitWorkflowRunDecideSuccess(
   const lines = [
     `Workflow gate resolved: ${resolved.gateId}`,
     `Run: ${resolved.workflowRunId}`,
-    `Scope: ${resolved.targetScope} (${resolved.gateType})`,
+    `Scope: ${publicWorkflowGateTargetScope(resolved.targetScope)} (${resolved.gateType})`,
     `Action: ${resolved.chosenAction}`,
     `Resolved by: ${resolved.resolvedBy} (${resolved.resolutionMode})`,
     `Note: ${resolved.resolution ?? "(none)"}`,
@@ -1493,7 +1495,7 @@ export function emitWorkflowRunLogs(
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
-    invocations: envelope.invocations.map(workflowInvocationToJsonShape),
+    attempts: envelope.attempts.map(workflowAttemptToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
     nextAction: nextActionToJsonShape(
       envelope.detail.monitor,
@@ -1531,11 +1533,11 @@ export function workflowRoundToJsonShape(
 ): Record<string, unknown> {
   return {
     roundId: round.roundId,
-    invocationId: round.invocationId,
+    attemptId: round.attemptId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
     executorFamily: round.executorFamily,
-    attempt: round.attempt,
+    attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: round.state,
     classification: round.classification,
@@ -1631,20 +1633,20 @@ function workflowRoundCompletionRecommendation(
   return round.classification ?? "continue";
 }
 
-export function workflowInvocationToJsonShape(
-  invocation: WorkflowRunLogsEnvelope["invocations"][number],
+export function workflowAttemptToJsonShape(
+  attempt: WorkflowRunLogsEnvelope["attempts"][number],
 ): Record<string, unknown> {
   return {
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
-    executorFamily: invocation.executorFamily,
-    state: invocation.state,
-    attempt: invocation.attempt,
-    startedAt: invocation.startedAt,
-    heartbeatAt: invocation.heartbeatAt,
-    finishedAt: invocation.finishedAt,
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
+    executorFamily: attempt.executorFamily,
+    state: attempt.state,
+    attemptNumber: attempt.attemptNumber,
+    startedAt: attempt.startedAt,
+    heartbeatAt: attempt.heartbeatAt,
+    finishedAt: attempt.finishedAt,
   };
 }
 
@@ -1674,19 +1676,19 @@ export function renderWorkflowRunLogsText(
   );
   for (const gate of openGates) {
     lines.push(
-      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN` +
+      `- ${gate.gateId} [${publicWorkflowGateTargetScope(gate.targetScope)}/${gate.gateType}] OPEN` +
         ` allowed=${gate.allowedActions.join(",")}` +
         (gate.recommendedAction !== null
           ? ` recommended=${gate.recommendedAction}`
           : ""),
     );
   }
-  lines.push(`Executor invocations: ${envelope.invocations.length}`);
-  for (const invocation of envelope.invocations) {
+  lines.push(`Executor attempts: ${envelope.attempts.length}`);
+  for (const attempt of envelope.attempts) {
     lines.push(
-      `- ${invocation.invocationId} [${invocation.stepKey}/${invocation.state}]` +
-        ` attempt=${invocation.attempt}` +
-        ` executor=${invocation.executorFamily}`,
+      `- ${attempt.attemptId} [${attempt.stepKey}/${attempt.state}]` +
+        ` attempt=${attempt.attemptNumber}` +
+        ` executor=${attempt.executorFamily}`,
     );
   }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);
@@ -2079,6 +2081,10 @@ export function workflowEvidenceToJsonShape(
   };
 }
 
+function publicWorkflowGateTargetScope(targetScope: string): string {
+  return targetScope === "invocation" ? "attempt" : targetScope;
+}
+
 export function workflowGateToJsonShape(
   gate: WorkflowGateRecord,
 ): Record<string, unknown> {
@@ -2086,9 +2092,9 @@ export function workflowGateToJsonShape(
     gateId: gate.gateId,
     workflowRunId: gate.workflowRunId,
     stepRunId: gate.stepRunId,
-    invocationId: gate.invocationId,
+    attemptId: gate.attemptId,
     roundId: gate.roundId,
-    targetScope: gate.targetScope,
+    targetScope: publicWorkflowGateTargetScope(gate.targetScope),
     gateType: gate.gateType,
     reason: gate.reason,
     evidence: gate.evidence,
@@ -2220,7 +2226,7 @@ export function renderWorkflowDetailText(
           `action=${gate.chosenAction ?? "(none)"} ` +
           `(${gate.resolutionMode ?? "?"})`;
     lines.push(
-      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`,
+      `- ${gate.gateId} [${publicWorkflowGateTargetScope(gate.targetScope)}/${gate.gateType}] ${status}`,
     );
   }
   lines.push("");

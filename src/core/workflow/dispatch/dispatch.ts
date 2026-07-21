@@ -8,8 +8,8 @@
  * to a real executor dispatch or to a fail-closed, operator-visible
  * manual-recovery outcome. It follows the same discipline as `gate/gate.ts`
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
- * executor invocation. The durable twins resolve the claimed step against
- * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
+ * executor execution. The durable twins resolve the claimed step against
+ * `workflow_runs` / `step_definitions`, create the `executor_attempts` /
  * `executor_rounds` start scaffold, open a `workflow_gates` row when the run can
  * carry one, flag manual recovery for the fail-closed outcome when possible,
  * release the dispatch lease where appropriate, and wire the dispatcher into
@@ -135,7 +135,7 @@ export type WorkflowDispatchFailClosedCode =
  * The dispatch decision for a claimed workflow step.
  *
  *   - `dispatch`: the step resolved to a valid executor identity; the
- *     persistence twin creates the executor invocation / round start scaffold.
+ *     persistence twin creates the executor attempt / round start scaffold.
  *   - `fail_closed`: the step is unresolvable, under-configured, or resolved to
  *     an invalid identity; the persistence twin records a durable
  *     operator-visible manual-recovery outcome and releases the dispatch lease.

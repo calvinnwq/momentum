@@ -3,48 +3,48 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorRound,
-  type ExecutorCompletionClassification
+  type ExecutorCompletionClassification,
 } from "../src/core/executors/loop/reducer.js";
 import {
   GOAL_LOOP_GLOBAL_DEFAULT_SELECTION,
   decideGoalLoopRound,
   goalLoopFinalizeEvidenceFromResult,
-  goalLoopInvocationId,
+  goalLoopAttemptId,
   goalLoopRecommendationFromResult,
   goalLoopRoundId,
-  invocationStateForRoundClassification,
-  planGoalLoopInvocation,
+  attemptStateForRoundClassification,
+  planGoalLoopAttempt,
   planGoalLoopRoundArtifacts,
   planGoalLoopRoundCheckpoints,
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
-  planGoalLoopRoundStartForInvocation,
+  planGoalLoopRoundStartForAttempt,
   resolveGoalLoopRoundSelection,
   type DecideGoalLoopRoundInput,
   type GoalLoopFinalizeOutcome,
   type GoalLoopRoundArtifacts,
   type GoalLoopRoundSelection,
-  type PlanGoalLoopRoundStartInput
+  type PlanGoalLoopRoundStartInput,
 } from "../src/core/executors/goal-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const INVOCATION_STATE_SET = new Set<string>(EXECUTOR_INVOCATION_STATES);
+const ATTEMPT_STATE_SET = new Set<string>(EXECUTOR_ATTEMPT_STATES);
 
 function decide(
-  overrides: Partial<DecideGoalLoopRoundInput> = {}
+  overrides: Partial<DecideGoalLoopRoundInput> = {},
 ): ReturnType<typeof decideGoalLoopRound> {
   const input: DecideGoalLoopRoundInput = {
     recommendation: { success: true, goalComplete: false },
     finalizeOutcome: "committed",
     roundIndex: 0,
     maxRounds: 5,
-    ...overrides
+    ...overrides,
   };
   return decideGoalLoopRound(input);
 }
@@ -53,7 +53,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
   it("classifies a committed, goal-complete round as complete", () => {
     const decision = decide({
       recommendation: { success: true, goalComplete: true },
-      finalizeOutcome: "committed"
+      finalizeOutcome: "committed",
     });
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
@@ -67,7 +67,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
       recommendation: { success: true, goalComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 1,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(decision.classification).toBe("continue");
     expect(decision.roundState).toBe("succeeded");
@@ -80,7 +80,7 @@ describe("decideGoalLoopRound — committed rounds", () => {
       recommendation: { success: true, goalComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 4,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(decision.classification).toBe("operator_decision_required");
     expect(decision.roundState).toBe("succeeded");
@@ -95,7 +95,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
       recommendation: { success: true, goalComplete: true },
       finalizeOutcome: "reset_verification_failure",
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     // Verification is authoritative: a reset round produced no commit, so the
     // daemon must not honour the executor's `complete` recommendation.
@@ -110,7 +110,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
       recommendation: { success: false, goalComplete: false },
       finalizeOutcome: "reset_step_failure",
       roundIndex: 0,
-      maxRounds: 3
+      maxRounds: 3,
     });
     expect(decision.classification).toBe("continue");
     expect(decision.roundState).toBe("failed");
@@ -122,7 +122,7 @@ describe("decideGoalLoopRound — safe resets (verification authority)", () => {
       recommendation: { success: false, goalComplete: false },
       finalizeOutcome: "reset_step_failure",
       roundIndex: 2,
-      maxRounds: 3
+      maxRounds: 3,
     });
     expect(decision.classification).toBe("operator_decision_required");
     expect(decision.roundState).toBe("failed");
@@ -137,7 +137,7 @@ describe("decideGoalLoopRound — repo-safety / manual recovery boundaries", () 
       recommendation: { success: true, goalComplete: true },
       finalizeOutcome: "manual_recovery_required",
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.roundState).toBe("manual_recovery_required");
@@ -153,7 +153,7 @@ describe("decideGoalLoopRound — repo-safety / manual recovery boundaries", () 
     ["repo_lock_lost", "repo_lock_lost"],
     ["invalid_input", "invalid_input"],
     ["result_missing", "result_missing"],
-    ["result_invalid", "result_invalid"]
+    ["result_invalid", "result_invalid"],
   ])(
     "preserves the %s recovery code and routes to manual recovery",
     (finalizeOutcome, expectedCode) => {
@@ -163,14 +163,14 @@ describe("decideGoalLoopRound — repo-safety / manual recovery boundaries", () 
       expect(decision.recoveryCode).toBe(expectedCode);
       expect(decision.humanGate).toBe("manual_recovery_required");
       expect(decision.continueLoop).toBe(false);
-    }
+    },
   );
 
   it("prioritises manual recovery over budget exhaustion on the final round", () => {
     const decision = decide({
       finalizeOutcome: "repo_lock_lost",
       roundIndex: 4,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.humanGate).toBe("manual_recovery_required");
@@ -183,7 +183,7 @@ describe("decideGoalLoopRound — budget semantics", () => {
       recommendation: { success: true, goalComplete: false },
       finalizeOutcome: "committed",
       roundIndex: 999,
-      maxRounds: null
+      maxRounds: null,
     });
     expect(decision.classification).toBe("continue");
     expect(decision.continueLoop).toBe(true);
@@ -212,7 +212,7 @@ describe("decideGoalLoopRound — budget semantics", () => {
   });
 });
 
-describe("invocationStateForRoundClassification", () => {
+describe("attemptStateForRoundClassification", () => {
   it.each<[ExecutorCompletionClassification, string]>([
     ["complete", "succeeded"],
     ["continue", "running"],
@@ -221,17 +221,17 @@ describe("invocationStateForRoundClassification", () => {
     ["manual_recovery_required", "manual_recovery_required"],
     ["blocked", "blocked"],
     ["failed", "failed"],
-    ["cancelled", "cancelled"]
-  ])("maps %s to the %s invocation state", (classification, expected) => {
-    const state = invocationStateForRoundClassification(classification);
+    ["cancelled", "cancelled"],
+  ])("maps %s to the %s attempt state", (classification, expected) => {
+    const state = attemptStateForRoundClassification(classification);
     expect(state).toBe(expected);
-    expect(INVOCATION_STATE_SET.has(state)).toBe(true);
+    expect(ATTEMPT_STATE_SET.has(state)).toBe(true);
   });
 
-  it("maps every completion classification to a known invocation state", () => {
+  it("maps every completion classification to a known attempt state", () => {
     for (const classification of EXECUTOR_COMPLETION_CLASSIFICATIONS) {
-      const state = invocationStateForRoundClassification(classification);
-      expect(INVOCATION_STATE_SET.has(state)).toBe(true);
+      const state = attemptStateForRoundClassification(classification);
+      expect(ATTEMPT_STATE_SET.has(state)).toBe(true);
     }
   });
 });
@@ -250,12 +250,12 @@ describe("goalLoopRecommendationFromResult", () => {
         scope: undefined,
         subject: "do work",
         body: "",
-        breaking: false
-      }
+        breaking: false,
+      },
     };
     expect(goalLoopRecommendationFromResult(result)).toEqual({
       success: true,
-      goalComplete: false
+      goalComplete: false,
     });
   });
 
@@ -272,12 +272,12 @@ describe("goalLoopRecommendationFromResult", () => {
         scope: undefined,
         subject: "finish",
         body: "",
-        breaking: false
-      }
+        breaking: false,
+      },
     };
     expect(goalLoopRecommendationFromResult(result)).toEqual({
       success: true,
-      goalComplete: true
+      goalComplete: true,
     });
   });
 });
@@ -292,7 +292,7 @@ function verifyCmd(succeeded: boolean) {
     signal: null,
     duration_ms: 12,
     timed_out: false,
-    succeeded
+    succeeded,
   };
 }
 
@@ -309,9 +309,9 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
       scope: "goal-loop",
       subject: "project round evidence",
       body: "",
-      breaking: false
+      breaking: false,
     },
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -322,9 +322,9 @@ const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round evidence"
+    message: "feat(goal-loop): project round evidence",
   },
-  head: SHA_A
+  head: SHA_A,
 };
 
 const COMMITTED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
@@ -334,32 +334,31 @@ const COMMITTED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round evidence"
+    message: "feat(goal-loop): project round evidence",
   },
-  head: SHA_A
+  head: SHA_A,
 };
 
-const RESET_VERIFICATION_FAILURE: FinalizeWorkflowStepFromResultFileResult =
-  {
-    outcome: "reset_verification_failure",
-    verification: {
-      ok: false,
-      code: "command_failed",
-      error: "pnpm test failed",
-      results: [verifyCmd(false)]
-    },
-    reset: { ok: true, head: SHA_B }
-  };
+const RESET_VERIFICATION_FAILURE: FinalizeWorkflowStepFromResultFileResult = {
+  outcome: "reset_verification_failure",
+  verification: {
+    ok: false,
+    code: "command_failed",
+    error: "pnpm test failed",
+    results: [verifyCmd(false)],
+  },
+  reset: { ok: true, head: SHA_B },
+};
 
 const RESET_STEP_FAILURE: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_step_failure",
-  reset: { ok: true, head: SHA_B }
+  reset: { ok: true, head: SHA_B },
 };
 
 const COMMIT_FAILED: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "commit_failed",
   verification: { ok: true, results: [verifyCmd(true)] },
-  commit: { ok: false, code: "git_failed", error: "git commit failed" }
+  commit: { ok: false, code: "git_failed", error: "git commit failed" },
 };
 
 const COMMIT_FAILED_WITH_RESET_FAILED: FinalizeWorkflowStepFromResultFileResult =
@@ -370,8 +369,8 @@ const COMMIT_FAILED_WITH_RESET_FAILED: FinalizeWorkflowStepFromResultFileResult 
     reset: {
       ok: false,
       code: "missing_base",
-      error: "cleanup reset could not find base"
-    }
+      error: "cleanup reset could not find base",
+    },
   };
 
 const COMMIT_NOOP: FinalizeWorkflowStepFromResultFileResult = {
@@ -380,8 +379,8 @@ const COMMIT_NOOP: FinalizeWorkflowStepFromResultFileResult = {
   commit: {
     ok: false,
     code: "nothing_to_commit",
-    error: "No staged changes after runner; nothing to commit."
-  }
+    error: "No staged changes after runner; nothing to commit.",
+  },
 };
 
 const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
@@ -391,16 +390,16 @@ const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
     ok: false,
     code: "command_failed",
     error: "pnpm test failed",
-    results: [verifyCmd(false)]
+    results: [verifyCmd(false)],
   },
-  reset: { ok: false, code: "git_failed", error: "git reset failed" }
+  reset: { ok: false, code: "git_failed", error: "git reset failed" },
 };
 
 const RESET_FAILED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
   trigger: "runner_failure",
   verification: null,
-  reset: { ok: false, code: "git_failed", error: "git reset failed" }
+  reset: { ok: false, code: "git_failed", error: "git reset failed" },
 };
 
 const MOVED_HEAD: FinalizeWorkflowStepFromResultFileResult = {
@@ -409,13 +408,13 @@ const MOVED_HEAD: FinalizeWorkflowStepFromResultFileResult = {
   trigger: "pre_finalize",
   expectedHead: SHA_B,
   currentHead: SHA_A,
-  reason: "HEAD moved before finalize"
+  reason: "HEAD moved before finalize",
 };
 
 const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "result_missing",
   resultFilePath: "/tmp/result.json",
-  error: "result file not found"
+  error: "result file not found",
 };
 
 describe("goalLoopFinalizeEvidenceFromResult", () => {
@@ -423,7 +422,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(COMMITTED)).toEqual({
       outcome: "committed",
       commitSha: SHA_A,
-      verificationStatus: "passed"
+      verificationStatus: "passed",
     });
   });
 
@@ -431,17 +430,17 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(COMMITTED_NO_VERIFY)).toEqual({
       outcome: "committed",
       commitSha: SHA_A,
-      verificationStatus: "skipped"
+      verificationStatus: "skipped",
     });
   });
 
   it("projects a verification-failure reset as failed with no commit SHA", () => {
     expect(
-      goalLoopFinalizeEvidenceFromResult(RESET_VERIFICATION_FAILURE)
+      goalLoopFinalizeEvidenceFromResult(RESET_VERIFICATION_FAILURE),
     ).toEqual({
       outcome: "reset_verification_failure",
       commitSha: null,
-      verificationStatus: "failed"
+      verificationStatus: "failed",
     });
   });
 
@@ -449,7 +448,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(RESET_STEP_FAILURE)).toEqual({
       outcome: "reset_step_failure",
       commitSha: null,
-      verificationStatus: null
+      verificationStatus: null,
     });
   });
 
@@ -457,17 +456,17 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(COMMIT_FAILED)).toEqual({
       outcome: "commit_failed",
       commitSha: null,
-      verificationStatus: "passed"
+      verificationStatus: "passed",
     });
   });
 
   it("projects a reset_failed carrying a verification failure as failed", () => {
     expect(
-      goalLoopFinalizeEvidenceFromResult(RESET_FAILED_WITH_VERIFY)
+      goalLoopFinalizeEvidenceFromResult(RESET_FAILED_WITH_VERIFY),
     ).toEqual({
       outcome: "reset_failed",
       commitSha: null,
-      verificationStatus: "failed"
+      verificationStatus: "failed",
     });
   });
 
@@ -475,7 +474,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(RESET_FAILED_NO_VERIFY)).toEqual({
       outcome: "reset_failed",
       commitSha: null,
-      verificationStatus: null
+      verificationStatus: null,
     });
   });
 
@@ -483,7 +482,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(MOVED_HEAD)).toEqual({
       outcome: "manual_recovery_required",
       commitSha: null,
-      verificationStatus: null
+      verificationStatus: null,
     });
   });
 
@@ -491,7 +490,7 @@ describe("goalLoopFinalizeEvidenceFromResult", () => {
     expect(goalLoopFinalizeEvidenceFromResult(RESULT_MISSING)).toEqual({
       outcome: "result_missing",
       commitSha: null,
-      verificationStatus: null
+      verificationStatus: null,
     });
   });
 });
@@ -503,14 +502,14 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
       result,
       finalize: COMMITTED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
 
     expect(plan.decision.classification).toBe("complete");
     expect(plan.evidence).toEqual({
       outcome: "committed",
       commitSha: SHA_A,
-      verificationStatus: "passed"
+      verificationStatus: "passed",
     });
 
     expect(plan.captureUpdate).toEqual({
@@ -518,7 +517,7 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
       summary: result.summary,
       keyChanges: result.key_changes_made,
       keyLearnings: result.key_learnings,
-      remainingWork: result.remaining_work
+      remainingWork: result.remaining_work,
     });
 
     expect(plan.terminalUpdate).toEqual({
@@ -531,12 +530,12 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
           command: "pnpm test",
           exitCode: 0,
           durationMs: 12,
-          timedOut: false
-        }
+          timedOut: false,
+        },
       ],
       commitSha: SHA_A,
       recoveryCode: null,
-      humanGate: null
+      humanGate: null,
     });
   });
 
@@ -545,16 +544,16 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
       result: runnerResult({ goal_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     const capture = transitionExecutorRound(
       "running",
-      plan.captureUpdate!.toState
+      plan.captureUpdate!.toState,
     );
     expect(capture.ok).toBe(true);
     const terminal = transitionExecutorRound(
       plan.captureUpdate!.toState,
-      plan.terminalUpdate.toState
+      plan.terminalUpdate.toState,
     );
     expect(terminal.ok).toBe(true);
   });
@@ -566,7 +565,7 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
       result: runnerResult({ goal_complete: false }),
       finalize: COMMITTED,
       roundIndex: 1,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(plan.decision.classification).toBe("continue");
     expect(plan.terminalUpdate.toState).toBe("succeeded");
@@ -580,10 +579,10 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
       result: runnerResult({ goal_complete: false }),
       finalize: COMMITTED,
       roundIndex: 4,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(plan.terminalUpdate.classification).toBe(
-      "operator_decision_required"
+      "operator_decision_required",
     );
     expect(plan.terminalUpdate.executorRecommendation).toBe("continue");
     expect(plan.terminalUpdate.humanGate).toBe("quota_exhausted");
@@ -596,7 +595,7 @@ describe("planGoalLoopRoundPersistence — verification authority", () => {
       result: runnerResult({ goal_complete: true }),
       finalize: RESET_VERIFICATION_FAILURE,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     // The runner recommended completion, but verification reset the work.
     expect(plan.captureUpdate).not.toBeNull();
@@ -611,11 +610,11 @@ describe("planGoalLoopRoundPersistence — verification authority", () => {
       result: runnerResult(),
       finalize: RESET_VERIFICATION_FAILURE,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     const terminal = transitionExecutorRound(
       plan.captureUpdate!.toState,
-      plan.terminalUpdate.toState
+      plan.terminalUpdate.toState,
     );
     expect(terminal.ok).toBe(true);
   });
@@ -627,7 +626,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: null,
       finalize: RESULT_MISSING,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(plan.captureUpdate).toBeNull();
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
@@ -641,7 +640,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: runnerResult(),
       finalize: COMMIT_FAILED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     expect(plan.captureUpdate).not.toBeNull();
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
@@ -650,11 +649,11 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     expect(plan.terminalUpdate.verificationStatus).toBe("passed");
     const running = transitionExecutorRound(
       "running",
-      plan.captureUpdate!.toState
+      plan.captureUpdate!.toState,
     );
     const terminal = transitionExecutorRound(
       plan.captureUpdate!.toState,
-      plan.terminalUpdate.toState
+      plan.terminalUpdate.toState,
     );
     expect(running.ok).toBe(true);
     expect(terminal.ok).toBe(true);
@@ -665,7 +664,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: runnerResult(),
       finalize: COMMIT_FAILED_WITH_RESET_FAILED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
 
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
@@ -678,7 +677,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: runnerResult(),
       finalize: RESET_FAILED_NO_VERIFY,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
 
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
@@ -691,7 +690,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: runnerResult(),
       finalize: COMMIT_NOOP,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
 
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
@@ -704,11 +703,11 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
       result: null,
       finalize: RESULT_MISSING,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     const direct = transitionExecutorRound(
       "running",
-      plan.terminalUpdate.toState
+      plan.terminalUpdate.toState,
     );
     expect(direct.ok).toBe(true);
   });
@@ -721,7 +720,7 @@ describe("planGoalLoopRoundPersistence — result digest", () => {
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,
-      resultDigest: "sha256:deadbeef"
+      resultDigest: "sha256:deadbeef",
     });
     expect(plan.captureUpdate?.resultDigest).toBe("sha256:deadbeef");
   });
@@ -731,7 +730,7 @@ describe("planGoalLoopRoundPersistence — result digest", () => {
       result: runnerResult(),
       finalize: COMMITTED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     // Backward-compatible: an absent digest leaves the field off the patch
     // entirely (coalesce then keeps the round-start record's null), rather than
@@ -746,7 +745,7 @@ describe("planGoalLoopRoundPersistence — result digest", () => {
       finalize: RESULT_MISSING,
       roundIndex: 0,
       maxRounds: 5,
-      resultDigest: "sha256:should-be-ignored"
+      resultDigest: "sha256:should-be-ignored",
     });
     expect(plan.captureUpdate).toBeNull();
     expect(plan.terminalUpdate).not.toHaveProperty("resultDigest");
@@ -760,7 +759,7 @@ describe("planGoalLoopRoundPersistence — changed files", () => {
       finalize: COMMITTED,
       roundIndex: 0,
       maxRounds: 5,
-      changedFiles: ["src/a.ts", "src/b.ts"]
+      changedFiles: ["src/a.ts", "src/b.ts"],
     });
     // changed_files is commit-derived evidence, so it pairs with commit_sha on
     // the terminal patch rather than the result-document capture patch.
@@ -772,7 +771,7 @@ describe("planGoalLoopRoundPersistence — changed files", () => {
       result: runnerResult({ goal_complete: true }),
       finalize: COMMITTED,
       roundIndex: 0,
-      maxRounds: 5
+      maxRounds: 5,
     });
     // Backward-compatible: an absent list leaves the field off the patch so
     // coalesce keeps the round-start record's empty array.
@@ -785,7 +784,7 @@ describe("planGoalLoopRoundPersistence — changed files", () => {
       finalize: RESET_VERIFICATION_FAILURE,
       roundIndex: 0,
       maxRounds: 5,
-      changedFiles: []
+      changedFiles: [],
     });
     // A non-committed round committed nothing, so its empty change set is left
     // off the patch (identical to the round-start default) rather than stamped.
@@ -802,8 +801,8 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
         effort: "high",
         timeoutMs: 1_800_000,
         maxRounds: 12,
-        policyEnvelope: "delegated:standard"
-      }
+        policyEnvelope: "delegated:standard",
+      },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.model).toBe("claude-opus-4-8");
@@ -817,14 +816,14 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
       effort: "step_definition",
       timeoutMs: "step_definition",
       maxRounds: "step_definition",
-      policyEnvelope: "step_definition"
+      policyEnvelope: "step_definition",
     });
   });
 
   it("falls back to workflow defaults for fields the step config omits", () => {
     const selection = resolveGoalLoopRoundSelection({
       stepConfig: { agentProvider: "claude" },
-      workflowConfig: { model: "claude-sonnet-4-6", maxRounds: 8 }
+      workflowConfig: { model: "claude-sonnet-4-6", maxRounds: 8 },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.source.agentProvider).toBe("step_definition");
@@ -837,7 +836,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
   it("falls back to repository policy below the workflow defaults", () => {
     const selection = resolveGoalLoopRoundSelection({
       workflowConfig: { agentProvider: "claude" },
-      repositoryPolicy: { effort: "medium", maxRounds: 6 }
+      repositoryPolicy: { effort: "medium", maxRounds: 6 },
     });
     expect(selection.effort).toBe("medium");
     expect(selection.source.effort).toBe("repository_policy");
@@ -848,7 +847,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
   it("falls back to the executor family default below repository policy", () => {
     const selection = resolveGoalLoopRoundSelection({
       repositoryPolicy: { agentProvider: "claude" },
-      familyDefault: { maxRounds: 10, effort: "high" }
+      familyDefault: { maxRounds: 10, effort: "high" },
     });
     expect(selection.maxRounds).toBe(10);
     expect(selection.source.maxRounds).toBe("executor_family_default");
@@ -875,7 +874,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
       workflowConfig: { model: "claude-sonnet-4-6" },
       repositoryPolicy: { effort: "medium" },
       familyDefault: { maxRounds: 9 },
-      globalDefault: { timeoutMs: 600_000 }
+      globalDefault: { timeoutMs: 600_000 },
     });
     expect(selection.source).toEqual({
       agentProvider: "step_definition",
@@ -883,7 +882,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
       effort: "repository_policy",
       maxRounds: "executor_family_default",
       timeoutMs: "momentum_global_default",
-      policyEnvelope: "momentum_global_default"
+      policyEnvelope: "momentum_global_default",
     });
     expect(selection.timeoutMs).toBe(600_000);
     expect(selection.policyEnvelope).toBeNull();
@@ -892,7 +891,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
   it("treats an explicit null at a higher level as a deliberate override", () => {
     const selection = resolveGoalLoopRoundSelection({
       stepConfig: { model: null },
-      workflowConfig: { model: "claude-sonnet-4-6" }
+      workflowConfig: { model: "claude-sonnet-4-6" },
     });
     expect(selection.model).toBeNull();
     expect(selection.source.model).toBe("step_definition");
@@ -900,7 +899,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
 
   it("lets an explicit global default override the built-in null floor", () => {
     const selection = resolveGoalLoopRoundSelection({
-      globalDefault: { agentProvider: "claude", maxRounds: 4 }
+      globalDefault: { agentProvider: "claude", maxRounds: 4 },
     });
     expect(selection.agentProvider).toBe("claude");
     expect(selection.source.agentProvider).toBe("momentum_global_default");
@@ -914,7 +913,7 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
       effort: null,
       timeoutMs: null,
       maxRounds: null,
-      policyEnvelope: null
+      policyEnvelope: null,
     });
   });
 });
@@ -927,28 +926,28 @@ function startSelection(): GoalLoopRoundSelection {
       effort: "high",
       timeoutMs: 1_800_000,
       maxRounds: 12,
-      policyEnvelope: "delegated:standard"
-    }
+      policyEnvelope: "delegated:standard",
+    },
   });
 }
 
 function startInput(
-  overrides: Partial<PlanGoalLoopRoundStartInput> = {}
+  overrides: Partial<PlanGoalLoopRoundStartInput> = {},
 ): PlanGoalLoopRoundStartInput {
   return {
     roundId: "round-1",
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     selection: startSelection(),
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-1",
     logPaths: ["/artifacts/round-1/stdout.log"],
     startedAt: 1_000,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -959,11 +958,11 @@ describe("planGoalLoopRoundStart", () => {
     expect(record.state).toBe("running");
     expect(record.classification).toBeNull();
     expect(record.roundId).toBe("round-1");
-    expect(record.invocationId).toBe("inv-1");
+    expect(record.attemptId).toBe("inv-1");
     expect(record.workflowRunId).toBe("run-1");
     expect(record.stepRunId).toBe("step-1");
     expect(record.stepKey).toBe("implementation");
-    expect(record.attempt).toBe(1);
+    expect(record.attemptNumber).toBe(1);
     expect(record.roundIndex).toBe(0);
   });
 
@@ -1004,16 +1003,16 @@ describe("planGoalLoopRoundStart", () => {
   it("defaults log paths to an empty array when omitted", () => {
     const record = planGoalLoopRoundStart({
       roundId: "round-1",
-      invocationId: "inv-1",
+      attemptId: "inv-1",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       selection: startSelection(),
       inputDigest: "sha256:input",
       artifactRoot: "/artifacts/round-1",
-      startedAt: 1_000
+      startedAt: 1_000,
     });
     expect(record.logPaths).toEqual([]);
   });
@@ -1030,21 +1029,27 @@ describe("planGoalLoopRoundArtifacts", () => {
 
   function fullArtifacts(): GoalLoopRoundArtifacts {
     return {
-      resultDocument: { path: "/artifacts/round-1/result.json", digest: "sha256:r" },
+      resultDocument: {
+        path: "/artifacts/round-1/result.json",
+        digest: "sha256:r",
+      },
       checkpointStream: { path: "/artifacts/round-1/checkpoints.ndjson" },
       verificationOutput: {
         path: "/artifacts/round-1/verify.log",
-        description: "pnpm test"
+        description: "pnpm test",
       },
       commitOrResetEvidence: { path: "/artifacts/round-1/commit.txt" },
-      recoveryNote: { path: "/artifacts/round-1/recovery.md" }
+      recoveryNote: { path: "/artifacts/round-1/recovery.md" },
     };
   }
 
   it("derives one logs artifact per frozen log path, in order", () => {
     const records = planGoalLoopRoundArtifacts({
       roundId: "round-1",
-      logPaths: ["/artifacts/round-1/stdout.log", "/artifacts/round-1/stderr.log"]
+      logPaths: [
+        "/artifacts/round-1/stdout.log",
+        "/artifacts/round-1/stderr.log",
+      ],
     });
     expect(records).toEqual([
       {
@@ -1053,7 +1058,7 @@ describe("planGoalLoopRoundArtifacts", () => {
         artifactClass: "logs",
         path: "/artifacts/round-1/stdout.log",
         digest: null,
-        description: null
+        description: null,
       },
       {
         artifactId: "round-1-logs-1",
@@ -1061,8 +1066,8 @@ describe("planGoalLoopRoundArtifacts", () => {
         artifactClass: "logs",
         path: "/artifacts/round-1/stderr.log",
         digest: null,
-        description: null
-      }
+        description: null,
+      },
     ]);
   });
 
@@ -1070,7 +1075,7 @@ describe("planGoalLoopRoundArtifacts", () => {
     const records = planGoalLoopRoundArtifacts({
       roundId: "round-1",
       logPaths: [],
-      artifacts: fullArtifacts()
+      artifacts: fullArtifacts(),
     });
     const byClass = new Map(records.map((r) => [r.artifactClass, r]));
     expect(byClass.get("result_document")).toEqual({
@@ -1079,17 +1084,17 @@ describe("planGoalLoopRoundArtifacts", () => {
       artifactClass: "result_document",
       path: "/artifacts/round-1/result.json",
       digest: "sha256:r",
-      description: null
+      description: null,
     });
     expect(byClass.get("checkpoint_stream")?.artifactId).toBe(
-      "round-1-checkpoint_stream"
+      "round-1-checkpoint_stream",
     );
     expect(byClass.get("verification_output")?.description).toBe("pnpm test");
     expect(byClass.get("commit_or_reset_evidence")?.path).toBe(
-      "/artifacts/round-1/commit.txt"
+      "/artifacts/round-1/commit.txt",
     );
     expect(byClass.get("recovery_note")?.path).toBe(
-      "/artifacts/round-1/recovery.md"
+      "/artifacts/round-1/recovery.md",
     );
     // Every artifact class is a contract-known class.
     for (const record of records) {
@@ -1101,7 +1106,7 @@ describe("planGoalLoopRoundArtifacts", () => {
     const records = planGoalLoopRoundArtifacts({
       roundId: "round-1",
       logPaths: ["/artifacts/round-1/stdout.log"],
-      artifacts: fullArtifacts()
+      artifacts: fullArtifacts(),
     });
     expect(records.map((r) => r.artifactClass)).toEqual([
       "result_document",
@@ -1109,7 +1114,7 @@ describe("planGoalLoopRoundArtifacts", () => {
       "checkpoint_stream",
       "verification_output",
       "commit_or_reset_evidence",
-      "recovery_note"
+      "recovery_note",
     ]);
   });
 
@@ -1119,15 +1124,15 @@ describe("planGoalLoopRoundArtifacts", () => {
       logPaths: [],
       artifacts: {
         resultDocument: { path: "/artifacts/round-1/result.json" },
-        recoveryNote: null
-      }
+        recoveryNote: null,
+      },
     });
     expect(records.map((r) => r.artifactClass)).toEqual(["result_document"]);
   });
 
   it("records no artifacts when no logs and no pointers are present", () => {
     expect(
-      planGoalLoopRoundArtifacts({ roundId: "round-1", logPaths: [] })
+      planGoalLoopRoundArtifacts({ roundId: "round-1", logPaths: [] }),
     ).toEqual([]);
   });
 
@@ -1135,7 +1140,7 @@ describe("planGoalLoopRoundArtifacts", () => {
     const [record] = planGoalLoopRoundArtifacts({
       roundId: "round-1",
       logPaths: [],
-      artifacts: { resultDocument: { path: "/artifacts/round-1/result.json" } }
+      artifacts: { resultDocument: { path: "/artifacts/round-1/result.json" } },
     });
     expect(record?.digest).toBeNull();
     expect(record?.description).toBeNull();
@@ -1148,7 +1153,7 @@ describe("planGoalLoopRoundCheckpoints", () => {
       roundId: "round-1",
       finalizeOutcome: "committed",
       capturedResult: true,
-      classification: "complete"
+      classification: "complete",
     });
     expect(records).toEqual([
       {
@@ -1156,29 +1161,29 @@ describe("planGoalLoopRoundCheckpoints", () => {
         roundId: "round-1",
         sequence: 0,
         stage: "round_started",
-        detail: null
+        detail: null,
       },
       {
         checkpointId: "round-1-checkpoint-1",
         roundId: "round-1",
         sequence: 1,
         stage: "mechanism_completed",
-        detail: "finalize outcome: committed"
+        detail: "finalize outcome: committed",
       },
       {
         checkpointId: "round-1-checkpoint-2",
         roundId: "round-1",
         sequence: 2,
         stage: "result_captured",
-        detail: null
+        detail: null,
       },
       {
         checkpointId: "round-1-checkpoint-3",
         roundId: "round-1",
         sequence: 3,
         stage: "classified",
-        detail: "classification: complete"
-      }
+        detail: "classification: complete",
+      },
     ]);
   });
 
@@ -1187,12 +1192,12 @@ describe("planGoalLoopRoundCheckpoints", () => {
       roundId: "round-1",
       finalizeOutcome: "result_missing",
       capturedResult: false,
-      classification: "manual_recovery_required"
+      classification: "manual_recovery_required",
     });
     expect(records.map((c) => c.stage)).toEqual([
       "round_started",
       "mechanism_completed",
-      "classified"
+      "classified",
     ]);
     // The mechanism stage records the precise unsafe finalize outcome, and the
     // terminal stage the daemon classification, so the coarse stream explains
@@ -1206,7 +1211,7 @@ describe("planGoalLoopRoundCheckpoints", () => {
       roundId: "round-7",
       finalizeOutcome: "reset_verification_failure",
       capturedResult: true,
-      classification: "continue"
+      classification: "continue",
     });
     expect(records.map((c) => c.sequence)).toEqual([0, 1, 2, 3]);
     // (round_id, sequence) is unique per the schema; the ids embed both so a
@@ -1216,15 +1221,15 @@ describe("planGoalLoopRoundCheckpoints", () => {
       "round-7-checkpoint-0",
       "round-7-checkpoint-1",
       "round-7-checkpoint-2",
-      "round-7-checkpoint-3"
+      "round-7-checkpoint-3",
     ]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// goal-loop executor adapter "below StepRun": deterministic invocation / round
+// goal-loop executor adapter "below StepRun": deterministic attempt / round
 // identity materialization. These pure helpers turn a StepRun identity into the
-// durable ExecutorInvocation + per-round ExecutorRound identities, so every
+// durable ExecutorAttempt + per-round ExecutorRound identities, so every
 // caller mints reattachable ids the same way (contract "Heartbeat And Reattach":
 // "The daemon must be able to reattach using durable state alone.").
 // ---------------------------------------------------------------------------
@@ -1238,20 +1243,20 @@ function selection(maxRounds = 5): GoalLoopRoundSelection {
       agentProvider: "claude",
       model: "claude-opus-4-8",
       effort: "high",
-      maxRounds
-    }
+      maxRounds,
+    },
   });
 }
 
-describe("goalLoopInvocationId", () => {
+describe("goalLoopAttemptId", () => {
   it("is deterministic for the same StepRun identity and attempt", () => {
-    expect(goalLoopInvocationId(RUN_A, "implementation", 1)).toBe(
-      goalLoopInvocationId(RUN_A, "implementation", 1)
+    expect(goalLoopAttemptId(RUN_A, "implementation", 1)).toBe(
+      goalLoopAttemptId(RUN_A, "implementation", 1),
     );
   });
 
   it("embeds the run, step, family, and attempt so it is globally unique and reattachable", () => {
-    const id = goalLoopInvocationId(RUN_A, "implementation", 2);
+    const id = goalLoopAttemptId(RUN_A, "implementation", 2);
     expect(id).toContain(RUN_A);
     expect(id).toContain("implementation");
     expect(id).toContain("goal-loop");
@@ -1260,84 +1265,80 @@ describe("goalLoopInvocationId", () => {
 
   it("distinguishes different attempts, steps, and runs", () => {
     const ids = new Set([
-      goalLoopInvocationId(RUN_A, "implementation", 1),
-      goalLoopInvocationId(RUN_A, "implementation", 2),
-      goalLoopInvocationId(RUN_A, "review", 1),
-      goalLoopInvocationId(RUN_B, "implementation", 1)
+      goalLoopAttemptId(RUN_A, "implementation", 1),
+      goalLoopAttemptId(RUN_A, "implementation", 2),
+      goalLoopAttemptId(RUN_A, "review", 1),
+      goalLoopAttemptId(RUN_B, "implementation", 1),
     ]);
     expect(ids.size).toBe(4);
   });
 });
 
 describe("goalLoopRoundId", () => {
-  it("is deterministic and embeds the invocation id and round index", () => {
-    const invocationId = goalLoopInvocationId(RUN_A, "implementation", 1);
-    expect(goalLoopRoundId(invocationId, 0)).toBe(
-      goalLoopRoundId(invocationId, 0)
-    );
-    expect(goalLoopRoundId(invocationId, 0)).toContain(invocationId);
+  it("is deterministic and embeds the attempt id and round index", () => {
+    const attemptId = goalLoopAttemptId(RUN_A, "implementation", 1);
+    expect(goalLoopRoundId(attemptId, 0)).toBe(goalLoopRoundId(attemptId, 0));
+    expect(goalLoopRoundId(attemptId, 0)).toContain(attemptId);
   });
 
-  it("distinguishes round indices under the same invocation", () => {
-    const invocationId = goalLoopInvocationId(RUN_A, "implementation", 1);
-    expect(goalLoopRoundId(invocationId, 0)).not.toBe(
-      goalLoopRoundId(invocationId, 1)
+  it("distinguishes round indices under the same attempt", () => {
+    const attemptId = goalLoopAttemptId(RUN_A, "implementation", 1);
+    expect(goalLoopRoundId(attemptId, 0)).not.toBe(
+      goalLoopRoundId(attemptId, 1),
     );
   });
 });
 
-describe("planGoalLoopInvocation", () => {
-  it("projects a StepRun identity into a running goal-loop invocation record", () => {
-    const invocation = planGoalLoopInvocation({
+describe("planGoalLoopAttempt", () => {
+  it("projects a StepRun identity into a running goal-loop attempt record", () => {
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
-      startedAt: 1_000
+      attemptNumber: 1,
+      startedAt: 1_000,
     });
-    expect(invocation).toEqual({
-      invocationId: goalLoopInvocationId(RUN_A, "implementation", 1),
+    expect(attempt).toEqual({
+      attemptId: goalLoopAttemptId(RUN_A, "implementation", 1),
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
       executorFamily: "goal-loop",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000,
       heartbeatAt: 1_000,
-      finishedAt: null
+      finishedAt: null,
     });
   });
 });
 
-describe("planGoalLoopRoundStartForInvocation", () => {
-  it("inherits the invocation identity and mints a deterministic round id", () => {
-    const invocation = planGoalLoopInvocation({
+describe("planGoalLoopRoundStartForAttempt", () => {
+  it("inherits the attempt identity and mints a deterministic round id", () => {
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
-      startedAt: 1_000
+      attemptNumber: 1,
+      startedAt: 1_000,
     });
-    const start = planGoalLoopRoundStartForInvocation({
-      invocation,
+    const start = planGoalLoopRoundStartForAttempt({
+      attempt,
       selection: selection(),
       roundIndex: 0,
       runtime: {
         inputDigest: "sha256:input-0",
         artifactRoot: "/artifacts/round-0",
-        logPaths: ["/artifacts/round-0/stdout.log"]
+        logPaths: ["/artifacts/round-0/stdout.log"],
       },
-      startedAt: 1_100
+      startedAt: 1_100,
     });
-    expect(start.roundId).toBe(
-      goalLoopRoundId(invocation.invocationId, 0)
-    );
-    expect(start.invocationId).toBe(invocation.invocationId);
+    expect(start.roundId).toBe(goalLoopRoundId(attempt.attemptId, 0));
+    expect(start.attemptId).toBe(attempt.attemptId);
     expect(start.workflowRunId).toBe(RUN_A);
     expect(start.stepRunId).toBe("implementation");
     expect(start.stepKey).toBe("implementation");
-    expect(start.attempt).toBe(1);
+    expect(start.attemptNumber).toBe(1);
     expect(start.roundIndex).toBe(0);
     expect(start.inputDigest).toBe("sha256:input-0");
     expect(start.artifactRoot).toBe("/artifacts/round-0");
@@ -1347,25 +1348,28 @@ describe("planGoalLoopRoundStartForInvocation", () => {
   });
 
   it("composes into a valid running round record that freezes the resolved selection", () => {
-    const invocation = planGoalLoopInvocation({
+    const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      attempt: 1,
-      startedAt: 1_000
+      attemptNumber: 1,
+      startedAt: 1_000,
     });
-    const start = planGoalLoopRoundStartForInvocation({
-      invocation,
+    const start = planGoalLoopRoundStartForAttempt({
+      attempt,
       selection: selection(),
       roundIndex: 2,
-      runtime: { inputDigest: "sha256:input-2", artifactRoot: "/artifacts/round-2" },
-      startedAt: 1_200
+      runtime: {
+        inputDigest: "sha256:input-2",
+        artifactRoot: "/artifacts/round-2",
+      },
+      startedAt: 1_200,
     });
     const round = planGoalLoopRoundStart(start);
     expect(round.state).toBe("running");
     expect(round.executorFamily).toBe("goal-loop");
-    expect(round.roundId).toBe(goalLoopRoundId(invocation.invocationId, 2));
-    expect(round.invocationId).toBe(invocation.invocationId);
+    expect(round.roundId).toBe(goalLoopRoundId(attempt.attemptId, 2));
+    expect(round.attemptId).toBe(attempt.attemptId);
     expect(round.roundIndex).toBe(2);
     // The resolved selection is frozen into the round before any work runs.
     expect(round.agentProvider).toBe("claude");

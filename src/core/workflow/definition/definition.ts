@@ -4,7 +4,7 @@
  * This module owns the *pure* `WorkflowDefinition` / `StepDefinition` shape,
  * a deterministic validator, and the built-in coding workflow definition. It
  * follows the same discipline as `run/reducer.ts`: no SQLite, no file
- * system, no executor invocation. Durable persistence (`workflow_definitions`
+ * system, no executor execution. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
  * `definition/persist.ts`; first-class workflow run start, executor
  * records, the opt-in daemon scheduler lane, the native goal-loop / one-shot /
@@ -352,7 +352,7 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  * SPEC.md, choosing one option where the
  * contract offers a pair:
  *
- *   - preflight      -> one-shot      (a single bounded prep invocation)
+ *   - preflight      -> one-shot      (a single bounded prep attempt)
  *   - implementation -> delegate-supervisor (GNHF owns the implementation loop)
  *   - postflight     -> one-shot      (a single bounded review pass)
  *   - no-mistakes    -> delegate-supervisor (no-mistakes owns validation)

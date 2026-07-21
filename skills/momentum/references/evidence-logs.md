@@ -11,7 +11,7 @@ verification results, and recovery codes over terminal output or process state.
 <momentum> workflow handoff <run-id> --json
 ```
 
-Use logs for executor invocations, rounds, artifacts, checkpoints, findings, and
+Use logs for executor attempts, rounds, artifacts, checkpoints, findings, and
 decisions. Use status or handoff for the current next action.
 
 ## Inspect Events

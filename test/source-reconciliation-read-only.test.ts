@@ -8,7 +8,7 @@ import {
   reconcileLinearSource,
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
-  type LinearReconciliationFetchPageResult
+  type LinearReconciliationFetchPageResult,
 } from "../src/core/source/reconciliation.js";
 
 /**
@@ -39,7 +39,9 @@ function makeTempDir(prefix = "momentum-source-read-only-"): string {
   return fs.realpathSync(dir);
 }
 
-function makeLinearIssue(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeLinearIssue(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     id: overrides["id"] ?? "issue-uuid-1",
     identifier: overrides["identifier"] ?? "NGX-1",
@@ -49,28 +51,32 @@ function makeLinearIssue(overrides: Record<string, unknown> = {}): Record<string
     project: overrides["project"] ?? {
       id: "project-uuid-1",
       key: "PROJ",
-      name: "Project One"
+      name: "Project One",
     },
     projectMilestone: overrides["projectMilestone"] ?? {
       id: "milestone-uuid-1",
-      name: "Milestone One"
+      name: "Milestone One",
     },
     labels: overrides["labels"] ?? { nodes: [] },
     assignee: overrides["assignee"] ?? null,
     priority: overrides["priority"] ?? 0,
     updatedAt: overrides["updatedAt"] ?? "2026-04-01T00:00:00.000Z",
-    ...overrides
+    ...overrides,
   };
 }
 
-function singlePageClient(issues: readonly unknown[]): LinearReconciliationClient {
+function singlePageClient(
+  issues: readonly unknown[],
+): LinearReconciliationClient {
   let served = false;
   return {
-    fetchPage(_input: LinearReconciliationFetchPageInput): LinearReconciliationFetchPageResult {
+    fetchPage(
+      _input: LinearReconciliationFetchPageInput,
+    ): LinearReconciliationFetchPageResult {
       if (served) return { ok: true, page: { issues: [], nextCursor: null } };
       served = true;
       return { ok: true, page: { issues, nextCursor: null } };
-    }
+    },
   };
 }
 
@@ -81,7 +87,10 @@ function countRows(db: MomentumDb, table: string): number {
   return Number(row.count);
 }
 
-function tableRows(db: MomentumDb, table: string): Array<Record<string, unknown>> {
+function tableRows(
+  db: MomentumDb,
+  table: string,
+): Array<Record<string, unknown>> {
   return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<
     Record<string, unknown>
   >;
@@ -89,16 +98,18 @@ function tableRows(db: MomentumDb, table: string): Array<Record<string, unknown>
 
 function snapshotTables(
   db: MomentumDb,
-  tables: readonly string[]
+  tables: readonly string[],
 ): Record<string, Array<Record<string, unknown>>> {
-  return Object.fromEntries(tables.map((table) => [table, tableRows(db, table)]));
+  return Object.fromEntries(
+    tables.map((table) => [table, tableRows(db, table)]),
+  );
 }
 
 // Tables the source reconciliation adapter is the durable owner of (M5 contract).
 const SOURCE_TABLES = [
   "source_items",
   "source_snapshots",
-  "source_reconciliation_runs"
+  "source_reconciliation_runs",
 ] as const;
 
 // Execution-state and external-write tables a read-only source adapter must
@@ -118,7 +129,7 @@ const FORBIDDEN_TABLES = [
   "workflow_gates",
   // Executor-loop state.
   "executor_definitions",
-  "executor_invocations",
+  "executor_attempts",
   "executor_rounds",
   "executor_artifacts",
   "executor_checkpoints",
@@ -131,7 +142,7 @@ const FORBIDDEN_TABLES = [
   // Other runtime substrate the adapter has no business touching.
   "repo_locks",
   "daemon_runs",
-  "evidence_records"
+  "evidence_records",
 ] as const;
 
 function seedForbiddenTables(db: MomentumDb): void {
@@ -196,15 +207,15 @@ function seedForbiddenTables(db: MomentumDb): void {
       VALUES
       ('executor_existing', 'manual', 'operator', 'none', 1011, 1011);
 
-    INSERT INTO executor_invocations
-      (invocation_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
+    INSERT INTO executor_attempts
+      (attempt_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
       VALUES
-      ('invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
+      ('attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
 
     INSERT INTO executor_rounds
-      (round_id, invocation_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
+      (round_id, attempt_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
       VALUES
-      ('round_existing', 'invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
+      ('round_existing', 'attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
 
     INSERT INTO executor_artifacts
       (artifact_id, round_id, artifact_class, path, digest, created_at)
@@ -227,9 +238,9 @@ function seedForbiddenTables(db: MomentumDb): void {
       ('decision_existing', 'round_existing', 'Existing decision', '["continue"]', 'continue', 1017);
 
     INSERT INTO workflow_gates
-      (gate_id, workflow_run_id, step_run_id, invocation_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
+      (gate_id, workflow_run_id, step_run_id, attempt_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
       VALUES
-      ('gate_existing', 'workflow_run_existing', 'step_existing', 'invocation_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
+      ('gate_existing', 'workflow_run_existing', 'step_existing', 'attempt_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
 
     INSERT INTO evidence_records
       (id, source, type, occurred_at, summary, goal_id, ingest_key, created_at, updated_at)
@@ -259,38 +270,56 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       // then update, then skip + per-item error, then dry-run.
       await reconcileLinearSource(db, {
         client: singlePageClient([
-          makeLinearIssue({ id: "issue-a", identifier: "NGX-1", updatedAt: 1_000 }),
-          makeLinearIssue({ id: "issue-b", identifier: "NGX-2", updatedAt: 1_000 })
-        ])
+          makeLinearIssue({
+            id: "issue-a",
+            identifier: "NGX-1",
+            updatedAt: 1_000,
+          }),
+          makeLinearIssue({
+            id: "issue-b",
+            identifier: "NGX-2",
+            updatedAt: 1_000,
+          }),
+        ]),
       });
       // Update pass: newer observedAt -> upsert + a fresh snapshot for issue-a.
       await reconcileLinearSource(db, {
         client: singlePageClient([
-          makeLinearIssue({ id: "issue-a", identifier: "NGX-1", updatedAt: 2_000 })
-        ])
+          makeLinearIssue({
+            id: "issue-a",
+            identifier: "NGX-1",
+            updatedAt: 2_000,
+          }),
+        ]),
       });
       // Stale issue-a (skipped, no write) alongside a malformed issue (per-item error, no write).
       await reconcileLinearSource(db, {
         client: singlePageClient([
-          makeLinearIssue({ id: "issue-a", identifier: "NGX-1", updatedAt: 500 }),
-          { id: "broken-missing-required-fields" }
-        ])
+          makeLinearIssue({
+            id: "issue-a",
+            identifier: "NGX-1",
+            updatedAt: 500,
+          }),
+          { id: "broken-missing-required-fields" },
+        ]),
       });
       // Dry-run never persists items or snapshots, but still records the run.
       await reconcileLinearSource(db, {
-        client: singlePageClient([makeLinearIssue({ id: "issue-c", identifier: "NGX-3" })]),
-        dryRun: true
+        client: singlePageClient([
+          makeLinearIssue({ id: "issue-c", identifier: "NGX-3" }),
+        ]),
+        dryRun: true,
       });
 
       // The adapter IS the durable owner of these: they must be populated.
       expect(countRows(db, "source_items")).toBe(2); // issue-a, issue-b (issue-c was dry-run only)
       expect(countRows(db, "source_snapshots")).toBe(3); // 2 creates + 1 update
-      expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per invocation, incl. dry-run
+      expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per attempt, incl. dry-run
 
       for (const table of FORBIDDEN_TABLES) {
         expect(
           tableRows(db, table),
-          `reconciliation must leave ${table} unchanged`
+          `reconciliation must leave ${table} unchanged`,
         ).toEqual(forbiddenBefore[table]);
       }
     } finally {
@@ -305,8 +334,8 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       await reconcileLinearSource(db, {
         client: singlePageClient([
           makeLinearIssue({ id: "issue-a", identifier: "NGX-1" }),
-          makeLinearIssue({ id: "issue-b", identifier: "NGX-2" })
-        ])
+          makeLinearIssue({ id: "issue-b", identifier: "NGX-2" }),
+        ]),
       });
 
       // The adapter must not initialize or mutate a git repository.
@@ -317,7 +346,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       for (const entry of fs.readdirSync(dataDir)) {
         expect(
           entry.startsWith("momentum.db"),
-          `reconciliation wrote an unexpected file outside the SQLite database: ${entry}`
+          `reconciliation wrote an unexpected file outside the SQLite database: ${entry}`,
         ).toBe(true);
       }
     } finally {
@@ -333,7 +362,7 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
         fetchPage(input) {
           inputs.push(input);
           return { ok: true, page: { issues: [], nextCursor: null } };
-        }
+        },
       };
 
       await reconcileLinearSource(db, { client, filters: { projectId: "p1" } });
@@ -342,7 +371,10 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       // The adapter's sole outward surface is a read request: exactly a pagination
       // cursor plus read filters, with no db handle or mutation callback that
       // could drive an external or execution-state write.
-      expect(Object.keys(inputs[0] ?? {}).sort()).toEqual(["cursor", "filters"]);
+      expect(Object.keys(inputs[0] ?? {}).sort()).toEqual([
+        "cursor",
+        "filters",
+      ]);
       expect(inputs[0]?.cursor).toBeNull();
     } finally {
       db.close();

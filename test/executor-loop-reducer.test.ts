@@ -3,25 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_STATES,
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   selectExecutorDecisionForHumanGate,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   transitionExecutorRound,
   type ExecutorDefinitionRecord,
-  type ExecutorInvocationRecord,
-  type ExecutorInvocationState,
+  type ExecutorAttemptRecord,
+  type ExecutorAttemptState,
   type ExecutorRoundRecord,
   type ExecutorRoundState,
 } from "../src/core/executors/loop/reducer.js";
 
 describe("executor-loop-reducer vocabulary", () => {
-  it("exposes the invocation states pinned by the executor-loop contract", () => {
-    expect([...EXECUTOR_INVOCATION_STATES].sort()).toEqual(
+  it("exposes the attempt states pinned by the executor-loop contract", () => {
+    expect([...EXECUTOR_ATTEMPT_STATES].sort()).toEqual(
       [
         "pending",
         "preparing",
@@ -55,7 +55,7 @@ describe("executor-loop-reducer vocabulary", () => {
     );
   });
 
-  it("flags the same terminal set for invocations and rounds", () => {
+  it("flags the same terminal set for attempts and rounds", () => {
     const expected = [
       "manual_recovery_required",
       "blocked",
@@ -63,14 +63,14 @@ describe("executor-loop-reducer vocabulary", () => {
       "succeeded",
       "cancelled",
     ].sort();
-    expect([...EXECUTOR_INVOCATION_TERMINAL_STATES].sort()).toEqual(expected);
+    expect([...EXECUTOR_ATTEMPT_TERMINAL_STATES].sort()).toEqual(expected);
     expect([...EXECUTOR_ROUND_TERMINAL_STATES].sort()).toEqual(expected);
   });
 
   it("treats waiting_operator as a durable, non-terminal pause", () => {
-    expect(isTerminalExecutorInvocationState("waiting_operator")).toBe(false);
+    expect(isTerminalExecutorAttemptState("waiting_operator")).toBe(false);
     expect(isTerminalExecutorRoundState("waiting_operator")).toBe(false);
-    expect(isTerminalExecutorInvocationState("succeeded")).toBe(true);
+    expect(isTerminalExecutorAttemptState("succeeded")).toBe(true);
     expect(isTerminalExecutorRoundState("blocked")).toBe(true);
   });
 
@@ -108,35 +108,35 @@ describe("executor-loop-reducer vocabulary", () => {
   });
 });
 
-describe("transitionExecutorInvocation", () => {
+describe("transitionExecutorAttempt", () => {
   it("accepts the happy path pending -> preparing -> running -> succeeded", () => {
-    expect(transitionExecutorInvocation("pending", "preparing").ok).toBe(true);
-    expect(transitionExecutorInvocation("preparing", "running").ok).toBe(true);
-    const succeed = transitionExecutorInvocation("running", "succeeded");
+    expect(transitionExecutorAttempt("pending", "preparing").ok).toBe(true);
+    expect(transitionExecutorAttempt("preparing", "running").ok).toBe(true);
+    const succeed = transitionExecutorAttempt("running", "succeeded");
     expect(succeed.ok).toBe(true);
     if (succeed.ok) expect(succeed.state).toBe("succeeded");
   });
 
   it("accepts running -> pausing -> waiting_operator then resumes waiting_operator -> running", () => {
-    expect(transitionExecutorInvocation("running", "pausing").ok).toBe(true);
-    expect(transitionExecutorInvocation("pausing", "waiting_operator").ok).toBe(
+    expect(transitionExecutorAttempt("running", "pausing").ok).toBe(true);
+    expect(transitionExecutorAttempt("pausing", "waiting_operator").ok).toBe(
       true,
     );
     // waiting_operator is a durable pause: it can be resumed, never a terminal.
-    expect(transitionExecutorInvocation("waiting_operator", "running").ok).toBe(
+    expect(transitionExecutorAttempt("waiting_operator", "running").ok).toBe(
       true,
     );
   });
 
   it("accepts an abort to any failure-ish terminal from every active state", () => {
-    const active: ExecutorInvocationState[] = [
+    const active: ExecutorAttemptState[] = [
       "pending",
       "preparing",
       "running",
       "pausing",
       "waiting_operator",
     ];
-    const aborts: ExecutorInvocationState[] = [
+    const aborts: ExecutorAttemptState[] = [
       "blocked",
       "failed",
       "manual_recovery_required",
@@ -144,10 +144,9 @@ describe("transitionExecutorInvocation", () => {
     ];
     for (const from of active) {
       for (const to of aborts) {
-        expect(
-          transitionExecutorInvocation(from, to).ok,
-          `${from} -> ${to}`,
-        ).toBe(true);
+        expect(transitionExecutorAttempt(from, to).ok, `${from} -> ${to}`).toBe(
+          true,
+        );
       }
     }
   });
@@ -159,45 +158,45 @@ describe("transitionExecutorInvocation", () => {
       "pausing",
       "waiting_operator",
     ] as const) {
-      const result = transitionExecutorInvocation(from, "succeeded");
+      const result = transitionExecutorAttempt(from, "succeeded");
       expect(result.ok, `${from} -> succeeded`).toBe(false);
       if (!result.ok) {
-        expect(result.errorCode).toBe("executor_invocation_invalid_transition");
+        expect(result.errorCode).toBe("executor_attempt_invalid_transition");
       }
     }
   });
 
   it("refuses to skip preparing (pending -> running)", () => {
-    const result = transitionExecutorInvocation("pending", "running");
+    const result = transitionExecutorAttempt("pending", "running");
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errorCode).toBe("executor_invocation_invalid_transition");
+      expect(result.errorCode).toBe("executor_attempt_invalid_transition");
     }
   });
 
-  it("refuses to transition out of a terminal invocation state", () => {
-    for (const from of EXECUTOR_INVOCATION_TERMINAL_STATES) {
-      const result = transitionExecutorInvocation(from, "running");
+  it("refuses to transition out of a terminal attempt state", () => {
+    for (const from of EXECUTOR_ATTEMPT_TERMINAL_STATES) {
+      const result = transitionExecutorAttempt(from, "running");
       expect(result.ok, `${from} -> running`).toBe(false);
       if (!result.ok) {
-        expect(result.errorCode).toBe("executor_invocation_terminal");
+        expect(result.errorCode).toBe("executor_attempt_terminal");
       }
     }
   });
 
-  it("refuses an unknown state with executor_invocation_unknown_state", () => {
-    const result = transitionExecutorInvocation(
+  it("refuses an unknown state with executor_attempt_unknown_state", () => {
+    const result = transitionExecutorAttempt(
       "bogus" as never,
       "running" as never,
     );
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.errorCode).toBe("executor_invocation_unknown_state");
+      expect(result.errorCode).toBe("executor_attempt_unknown_state");
     }
   });
 
   it("allows same-state self transitions as a no-op success", () => {
-    const result = transitionExecutorInvocation("running", "running");
+    const result = transitionExecutorAttempt("running", "running");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.state).toBe("running");
   });
@@ -330,32 +329,32 @@ describe("executor-loop record shapes", () => {
     expect(def.maxRounds).toBe(8);
   });
 
-  it("models an ExecutorInvocation nested below a StepRun", () => {
-    const invocation: ExecutorInvocationRecord = {
-      invocationId: "inv-1",
+  it("models an ExecutorAttempt nested below a StepRun", () => {
+    const attempt: ExecutorAttemptRecord = {
+      attemptId: "inv-1",
       workflowRunId: "run-1",
       stepRunId: "step-impl",
       stepKey: "implementation",
       executorFamily: "goal-loop",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 1_000,
       heartbeatAt: 1_500,
       finishedAt: null,
     };
-    expect(invocation.state).toBe("running");
-    expect(invocation.executorFamily).toBe("goal-loop");
+    expect(attempt.state).toBe("running");
+    expect(attempt.executorFamily).toBe("goal-loop");
   });
 
   it("models an ExecutorRound carrying the common result schema fields", () => {
     const round: ExecutorRoundRecord = {
       roundId: "round-1",
-      invocationId: "inv-1",
+      attemptId: "inv-1",
       workflowRunId: "run-1",
       stepRunId: "step-impl",
       stepKey: "implementation",
       executorFamily: "goal-loop",
-      attempt: 1,
+      attemptNumber: 1,
       roundIndex: 0,
       state: "succeeded",
       classification: "complete",

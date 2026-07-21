@@ -15,10 +15,10 @@ import {
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-recovery.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workflow/dispatch/subworkflow-run.js";
@@ -189,12 +189,12 @@ describe("subworkflow production flip — configured step dispatches through dae
       const parentStep = getWorkflowStep(db, runId, PARENT_STEP_ID);
       expect(parentStep?.state).toBe("running");
 
-      const invocation = loadExecutorInvocation(
+      const attempt = loadExecutorAttempt(
         db,
-        deriveDispatchInvocationId(runId, PARENT_STEP_ID),
+        deriveDispatchAttemptId(runId, PARENT_STEP_ID, 1),
       );
-      expect(invocation?.executorFamily).toBe("subworkflow");
-      expect(invocation?.state).toBe("running");
+      expect(attempt?.executorFamily).toBe("subworkflow");
+      expect(attempt?.state).toBe("running");
 
       // A REAL child workflow run now exists, started through the run-start seam.
       const child = loadWorkflowRunDetail(db, childRunId(runId));
@@ -266,9 +266,9 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         now: NOW + 1,
       });
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
-          deriveDispatchInvocationId(runId, PARENT_STEP_ID),
+          deriveDispatchAttemptId(runId, PARENT_STEP_ID, 1),
         )?.executorFamily,
       ).toBe("subworkflow");
 
@@ -327,9 +327,9 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         "succeeded",
       );
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
-          deriveDispatchInvocationId(runId, PARENT_STEP_ID),
+          deriveDispatchAttemptId(runId, PARENT_STEP_ID, 1),
         )?.state,
       ).toBe("succeeded");
 

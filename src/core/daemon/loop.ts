@@ -320,7 +320,7 @@ export async function runDaemonLoop(
       }
 
       // A cycle is active (no idle increment, no poll sleep) only when the
-      // workflow lane starts or retries an invocation. A continuation-only SDK
+      // workflow lane starts or retries an attempt. A continuation-only SDK
       // tick has already done its bounded poll, so it observes the configured
       // interval before the next external-state read.
       const cycleDidUsefulWork =

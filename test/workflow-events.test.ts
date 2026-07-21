@@ -6,14 +6,17 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { insertWorkflowGate, resolveWorkflowGate } from "../src/core/workflow/gate/persist.js";
+import {
+  insertWorkflowGate,
+  resolveWorkflowGate,
+} from "../src/core/workflow/gate/persist.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
-  markWorkflowRunNeedsManualRecovery
+  markWorkflowRunNeedsManualRecovery,
 } from "../src/core/workflow/run/recovery.js";
 import {
   WORKFLOW_EVENT_TYPES,
-  appendWorkflowEvent
+  appendWorkflowEvent,
 } from "../src/core/workflow/run/events.js";
 
 type WorkflowGuiEventsContractFixture = {
@@ -29,8 +32,8 @@ type WorkflowGuiEventsContractFixture = {
 const EVENTS_CONTRACT = JSON.parse(
   fs.readFileSync(
     path.join(process.cwd(), "test/fixtures/workflow-gui-contract.json"),
-    "utf-8"
-  )
+    "utf-8",
+  ),
 ) as WorkflowGuiEventsContractFixture;
 
 type RunResult = {
@@ -41,7 +44,6 @@ type RunResult = {
 
 const EVENT_ENVELOPE_KEYS = EVENTS_CONTRACT.events.envelopeKeys.slice().sort();
 const EVENT_KEYS = EVENTS_CONTRACT.events.eventKeys.slice().sort();
-
 
 type WorkflowEvent = {
   id: string;
@@ -86,15 +88,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -102,7 +104,7 @@ async function run(argv: string[]): Promise<RunResult> {
 async function readEvents(
   dataDir: string,
   runId: string,
-  since?: string | null
+  since?: string | null,
 ): Promise<WorkflowEventsEnvelope> {
   const argv = [
     "workflow",
@@ -111,7 +113,7 @@ async function readEvents(
     runId,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ];
   if (since !== undefined) {
     argv.push("--since", since ?? "");
@@ -122,21 +124,26 @@ async function readEvents(
 }
 
 function assertWorkflowEventsEnvelopeContract(
-  envelope: WorkflowEventsEnvelope
+  envelope: WorkflowEventsEnvelope,
 ): void {
   expect(Object.keys(envelope).sort()).toEqual(EVENT_ENVELOPE_KEYS);
   expect(envelope.command).toBe("workflow run events");
   expect(typeof envelope.runId).toBe("string");
+  expect(envelope.since === null || typeof envelope.since === "string").toBe(
+    true,
+  );
   expect(
-    envelope.since === null || typeof envelope.since === "string"
+    envelope.cursor === null ||
+      envelope.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix),
   ).toBe(true);
-  expect(envelope.cursor === null || envelope.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix)).toBe(true);
   for (const event of envelope.events) {
     expect(Object.keys(event).sort()).toEqual(EVENT_KEYS);
     expect(typeof event.id).toBe("string");
     expect(event.id.length).toBeGreaterThan(0);
     expect(typeof event.cursor).toBe("string");
-    expect(event.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix)).toBe(true);
+    expect(event.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix)).toBe(
+      true,
+    );
     expect(typeof event.timestamp).toBe("number");
     expect(typeof event.type).toBe("string");
     expect(EVENTS_CONTRACT.events.types).toContain(event.type);
@@ -158,21 +165,21 @@ function seedRun(
     finishedAt?: number | null;
     createdAt?: number;
     updatedAt?: number;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, issue_scope_json, route_json,
         needs_manual_recovery, started_at, finished_at, created_at, updated_at)
        VALUES (?, ?, 'momentum-native-coding', '{}', '{}', '{}',
-        0, ?, ?, ?, ?)`
+        0, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state ?? "pending",
     input.startedAt ?? null,
     input.finishedAt ?? null,
     input.createdAt ?? 1,
-    input.updatedAt ?? 1
+    input.updatedAt ?? 1,
   );
 }
 
@@ -191,14 +198,14 @@ function seedStep(
     errorCode?: string | null;
     errorMessage?: string | null;
     resultDigest?: string | null;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -211,7 +218,7 @@ function seedStep(
     input.startedAt ?? null,
     input.finishedAt ?? null,
     input.createdAt ?? 1,
-    input.updatedAt ?? 1
+    input.updatedAt ?? 1,
   );
 }
 
@@ -224,12 +231,12 @@ function seedWorkflowEvent(
     timestamp: number;
     stepId?: string | null;
     payload?: Record<string, unknown>;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_events
        (event_id, run_id, step_id, occurred_at, type, payload_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.eventId,
     input.runId,
@@ -237,7 +244,7 @@ function seedWorkflowEvent(
     input.timestamp,
     input.type,
     JSON.stringify(input.payload ?? {}),
-    input.timestamp
+    input.timestamp,
   );
 }
 
@@ -265,7 +272,7 @@ describe("workflow run events", () => {
       since: null,
       cursor: null,
       events: [],
-      counts: { events: 0 }
+      counts: { events: 0 },
     });
     expect(second).toEqual(first);
   });
@@ -278,7 +285,7 @@ describe("workflow run events", () => {
       state: "succeeded",
       startedAt: 5,
       finishedAt: 80,
-      updatedAt: 80
+      updatedAt: 80,
     });
     seedStep(db, {
       runId: "run-replay",
@@ -288,7 +295,7 @@ describe("workflow run events", () => {
       order: 1,
       startedAt: 10,
       finishedAt: 30,
-      resultDigest: "sha256:implementation"
+      resultDigest: "sha256:implementation",
     });
     db.prepare(
       `INSERT INTO workflow_approvals
@@ -296,7 +303,7 @@ describe("workflow run events", () => {
           recorded_at, discharged_at, created_at, updated_at)
          VALUES ('run-replay', 'implementation', 'calvin',
           'approve implementation', '/approval.json', 'sha256:approval',
-          40, NULL, 40, 40)`
+          40, NULL, 40, 40)`,
     ).run();
     insertWorkflowGate(
       db,
@@ -307,29 +314,29 @@ describe("workflow run events", () => {
         gateType: "approval_required",
         reason: "operator approval required",
         allowedActions: ["approve", "reject"],
-        recommendedAction: "approve"
+        recommendedAction: "approve",
       },
-      { now: 50 }
+      { now: 50 },
     );
     resolveWorkflowGate(
       db,
       "gate-1",
       { action: "approve", actor: "calvin", mode: "operator" },
-      { now: 60 }
+      { now: 60 },
     );
     seedWorkflowEvent(db, {
       eventId: "000000000070:recovery_required:run-replay",
       runId: "run-replay",
       type: "recovery_required",
       timestamp: 70,
-      payload: { reason: "manual inspection required" }
+      payload: { reason: "manual inspection required" },
     });
     seedWorkflowEvent(db, {
       eventId: "000000000075:recovery_cleared:run-replay",
       runId: "run-replay",
       type: "recovery_cleared",
       timestamp: 75,
-      payload: { previousReason: "manual inspection required" }
+      payload: { previousReason: "manual inspection required" },
     });
     seedWorkflowEvent(db, {
       eventId: "000000000076:monitor_stuck_risk:run-replay",
@@ -337,7 +344,7 @@ describe("workflow run events", () => {
       type: "monitor_stuck_risk",
       timestamp: 76,
       stepId: "implementation",
-      payload: { stuckRisk: "medium" }
+      payload: { stuckRisk: "medium" },
     });
     db.close();
 
@@ -355,7 +362,7 @@ describe("workflow run events", () => {
       "recovery_required",
       "recovery_cleared",
       "monitor_stuck_risk",
-      "terminal_state"
+      "terminal_state",
     ]);
     for (const event of envelope.events) {
       expect(event.id.length).toBeGreaterThan(0);
@@ -368,7 +375,7 @@ describe("workflow run events", () => {
       timestamp: 80,
       type: "terminal_state",
       stepId: null,
-      payload: { state: "succeeded" }
+      payload: { state: "succeeded" },
     });
     expect(envelope.cursor).toBe(envelope.events.at(-1)?.cursor);
     expect(envelope.counts.events).toBe(envelope.events.length);
@@ -381,7 +388,7 @@ describe("workflow run events", () => {
       runId: "run-imported-terminal",
       state: "succeeded",
       finishedAt: null,
-      updatedAt: 95
+      updatedAt: 95,
     });
     db.close();
 
@@ -393,7 +400,7 @@ describe("workflow run events", () => {
       timestamp: 95,
       type: "terminal_state",
       stepId: null,
-      payload: { state: "succeeded" }
+      payload: { state: "succeeded" },
     });
     expect(envelope.cursor).toBe(envelope.events[0]?.cursor);
   });
@@ -408,7 +415,7 @@ describe("workflow run events", () => {
       kind: "implementation",
       state: "running",
       order: 1,
-      startedAt: 10
+      startedAt: 10,
     });
     db.close();
 
@@ -424,7 +431,7 @@ describe("workflow run events", () => {
            SET state = 'failed', error_code = 'runner_failed',
                error_message = 'runner exited non-zero',
                finished_at = 25, updated_at = 25
-         WHERE run_id = 'run-continue' AND step_id = 'implementation'`
+         WHERE run_id = 'run-continue' AND step_id = 'implementation'`,
       )
       .run();
     writeDb.close();
@@ -439,8 +446,8 @@ describe("workflow run events", () => {
       payload: {
         kind: "implementation",
         errorCode: "runner_failed",
-        errorMessage: "runner exited non-zero"
-      }
+        errorMessage: "runner exited non-zero",
+      },
     });
     expect(next.cursor).toBe(next.events[0]?.cursor);
   });
@@ -448,7 +455,11 @@ describe("workflow run events", () => {
   it("orders same-timestamp step starts before terminal step events", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
-    seedRun(db, { runId: "run-same-timestamp-step", state: "failed", updatedAt: 10 });
+    seedRun(db, {
+      runId: "run-same-timestamp-step",
+      state: "failed",
+      updatedAt: 10,
+    });
     seedStep(db, {
       runId: "run-same-timestamp-step",
       stepId: "implementation",
@@ -458,7 +469,7 @@ describe("workflow run events", () => {
       startedAt: 10,
       finishedAt: 10,
       errorCode: "runner_failed",
-      errorMessage: "runner exited non-zero"
+      errorMessage: "runner exited non-zero",
     });
     db.close();
 
@@ -468,9 +479,11 @@ describe("workflow run events", () => {
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_started",
       "step_failed",
-      "terminal_state"
+      "terminal_state",
     ]);
-    expect(envelope.events.map((event) => event.timestamp)).toEqual([10, 10, 10]);
+    expect(envelope.events.map((event) => event.timestamp)).toEqual([
+      10, 10, 10,
+    ]);
   });
 
   it("replays recovery reason changes while the run remains marked", async () => {
@@ -481,15 +494,15 @@ describe("workflow run events", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-recovery-remark",
         reason: "first recovery reason",
-        now: 100
-      })
+        now: 100,
+      }),
     ).toEqual({ ok: true, previouslyMarked: false });
     db.close();
 
     const first = await readEvents(dataDir, "run-recovery-remark");
     assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual([
-      "recovery_required"
+      "recovery_required",
     ]);
 
     const writeDb = openDb(dataDir);
@@ -497,16 +510,12 @@ describe("workflow run events", () => {
       markWorkflowRunNeedsManualRecovery(writeDb, {
         runId: "run-recovery-remark",
         reason: "updated recovery reason",
-        now: 200
-      })
+        now: 200,
+      }),
     ).toEqual({ ok: true, previouslyMarked: true });
     writeDb.close();
 
-    const next = await readEvents(
-      dataDir,
-      "run-recovery-remark",
-      first.cursor
-    );
+    const next = await readEvents(dataDir, "run-recovery-remark", first.cursor);
     assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toHaveLength(1);
     expect(next.events[0]).toMatchObject({
@@ -515,8 +524,8 @@ describe("workflow run events", () => {
       payload: {
         reason: "updated recovery reason",
         previousReason: "first recovery reason",
-        previousMarkedAt: 100
-      }
+        previousMarkedAt: 100,
+      },
     });
   });
 
@@ -528,15 +537,15 @@ describe("workflow run events", () => {
       markWorkflowRunNeedsManualRecovery(db, {
         runId: "run-recovery-idempotent",
         reason: "same recovery reason",
-        now: 100
-      })
+        now: 100,
+      }),
     ).toEqual({ ok: true, previouslyMarked: false });
     db.close();
 
     const first = await readEvents(dataDir, "run-recovery-idempotent");
     assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual([
-      "recovery_required"
+      "recovery_required",
     ]);
 
     const writeDb = openDb(dataDir);
@@ -544,15 +553,15 @@ describe("workflow run events", () => {
       markWorkflowRunNeedsManualRecovery(writeDb, {
         runId: "run-recovery-idempotent",
         reason: "same recovery reason",
-        now: 200
-      })
+        now: 200,
+      }),
     ).toEqual({ ok: true, previouslyMarked: true });
     writeDb.close();
 
     const next = await readEvents(
       dataDir,
       "run-recovery-idempotent",
-      first.cursor
+      first.cursor,
     );
     assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toEqual([]);
@@ -567,7 +576,7 @@ describe("workflow run events", () => {
       stepId: "implementation",
       kind: "implementation",
       state: "approved",
-      order: 1
+      order: 1,
     });
     db.close();
 
@@ -584,7 +593,7 @@ describe("workflow run events", () => {
       "waiting on external state",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(blocked.code, blocked.stderr).toBe(0);
 
@@ -601,14 +610,14 @@ describe("workflow run events", () => {
       "external state resolved",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(approved.code, approved.stderr).toBe(0);
 
     const envelope = await readEvents(dataDir, "run-blocked-transition");
     assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.events.map((event) => event.type)).toEqual([
-      "step_blocked"
+      "step_blocked",
     ]);
     expect(envelope.events[0]).toMatchObject({
       stepId: "implementation",
@@ -617,8 +626,8 @@ describe("workflow run events", () => {
         order: 1,
         required: true,
         reason: "waiting on external state",
-        previousState: "approved"
-      }
+        previousState: "approved",
+      },
     });
   });
 
@@ -632,7 +641,7 @@ describe("workflow run events", () => {
       kind: "implementation",
       state: "blocked",
       order: 1,
-      updatedAt: 120
+      updatedAt: 120,
     });
     db.prepare(
       `UPDATE workflow_steps
@@ -642,7 +651,7 @@ describe("workflow run events", () => {
               operator_ledger_pointer = 'ledger://blocked',
               operator_transition_at = 120
         WHERE run_id = 'run-projected-blocked'
-          AND step_id = 'implementation'`
+          AND step_id = 'implementation'`,
     ).run();
     db.close();
 
@@ -650,7 +659,7 @@ describe("workflow run events", () => {
     assertWorkflowEventsEnvelopeContract(envelope);
 
     expect(envelope.events.map((event) => event.type)).toEqual([
-      "step_blocked"
+      "step_blocked",
     ]);
     expect(envelope.events[0]).toMatchObject({
       stepId: "implementation",
@@ -662,8 +671,8 @@ describe("workflow run events", () => {
         reason: "waiting on external state",
         actor: "calvin",
         evidencePointer: "evidence://blocked",
-        ledgerPointer: "ledger://blocked"
-      }
+        ledgerPointer: "ledger://blocked",
+      },
     });
   });
 
@@ -671,12 +680,12 @@ describe("workflow run events", () => {
     const dataDir = makeTempDir();
     const runId = "run-retry-start-preserved";
     const stepId = "no-mistakes";
-    const invocationId = `${runId}::${stepId}::dispatch`;
+    const attemptId = `${runId}::${stepId}::dispatch`;
     const db = openDb(dataDir);
     seedRun(db, {
       runId,
       state: "running",
-      updatedAt: 200
+      updatedAt: 200,
     });
     seedStep(db, {
       runId,
@@ -684,20 +693,20 @@ describe("workflow run events", () => {
       kind: "no-mistakes",
       state: "running",
       order: 3,
-      startedAt: 100
+      startedAt: 100,
     });
     markWorkflowRunNeedsManualRecovery(db, {
       runId,
       reason: "runtime_unavailable",
-      now: 150
+      now: 150,
     });
     db.prepare(
-      `INSERT INTO executor_invocations
-         (invocation_id, workflow_run_id, step_run_id, step_key,
-          executor_family, state, attempt, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO executor_attempts
+         (attempt_id, workflow_run_id, step_run_id, step_key,
+          executor_family, state, attempt_number, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      invocationId,
+      attemptId,
       runId,
       stepId,
       stepId,
@@ -706,17 +715,17 @@ describe("workflow run events", () => {
       1,
       100,
       100,
-      150
+      150,
     );
     db.prepare(
       `INSERT INTO executor_rounds
-         (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-          executor_family, attempt, round_index, state, recovery_code,
+         (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+          executor_family, attempt_number, round_index, state, recovery_code,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      `${invocationId}::round-0`,
-      invocationId,
+      `${attemptId}::round-0`,
+      attemptId,
       runId,
       stepId,
       stepId,
@@ -726,35 +735,35 @@ describe("workflow run events", () => {
       "manual_recovery_required",
       "runtime_unavailable",
       100,
-      150
+      150,
     );
     db.close();
 
     const beforeClear = await readEvents(dataDir, runId);
     assertWorkflowEventsEnvelopeContract(beforeClear);
     const beforeStart = beforeClear.events.find(
-      (event) => event.stepId === stepId && event.type === "step_started"
+      (event) => event.stepId === stepId && event.type === "step_started",
     );
     expect(beforeStart).toBeDefined();
 
     const writeDb = openDb(dataDir);
     const clear = clearWorkflowRunManualRecoveryGuarded(writeDb, {
       runId,
-      now: 200
+      now: 200,
     });
     writeDb.close();
     expect(clear).toMatchObject({
       ok: true,
       retryPrepared: {
         stepId,
-        recoveryCode: "runtime_unavailable"
-      }
+        recoveryCode: "runtime_unavailable",
+      },
     });
 
     const fullReplay = await readEvents(dataDir, runId);
     assertWorkflowEventsEnvelopeContract(fullReplay);
     const afterStart = fullReplay.events.find(
-      (event) => event.stepId === stepId && event.type === "step_started"
+      (event) => event.stepId === stepId && event.type === "step_started",
     );
     expect(afterStart?.id).toBe(beforeStart?.id);
 
@@ -762,8 +771,8 @@ describe("workflow run events", () => {
     assertWorkflowEventsEnvelopeContract(catchup);
     expect(
       catchup.events.some(
-        (event) => event.stepId === stepId && event.type === "step_started"
-      )
+        (event) => event.stepId === stepId && event.type === "step_started",
+      ),
     ).toBe(false);
   });
 
@@ -776,14 +785,14 @@ describe("workflow run events", () => {
       stepId: "implementation",
       type: "step_blocked",
       occurredAt: 100,
-      payload: { reason: "external state missing" }
+      payload: { reason: "external state missing" },
     });
     appendWorkflowEvent(db, {
       runId: "run-repeat-stored",
       stepId: "implementation",
       type: "step_blocked",
       occurredAt: 100,
-      payload: { reason: "external state missing" }
+      payload: { reason: "external state missing" },
     });
     db.close();
 
@@ -791,12 +800,16 @@ describe("workflow run events", () => {
     assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_blocked",
-      "step_blocked"
+      "step_blocked",
     ]);
     expect(new Set(envelope.events.map((event) => event.id)).size).toBe(2);
     expect(envelope.events[0]?.payload).toEqual(envelope.events[1]?.payload);
 
-    const next = await readEvents(dataDir, "run-repeat-stored", envelope.cursor);
+    const next = await readEvents(
+      dataDir,
+      "run-repeat-stored",
+      envelope.cursor,
+    );
     assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toEqual([]);
   });
@@ -808,15 +821,13 @@ describe("workflow run events", () => {
       runId: "run-same-timestamp",
       state: "succeeded",
       finishedAt: 80,
-      updatedAt: 80
+      updatedAt: 80,
     });
     db.close();
 
     const first = await readEvents(dataDir, "run-same-timestamp");
     assertWorkflowEventsEnvelopeContract(first);
-    expect(first.events.map((event) => event.type)).toEqual([
-      "terminal_state"
-    ]);
+    expect(first.events.map((event) => event.type)).toEqual(["terminal_state"]);
     const terminalCursor = first.cursor;
     expect(terminalCursor).not.toBeNull();
 
@@ -826,19 +837,23 @@ describe("workflow run events", () => {
       runId: "run-same-timestamp",
       type: "monitor_stuck_risk",
       timestamp: 80,
-      payload: { stuckRisk: "medium" }
+      payload: { stuckRisk: "medium" },
     });
     writeDb.close();
 
-    const next = await readEvents(dataDir, "run-same-timestamp", terminalCursor);
+    const next = await readEvents(
+      dataDir,
+      "run-same-timestamp",
+      terminalCursor,
+    );
     assertWorkflowEventsEnvelopeContract(next);
     expect(next.events.map((event) => event.type)).toContain(
-      "monitor_stuck_risk"
+      "monitor_stuck_risk",
     );
     const quiesced = await readEvents(
       dataDir,
       "run-same-timestamp",
-      next.cursor
+      next.cursor,
     );
     assertWorkflowEventsEnvelopeContract(quiesced);
     expect(quiesced.events).toEqual([]);
@@ -851,21 +866,21 @@ describe("workflow run events", () => {
       runId: "run-same-response",
       state: "succeeded",
       finishedAt: 80,
-      updatedAt: 80
+      updatedAt: 80,
     });
     seedWorkflowEvent(db, {
       eventId: "0000000000080:monitor_stuck_risk:run-same-response",
       runId: "run-same-response",
       type: "monitor_stuck_risk",
       timestamp: 80,
-      payload: { stuckRisk: "medium" }
+      payload: { stuckRisk: "medium" },
     });
     db.close();
 
     const first = await readEvents(dataDir, "run-same-response");
     expect(first.events.map((event) => event.type)).toEqual([
       "monitor_stuck_risk",
-      "terminal_state"
+      "terminal_state",
     ]);
 
     const next = await readEvents(dataDir, "run-same-response", first.cursor);
@@ -875,7 +890,11 @@ describe("workflow run events", () => {
   it("rereads deterministically from the same cursor", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
-    seedRun(db, { runId: "run-deterministic", state: "running", updatedAt: 40 });
+    seedRun(db, {
+      runId: "run-deterministic",
+      state: "running",
+      updatedAt: 40,
+    });
     seedStep(db, {
       runId: "run-deterministic",
       stepId: "implementation",
@@ -885,7 +904,7 @@ describe("workflow run events", () => {
       startedAt: 10,
       finishedAt: 40,
       errorCode: "verification_failed",
-      errorMessage: "pnpm test failed"
+      errorMessage: "pnpm test failed",
     });
     db.close();
 
@@ -906,7 +925,7 @@ describe("workflow run events", () => {
       kind: "implementation",
       state: "running",
       order: 1,
-      startedAt: 10
+      startedAt: 10,
     });
     db.close();
 
@@ -919,7 +938,7 @@ describe("workflow run events", () => {
       "wfcur1.not-json",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -928,7 +947,7 @@ describe("workflow run events", () => {
       command: "workflow run events",
       code: "invalid_cursor",
       dataDir,
-      runId: "run-malformed-cursor"
+      runId: "run-malformed-cursor",
     });
     expect(result.stdout).toBe("");
   });
@@ -943,7 +962,7 @@ describe("workflow run events", () => {
       kind: "implementation",
       state: "running",
       order: 1,
-      startedAt: 10
+      startedAt: 10,
     });
     db.close();
 
@@ -956,7 +975,7 @@ describe("workflow run events", () => {
       "zzz",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -965,7 +984,7 @@ describe("workflow run events", () => {
       command: "workflow run events",
       code: "invalid_cursor",
       dataDir,
-      runId: "run-legacy-cursor"
+      runId: "run-legacy-cursor",
     });
     expect(result.stdout).toBe("");
   });
@@ -981,7 +1000,7 @@ describe("workflow run events", () => {
       "missing-run",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -990,7 +1009,7 @@ describe("workflow run events", () => {
       command: "workflow run events",
       code: "run_not_found",
       dataDir,
-      runId: "missing-run"
+      runId: "missing-run",
     });
     expect(result.stdout).toBe("");
   });
@@ -1021,7 +1040,7 @@ describe("workflow run events", () => {
       "missing-run",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1030,7 +1049,7 @@ describe("workflow run events", () => {
       command: "workflow run events",
       code: "run_not_found",
       dataDir,
-      runId: "missing-run"
+      runId: "missing-run",
     });
     expect(result.stdout).toBe("");
   });
@@ -1046,7 +1065,7 @@ describe("workflow run events", () => {
       "missing-run",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -1055,7 +1074,7 @@ describe("workflow run events", () => {
       command: "workflow run events",
       code: "run_not_found",
       dataDir,
-      runId: "missing-run"
+      runId: "missing-run",
     });
     expect(fs.existsSync(dataDir)).toBe(false);
   });
@@ -1114,7 +1133,7 @@ describe("workflow run events", () => {
           gate_id TEXT PRIMARY KEY,
           workflow_run_id TEXT NOT NULL,
           step_run_id TEXT,
-          invocation_id TEXT,
+          attempt_id TEXT,
           round_id TEXT,
           target_scope TEXT NOT NULL,
           gate_type TEXT NOT NULL,
@@ -1135,12 +1154,12 @@ describe("workflow run events", () => {
       db.prepare(
         `INSERT INTO workflow_runs
            (id, state, source, created_at, updated_at)
-         VALUES ('legacy-run', 'running', 'momentum-native-coding', 1, 10)`
+         VALUES ('legacy-run', 'running', 'momentum-native-coding', 1, 10)`,
       ).run();
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, started_at, created_at, updated_at)
-         VALUES ('legacy-run', 'implementation', 'implementation', 'running', 1, 10, 1, 10)`
+         VALUES ('legacy-run', 'implementation', 'implementation', 'running', 1, 10, 1, 10)`,
       ).run();
     } finally {
       db.close();
@@ -1148,7 +1167,7 @@ describe("workflow run events", () => {
 
     const envelope = await readEvents(dataDir, "legacy-run");
     expect(envelope.events.map((event) => event.type)).toEqual([
-      "step_started"
+      "step_started",
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(true);
   });
@@ -1207,12 +1226,12 @@ describe("workflow run events", () => {
       db.prepare(
         `INSERT INTO workflow_runs
            (id, state, source, created_at, updated_at)
-         VALUES ('legacy-run', 'running', 'momentum-native-coding', 1, 10)`
+         VALUES ('legacy-run', 'running', 'momentum-native-coding', 1, 10)`,
       ).run();
       db.prepare(
         `INSERT INTO workflow_steps
            (run_id, step_id, kind, state, step_order, started_at, created_at, updated_at)
-         VALUES ('legacy-run', 'implementation', 'implementation', 'running', 1, 10, 1, 10)`
+         VALUES ('legacy-run', 'implementation', 'implementation', 'running', 1, 10, 1, 10)`,
       ).run();
     } finally {
       db.close();
@@ -1220,7 +1239,7 @@ describe("workflow run events", () => {
 
     const envelope = await readEvents(dataDir, "legacy-run");
     expect(envelope.events.map((event) => event.type)).toEqual([
-      "step_started"
+      "step_started",
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(true);
   });

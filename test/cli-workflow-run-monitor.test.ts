@@ -7,13 +7,11 @@ import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertWorkflowGate,
-  resolveWorkflowGate
+  resolveWorkflowGate,
 } from "../src/core/workflow/gate/persist.js";
 import { parseWorkflowRunImport } from "../src/core/workflow/run/import.js";
 import { persistWorkflowRunImport } from "../src/core/workflow/run/import-persist.js";
-import {
-  MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
-} from "../src/core/workflow/run/start.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 
 type RunResult = {
   code: number;
@@ -47,7 +45,7 @@ function writeLedger(filePath: string, lines: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(
     filePath,
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
   );
 }
 
@@ -59,15 +57,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -86,7 +84,7 @@ function seedRun(
     source?: string;
     needsManualRecovery?: boolean;
     manualRecoveryReason?: string | null;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
@@ -96,7 +94,7 @@ function seedRun(
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -115,7 +113,7 @@ function seedRun(
     null,
     null,
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
@@ -128,14 +126,14 @@ function seedStep(
     state?: string;
     order: number;
     required?: boolean;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_steps
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -150,7 +148,7 @@ function seedStep(
     null,
     null,
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
@@ -162,13 +160,13 @@ function seedLease(
     expiresAt: number;
     stalePolicy?: string;
     releasedAt?: number | null;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.leaseKind,
@@ -179,20 +177,20 @@ function seedLease(
     input.releasedAt ?? null,
     input.stalePolicy ?? "auto-release",
     SEED_NOW,
-    SEED_NOW
+    SEED_NOW,
   );
 }
 
 function readStepState(
   dataDir: string,
   runId: string,
-  stepId: string
+  stepId: string,
 ): string | undefined {
   const db = openDb(dataDir);
   try {
     const row = db
       .prepare(
-        "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+        "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
       )
       .get(runId, stepId) as { state: string } | undefined;
     return row?.state;
@@ -203,7 +201,7 @@ function readStepState(
 
 function readMonitorDigests(
   dataDir: string,
-  runId: string
+  runId: string,
 ): { seen: string | null; emitted: string | null } {
   const db = openDb(dataDir);
   try {
@@ -211,9 +209,10 @@ function readMonitorDigests(
       .prepare(
         `SELECT monitor_last_seen_digest AS seen,
                 monitor_last_emitted_digest AS emitted
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
-      .get(runId) as { seen: string | null; emitted: string | null } | undefined;
+      .get(runId) as
+      { seen: string | null; emitted: string | null } | undefined;
     return { seen: row?.seen ?? null, emitted: row?.emitted ?? null };
   } finally {
     db.close();
@@ -237,14 +236,14 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "monitor",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run monitor",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -257,7 +256,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "cwfp-missing",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -265,7 +264,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       ok: false,
       command: "workflow run monitor",
       code: "run_not_found",
-      runId: "cwfp-missing"
+      runId: "cwfp-missing",
     });
   });
 
@@ -280,7 +279,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "cwfp-db-failed",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
 
     expect(result.code).toBe(1);
@@ -290,7 +289,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       command: "workflow run monitor",
       code: "data_dir_failed",
       dataDir,
-      runId: "cwfp-db-failed"
+      runId: "cwfp-db-failed",
     });
   });
 
@@ -305,12 +304,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -323,14 +322,14 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       command: "workflow run monitor",
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       runState: "running",
       stepState: "running",
@@ -340,10 +339,10 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       disposition: "wait",
       reportable: false,
       reportReason: "in_progress",
-      recovery: null
+      recovery: null,
     });
     expect((payload["nextAction"] as Record<string, unknown>)["code"]).toBe(
-      "resume_running"
+      "resume_running",
     );
     expect(typeof payload["generatedAt"]).toBe("number");
   });
@@ -359,14 +358,14 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -379,7 +378,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -389,7 +388,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       terminal: true,
       disposition: "report",
       reportable: true,
-      reportReason: "terminal_succeeded"
+      reportReason: "terminal_succeeded",
     });
   });
 
@@ -404,7 +403,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "failed",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -417,7 +416,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -432,11 +431,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "no-mistakes",
         leaseKind: "managed-step",
         actionClass: "retry_failed_step",
-        recoveryDetail: null
-      }
+        recoveryDetail: null,
+      },
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
-      "failed_required_step"
+      "failed_required_step",
     );
   });
 
@@ -451,12 +450,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: STALE_EXPIRY
+        expiresAt: STALE_EXPIRY,
       });
     } finally {
       db.close();
@@ -469,57 +468,57 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       disposition: "recover",
-      reportReason: "recovery_required"
+      reportReason: "recovery_required",
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
-      "stale_running_step"
+      "stale_running_step",
     );
   });
 
   it("reports monitor drift from an imported advisory snapshot", async () => {
     const dataDir = makeTempDir();
     const artifactRoot = makeTempDir(
-      "momentum-cli-workflow-run-monitor-artifacts-"
+      "momentum-cli-workflow-run-monitor-artifacts-",
     );
     const runId = "cwfp-drift";
     const runDir = path.join(artifactRoot, runId);
     writeJsonFile(path.join(runDir, "plan.json"), {
       runId,
       schemaVersion: 1,
-      taskFlow: { childTasks: [{ stepId: "implementation" }] }
+      taskFlow: { childTasks: [{ stepId: "implementation" }] },
     });
     writeLedger(path.join(runDir, "ledger.jsonl"), [
       {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-29T00:00:00Z"
-      }
+        ts: "2026-05-29T00:00:00Z",
+      },
     ]);
     writeJsonFile(path.join(runDir, "monitor.json"), {
       lastSeenState: "succeeded",
       terminal: true,
       step: "implementation",
       lastSeenDigest: "stale-digest",
-      lastEmittedDigest: "stale-digest"
+      lastEmittedDigest: "stale-digest",
     });
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseImportOrThrow(runDir), {
-        now: SEED_NOW
+        now: SEED_NOW,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -532,7 +531,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -541,24 +540,24 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runState: "running",
       disposition: "report",
       reportable: true,
-      reportReason: "monitor_drift"
+      reportReason: "monitor_drift",
     });
     expect(payload["monitorDrift"]).toMatchObject({
       advisoryState: "succeeded",
       advisoryTerminal: true,
       actualState: "running",
       drifted: true,
-      reason: "monitor_says_terminal_but_running"
+      reason: "monitor_says_terminal_but_running",
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
-      "monitor_drift_stale"
+      "monitor_drift_stale",
     );
   });
 
   it("reports monitor drift when an imported advisory points at an old step", async () => {
     const dataDir = makeTempDir();
     const artifactRoot = makeTempDir(
-      "momentum-cli-workflow-run-monitor-artifacts-"
+      "momentum-cli-workflow-run-monitor-artifacts-",
     );
     const runId = "cwfp-step-drift";
     const runDir = path.join(artifactRoot, runId);
@@ -566,40 +565,40 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       schemaVersion: 1,
       taskFlow: {
-        childTasks: [{ stepId: "preflight" }, { stepId: "implementation" }]
-      }
+        childTasks: [{ stepId: "preflight" }, { stepId: "implementation" }],
+      },
     });
     writeLedger(path.join(runDir, "ledger.jsonl"), [
       {
         runId,
         step: "preflight",
         status: "complete",
-        ts: "2026-05-29T00:00:00Z"
+        ts: "2026-05-29T00:00:00Z",
       },
       {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-29T00:01:00Z"
-      }
+        ts: "2026-05-29T00:01:00Z",
+      },
     ]);
     writeJsonFile(path.join(runDir, "monitor.json"), {
       lastSeenState: "running",
       terminal: false,
       step: "preflight",
       lastSeenDigest: "stale-digest",
-      lastEmittedDigest: "stale-digest"
+      lastEmittedDigest: "stale-digest",
     });
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseImportOrThrow(runDir), {
-        now: SEED_NOW
+        now: SEED_NOW,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -612,7 +611,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -621,20 +620,20 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runState: "running",
       disposition: "report",
       reportable: true,
-      reportReason: "monitor_drift"
+      reportReason: "monitor_drift",
     });
     expect(payload["activeStep"]).toMatchObject({
-      stepId: "implementation"
+      stepId: "implementation",
     });
     expect(payload["monitorDrift"]).toMatchObject({
       advisoryState: "running",
       advisoryTerminal: false,
       actualState: "running",
       drifted: true,
-      reason: "monitor_step_mismatch"
+      reason: "monitor_step_mismatch",
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
-      "monitor_drift_stale"
+      "monitor_drift_stale",
     );
   });
 
@@ -649,12 +648,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -666,7 +665,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "monitor",
       runId,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(`Workflow run monitor: ${runId}`);
@@ -685,12 +684,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
       insertWorkflowGate(
         db,
@@ -702,9 +701,9 @@ describe("momentum workflow run monitor (NGX-328)", () => {
           reason: "operator must approve external apply",
           allowedActions: ["approve", "reject"],
           recommendedAction: "approve",
-          policyEnvelope: []
+          policyEnvelope: [],
         },
-        { now: SEED_NOW }
+        { now: SEED_NOW },
       );
       insertWorkflowGate(
         db,
@@ -717,15 +716,15 @@ describe("momentum workflow run monitor (NGX-328)", () => {
           reason: "decide how to handle a verification failure",
           allowedActions: ["fix", "skip", "abort"],
           recommendedAction: "fix",
-          policyEnvelope: ["fix"]
+          policyEnvelope: ["fix"],
         },
-        { now: SEED_NOW }
+        { now: SEED_NOW },
       );
       resolveWorkflowGate(
         db,
         "gate-done-1",
         { action: "fix", actor: "calvin", mode: "operator" },
-        { now: SEED_NOW + 1 }
+        { now: SEED_NOW + 1 },
       );
     } finally {
       db.close();
@@ -738,7 +737,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -762,7 +761,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(payload.counts.gatesOpen).toBe(1);
     expect(payload.gates.map((g) => g.gateId).sort()).toEqual([
       "gate-done-1",
-      "gate-open-1"
+      "gate-open-1",
     ]);
     const open = payload.gates.find((g) => g.gateId === "gate-open-1");
     expect(open).toMatchObject({
@@ -773,8 +772,8 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       recommendedActionPolicy: {
         action: "approval_decision",
         authority: "human_required",
-        risk: "medium"
-      }
+        risk: "medium",
+      },
     });
     const resolved = payload.gates.find((g) => g.gateId === "gate-done-1");
     expect(resolved).toMatchObject({
@@ -782,10 +781,10 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       recommendedActionPolicy: {
         action: "operator_decision",
         authority: "human_required",
-        risk: "medium"
+        risk: "medium",
       },
       resolvedBy: "calvin",
-      chosenAction: "fix"
+      chosenAction: "fix",
     });
 
     const textResult = await run([
@@ -794,7 +793,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "monitor",
       runId,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Gates: 2 (open: 1)");
@@ -812,12 +811,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: STALE_EXPIRY
+        expiresAt: STALE_EXPIRY,
       });
     } finally {
       db.close();
@@ -831,7 +830,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readStepState(dataDir, runId, "implementation")).toBe(before);
@@ -848,12 +847,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -866,7 +865,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -892,7 +891,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       currentStep: "implementation",
       lastEvent: "step:implementation:running",
       nextAction: "resume_running",
-      blockerReason: null
+      blockerReason: null,
     });
     expect(payload.progress.digest.startsWith("sha256:")).toBe(true);
   });
@@ -908,12 +907,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -926,7 +925,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
@@ -940,7 +939,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     try {
       persistDb
         .prepare(
-          "UPDATE workflow_runs SET monitor_last_emitted_digest = ? WHERE id = ?"
+          "UPDATE workflow_runs SET monitor_last_emitted_digest = ? WHERE id = ?",
         )
         .run(firstPayload.progress.digest, runId);
     } finally {
@@ -954,7 +953,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
@@ -975,7 +974,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         state: "running",
         source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
         needsManualRecovery: true,
-        manualRecoveryReason: "repo lock was lost"
+        manualRecoveryReason: "repo lock was lost",
       });
     } finally {
       db.close();
@@ -988,7 +987,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -998,7 +997,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(payload.manualRecoveryReason).toBe("repo lock was lost");
     expect(payload.progress).toMatchObject({
       phase: "blocked",
-      blockerReason: "repo lock was lost"
+      blockerReason: "repo lock was lost",
     });
   });
 
@@ -1013,7 +1012,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1026,7 +1025,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1035,7 +1034,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(payload.progress).toMatchObject({
       phase: "terminal",
       terminal: true,
-      cleanup: "release"
+      cleanup: "release",
     });
   });
 
@@ -1050,12 +1049,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1067,7 +1066,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "monitor",
       runId,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Progress phase: advancing");
@@ -1084,19 +1083,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1112,7 +1111,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1134,19 +1133,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1160,7 +1159,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(advance.code).toBe(0);
     expect(readMonitorDigests(dataDir, runId).emitted).not.toBeNull();
@@ -1172,7 +1171,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitor.code).toBe(0);
     const monitorPayload = JSON.parse(monitor.stdout) as {
@@ -1186,7 +1185,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(status.code).toBe(0);
     const statusPayload = JSON.parse(status.stdout) as {
@@ -1203,14 +1202,14 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "succeeded",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1224,7 +1223,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
@@ -1252,7 +1251,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
@@ -1271,7 +1270,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(secondPayload.progress.advanced).toBe(false);
     expect(readMonitorDigests(dataDir, runId)).toEqual({
       seen: firstPayload.progress.digest,
-      emitted: firstPayload.progress.digest
+      emitted: firstPayload.progress.digest,
     });
   });
 
@@ -1286,18 +1285,18 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
       db.prepare(
         `UPDATE workflow_runs
             SET monitor_last_seen_digest = ?,
                 monitor_last_emitted_digest = ?
-          WHERE id = ?`
+          WHERE id = ?`,
       ).run("sha256:seen-baseline", "sha256:emitted-baseline", runId);
     } finally {
       db.close();
@@ -1311,7 +1310,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1319,11 +1318,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       ok: false,
       command: "workflow run monitor",
       code: "advance_unsupported_source",
-      runId
+      runId,
     });
     expect(readMonitorDigests(dataDir, runId)).toEqual({
       seen: "sha256:seen-baseline",
-      emitted: "sha256:emitted-baseline"
+      emitted: "sha256:emitted-baseline",
     });
   });
 
@@ -1335,19 +1334,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1361,7 +1360,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
@@ -1381,18 +1380,23 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
-      progress: { changed: boolean; emit: boolean; advanced: boolean; digest: string };
+      progress: {
+        changed: boolean;
+        emit: boolean;
+        advanced: boolean;
+        digest: string;
+      };
     };
     expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
     expect(secondPayload.progress.changed).toBe(false);
     expect(secondPayload.progress.emit).toBe(false);
     expect(secondPayload.progress.advanced).toBe(false);
     expect(readMonitorDigests(dataDir, runId).emitted).toBe(
-      firstPayload.progress.digest
+      firstPayload.progress.digest,
     );
   });
 
@@ -1404,19 +1408,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1430,11 +1434,16 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
-      progress: { digest: string; emit: boolean; changed: boolean; advanced: boolean };
+      progress: {
+        digest: string;
+        emit: boolean;
+        changed: boolean;
+        advanced: boolean;
+      };
     };
     expect(firstPayload.progress.emit).toBe(true);
     expect(firstPayload.progress.changed).toBe(true);
@@ -1444,7 +1453,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     try {
       mutateDb
         .prepare(
-          "UPDATE workflow_leases SET heartbeat_at = heartbeat_at + 9000, expires_at = expires_at + 9000 WHERE run_id = ? AND lease_kind = ?"
+          "UPDATE workflow_leases SET heartbeat_at = heartbeat_at + 9000, expires_at = expires_at + 9000 WHERE run_id = ? AND lease_kind = ?",
         )
         .run(runId, "managed-step");
     } finally {
@@ -1459,11 +1468,16 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
-      progress: { digest: string; emit: boolean; changed: boolean; advanced: boolean };
+      progress: {
+        digest: string;
+        emit: boolean;
+        changed: boolean;
+        advanced: boolean;
+      };
     };
     expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
     expect(secondPayload.progress.changed).toBe(false);
@@ -1479,19 +1493,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1505,7 +1519,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstDigest = (
@@ -1517,7 +1531,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     try {
       mutateDb
         .prepare(
-          "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_id = ?"
+          "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_id = ?",
         )
         .run(runId, "implementation");
     } finally {
@@ -1532,18 +1546,23 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "--advance",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
-      progress: { changed: boolean; emit: boolean; advanced: boolean; digest: string };
+      progress: {
+        changed: boolean;
+        emit: boolean;
+        advanced: boolean;
+        digest: string;
+      };
     };
     expect(secondPayload.progress.digest).not.toBe(firstDigest);
     expect(secondPayload.progress.changed).toBe(true);
     expect(secondPayload.progress.emit).toBe(true);
     expect(secondPayload.progress.advanced).toBe(true);
     expect(readMonitorDigests(dataDir, runId).emitted).toBe(
-      secondPayload.progress.digest
+      secondPayload.progress.digest,
     );
   });
 
@@ -1558,12 +1577,12 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1576,7 +1595,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -1594,19 +1613,19 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedRun(db, {
         runId,
         state: "running",
-        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       seedLease(db, {
         runId,
         leaseKind: "managed-step",
-        expiresAt: FRESH_EXPIRY
+        expiresAt: FRESH_EXPIRY,
       });
     } finally {
       db.close();
@@ -1619,7 +1638,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runId,
       "--advance",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Progress advanced: true");
@@ -1630,7 +1649,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(
-      "--advance is only supported by `momentum workflow run monitor`."
+      "--advance is only supported by `momentum workflow run monitor`.",
     );
   });
 
@@ -1638,7 +1657,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     const result = await run(["workflow", "status", "--advance"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "--advance is only supported by `momentum workflow run monitor`."
+      "--advance is only supported by `momentum workflow run monitor`.",
     );
   });
 
@@ -1652,7 +1671,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       "surprise",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;

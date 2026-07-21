@@ -135,14 +135,16 @@ import {
   type DispatchedStepRepoSafetyContext,
 } from "../workflow/dispatch/executor-context.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchCorrelationId,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
 import {
   listExecutorCheckpointsForRound,
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
+  listExecutorRoundsForAttempt,
+  listExecutorRoundsForStep,
+  loadLatestExecutorAttemptForStep,
 } from "../executors/loop/persist.js";
+import { nextExecutorRoundIndex } from "../executors/loop/reducer.js";
 import { heartbeatWorkflowLease } from "../workflow/leases.js";
 import { getWorkflowStep } from "../workflow/step/transitions.js";
 import {
@@ -249,11 +251,12 @@ export function resolveDaemonWorkflowStepDispatch(
             resolveOwnedRoundMaterializer,
             // A delegated handoff is one durable SDK round; allow only that
             // executor to perform its first bounded read under the same claim.
-            resolveMaxTicks: ({ executorName, invocation, context }) =>
+            resolveMaxTicks: ({ executorName, attempt, context }) =>
               executorName === DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
               !hasAnyCompletedDelegateHandoff(
                 context.db,
-                invocation.invocationId,
+                attempt.workflowRunId,
+                attempt.stepRunId,
               )
                 ? 2
                 : 1,
@@ -378,22 +381,19 @@ function createMissingProfileNativeDispatch(
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
     resolveHostBindings: ({ claim, context, executorName }) => {
-      const invocation = loadExecutorInvocation(
+      const attempt = loadLatestExecutorAttemptForStep(
         context.db,
-        deriveDispatchInvocationId(claim.runId, claim.stepId),
+        claim.runId,
+        claim.stepId,
       );
       const settleRepoOwnership =
-        invocation !== undefined &&
-        hasUnclassifiedCompletedNativeMechanism(
-          context.db,
-          invocation.invocationId,
-          invocation.attempt,
-        )
+        attempt !== undefined &&
+        hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId)
           ? recoverCompletedLiveStepRepoOwnership(
               context.db,
               claim.runId,
               claim.stepId,
-              invocation.attempt,
+              attempt.attemptNumber,
               context.now,
             )
           : undefined;
@@ -465,17 +465,13 @@ function createNativeOwnedRoundMaterializerResolver(
     const wrapper = profile.wrappers.get(step.kind);
     if (wrapper === undefined) return undefined;
 
-    return ({ invocation, selection, now }) => {
-      const existingRounds = listExecutorRoundsForInvocation(
+    return ({ attempt, selection, now, roundId: requestedRoundId }) => {
+      const existingRounds = listExecutorRoundsForStep(
         input.context.db,
-        invocation.invocationId,
+        attempt.workflowRunId,
+        attempt.stepRunId,
       );
-      const roundIndex =
-        existingRounds.reduce(
-          (highestRoundIndex, round) =>
-            Math.max(highestRoundIndex, round.roundIndex),
-          -1,
-        ) + 1;
+      const roundIndex = nextExecutorRoundIndex(existingRounds);
       const canonicalRepoPath = fs.realpathSync(resolved.exec.repoPath);
       const canonicalRunDir = canonicalizeRunDir(
         resolved.exec.repoPath,
@@ -483,9 +479,9 @@ function createNativeOwnedRoundMaterializerResolver(
         resolved.exec.runDir,
       );
       const artifactRoot =
-        invocation.attempt <= 1
+        attempt.attemptNumber <= 1
           ? canonicalRunDir
-          : path.join(canonicalRunDir, `attempt-${invocation.attempt}`);
+          : path.join(canonicalRunDir, `attempt-${attempt.attemptNumber}`);
       const selectionBinding = isGoalLoop
         ? resolveGoalLoopRoundSelection({
             stepConfig: {
@@ -538,12 +534,13 @@ function createNativeOwnedRoundMaterializerResolver(
         >;
         const roundRoot = path.join(artifactRoot, `round-${roundIndex + 1}`);
         const start = {
-          roundId: `${invocation.invocationId}::round::${roundIndex}`,
-          invocationId: invocation.invocationId,
-          workflowRunId: invocation.workflowRunId,
-          stepRunId: invocation.stepRunId,
-          stepKey: invocation.stepKey,
-          attempt: invocation.attempt,
+          roundId:
+            requestedRoundId ?? `${attempt.attemptId}::round::${roundIndex}`,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
+          attemptNumber: attempt.attemptNumber,
           roundIndex,
           selection: goalLoopSelection,
           inputDigest: goalLoopInputDigest(input.config, existingRounds),
@@ -575,13 +572,14 @@ function createNativeOwnedRoundMaterializerResolver(
       }
 
       const start = {
-        roundId: `${invocation.invocationId}::round::${roundIndex}`,
-        invocationId: invocation.invocationId,
-        workflowRunId: invocation.workflowRunId,
-        stepRunId: invocation.stepRunId,
-        stepKey: invocation.stepKey,
+        roundId:
+          requestedRoundId ?? `${attempt.attemptId}::round::${roundIndex}`,
+        attemptId: attempt.attemptId,
+        workflowRunId: attempt.workflowRunId,
+        stepRunId: attempt.stepRunId,
+        stepKey: attempt.stepKey,
         family: input.executorName as "one-shot" | "script",
-        attempt: invocation.attempt,
+        attemptNumber: attempt.attemptNumber,
         roundIndex,
         selection: selectionBinding,
         inputDigest: singleShotInputDigest(input.config),
@@ -691,12 +689,12 @@ function createLiveStepHostBindingsResolver(
         resolved.reason,
       );
     }
-    const invocation = loadExecutorInvocation(
+    const attempt = loadLatestExecutorAttemptForStep(
       context.db,
-      deriveDispatchInvocationId(claim.runId, claim.stepId),
+      claim.runId,
+      claim.stepId,
     );
-    if (invocation === undefined)
-      throw new Error("dispatch_invocation_not_found");
+    if (attempt === undefined) throw new Error("dispatch_attempt_not_found");
     const delegateTool = isDelegate
       ? resolveDelegateToolName(input.config)
       : undefined;
@@ -708,17 +706,13 @@ function createLiveStepHostBindingsResolver(
     }
     if (
       isLiveStep &&
-      hasCompletedLiveStepMechanism(
-        context.db,
-        invocation.invocationId,
-        invocation.attempt,
-      )
+      hasCompletedLiveStepMechanism(context.db, attempt.attemptId)
     ) {
       const settleRepoOwnership = recoverCompletedLiveStepRepoOwnership(
         context.db,
         claim.runId,
         claim.stepId,
-        invocation.attempt,
+        attempt.attemptNumber,
         context.now,
       );
       return {
@@ -733,17 +727,13 @@ function createLiveStepHostBindingsResolver(
     }
     if (
       isDelegate &&
-      hasCompletedLiveStepMechanism(
-        context.db,
-        invocation.invocationId,
-        invocation.attempt,
-      )
+      hasCompletedLiveStepMechanism(context.db, attempt.attemptId)
     ) {
       const settleHandoff = recoverCompletedLiveStepRepoOwnership(
         context.db,
         claim.runId,
         claim.stepId,
-        invocation.attempt,
+        attempt.attemptNumber,
         context.now,
       );
       return {
@@ -753,17 +743,13 @@ function createLiveStepHostBindingsResolver(
     }
     const completedNativeMechanism =
       (isSingleShot || isGoalLoop) &&
-      hasUnclassifiedCompletedNativeMechanism(
-        context.db,
-        invocation.invocationId,
-        invocation.attempt,
-      );
+      hasUnclassifiedCompletedNativeMechanism(context.db, attempt.attemptId);
     const recoveredNativeRepoOwnership = completedNativeMechanism
       ? recoverCompletedLiveStepRepoOwnership(
           context.db,
           claim.runId,
           claim.stepId,
-          invocation.attempt,
+          attempt.attemptNumber,
           context.now,
         )
       : undefined;
@@ -784,11 +770,7 @@ function createLiveStepHostBindingsResolver(
         : undefined;
     if (
       isDelegate &&
-      hasCompletedDelegateHandoff(
-        context.db,
-        invocation.invocationId,
-        invocation.attempt,
-      )
+      hasCompletedDelegateHandoff(context.db, attempt.attemptId)
     ) {
       const adapter = createPersistedProfileDelegateToolAdapter({
         tool: delegateTool!,
@@ -801,7 +783,7 @@ function createLiveStepHostBindingsResolver(
         context.db,
         claim.runId,
         claim.stepId,
-        invocation.attempt,
+        attempt.attemptNumber,
         context.now,
       );
       return {
@@ -817,8 +799,11 @@ function createLiveStepHostBindingsResolver(
     const preparedCommitEvidence = isDelegate
       ? resolvePreparedDelegateCommitEvidence({
           tool: delegateTool!,
-          invocationId: invocation.invocationId,
-          attempt: invocation.attempt,
+          handoffCorrelationId: deriveDispatchCorrelationId(
+            claim.runId,
+            claim.stepId,
+          ),
+          attemptNumber: attempt.attemptNumber,
           repoPath: resolved.exec.repoPath,
           handoffReceiptPath: path.join(
             preparedDelegateArtifactRoot,
@@ -896,14 +881,14 @@ function createLiveStepHostBindingsResolver(
         ),
       );
     }
-    const attempt = invocation.attempt;
+    const attemptNumber = attempt.attemptNumber;
     const artifactRoot = isDelegate
       ? path.join(safety.runDir, "delegate", claim.stepId)
       : safety.runDir;
     let runDir =
-      attempt <= 1
+      attemptNumber <= 1
         ? artifactRoot
-        : path.join(artifactRoot, `attempt-${attempt}`);
+        : path.join(artifactRoot, `attempt-${attemptNumber}`);
     try {
       if (isSingleShot || isGoalLoop) {
         const relativeArtifactRoot = path.relative(
@@ -1006,8 +991,8 @@ function createLiveStepHostBindingsResolver(
     ) {
       assertCompletedNativeMechanismRepositoryProof({
         db: context.db,
-        invocationId: invocation.invocationId,
-        attempt: invocation.attempt,
+        attemptId: attempt.attemptId,
+        attemptNumber: attempt.attemptNumber,
         repoPath: safety.repoPath,
         baseHead: safety.repoSafety.baseHead,
       });
@@ -1018,14 +1003,15 @@ function createLiveStepHostBindingsResolver(
           claim,
           context,
           repoPath: safety.repoPath,
-          attempt,
+          attemptNumber,
           repoSafety: safety.repoSafety,
           runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
           reclaimHandoffAttempt: isDelegate
             ? findInterruptedDelegateHandoffAttempt(
                 context.db,
-                invocation.invocationId,
-                attempt,
+                claim.runId,
+                claim.stepId,
+                attemptNumber,
               )
             : undefined,
         });
@@ -1045,18 +1031,20 @@ function createLiveStepHostBindingsResolver(
       beginGitMutation: repoOwnership.beginMutation,
     };
     if (isGoalLoop) {
-      const invocationRounds = listExecutorRoundsForInvocation(
+      const attemptRounds = listExecutorRoundsForStep(
         context.db,
-        invocation.invocationId,
+        attempt.workflowRunId,
+        attempt.stepRunId,
       );
-      const resumableRound = [...invocationRounds]
+      const resumableRound = [...attemptRounds]
         .reverse()
         .find(
           (round) =>
-            round.attempt === invocation.attempt &&
+            round.attemptNumber === attempt.attemptNumber &&
             round.classification === null,
         );
-      const roundIndex = resumableRound?.roundIndex ?? invocationRounds.length;
+      const roundIndex =
+        resumableRound?.roundIndex ?? nextExecutorRoundIndex(attemptRounds);
       const preparedRound = prepareGoalLoopRoundRoot(runDir, roundIndex + 1);
       if (!preparedRound.ok) {
         repoOwnership.settle(false);
@@ -1128,7 +1116,7 @@ function createLiveStepHostBindingsResolver(
           "goal-loop objective is unavailable",
         );
       }
-      const priorRounds = invocationRounds.filter(
+      const priorRounds = attemptRounds.filter(
         (round) => round.roundId !== resumableRound?.roundId,
       );
       const executorInput = buildDispatchedStepExecutorInput(
@@ -1141,7 +1129,7 @@ function createLiveStepHostBindingsResolver(
           resultJsonPath: roundResultPath,
           executorLogPath: roundLogPath,
           promptPath,
-          attempt,
+          attemptNumber,
           env,
           config: { ...input.config },
         },
@@ -1155,12 +1143,12 @@ function createLiveStepHostBindingsResolver(
         start: {
           roundId:
             resumableRound?.roundId ??
-            `${invocation.invocationId}::round::${roundIndex}`,
-          invocationId: invocation.invocationId,
-          workflowRunId: invocation.workflowRunId,
-          stepRunId: invocation.stepRunId,
-          stepKey: invocation.stepKey,
-          attempt: invocation.attempt,
+            `${attempt.attemptId}::round::${roundIndex}`,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
+          attemptNumber: attempt.attemptNumber,
           roundIndex,
           inputDigest:
             resumableRound?.inputDigest ??
@@ -1227,10 +1215,10 @@ function createLiveStepHostBindingsResolver(
               round: {
                 workflowRunId: round.workflowRunId,
                 stepRunId: round.stepRunId,
-                invocationId: round.invocationId,
+                attemptId: round.attemptId,
                 roundId: round.roundId,
                 roundIndex: round.roundIndex,
-                attempt: round.attempt,
+                attemptNumber: round.attemptNumber,
               },
               repo: {
                 path: safety.repoPath,
@@ -1282,18 +1270,20 @@ function createLiveStepHostBindingsResolver(
     if (isSingleShot) {
       const singleShot = input.executor as SingleShotExecutor;
       const wrapper = nativeWrapper!;
-      const invocationRounds = listExecutorRoundsForInvocation(
+      const attemptRounds = listExecutorRoundsForStep(
         context.db,
-        invocation.invocationId,
+        attempt.workflowRunId,
+        attempt.stepRunId,
       );
-      const resumableRound = [...invocationRounds]
+      const resumableRound = [...attemptRounds]
         .reverse()
         .find(
           (round) =>
-            round.attempt === invocation.attempt &&
+            round.attemptNumber === attempt.attemptNumber &&
             round.classification === null,
         );
-      const roundIndex = resumableRound?.roundIndex ?? invocationRounds.length;
+      const roundIndex =
+        resumableRound?.roundIndex ?? nextExecutorRoundIndex(attemptRounds);
       const runRound =
         singleShot.name === "one-shot"
           ? createOneShotLiveWrapperRoundRunner(wrapper, {
@@ -1336,7 +1326,7 @@ function createLiveStepHostBindingsResolver(
                   kind: step.kind,
                   runId: claim.runId,
                   stepId: claim.stepId,
-                  attempt,
+                  attempt: attemptNumber,
                   repoPath: safety.repoPath,
                   iterationDir: runDir,
                 },
@@ -1370,13 +1360,13 @@ function createLiveStepHostBindingsResolver(
         start: {
           roundId:
             resumableRound?.roundId ??
-            `${invocation.invocationId}::round::${roundIndex}`,
-          invocationId: invocation.invocationId,
-          workflowRunId: invocation.workflowRunId,
-          stepRunId: invocation.stepRunId,
-          stepKey: invocation.stepKey,
+            `${attempt.attemptId}::round::${roundIndex}`,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
           family: singleShot.name,
-          attempt: invocation.attempt,
+          attemptNumber: attempt.attemptNumber,
           inputDigest:
             resumableRound?.inputDigest ??
             `sha256:${crypto
@@ -1451,7 +1441,7 @@ function createLiveStepHostBindingsResolver(
         runDir,
         resultJsonPath,
         executorLogPath,
-        attempt,
+        attemptNumber,
         env,
         config: { ...input.config },
       },
@@ -1465,8 +1455,11 @@ function createLiveStepHostBindingsResolver(
       );
       const adapter = createProfileBackedDelegateToolAdapter({
         tool: delegateTool!,
-        invocationId: invocation.invocationId,
-        attempt,
+        handoffCorrelationId: deriveDispatchCorrelationId(
+          claim.runId,
+          claim.stepId,
+        ),
+        attemptNumber,
         branch: resolveDelegateBranch(safety.repoPath),
         headSha: repoSafety.baseHead,
         statePath,
@@ -1508,17 +1501,17 @@ function recoverCompletedLiveStepRepoOwnership(
   db: MomentumDb,
   runId: string,
   stepId: string,
-  attempt: number,
+  attemptNumber: number,
   now: number,
 ): ((provenClean: boolean) => void) | undefined {
   const lock = getActiveRepoLockForJob(
     db,
-    deriveDispatchInvocationId(runId, stepId),
+    deriveDispatchCorrelationId(runId, stepId),
   );
   if (
     lock === undefined ||
     lock.goal_id !== runId ||
-    lock.iteration !== attempt
+    lock.iteration !== attemptNumber
   ) {
     return undefined;
   }
@@ -1657,18 +1650,18 @@ function expectedSettledRepoHeadFromSingleShotMechanism(
  */
 function assertCompletedNativeMechanismRepositoryProof(input: {
   db: MomentumDb;
-  invocationId: string;
-  attempt: number;
+  attemptId: string;
+  attemptNumber: number;
   repoPath: string;
   baseHead: string;
 }): void {
   const completedRound = [
-    ...listExecutorRoundsForInvocation(input.db, input.invocationId),
+    ...listExecutorRoundsForAttempt(input.db, input.attemptId),
   ]
     .reverse()
     .find(
       (round) =>
-        round.attempt === input.attempt &&
+        round.attemptNumber === input.attemptNumber &&
         round.classification === null &&
         listExecutorCheckpointsForRound(input.db, round.roundId).some(
           (checkpoint) => checkpoint.stage === "mechanism_completed",
@@ -1717,118 +1710,122 @@ function validatePortableAgentBinding(
 
 function hasCompletedLiveStepMechanism(
   db: MomentumDb,
-  invocationId: string,
-  attempt: number,
+  attemptId: string,
 ): boolean {
-  return hasExecutorCheckpoint(
-    db,
-    invocationId,
-    "mechanism_completed",
-    attempt,
-  );
+  return hasExecutorCheckpoint(db, attemptId, "mechanism_completed");
 }
 
 function hasUnclassifiedCompletedNativeMechanism(
   db: MomentumDb,
-  invocationId: string,
-  attempt: number,
+  attemptId: string,
 ): boolean {
   const row = db
     .prepare(
       `SELECT 1
          FROM executor_rounds AS r
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
-        WHERE r.invocation_id = ?
-          AND r.attempt = ?
+        WHERE r.attempt_id = ?
           AND r.classification IS NULL
           AND c.stage = 'mechanism_completed'
         ORDER BY r.round_index DESC
         LIMIT 1`,
     )
-    .get(invocationId, attempt);
+    .get(attemptId);
   return row !== undefined;
 }
 
 function hasCompletedDelegateHandoff(
   db: MomentumDb,
-  invocationId: string,
-  attempt: number,
+  attemptId: string,
 ): boolean {
   return hasExecutorCheckpoint(
     db,
-    invocationId,
+    attemptId,
     DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    attempt,
   );
 }
 
+/**
+ * Find the newest attempt number (at or below the current one) whose rounds
+ * recorded a delegate handoff intent that no later round ever completed.
+ * Handoff evidence spans retries, so the scan crosses every attempt of the
+ * step, ordered by attempt number then round index.
+ */
 function findInterruptedDelegateHandoffAttempt(
   db: MomentumDb,
-  invocationId: string,
-  attempt: number,
+  runId: string,
+  stepId: string,
+  attemptNumber: number,
 ): number | undefined {
   const row = db
     .prepare(
-      `SELECT intent_round.attempt AS attempt
+      `SELECT intent_round.attempt_number AS attempt_number
          FROM executor_rounds AS intent_round
          JOIN executor_checkpoints AS intent
            ON intent.round_id = intent_round.round_id
-        WHERE intent_round.invocation_id = ?
-          AND intent_round.attempt <= ?
+        WHERE intent_round.workflow_run_id = ?
+          AND intent_round.step_run_id = ?
+          AND intent_round.attempt_number <= ?
           AND intent.stage = ?
           AND NOT EXISTS (
             SELECT 1
               FROM executor_rounds AS completed_round
               JOIN executor_checkpoints AS completed
                 ON completed.round_id = completed_round.round_id
-             WHERE completed_round.invocation_id = intent_round.invocation_id
-               AND completed_round.round_index >= intent_round.round_index
+             WHERE completed_round.workflow_run_id = intent_round.workflow_run_id
+               AND completed_round.step_run_id = intent_round.step_run_id
+               AND (completed_round.attempt_number > intent_round.attempt_number
+                 OR (completed_round.attempt_number = intent_round.attempt_number
+                   AND completed_round.round_index >= intent_round.round_index))
                AND completed.stage = ?
           )
-        ORDER BY intent_round.round_index DESC
+        ORDER BY intent_round.attempt_number DESC, intent_round.round_index DESC
         LIMIT 1`,
     )
     .get(
-      invocationId,
-      attempt,
+      runId,
+      stepId,
+      attemptNumber,
       DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
       DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-    ) as { attempt: number } | undefined;
-  return row?.attempt;
+    ) as { attempt_number: number } | undefined;
+  return row?.attempt_number;
 }
 
 function hasAnyCompletedDelegateHandoff(
   db: MomentumDb,
-  invocationId: string,
-): boolean {
-  return hasExecutorCheckpoint(
-    db,
-    invocationId,
-    DELEGATE_SUPERVISOR_HANDOFF_STAGE,
-  );
-}
-
-function hasExecutorCheckpoint(
-  db: MomentumDb,
-  invocationId: string,
-  stage: string,
-  attempt?: number,
+  runId: string,
+  stepId: string,
 ): boolean {
   const row = db
     .prepare(
       `SELECT 1
          FROM executor_rounds AS r
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
-        WHERE r.invocation_id = ?
+        WHERE r.workflow_run_id = ?
+          AND r.step_run_id = ?
           AND c.stage = ?
-          ${attempt === undefined ? "" : "AND r.attempt = ?"}
         LIMIT 1`,
     )
-    .get(
-      ...(attempt === undefined
-        ? [invocationId, stage]
-        : [invocationId, stage, attempt]),
-    );
+    .get(runId, stepId, DELEGATE_SUPERVISOR_HANDOFF_STAGE);
+  return row !== undefined;
+}
+
+function hasExecutorCheckpoint(
+  db: MomentumDb,
+  attemptId: string,
+  stage: string,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.attempt_id = ?
+          AND c.stage = ?
+        LIMIT 1`,
+    )
+    .get(attemptId, stage);
   return row !== undefined;
 }
 
@@ -1967,12 +1964,12 @@ function acquireLiveStepRepoOwnership(input: {
   claim: Parameters<AsyncWorkflowStepDispatch>[0];
   context: Parameters<AsyncWorkflowStepDispatch>[1];
   repoPath: string;
-  attempt: number;
+  attemptNumber: number;
   repoSafety: DispatchedStepRepoSafetyContext;
   runnerWindowMs: number;
   reclaimHandoffAttempt: number | undefined;
 }): LiveStepRepoOwnership {
-  const { claim, context, repoPath, attempt, repoSafety } = input;
+  const { claim, context, repoPath, attemptNumber, repoSafety } = input;
   const wallClockOffset = context.now - Date.now();
   const now = () => Date.now() + wallClockOffset;
   const extensionMs = liveStepOwnershipExtensionMs(
@@ -2006,7 +2003,7 @@ function acquireLiveStepRepoOwnership(input: {
     };
   }
   try {
-    const jobId = deriveDispatchInvocationId(claim.runId, claim.stepId);
+    const jobId = deriveDispatchCorrelationId(claim.runId, claim.stepId);
     const existing =
       input.reclaimHandoffAttempt !== undefined
         ? getActiveRepoLockForJob(context.db, jobId)
@@ -2015,7 +2012,7 @@ function acquireLiveStepRepoOwnership(input: {
       existing !== undefined &&
       input.reclaimHandoffAttempt !== undefined &&
       existing.iteration >= input.reclaimHandoffAttempt &&
-      existing.iteration <= attempt &&
+      existing.iteration <= attemptNumber &&
       (existing.lease_expires_at < acquiredAt ||
         (context.staleDispatchTakeover?.previousHolder === existing.holder &&
           context.staleDispatchTakeover.previousAcquiredAt <
@@ -2031,7 +2028,7 @@ function acquireLiveStepRepoOwnership(input: {
         goalId: claim.runId,
         previousIteration: existing.iteration,
         previousLeaseExpiresAt: existing.lease_expires_at,
-        iteration: attempt,
+        iteration: attemptNumber,
         jobId,
         heartbeatAt: acquiredAt,
         leaseExpiresAt: acquiredAt + extensionMs,
@@ -2044,7 +2041,7 @@ function acquireLiveStepRepoOwnership(input: {
         repoRoot,
         holder: context.workerId,
         goalId: claim.runId,
-        iteration: attempt,
+        iteration: attemptNumber,
         jobId,
         leaseExpiresAt: acquiredAt + extensionMs,
         now: acquiredAt,
@@ -2082,7 +2079,7 @@ function acquireLiveStepRepoOwnership(input: {
       const lockBeat = updateRepoLockHeartbeat(context.db, {
         lockId,
         holder: context.workerId,
-        iteration: attempt,
+        iteration: attemptNumber,
         heartbeatAt: mutationAt,
         leaseExpiresAt: mutationAt + extensionMs,
       });
@@ -2111,14 +2108,14 @@ function acquireLiveStepRepoOwnership(input: {
             releaseRepoLock(context.db, {
               lockId,
               holder: context.workerId,
-              iteration: attempt,
+              iteration: attemptNumber,
               now: settledAt,
             });
           } else {
             markRepoLockNeedsManualRecovery(context.db, {
               lockId,
               holder: context.workerId,
-              iteration: attempt,
+              iteration: attemptNumber,
               now: settledAt,
               recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`,
             });

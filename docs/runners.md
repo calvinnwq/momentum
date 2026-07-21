@@ -50,7 +50,7 @@ This schema is still live: workflow live wrappers (see [`docs/daemon.md`](daemon
 The dependency-free `RunnerResult` types plus their parser and normalizers under `src/core/executors/runner/` are official [executor SDK](executor-sdk.md) contract surface; runner and process adapters may import them at runtime without acquiring persistence or daemon ownership.
 For ordinary live-wrapper-owned dispatched steps, the document is not terminal evidence by itself: after a successful wrapper process, Momentum parses the result, runs repo-safety finalization, verifies, commits or resets, and only then terminalizes the executor round for reconciliation.
 For profile-backed delegate-supervisor steps, the same document is input to safe handoff finalization, not terminal delegate authority.
-Its finalized result becomes durable handoff and candidate evidence, and a later external-state read must receive a daemon-accepted terminal classification before the invocation and step reconcile.
+Its finalized result becomes durable handoff and candidate evidence, and a later external-state read must receive a daemon-accepted terminal classification before the attempt and step reconcile.
 The no-mistakes handoff may report success without repository changes; Momentum accepts that no-change result only after verification proves the worktree clean, and a verification failure still rejects it.
 The result JSON is written at `$MOMENTUM_RESULT_PATH`:
 
@@ -82,7 +82,7 @@ For native goal-loop rounds, Momentum renders a deterministic per-round prompt t
 Source context and prior-round evidence are quoted as untrusted JSON context, not as runner instructions.
 Momentum clears any stale file at that result path before the executor starts, so the executor must write a fresh result for the current round.
 The executor writes only the normalized `RunnerResult` JSON at that configured result path, and Momentum routes missing, malformed, or schema-invalid result files through explicit recovery evidence instead of treating them as progress.
-After finalization, `workflow run logs` reads the native round evidence projected from `executor_invocations`, `executor_rounds`, and child evidence rows instead of treating the runner-authored JSON, terminal scrollback, `.gnhf/runs`, or a runner-local directory as authoritative state.
+After finalization, `workflow run logs` reads the native round evidence projected from `executor_attempts`, `executor_rounds`, and child evidence rows instead of treating the runner-authored JSON, terminal scrollback, `.gnhf/runs`, or a runner-local directory as authoritative state.
 Native goal-loop finalization writes a digested `commit_or_reset_evidence` sidecar next to the verification log when the verification log path is usable, so operators can inspect commit/reset outcome metadata without relying on terminal output.
 Future workflow status, handoff, monitor, and GUI surfaces must use that same projection once they are wired to executor round evidence.
 

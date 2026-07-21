@@ -16,11 +16,11 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  loadExecutorInvocation,
-  listExecutorRoundsForInvocation,
+  loadExecutorAttempt,
+  listExecutorRoundsForAttempt,
 } from "../src/core/executors/loop/persist.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
 import {
@@ -30,19 +30,19 @@ import {
 import type { WorkflowStepExecutorDispatchResult } from "../src/core/workflow/step/executor.js";
 import {
   planDispatchedExecutorTerminalization,
-  terminalizeDispatchedExecutorInvocation,
+  terminalizeDispatchedExecutorAttempt,
   WORKFLOW_EXECUTOR_TERMINALIZE_STATUS,
 } from "../src/core/workflow/dispatch/executor-evidence.js";
 
 /**
  * NGX-492 (RC-5b) — the production seam that drives a dispatched step's
- * executor scaffold (`<run>::<step>::dispatch` invocation `running` + round
+ * executor scaffold (`<run>::<step>::dispatch` attempt `running` + round
  * `pending`) to a terminal executor state from a REAL
  * `WorkflowStepExecutorDispatchResult`, then hands that terminal evidence to the
  * RC-2 reconciliation seam to finalize the workflow step exactly once.
  *
- * Before this, the only code that terminalized a dispatch invocation was the
- * test helper `driveInvocationTerminal` (and the dogfood stand-in). These tests
+ * Before this, the only code that terminalized a dispatch attempt was the
+ * test helper `driveAttemptTerminal` (and the dogfood stand-in). These tests
  * prove the production mapping: a clean executor terminal lets RC-2 finalize the
  * step; an unconfigured / process-level executor failure parks the run for
  * manual recovery instead of fabricating a fake success.
@@ -110,7 +110,7 @@ function approveAndClaim(
 
 /**
  * Drive a step through the production dispatch lane so it lands `running` with a
- * `<run>::<step>::dispatch` invocation (`running`) + scaffold round (`pending`)
+ * `<run>::<step>::dispatch` attempt (`running`) + scaffold round (`pending`)
  * and a held dispatch lease, exactly as the daemon workflow lane leaves it
  * before the executor terminates.
  */
@@ -178,9 +178,9 @@ function unconfiguredResult(): WorkflowStepExecutorDispatchResult {
 }
 
 function dispatchRound(db: MomentumDb, stepId: string) {
-  const rounds = listExecutorRoundsForInvocation(
+  const rounds = listExecutorRoundsForAttempt(
     db,
-    deriveDispatchInvocationId(RUN_ID, stepId),
+    deriveDispatchAttemptId(RUN_ID, stepId, 1),
   );
   if (rounds.length !== 1) {
     throw new Error(
@@ -200,7 +200,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
   it("maps a succeeded executor result to a clean succeeded terminal", () => {
     expect(planDispatchedExecutorTerminalization(successResult())).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -209,7 +209,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
   it("maps a failed (runner success=false) executor result to a clean failed terminal", () => {
     expect(planDispatchedExecutorTerminalization(failedResult())).toEqual({
       outcome: "clean_terminal",
-      invocationState: "failed",
+      attemptState: "failed",
       roundState: "failed",
       classification: "failed",
     });
@@ -219,7 +219,7 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
     expect(planDispatchedExecutorTerminalization(unconfiguredResult())).toEqual(
       {
         outcome: "manual_recovery",
-        invocationState: "manual_recovery_required",
+        attemptState: "manual_recovery_required",
         roundState: "manual_recovery_required",
         classification: "manual_recovery_required",
         recoveryCode: "runtime_unavailable",
@@ -259,16 +259,16 @@ describe("planDispatchedExecutorTerminalization — pure mapping", () => {
       resultJsonPath: RESULT_JSON,
     });
     expect(plan.outcome).toBe("manual_recovery");
-    expect(plan.invocationState).toBe("manual_recovery_required");
+    expect(plan.attemptState).toBe("manual_recovery_required");
   });
 });
 
-describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
-  it("drives the dispatch invocation + round to succeeded so RC-2 finalizes the step once", () => {
+describe("terminalizeDispatchedExecutorAttempt — succeeded", () => {
+  it("drives the dispatch attempt + round to succeeded so RC-2 finalizes the step once", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
 
-    const terminalize = terminalizeDispatchedExecutorInvocation({
+    const terminalize = terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -279,13 +279,13 @@ describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized,
     );
 
-    // The dispatch invocation is now a clean terminal the RC-2 decider maps.
-    const invocation = loadExecutorInvocation(
+    // The dispatch attempt is now a clean terminal the RC-2 decider maps.
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight"),
+      deriveDispatchAttemptId(RUN_ID, "preflight", 1),
     );
-    expect(invocation?.state).toBe("succeeded");
-    expect(invocation?.finishedAt).toBe(TERMINALIZE_AT);
+    expect(attempt?.state).toBe("succeeded");
+    expect(attempt?.finishedAt).toBe(TERMINALIZE_AT);
 
     // The scaffold round terminalized with captured evidence (no fabrication
     // before execution; the round only now carries the summary/log evidence).
@@ -312,12 +312,12 @@ describe("terminalizeDispatchedExecutorInvocation — succeeded", () => {
   });
 });
 
-describe("terminalizeDispatchedExecutorInvocation — failed", () => {
-  it("drives the invocation + round to failed so RC-2 finalizes the step failed", () => {
+describe("terminalizeDispatchedExecutorAttempt — failed", () => {
+  it("drives the attempt + round to failed so RC-2 finalizes the step failed", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
 
-    terminalizeDispatchedExecutorInvocation({
+    terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -326,10 +326,8 @@ describe("terminalizeDispatchedExecutorInvocation — failed", () => {
     });
 
     expect(
-      loadExecutorInvocation(
-        db,
-        deriveDispatchInvocationId(RUN_ID, "preflight"),
-      )?.state,
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, "preflight", 1))
+        ?.state,
     ).toBe("failed");
     const round = dispatchRound(db, "preflight");
     expect(round.state).toBe("failed");
@@ -346,12 +344,12 @@ describe("terminalizeDispatchedExecutorInvocation — failed", () => {
   });
 });
 
-describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestly", () => {
+describe("terminalizeDispatchedExecutorAttempt — unconfigured fails honestly", () => {
   it("parks the run for manual recovery on a runtime_unavailable result instead of a fake success", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
 
-    terminalizeDispatchedExecutorInvocation({
+    terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -359,11 +357,11 @@ describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestl
       now: TERMINALIZE_AT,
     });
 
-    const invocation = loadExecutorInvocation(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight"),
+      deriveDispatchAttemptId(RUN_ID, "preflight", 1),
     );
-    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(attempt?.state).toBe("manual_recovery_required");
     const round = dispatchRound(db, "preflight");
     expect(round.state).toBe("manual_recovery_required");
     expect(round.recoveryCode).toBe("runtime_unavailable");
@@ -391,12 +389,12 @@ describe("terminalizeDispatchedExecutorInvocation — unconfigured fails honestl
   });
 });
 
-describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
-  it("is a no-op on re-entry over an already-terminal invocation", () => {
+describe("terminalizeDispatchedExecutorAttempt — idempotency", () => {
+  it("is a no-op on re-entry over an already-terminal attempt", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
 
-    const first = terminalizeDispatchedExecutorInvocation({
+    const first = terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -408,8 +406,8 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
     );
 
     // A second terminalize (e.g. a re-entered dispatch tick) recognises the
-    // already-terminal invocation, changes nothing, and never duplicates a round.
-    const second = terminalizeDispatchedExecutorInvocation({
+    // already-terminal attempt, changes nothing, and never duplicates a round.
+    const second = terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -420,12 +418,12 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
     );
 
-    const invocation = loadExecutorInvocation(
+    const attempt = loadExecutorAttempt(
       db,
-      deriveDispatchInvocationId(RUN_ID, "preflight"),
+      deriveDispatchAttemptId(RUN_ID, "preflight", 1),
     );
-    expect(invocation?.state).toBe("succeeded");
-    expect(invocation?.finishedAt).toBe(TERMINALIZE_AT);
+    expect(attempt?.state).toBe("succeeded");
+    expect(attempt?.finishedAt).toBe(TERMINALIZE_AT);
     const round = dispatchRound(db, "preflight");
     expect(round.summary).toBe("preflight passed");
 
@@ -441,11 +439,11 @@ describe("terminalizeDispatchedExecutorInvocation — idempotency", () => {
   });
 });
 
-describe("terminalizeDispatchedExecutorInvocation — boundary", () => {
-  it("refuses a step with no dispatch invocation and writes nothing", () => {
+describe("terminalizeDispatchedExecutorAttempt — boundary", () => {
+  it("refuses a step with no dispatch attempt and writes nothing", () => {
     const db = openSeededDb();
     // No dispatch: the step was never driven through the M10 lane.
-    const result = terminalizeDispatchedExecutorInvocation({
+    const result = terminalizeDispatchedExecutorAttempt({
       db,
       runId: RUN_ID,
       stepId: "preflight",
@@ -456,10 +454,7 @@ describe("terminalizeDispatchedExecutorInvocation — boundary", () => {
       WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
     );
     expect(
-      loadExecutorInvocation(
-        db,
-        deriveDispatchInvocationId(RUN_ID, "preflight"),
-      ),
+      loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, "preflight", 1)),
     ).toBeUndefined();
   });
 });

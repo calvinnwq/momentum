@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   deriveWorkflowMonitorProgress,
   WORKFLOW_MONITOR_PROGRESS_PHASES,
-  type WorkflowMonitorProgressPhase
+  type WorkflowMonitorProgressPhase,
 } from "../src/core/workflow/monitor/progress.js";
 import type {
   WorkflowMonitorEnvelope,
-  WorkflowMonitorEnvelopeCounts
+  WorkflowMonitorEnvelopeCounts,
 } from "../src/core/workflow/monitor/envelope.js";
 import { getWorkflowActionAuthorityPolicy } from "../src/core/workflow/monitor/action-authority.js";
 
@@ -22,7 +22,7 @@ import { getWorkflowActionAuthorityPolicy } from "../src/core/workflow/monitor/a
  */
 
 function makeCounts(
-  overrides: Partial<WorkflowMonitorEnvelopeCounts> = {}
+  overrides: Partial<WorkflowMonitorEnvelopeCounts> = {},
 ): WorkflowMonitorEnvelopeCounts {
   return {
     steps: 1,
@@ -34,18 +34,18 @@ function makeCounts(
       failed: 0,
       skipped: 0,
       blocked: 0,
-      canceled: 0
+      canceled: 0,
     },
     approvals: 0,
     leases: 0,
     gates: 0,
     gatesOpen: 0,
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeEnvelope(
-  overrides: Partial<WorkflowMonitorEnvelope> = {}
+  overrides: Partial<WorkflowMonitorEnvelope> = {},
 ): WorkflowMonitorEnvelope {
   return {
     schemaVersion: 1,
@@ -66,7 +66,7 @@ function makeEnvelope(
       kind: "implementation",
       state: "running",
       order: 1,
-      required: true
+      required: true,
     },
     leases: [],
     lastCheckpoint: null,
@@ -75,7 +75,7 @@ function makeEnvelope(
       code: "resume_running",
       stepId: "implementation",
       leaseKind: "managed-step",
-      detail: "Step is running with fresh evidence. Allow it to continue."
+      detail: "Step is running with fresh evidence. Allow it to continue.",
     },
     recovery: null,
     evidence: [],
@@ -84,7 +84,7 @@ function makeEnvelope(
     monitorLastEmittedDigest: null,
     monitorLastSeenAt: null,
     monitorLastEmittedAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -102,7 +102,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
     const env = makeEnvelope();
     const first = deriveWorkflowMonitorProgress(env);
     const second = deriveWorkflowMonitorProgress(env, {
-      priorDigest: first.digest
+      priorDigest: first.digest,
     });
     expect(second.digest).toBe(first.digest);
     expect(second.changed).toBe(false);
@@ -117,7 +117,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             gateId: "gate-approval",
             workflowRunId: "cwfp-run",
             stepRunId: "implementation",
-            invocationId: null,
+            attemptId: null,
             roundId: null,
             targetScope: "step",
             gateType: "approval_required",
@@ -125,19 +125,18 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             evidence: "goals/cwfp-run/gates/gate-approval.json",
             allowedActions: ["approve", "reject"],
             recommendedAction: "approve",
-            recommendedActionPolicy: getWorkflowActionAuthorityPolicy(
-              "approval_decision"
-            ),
+            recommendedActionPolicy:
+              getWorkflowActionAuthorityPolicy("approval_decision"),
             policyEnvelope: ["approve"],
             resolvedAt: null,
             resolvedBy: null,
             resolutionMode: null,
             chosenAction: null,
-            resolution: null
-          }
+            resolution: null,
+          },
         ],
-        counts: makeCounts({ gates: 1, gatesOpen: 1 })
-      })
+        counts: makeCounts({ gates: 1, gatesOpen: 1 }),
+      }),
     );
     const second = deriveWorkflowMonitorProgress(
       makeEnvelope({
@@ -146,7 +145,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             gateId: "gate-recovery",
             workflowRunId: "cwfp-run",
             stepRunId: "implementation",
-            invocationId: null,
+            attemptId: null,
             roundId: null,
             targetScope: "step",
             gateType: "manual_recovery_required",
@@ -161,12 +160,12 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             resolvedBy: null,
             resolutionMode: null,
             chosenAction: null,
-            resolution: null
-          }
+            resolution: null,
+          },
         ],
-        counts: makeCounts({ gates: 1, gatesOpen: 1 })
+        counts: makeCounts({ gates: 1, gatesOpen: 1 }),
       }),
-      { priorDigest: first.digest }
+      { priorDigest: first.digest },
     );
     expect(second.digest).not.toBe(first.digest);
     expect(second.changed).toBe(true);
@@ -180,21 +179,21 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
       classification: "fresh" as const,
       expiresAt: 1_000,
       heartbeatAt: 100,
-      releasedAt: null
+      releasedAt: null,
     };
     const env1 = makeEnvelope({
       generatedAt: 1,
       leases: [lease],
-      counts: makeCounts({ leases: 1 })
+      counts: makeCounts({ leases: 1 }),
     });
     const env2 = makeEnvelope({
       generatedAt: 999_999,
       leases: [{ ...lease, expiresAt: 9_999_999, heartbeatAt: 9_000 }],
-      counts: makeCounts({ leases: 1 })
+      counts: makeCounts({ leases: 1 }),
     });
     const first = deriveWorkflowMonitorProgress(env1);
     const second = deriveWorkflowMonitorProgress(env2, {
-      priorDigest: first.digest
+      priorDigest: first.digest,
     });
     expect(second.digest).toBe(first.digest);
     expect(second.emit).toBe(false);
@@ -208,14 +207,14 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         kind: "no-mistakes",
         state: "approved",
         order: 2,
-        required: true
+        required: true,
       },
       stepState: "approved",
       nextAction: {
         code: "advance_to_step",
         stepId: "no-mistakes",
         leaseKind: "managed-step",
-        detail: 'Approved step "no-mistakes" is the next step to dispatch.'
+        detail: 'Approved step "no-mistakes" is the next step to dispatch.',
       },
       counts: makeCounts({
         steps: 2,
@@ -227,13 +226,13 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           failed: 0,
           skipped: 0,
           blocked: 0,
-          canceled: 0
-        }
-      })
+          canceled: 0,
+        },
+      }),
     });
     const firstTick = deriveWorkflowMonitorProgress(before);
     const nextTick = deriveWorkflowMonitorProgress(after, {
-      priorDigest: firstTick.digest
+      priorDigest: firstTick.digest,
     });
     expect(nextTick.digest).not.toBe(firstTick.digest);
     expect(nextTick.changed).toBe(true);
@@ -260,7 +259,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "await_approval",
           stepId: null,
           leaseKind: null,
-          detail: "No steps recorded yet. Await plan import / approval."
+          detail: "No steps recorded yet. Await plan import / approval.",
         },
         counts: makeCounts({
           steps: 0,
@@ -272,10 +271,10 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             failed: 0,
             skipped: 0,
             blocked: 0,
-            canceled: 0
-          }
-        })
-      })
+            canceled: 0,
+          },
+        }),
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("idle");
     expect(tick.currentStep).toBeNull();
@@ -293,16 +292,17 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           kind: "no-mistakes",
           state: "pending",
           order: 2,
-          required: true
+          required: true,
         },
         stepState: "pending",
         nextAction: {
           code: "await_approval",
           stepId: "no-mistakes",
           leaseKind: "managed-step",
-          detail: 'Step "no-mistakes" is pending approval before it can advance.'
-        }
-      })
+          detail:
+            'Step "no-mistakes" is pending approval before it can advance.',
+        },
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("awaiting_approval");
     expect(tick.currentStep).toBe("no-mistakes");
@@ -322,19 +322,19 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           kind: "no-mistakes",
           state: "failed",
           order: 2,
-          required: true
+          required: true,
         },
         stepState: "failed",
         nextAction: {
           code: "rerun_failed_step",
           stepId: "no-mistakes",
           leaseKind: "managed-step",
-          detail: "A required step failed. Decide whether to retry."
+          detail: "A required step failed. Decide whether to retry.",
         },
         recovery: {
           code: "failed_required_step",
           message: "A required step finalized in failed state.",
-          stepId: "no-mistakes"
+          stepId: "no-mistakes",
         },
         counts: makeCounts({
           steps: 2,
@@ -346,14 +346,14 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             failed: 1,
             skipped: 0,
             blocked: 0,
-            canceled: 0
-          }
-        })
-      })
+            canceled: 0,
+          },
+        }),
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("blocked");
     expect(tick.blockerReason).toBe(
-      "A required step finalized in failed state."
+      "A required step finalized in failed state.",
     );
     // Failed needs operator recovery, not terminal cleanup.
     expect(tick.cleanup).toBe("none");
@@ -372,18 +372,18 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "clear_recovery",
           stepId: "implementation",
           leaseKind: null,
-          detail: "Run is blocked. Clear the manual recovery once resolved."
+          detail: "Run is blocked. Clear the manual recovery once resolved.",
         },
         recovery: {
           code: "manual_recovery_lease",
           message: "An outstanding manual-recovery-required lease is blocking.",
-          stepId: "implementation"
-        }
-      })
+          stepId: "implementation",
+        },
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("blocked");
     expect(tick.blockerReason).toBe(
-      "An outstanding manual-recovery-required lease is blocking."
+      "An outstanding manual-recovery-required lease is blocking.",
     );
   });
 
@@ -401,14 +401,12 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "clear_recovery",
           stepId: "implementation",
           leaseKind: null,
-          detail: "Run is blocked. Clear the manual recovery once resolved."
-        }
-      })
+          detail: "Run is blocked. Clear the manual recovery once resolved.",
+        },
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("blocked");
-    expect(tick.blockerReason).toBe(
-      "head mismatch requires operator recovery"
-    );
+    expect(tick.blockerReason).toBe("head mismatch requires operator recovery");
   });
 
   it("emits when the durable manual-recovery reason changes", () => {
@@ -418,8 +416,8 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         manualRecoveryReason: "head mismatch requires operator recovery",
         disposition: "recover",
         reportable: true,
-        reportReason: "recovery_required"
-      })
+        reportReason: "recovery_required",
+      }),
     );
     const second = deriveWorkflowMonitorProgress(
       makeEnvelope({
@@ -427,9 +425,9 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         manualRecoveryReason: "repo lock was lost",
         disposition: "recover",
         reportable: true,
-        reportReason: "recovery_required"
+        reportReason: "recovery_required",
       }),
-      { priorDigest: first.digest }
+      { priorDigest: first.digest },
     );
     expect(second.digest).not.toBe(first.digest);
     expect(second.changed).toBe(true);
@@ -450,7 +448,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "no_action",
           stepId: null,
           leaseKind: null,
-          detail: "Run is terminally succeeded. No further action required."
+          detail: "Run is terminally succeeded. No further action required.",
         },
         counts: makeCounts({
           steps: 2,
@@ -462,10 +460,10 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             failed: 0,
             skipped: 0,
             blocked: 0,
-            canceled: 0
-          }
-        })
-      })
+            canceled: 0,
+          },
+        }),
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("terminal");
     expect(tick.terminal).toBe(true);
@@ -487,9 +485,9 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "no_action",
           stepId: null,
           leaseKind: null,
-          detail: "Run is canceled. No further action required."
-        }
-      })
+          detail: "Run is canceled. No further action required.",
+        },
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("terminal");
     expect(tick.cleanup).toBe("release");
@@ -508,12 +506,12 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         code: "no_action",
         stepId: null,
         leaseKind: null,
-        detail: "Run is terminally succeeded."
-      }
+        detail: "Run is terminally succeeded.",
+      },
     });
     const first = deriveWorkflowMonitorProgress(env);
     const second = deriveWorkflowMonitorProgress(env, {
-      priorDigest: first.digest
+      priorDigest: first.digest,
     });
     expect(second.emit).toBe(false);
     expect(second.cleanup).toBe("release");
@@ -530,7 +528,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         reportReason: "recovery_required",
         needsManualRecovery: true,
         manualRecoveryReason:
-          "Dispatch invocation ended `manual_recovery_required` before operator reconciliation.",
+          "Dispatch attempt ended `manual_recovery_required` before operator reconciliation.",
         activeStep: null,
         stepState: null,
         recovery: null,
@@ -538,7 +536,7 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           code: "no_action",
           stepId: null,
           leaseKind: null,
-          detail: "Run is terminally succeeded. No further action required."
+          detail: "Run is terminally succeeded. No further action required.",
         },
         counts: makeCounts({
           steps: 6,
@@ -550,16 +548,16 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             failed: 0,
             skipped: 0,
             blocked: 0,
-            canceled: 0
-          }
+            canceled: 0,
+          },
         }),
         lastCheckpoint: {
           stepId: "linear-refresh",
           at: 1_730_000_000_000,
           source: "ledger",
-          digest: "rc2-reconcile::linear-refresh::succeeded"
-        }
-      })
+          digest: "rc2-reconcile::linear-refresh::succeeded",
+        },
+      }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("terminal");
     expect(tick.blockerReason).toBeNull();
@@ -574,16 +572,16 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           stepId: "implementation",
           at: 1_730_000_000_000,
           source: "ledger",
-          digest: "sha256:abc"
-        }
-      })
+          digest: "sha256:abc",
+        },
+      }),
     );
     expect(tick.lastEvent).toBe("checkpoint:ledger:implementation");
   });
 
   it("exposes the full phase vocabulary", () => {
     expect([...WORKFLOW_MONITOR_PROGRESS_PHASES].sort()).toEqual(
-      ["advancing", "awaiting_approval", "blocked", "idle", "terminal"].sort()
+      ["advancing", "awaiting_approval", "blocked", "idle", "terminal"].sort(),
     );
   });
 });

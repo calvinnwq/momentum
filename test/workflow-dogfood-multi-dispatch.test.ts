@@ -11,7 +11,7 @@ import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.
 import { runDaemonLoop } from "../src/core/daemon/loop.js";
 import { startDaemonRun } from "../src/core/daemon/runs.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
@@ -20,7 +20,7 @@ import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/schedul
 import type { WorkflowStepDispatch } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { loadExecutorAttempt } from "../src/core/executors/loop/persist.js";
 
 type RunResult = {
   code: number;
@@ -172,14 +172,14 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
         { step_id: "linear-refresh", state: "pending" },
       ]);
 
-      // Exactly one executor invocation per dispatched step — no duplicate
+      // Exactly one executor attempt per dispatched step — no duplicate
       // dispatch — created through the production dispatch path.
-      const invocations = verifyDb
+      const attempts = verifyDb
         .prepare(
-          "SELECT step_key, executor_family FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at",
+          "SELECT step_key, executor_family FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
         )
         .all(runId) as Array<{ step_key: string; executor_family: string }>;
-      expect(invocations).toEqual([
+      expect(attempts).toEqual([
         { step_key: "preflight", executor_family: "one-shot" },
         {
           step_key: "implementation",
@@ -366,12 +366,12 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         "running",
       );
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
-      const invocation = loadExecutorInvocation(
+      const attempt = loadExecutorAttempt(
         db,
-        deriveDispatchInvocationId(runId, "implementation"),
+        deriveDispatchAttemptId(runId, "implementation", 1),
       );
-      expect(invocation?.executorFamily).toBe("subworkflow");
-      expect(invocation?.state).toBe("running");
+      expect(attempt?.executorFamily).toBe("subworkflow");
+      expect(attempt?.state).toBe("running");
     } finally {
       db.close();
     }

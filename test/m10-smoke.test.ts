@@ -99,16 +99,16 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     // SQLite after the daemon process has exited.
     const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
-      const invocations = db
+      const attempts = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ?",
+          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
         executor_family: string;
         state: string;
       }>;
-      expect(invocations).toEqual([
+      expect(attempts).toEqual([
         {
           step_key: "preflight",
           executor_family: "one-shot",

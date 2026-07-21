@@ -17,24 +17,29 @@ import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
-  listExecutorInvocationsForRun,
-  listExecutorRoundsForRun
+  listExecutorAttemptsForRun,
+  listExecutorRoundsForRun,
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
-  ExecutorInvocationRecord,
-  ExecutorRoundRecord
+  ExecutorAttemptRecord,
+  ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
-  type WorkflowRunDetail
+  type WorkflowRunDetail,
 } from "./status.js";
 
-export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 1;
+/**
+ * Version 2 replaced the legacy `invocations` array (mutable reopened rows with
+ * an `attempt` counter) with immutable `attempts` (`attemptId` /
+ * `attemptNumber`), and re-keyed rounds by `attemptId` / `attemptNumber`.
+ */
+export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 2;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
@@ -51,31 +56,31 @@ export type WorkflowRunLogsEnvelope = {
   schemaVersion: number;
   generatedAt: number;
   detail: WorkflowRunDetail;
-  invocations: ExecutorInvocationRecord[];
+  attempts: ExecutorAttemptRecord[];
   rounds: WorkflowRunLogRound[];
 };
 
 export function loadWorkflowRunLogs(
   db: MomentumDb,
   runId: string,
-  options: LoadWorkflowRunLogsOptions = {}
+  options: LoadWorkflowRunLogsOptions = {},
 ): WorkflowRunLogsEnvelope | null {
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
   const generatedAt = options.generatedAt ?? Date.now();
-  const invocations = listExecutorInvocationsForRun(db, runId);
+  const attempts = listExecutorAttemptsForRun(db, runId);
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
     checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
     findings: listExecutorFindingsForRound(db, round.roundId),
-    decisions: listExecutorDecisionsForRound(db, round.roundId)
+    decisions: listExecutorDecisionsForRound(db, round.roundId),
   }));
   return {
     schemaVersion: WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
     generatedAt,
     detail,
-    invocations,
-    rounds
+    attempts,
+    rounds,
   };
 }

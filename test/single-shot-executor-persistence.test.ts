@@ -5,19 +5,19 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  insertExecutorInvocation,
+  insertExecutorAttempt,
   insertExecutorRound,
   loadExecutorRound,
-  updateExecutorRound
+  updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import {
   planSingleShotRoundPersistence,
   planSingleShotRoundStart,
   resolveSingleShotRoundSelection,
   singleShotRoundId,
-  type SingleShotExecutorFamily
+  type SingleShotExecutorFamily,
 } from "../src/core/executors/single-shot/executor.js";
 
 // This is the integration twin of the pure projections in
@@ -44,36 +44,36 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-single-shot-persistence-")
+    path.join(os.tmpdir(), "momentum-single-shot-persistence-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
 }
 
-// Foreign keys are enforced, so a round needs a real invocation, which needs a
+// Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows.
 function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
-    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)"
+    "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
   db.prepare(
     `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
-       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`
+       VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
-  const invocation: ExecutorInvocationRecord = {
-    invocationId: "inv-1",
+  const attempt: ExecutorAttemptRecord = {
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     executorFamily: family,
     state: "running",
-    attempt: 1,
+    attemptNumber: 1,
     startedAt: 1,
     heartbeatAt: 1,
-    finishedAt: null
+    finishedAt: null,
   };
-  insertExecutorInvocation(db, invocation, { now: 1 });
+  insertExecutorAttempt(db, attempt, { now: 1 });
   return db;
 }
 
@@ -82,7 +82,7 @@ function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
 function startRound(
   db: MomentumDb,
   family: SingleShotExecutorFamily,
-  withAgent: boolean
+  withAgent: boolean,
 ): void {
   const selection = resolveSingleShotRoundSelection(
     withAgent
@@ -90,24 +90,24 @@ function startRound(
           stepConfig: {
             agentProvider: "claude",
             model: "claude-opus-4-8",
-            effort: "high"
-          }
+            effort: "high",
+          },
         }
-      : {}
+      : {},
   );
   const record = planSingleShotRoundStart({
     roundId: ROUND_ID,
-    invocationId: "inv-1",
+    attemptId: "inv-1",
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
     family,
-    attempt: 1,
+    attemptNumber: 1,
     selection,
     inputDigest: "sha256:input",
     artifactRoot: "/artifacts/round-0",
     logPaths: ["/artifacts/round-0/stdout.log"],
-    startedAt: 1_000
+    startedAt: 1_000,
   });
   insertExecutorRound(db, record, { now: 1_000 });
 }
@@ -124,8 +124,8 @@ const ONE_SHOT_RESULT: RunnerResult = {
     scope: "single-shot",
     subject: "one-shot pass",
     body: "",
-    breaking: false
-  }
+    breaking: false,
+  },
 };
 
 describe("single-shot round persistence — one-shot success round-trip", () => {
@@ -140,12 +140,12 @@ describe("single-shot round persistence — one-shot success round-trip", () => 
       evidence: {
         verificationStatus: "passed",
         commitSha: SHA,
-        changedFiles: ["src/x.ts"]
-      }
+        changedFiles: ["src/x.ts"],
+      },
     });
     updateExecutorRound(db, ROUND_ID, plan.captureUpdate!, { now: 2_000 });
     const final = updateExecutorRound(db, ROUND_ID, plan.terminalUpdate, {
-      now: 3_000
+      now: 3_000,
     });
 
     // Terminal classification and lifecycle.
@@ -182,7 +182,7 @@ describe("single-shot round persistence — script success round-trip", () => {
 
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: true },
-      evidence: { verificationStatus: "passed" }
+      evidence: { verificationStatus: "passed" },
     });
     // The bare capture is what makes the running -> capturing_result -> succeeded
     // path legal; without it the terminal update would attempt an illegal
@@ -190,7 +190,7 @@ describe("single-shot round persistence — script success round-trip", () => {
     expect(plan.captureUpdate).toEqual({ toState: "capturing_result" });
     updateExecutorRound(db, ROUND_ID, plan.captureUpdate!, { now: 2_000 });
     const final = updateExecutorRound(db, ROUND_ID, plan.terminalUpdate, {
-      now: 3_000
+      now: 3_000,
     });
 
     expect(final.state).toBe("succeeded");
@@ -212,13 +212,13 @@ describe("single-shot round persistence — execution failure round-trip", () =>
     startRound(db, "script", false);
 
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "command_failed" }
+      outcome: { ok: false, recoveryCode: "command_failed" },
     });
-    // A failed invocation captured nothing; the round transitions directly from
+    // A failed attempt captured nothing; the round transitions directly from
     // running to its terminal state.
     expect(plan.captureUpdate).toBeNull();
     const final = updateExecutorRound(db, ROUND_ID, plan.terminalUpdate, {
-      now: 2_000
+      now: 2_000,
     });
 
     expect(final.state).toBe("failed");
@@ -238,11 +238,11 @@ describe("single-shot round persistence — manual recovery round-trip", () => {
     startRound(db, "one-shot", true);
 
     const plan = planSingleShotRoundPersistence({
-      outcome: { ok: false, recoveryCode: "head_mismatch" }
+      outcome: { ok: false, recoveryCode: "head_mismatch" },
     });
     expect(plan.captureUpdate).toBeNull();
     const final = updateExecutorRound(db, ROUND_ID, plan.terminalUpdate, {
-      now: 2_000
+      now: 2_000,
     });
 
     expect(final.state).toBe("manual_recovery_required");

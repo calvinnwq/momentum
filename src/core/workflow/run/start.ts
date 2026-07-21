@@ -6,7 +6,7 @@
  * {@link WorkflowDefinition} graph into the in-memory `WorkflowRun` /
  * `StepRun` shape that a run start persists. It follows the same discipline as
  * `definition/definition.ts` and `run/import.ts`: no SQLite, no file
- * system, no executor invocation, no wall-clock reads. Durable persistence into
+ * system, no executor attempt, no wall-clock reads. Durable persistence into
  * `workflow_runs` / `workflow_steps` is layered on top in
  * `run/start-persist.ts`, and the CLI `workflow run start` surface
  * calls that persistence layer. Executor records, the opt-in daemon scheduler

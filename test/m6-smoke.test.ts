@@ -1420,7 +1420,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       expect(blockedPayload.intentId).toBe(intentId);
       // The refused claim must not have called the external adapter; the
       // failure envelope still reports the resolved policy so operators see
-      // why the second invocation was refused.
+      // why the second attempt was refused.
       expect(blockedPayload.applyPolicy).toMatchObject({
         effective: "external_apply_allowed",
         source: "momentum_policy",

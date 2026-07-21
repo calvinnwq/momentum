@@ -24,17 +24,18 @@ import {
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import {
-  deriveDispatchInvocationId,
+  deriveDispatchAttemptId,
   executeWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-evidence.js";
+import { terminalizeDispatchedExecutorAttempt } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery/artifact.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import { deriveWorkflowRunState } from "../src/core/workflow/run/reducer.js";
 import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
-  insertExecutorInvocation,
-  loadExecutorInvocation,
+  insertExecutorAttempt,
+  loadExecutorAttempt,
+  updateExecutorAttemptState,
   updateExecutorRound,
 } from "../src/core/executors/loop/persist.js";
 import { createDurableExecutorEnvelope } from "../src/core/executors/sdk/envelope.js";
@@ -657,7 +658,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
             SET acquired_at = ?, heartbeat_at = ?, expires_at = ?, updated_at = ?
           WHERE run_id = ? AND lease_kind = 'dispatch'`,
       ).run(NOW - 60_000, NOW - 60_000, NOW - 10_000, NOW - 60_000, "run-a");
-      terminalizeDispatchedExecutorInvocation({
+      terminalizeDispatchedExecutorAttempt({
         db,
         runId: "run-a",
         stepId: "preflight",
@@ -682,9 +683,9 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
-          deriveDispatchInvocationId("run-a", "preflight"),
+          deriveDispatchAttemptId("run-a", "preflight", 1),
         )?.state,
       ).toBe("succeeded");
 
@@ -716,7 +717,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
-  it("parks a stale nonterminal dispatch invocation and releases its lease", () => {
+  it("parks a stale nonterminal dispatch attempt and releases its lease", () => {
     const db = openDb(makeTempDir());
     try {
       persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
@@ -752,9 +753,9 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
 
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
       expect(
-        loadExecutorInvocation(
+        loadExecutorAttempt(
           db,
-          deriveDispatchInvocationId("run-a", "preflight"),
+          deriveDispatchAttemptId("run-a", "preflight", 1),
         )?.state,
       ).toBe("running");
 
@@ -1686,17 +1687,17 @@ function seedCheckpointedDelegateHandoff(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
       executorFamily: "delegate-supervisor",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: NOW,
       heartbeatAt: NOW,
       finishedAt: null,
@@ -1705,18 +1706,18 @@ function seedCheckpointedDelegateHandoff(
   );
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
     executorFamily: "delegate-supervisor",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "capturing_result",
     agentProvider: null,
@@ -1742,7 +1743,7 @@ function seedCheckpointedDelegateHandoff(
       stage === DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE
         ? {
             tool: "no-mistakes",
-            invocationId,
+            attemptId,
             attempt: 1,
           }
         : {
@@ -1755,7 +1756,7 @@ function seedCheckpointedDelegateHandoff(
           },
     ),
   });
-  return { envelope, invocationId, roundId };
+  return { envelope, attemptId, roundId };
 }
 
 function seedDelegateBeforeCurrentAttemptRound(
@@ -1772,17 +1773,17 @@ function seedDelegateBeforeCurrentAttemptRound(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
       executorFamily: "delegate-supervisor",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: NOW,
       heartbeatAt: NOW,
       finishedAt: null,
@@ -1792,18 +1793,18 @@ function seedDelegateBeforeCurrentAttemptRound(
   if (attempt === 1) return;
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
     executorFamily: "delegate-supervisor",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "running",
     agentProvider: null,
@@ -1829,11 +1830,26 @@ function seedDelegateBeforeCurrentAttemptRound(
     humanGate: "manual_recovery_required",
     finishedAt: NOW,
   });
-  db.prepare(
-    `UPDATE executor_invocations
-        SET attempt = 2, state = 'running', finished_at = NULL
-      WHERE invocation_id = ?`,
-  ).run(invocationId);
+  updateExecutorAttemptState(db, attemptId, "manual_recovery_required", {
+    finishedAt: NOW,
+    now: NOW,
+  });
+  insertExecutorAttempt(
+    db,
+    {
+      attemptId: deriveDispatchAttemptId(runId, stepId, 2),
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executorFamily: "delegate-supervisor",
+      state: "running",
+      attemptNumber: 2,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
 }
 
 function seedRegisteredSdkContinuation(
@@ -1849,17 +1865,17 @@ function seedRegisteredSdkContinuation(
     state: "running",
     order: 0,
   });
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
-  insertExecutorInvocation(
+  const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+  insertExecutorAttempt(
     db,
     {
-      invocationId,
+      attemptId,
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
       executorFamily: "fixture-executor",
       state: "running",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: NOW,
       heartbeatAt: NOW,
       finishedAt: null,
@@ -1868,18 +1884,18 @@ function seedRegisteredSdkContinuation(
   );
   const envelope = createDurableExecutorEnvelope({
     db,
-    invocationId,
+    attemptId,
     now: () => NOW,
   });
-  const roundId = `${invocationId}::round-1`;
+  const roundId = `${attemptId}::round-1`;
   envelope.facade.startRound({
     roundId,
-    invocationId,
+    attemptId,
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
     executorFamily: "fixture-executor",
-    attempt: 1,
+    attemptNumber: 1,
     roundIndex: 0,
     state: "running",
     agentProvider: null,
@@ -1906,7 +1922,7 @@ function seedRegisteredSdkContinuation(
       classification: "continue",
       executorRecommendation: "continue",
       roundState: "succeeded",
-      invocationState: "running",
+      attemptState: "running",
       recoveryCode: null,
       humanGate: null,
     },
@@ -1918,7 +1934,7 @@ function seedRegisteredSdkContinuation(
       },
     },
   );
-  return { invocationId, roundId };
+  return { attemptId, roundId };
 }
 
 describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
@@ -2478,17 +2494,17 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           state: "running",
           order: 0,
         });
-        const invocationId = deriveDispatchInvocationId(runId, stepId);
-        insertExecutorInvocation(
+        const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+        insertExecutorAttempt(
           db,
           {
-            invocationId,
+            attemptId,
             workflowRunId: runId,
             stepRunId: stepId,
             stepKey: stepId,
             executorFamily: "delegate-supervisor",
             state: "running",
-            attempt: 1,
+            attemptNumber: 1,
             startedAt: NOW,
             heartbeatAt: NOW,
             finishedAt: null,
@@ -2497,18 +2513,18 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         );
         const envelope = createDurableExecutorEnvelope({
           db,
-          invocationId,
+          attemptId,
           now: () => NOW,
         });
-        const sourceRoundId = `${invocationId}::round-1`;
+        const sourceRoundId = `${attemptId}::round-1`;
         envelope.facade.startRound({
           roundId: sourceRoundId,
-          invocationId,
+          attemptId,
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
           executorFamily: "delegate-supervisor",
-          attempt: 1,
+          attemptNumber: 1,
           roundIndex: 0,
           state: "running",
           agentProvider: null,
@@ -2533,7 +2549,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           detail: JSON.stringify({
             recommendation: "complete",
             recommendedRoundState: "succeeded",
-            recommendedInvocationState: "succeeded",
+            recommendedAttemptState: "succeeded",
             recoveryCode: null,
             humanGate: null,
             reason: "legacy wrapper completed cleanly",
@@ -2550,20 +2566,41 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           humanGate: null,
           finishedAt: NOW,
         });
-        db.prepare(
-          `UPDATE executor_invocations
-            SET attempt = 2, state = 'running', finished_at = NULL
-          WHERE invocation_id = ?`,
-        ).run(invocationId);
-        const replayRoundId = `${invocationId}::round-2`;
-        envelope.facade.startRound({
+        updateExecutorAttemptState(db, attemptId, "succeeded", {
+          finishedAt: NOW,
+          now: NOW,
+        });
+        const retryAttemptId = deriveDispatchAttemptId(runId, stepId, 2);
+        insertExecutorAttempt(
+          db,
+          {
+            attemptId: retryAttemptId,
+            workflowRunId: runId,
+            stepRunId: stepId,
+            stepKey: stepId,
+            executorFamily: "delegate-supervisor",
+            state: "running",
+            attemptNumber: 2,
+            startedAt: NOW,
+            heartbeatAt: NOW,
+            finishedAt: null,
+          },
+          { now: NOW },
+        );
+        const retryEnvelope = createDurableExecutorEnvelope({
+          db,
+          attemptId: retryAttemptId,
+          now: () => NOW,
+        });
+        const replayRoundId = `${retryAttemptId}::round-2`;
+        retryEnvelope.facade.startRound({
           roundId: replayRoundId,
-          invocationId,
+          attemptId: retryAttemptId,
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
           executorFamily: "delegate-supervisor",
-          attempt: 2,
+          attemptNumber: 2,
           roundIndex: 1,
           state: "capturing_result",
           agentProvider: null,
@@ -2582,7 +2619,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           commitSha: null,
         });
         if (persistReplayMarker) {
-          envelope.facade.recordCheckpoint(replayRoundId, {
+          retryEnvelope.facade.recordCheckpoint(replayRoundId, {
             checkpointId: `${replayRoundId}-legacy-completion-replayed`,
             sequence: 0,
             stage: DELEGATE_SUPERVISOR_LEGACY_COMPLETION_REPLAYED_STAGE,
@@ -2623,13 +2660,12 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "delegate-prior-attempt-handoff";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
-        seedCheckpointedDelegateHandoff(
-          db,
-          runId,
-          stepId,
-          DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
-        );
+      const { attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+        DELEGATE_SUPERVISOR_HANDOFF_INTENT_STAGE,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "complete",
@@ -2638,19 +2674,40 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         humanGate: null,
         finishedAt: NOW,
       });
-      db.prepare(
-        `UPDATE executor_invocations
-            SET attempt = 2, state = 'running', finished_at = NULL
-          WHERE invocation_id = ?`,
-      ).run(invocationId);
-      envelope.facade.startRound({
-        roundId: `${invocationId}::round-2`,
-        invocationId,
+      updateExecutorAttemptState(db, attemptId, "succeeded", {
+        finishedAt: NOW,
+        now: NOW,
+      });
+      const retryAttemptId = deriveDispatchAttemptId(runId, stepId, 2);
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: retryAttemptId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executorFamily: "delegate-supervisor",
+          state: "running",
+          attemptNumber: 2,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      const retryEnvelope = createDurableExecutorEnvelope({
+        db,
+        attemptId: retryAttemptId,
+        now: () => NOW,
+      });
+      retryEnvelope.facade.startRound({
+        roundId: `${retryAttemptId}::round-2`,
+        attemptId: retryAttemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
         executorFamily: "delegate-supervisor",
-        attempt: 2,
+        attemptNumber: 2,
         roundIndex: 1,
         state: "capturing_result",
         agentProvider: null,
@@ -2734,15 +2791,18 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "unclassified-delegate-gate";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       envelope.applyDaemonDecision(
         {
           roundId,
           classification: "continue",
           executorRecommendation: "continue",
           roundState: "succeeded",
-          invocationState: "running",
+          attemptState: "running",
           recoveryCode: null,
           humanGate: null,
         },
@@ -2754,15 +2814,15 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           },
         },
       );
-      const gateRoundId = `${invocationId}::round-2`;
+      const gateRoundId = `${attemptId}::round-2`;
       envelope.facade.startRound({
         roundId: gateRoundId,
-        invocationId,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
         executorFamily: "delegate-supervisor",
-        attempt: 1,
+        attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",
         agentProvider: null,
@@ -2962,8 +3022,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "waiting-operator-gate-recovery";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       const decisionId = `${roundId}::decision`;
       envelope.facade.recordDecision(roundId, {
         decisionId,
@@ -2986,7 +3049,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           classification: "approval_required",
           executorRecommendation: "approval_required",
           roundState: "waiting_operator",
-          invocationState: "waiting_operator",
+          attemptState: "waiting_operator",
           recoveryCode: null,
           humanGate: "approval_required",
         },
@@ -3020,11 +3083,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
       expect(
         db
           .prepare(
-            "SELECT invocation_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
+            "SELECT attempt_id, round_id, evidence, resolved_at FROM workflow_gates WHERE workflow_run_id = ?",
           )
           .get(runId),
       ).toEqual({
-        invocation_id: invocationId,
+        attempt_id: attemptId,
         round_id: roundId,
         evidence: decisionId,
         resolved_at: null,
@@ -3045,8 +3108,11 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "interrupted-delegate-poll";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "continue",
@@ -3054,13 +3120,13 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         finishedAt: NOW,
       });
       envelope.facade.startRound({
-        roundId: `${invocationId}::round-2`,
-        invocationId,
+        roundId: `${attemptId}::round-2`,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
         executorFamily: "delegate-supervisor",
-        attempt: 1,
+        attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",
         agentProvider: null,
@@ -3154,23 +3220,26 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     try {
       const runId = "completed-delegate-poll";
       const stepId = "implementation";
-      const { envelope, invocationId, roundId } =
-        seedCheckpointedDelegateHandoff(db, runId, stepId);
+      const { envelope, attemptId, roundId } = seedCheckpointedDelegateHandoff(
+        db,
+        runId,
+        stepId,
+      );
       updateExecutorRound(db, roundId, {
         toState: "succeeded",
         classification: "continue",
         executorRecommendation: "continue",
         finishedAt: NOW,
       });
-      const pollRoundId = `${invocationId}::round-2`;
+      const pollRoundId = `${attemptId}::round-2`;
       envelope.facade.startRound({
         roundId: pollRoundId,
-        invocationId,
+        attemptId,
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
         executorFamily: "delegate-supervisor",
-        attempt: 1,
+        attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",
         agentProvider: null,

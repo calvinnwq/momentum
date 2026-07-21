@@ -122,7 +122,7 @@ export function buildLiveStepWrapperInput(
     config,
     runId: input.runId,
     stepId: input.stepId,
-    attempt: input.attempt,
+    attempt: input.attemptNumber,
     repoPath: input.repoPath,
     iterationDir: input.runDir,
     executorLogPath: input.executorLogPath,

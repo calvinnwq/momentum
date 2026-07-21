@@ -3,13 +3,13 @@
  *
  * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the
- * `<run>::<step>::dispatch` executor invocation (`running`) and its first round
+ * newest dispatch attempt (`running`) and its first round
  * (`pending`) with every evidence field empty, and holds the dispatch lease. The
  * reconciliation seam (`dispatch/reconcile-execute.ts`) then finalizes the
- * workflow step from that invocation's *terminal* executor state. Nothing in
- * production bridged the two: no code drove the scaffold's invocation/round from
+ * workflow step from that attempt's *terminal* executor state. Nothing in
+ * production bridged the two: no code drove the scaffold's attempt/round from
  * `running`/`pending` to a terminal state from a real executor result, so the
- * the reconciliation seam always deferred (the invocation stayed `running`).
+ * the reconciliation seam always deferred (the attempt stayed `running`).
  *
  * This module owns that bridge — the "produce real terminal executor evidence"
  * half the reconciliation seam named as its remaining prerequisite. Given a finished
@@ -18,9 +18,9 @@
  *
  *   1. decides, purely, which terminal executor state that result implies
  *      ({@link planDispatchedExecutorTerminalization}), and
- *   2. records that terminal state durably on the dispatch scaffold's invocation
+ *   2. records that terminal state durably on the dispatch scaffold's attempt
  *      and round, capturing the result's summary / log evidence
- *      ({@link terminalizeDispatchedExecutorInvocation}).
+ *      ({@link terminalizeDispatchedExecutorAttempt}).
  *
  * It deliberately never calls `finishWorkflowStep` or releases the dispatch
  * lease: per `executor-loop.md` ("Core Boundary: the daemon, not the executor,
@@ -33,7 +33,7 @@
  * never as a fake success):
  *
  *   - A clean executor terminal (`succeeded` / `failed`) records a matching clean
- *     terminal invocation the reconciliation seam decider maps to a clean workflow-step terminal.
+ *     terminal attempt the reconciliation seam decider maps to a clean workflow-step terminal.
  *   - A process-level executor failure (`ok: false` — e.g. the honest
  *     `runtime_unavailable` an unconfigured live wrapper returns, a timeout, a
  *     missing result document) records `manual_recovery_required`, so the reconciliation seam parks
@@ -42,29 +42,28 @@
  *     planning decision, never a dispatched-step outcome) also routes to manual
  *     recovery rather than a fabricated clean terminal.
  *
- * Idempotent on re-entry: once the dispatch invocation is terminal, a second call
+ * Idempotent on re-entry: once the dispatch attempt is terminal, a second call
  * preserves the immutable evidence and writes nothing, so a re-entered dispatch
  * tick cannot double-record or overwrite the bounded session's outcome.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
-  isTerminalExecutorInvocationState,
+  isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   type ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import {
-  listExecutorRoundsForInvocation,
-  loadExecutorInvocation,
-  updateExecutorInvocationState,
+  listExecutorRoundsForAttempt,
+  updateExecutorAttemptState,
   updateExecutorRound,
+  loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
 import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
 
 /**
  * The terminal executor evidence a finished {@link WorkflowStepExecutorDispatchResult}
- * implies for a dispatched step's scaffold invocation / round.
+ * implies for a dispatched step's scaffold attempt / round.
  *
  *   - `clean_terminal`: the bounded session reached a clean `succeeded` / `failed`
  *     terminal the reconciliation seam decider maps to a clean workflow-step terminal.
@@ -75,13 +74,13 @@ import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
 export type DispatchedExecutorTerminalizationPlan =
   | {
       outcome: "clean_terminal";
-      invocationState: "succeeded" | "failed";
+      attemptState: "succeeded" | "failed";
       roundState: "succeeded" | "failed";
       classification: "complete" | "failed";
     }
   | {
       outcome: "manual_recovery";
-      invocationState: "manual_recovery_required";
+      attemptState: "manual_recovery_required";
       roundState: "manual_recovery_required";
       classification: "manual_recovery_required";
       /** The precise executor cause, preserved on the round for recovery. */
@@ -108,14 +107,14 @@ export function planDispatchedExecutorTerminalization(
     case "succeeded":
       return {
         outcome: "clean_terminal",
-        invocationState: "succeeded",
+        attemptState: "succeeded",
         roundState: "succeeded",
         classification: "complete",
       };
     case "failed":
       return {
         outcome: "clean_terminal",
-        invocationState: "failed",
+        attemptState: "failed",
         roundState: "failed",
         classification: "failed",
       };
@@ -132,7 +131,7 @@ function manualRecoveryPlan(
 ): DispatchedExecutorTerminalizationPlan {
   return {
     outcome: "manual_recovery",
-    invocationState: "manual_recovery_required",
+    attemptState: "manual_recovery_required",
     roundState: "manual_recovery_required",
     classification: "manual_recovery_required",
     recoveryCode,
@@ -153,11 +152,11 @@ function readExecutorRecoveryCode(
  * tests, and operator surfaces. Each is a recorded outcome.
  */
 export const WORKFLOW_EXECUTOR_TERMINALIZE_STATUS = {
-  /** No `<run>::<step>::dispatch` invocation exists; nothing was written. */
+  /** No dispatch attempt rows exist for the step; nothing was written. */
   notDispatched: "terminalize_not_dispatched",
-  /** The dispatch invocation + round were recorded to a terminal state. */
+  /** The dispatch attempt + round were recorded to a terminal state. */
   terminalized: "terminalize_recorded",
-  /** The dispatch invocation was already terminal; the record was preserved. */
+  /** The dispatch attempt was already terminal; the record was preserved. */
   alreadyTerminal: "terminalize_already_terminal",
 } as const;
 
@@ -180,47 +179,46 @@ export type TerminalizeDispatchedExecutorResult = {
 
 /**
  * Record the dispatched step's executor result as terminal evidence on the
- * `<run>::<step>::dispatch` scaffold — the invocation and its first round — so the
+ * newest dispatch scaffold — the latest attempt and its rounds — so the
  * reconciliation seam can finalize the workflow step from it. Writes the
- * invocation/round transitions in one `BEGIN IMMEDIATE` transaction so a mid-write
- * failure can never leave a terminal invocation over a non-terminal round (or the
- * reverse). Idempotent: once the invocation is terminal, a re-entry preserves the
+ * attempt/round transitions in one `BEGIN IMMEDIATE` transaction so a mid-write
+ * failure can never leave a terminal attempt over a non-terminal round (or the
+ * reverse). Idempotent: once the attempt is terminal, a re-entry preserves the
  * immutable evidence and writes nothing.
  *
  * Never finalizes the workflow step or touches the dispatch lease: the reconciliation seam
  * remains the single owner of step finalization (`executor-loop.md` Core Boundary).
  */
-export function terminalizeDispatchedExecutorInvocation(
+export function terminalizeDispatchedExecutorAttempt(
   input: TerminalizeDispatchedExecutorInput,
 ): TerminalizeDispatchedExecutorResult {
   const { db, runId, stepId, result, now } = input;
-  const invocationId = deriveDispatchInvocationId(runId, stepId);
   const plan = planDispatchedExecutorTerminalization(result);
   const evidence = extractEvidence(result);
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const invocation = loadExecutorInvocation(db, invocationId);
-    if (invocation === undefined) {
-      // No phase-1 dispatch invocation: this step was never dispatched through the
+    const attempt = loadLatestExecutorAttemptForStep(db, runId, stepId);
+    if (attempt === undefined) {
+      // No phase-1 dispatch attempt: this step was never dispatched through the
       // executor-loop lane. The seam owns only dispatched scaffolds, so it writes nothing.
       db.exec("COMMIT");
       return {
         status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.notDispatched,
-        detail: invocationId,
+        detail: `${runId}::${stepId}`,
       };
     }
-    if (isTerminalExecutorInvocationState(invocation.state)) {
+    if (isTerminalExecutorAttemptState(attempt.state)) {
       // Re-read under the write lock so concurrent settlement cannot overwrite
       // immutable terminal evidence with a stale pre-transaction snapshot.
       db.exec("COMMIT");
       return {
         status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.alreadyTerminal,
-        detail: invocation.state,
+        detail: attempt.state,
       };
     }
 
-    const rounds = listExecutorRoundsForInvocation(db, invocationId);
+    const rounds = listExecutorRoundsForAttempt(db, attempt.attemptId);
     const round =
       rounds.find(
         (candidate) => !isTerminalExecutorRoundState(candidate.state),
@@ -228,7 +226,7 @@ export function terminalizeDispatchedExecutorInvocation(
     if (round !== undefined) {
       terminalizeRound(db, round, plan, evidence, now);
     }
-    updateExecutorInvocationState(db, invocationId, plan.invocationState, {
+    updateExecutorAttemptState(db, attempt.attemptId, plan.attemptState, {
       now,
       finishedAt: now,
     });
@@ -240,7 +238,7 @@ export function terminalizeDispatchedExecutorInvocation(
 
   return {
     status: WORKFLOW_EXECUTOR_TERMINALIZE_STATUS.terminalized,
-    detail: plan.invocationState,
+    detail: plan.attemptState,
   };
 }
 

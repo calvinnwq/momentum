@@ -1,10 +1,16 @@
 import type { MomentumDb } from "../../../adapters/db.js";
-import { insertExecutorRound } from "../../executors/loop/persist.js";
+import {
+  ExecutorAttemptConflictError,
+  ExecutorRoundConflictError,
+  insertExecutorAttempt,
+  insertExecutorRound,
+} from "../../executors/loop/persist.js";
 import type { ExecutorRoundRecord } from "../../executors/loop/reducer.js";
 import { isExecutorName, type ExecutorName } from "../definition/definition.js";
 import { refreshWorkflowRunRuntimeState } from "../run/runtime-state.js";
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "../run/events.js";
+import { deriveDispatchAttemptId } from "./attempt-ids.js";
 
 const GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
   "unsupported_platform",
@@ -25,7 +31,7 @@ const DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set(
   ],
 );
 
-type RetryableInvocationState = "manual_recovery_required" | "blocked";
+type RetryableAttemptState = "manual_recovery_required" | "blocked";
 
 type RetryableStepState = "approved" | "running";
 
@@ -45,10 +51,9 @@ export type RetryableDispatchedStepRecovery = {
   runId: string;
   stepId: string;
   kind: WorkflowStepKind;
-  invocationId: string;
+  attemptId: string;
   executorFamily: ExecutorName;
-  invocationState: RetryableInvocationState;
-  attempt: number;
+  attemptNumber: number;
   latestRoundIndex: number;
   recoveryCode: string;
   stepOrder: number;
@@ -60,11 +65,10 @@ type RetryableDispatchRow = {
   run_id: string;
   step_id: string;
   kind: string;
-  state: string;
-  invocation_id: string;
+  attempt_id: string;
   executor_family: string;
-  invocation_state: string;
-  attempt: number;
+  attempt_state: string;
+  attempt_number: number;
   round_index: number | null;
   recovery_code: string | null;
   step_order: number;
@@ -72,62 +76,56 @@ type RetryableDispatchRow = {
   started_at: number | null;
 };
 
+/**
+ * Find a claimed-state step whose newest dispatch attempt ended in a retryable
+ * terminal. Only the highest-numbered attempt is ever considered: earlier
+ * attempts are immutable history and can never be reopened or re-examined for
+ * retry eligibility.
+ */
 export function findRetryableDispatchedStepRecovery(
   db: MomentumDb,
   input: { runId: string; stepState: RetryableStepState },
 ): RetryableDispatchedStepRecovery | undefined {
   const rows = db
     .prepare(
-      `SELECT step_id, kind, state
-         FROM workflow_steps
-        WHERE run_id = ? AND state = ?
-        ORDER BY step_order, step_id`,
+      `SELECT s.run_id,
+              s.step_id,
+              s.kind,
+              s.step_order,
+              s.required,
+              s.started_at,
+              a.attempt_id,
+              a.executor_family,
+              a.state AS attempt_state,
+              a.attempt_number,
+              (SELECT MAX(step_round.round_index)
+                 FROM executor_rounds AS step_round
+                WHERE step_round.workflow_run_id = s.run_id
+                  AND step_round.step_run_id = s.step_id) AS round_index,
+              r.recovery_code
+         FROM workflow_steps AS s
+         JOIN executor_attempts AS a
+           ON a.workflow_run_id = s.run_id
+          AND a.step_run_id = s.step_id
+          AND a.attempt_number = (
+            SELECT MAX(latest.attempt_number)
+              FROM executor_attempts AS latest
+             WHERE latest.workflow_run_id = s.run_id
+               AND latest.step_run_id = s.step_id
+          )
+         LEFT JOIN executor_rounds AS r
+           ON r.attempt_id = a.attempt_id
+          AND r.round_index = (
+            SELECT MAX(round_index)
+              FROM executor_rounds
+             WHERE attempt_id = a.attempt_id
+          )
+        WHERE s.run_id = ? AND s.state = ?
+        ORDER BY s.step_order, s.step_id`,
     )
-    .all(input.runId, input.stepState) as Array<{
-    step_id: string;
-    kind: string;
-    state: string;
-  }>;
+    .all(input.runId, input.stepState) as RetryableDispatchRow[];
 
-  for (const step of rows) {
-    if (!isWorkflowStepKind(step.kind)) continue;
-    const invocationId = deriveDispatchRetryInvocationId(
-      input.runId,
-      step.step_id,
-    );
-    const row = db
-      .prepare(
-        `SELECT s.run_id,
-                s.step_id,
-                s.kind,
-                s.state,
-                s.step_order,
-                s.required,
-                s.started_at,
-                i.invocation_id,
-                i.executor_family,
-                i.state AS invocation_state,
-                i.attempt,
-                r.round_index,
-                r.recovery_code
-           FROM workflow_steps AS s
-           JOIN executor_invocations AS i
-             ON i.workflow_run_id = s.run_id
-            AND i.step_run_id = s.step_id
-            AND i.invocation_id = ?
-           LEFT JOIN executor_rounds AS r
-             ON r.invocation_id = i.invocation_id
-            AND r.round_index = (
-              SELECT MAX(round_index)
-                FROM executor_rounds
-               WHERE invocation_id = i.invocation_id
-            )
-          WHERE s.run_id = ?
-            AND s.step_id = ?
-            AND s.state = ?`,
-      )
-      .get(invocationId, input.runId, step.step_id, input.stepState) as
-      RetryableDispatchRow | undefined;
+  for (const row of rows) {
     const parsed = parseRetryableDispatchRow(row);
     if (parsed !== undefined) return parsed;
   }
@@ -141,8 +139,8 @@ export type PrepareRetryableDispatchedStepForClearResult =
       prepared: true;
       runId: string;
       stepId: string;
-      invocationId: string;
-      attempt: number;
+      attemptId: string;
+      attemptNumber: number;
       recoveryCode: string;
     };
 
@@ -179,22 +177,33 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
     prepared: true,
     runId: input.runId,
     stepId: retryable.stepId,
-    invocationId: retryable.invocationId,
-    attempt: retryable.attempt,
+    attemptId: retryable.attemptId,
+    attemptNumber: retryable.attemptNumber,
     recoveryCode: retryable.recoveryCode,
   };
 }
 
-export type ReopenRetryableDispatchInvocationResult =
-  | { reopened: false }
+export type StartRetryableDispatchAttemptResult =
+  | { started: false }
   | {
-      reopened: true;
-      invocationId: string;
-      attempt: number;
+      started: true;
+      attemptId: string;
+      attemptNumber: number;
       roundIndex: number;
     };
 
-export function reopenRetryableDispatchInvocationForAttempt(
+/**
+ * Start a fresh durable attempt for a step whose newest attempt ended in a
+ * retryable terminal. The prior attempt row and all of its rounds are left
+ * untouched: a retry is a new immutable attempt with the next `attemptNumber`,
+ * never a reopened or rewritten one. Fresh ids use the canonical derived shape
+ * when it is available and a deterministic suffix when preserved legacy data
+ * already occupies that unrestricted id. The attempt and its initial round are
+ * one savepoint-protected write, and round ids use the same collision-safe
+ * allocation. A concurrent retry still loses the unique step-attempt-number
+ * insert race and reports `started: false`.
+ */
+export function startRetryableDispatchAttempt(
   db: MomentumDb,
   input: {
     runId: string;
@@ -204,67 +213,122 @@ export function reopenRetryableDispatchInvocationForAttempt(
     selection?: RetryRoundSelection;
     executorOwnsRounds?: boolean;
   },
-): ReopenRetryableDispatchInvocationResult {
+): StartRetryableDispatchAttemptResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
     runId: input.runId,
     stepState: input.stepState ?? "approved",
   });
   if (retryable === undefined || retryable.stepId !== input.stepId) {
-    return { reopened: false };
+    return { started: false };
   }
 
-  const nextAttempt = retryable.attempt + 1;
+  const nextAttemptNumber = retryable.attemptNumber + 1;
+  const canonicalAttemptId = deriveDispatchAttemptId(
+    input.runId,
+    input.stepId,
+    nextAttemptNumber,
+  );
+  // Round indices stay monotone across the whole step (attempt after attempt),
+  // so cross-attempt round ordering is always (attemptNumber, roundIndex).
   const nextRoundIndex = retryable.latestRoundIndex + 1;
 
-  const updated = db
-    .prepare(
-      `UPDATE executor_invocations
-          SET state = 'running',
-              attempt = ?,
-              started_at = ?,
-              heartbeat_at = NULL,
-              finished_at = NULL,
-              updated_at = ?
-        WHERE invocation_id = ?
-          AND state = ?
-          AND attempt = ?`,
-    )
-    .run(
-      nextAttempt,
-      input.now,
-      input.now,
-      retryable.invocationId,
-      retryable.invocationState,
-      retryable.attempt,
+  const savepoint = "start_retryable_dispatch_attempt";
+  const rollback = (): void => {
+    db.exec(
+      `ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`,
     );
-  if (Number(updated.changes) === 0) return { reopened: false };
+  };
+  db.exec(`SAVEPOINT ${savepoint}`);
+  try {
+    let nextAttemptId = canonicalAttemptId;
+    let allocationSuffix = 0;
+    while (true) {
+      try {
+        insertExecutorAttempt(
+          db,
+          {
+            attemptId: nextAttemptId,
+            workflowRunId: retryable.runId,
+            stepRunId: retryable.stepId,
+            stepKey: retryable.stepId,
+            executorFamily: retryable.executorFamily,
+            state: "running",
+            attemptNumber: nextAttemptNumber,
+            startedAt: input.now,
+            heartbeatAt: null,
+            finishedAt: null,
+          },
+          { now: input.now },
+        );
+        break;
+      } catch (error) {
+        if (!(error instanceof ExecutorAttemptConflictError)) throw error;
+        const concurrentRetry = db
+          .prepare(
+            `SELECT 1
+               FROM executor_attempts
+              WHERE workflow_run_id = ?
+                AND step_run_id = ?
+                AND attempt_number = ?`,
+          )
+          .get(retryable.runId, retryable.stepId, nextAttemptNumber);
+        if (concurrentRetry !== undefined) {
+          rollback();
+          return { started: false };
+        }
+        allocationSuffix += 1;
+        nextAttemptId = `${canonicalAttemptId}::allocated-${allocationSuffix}`;
+      }
+    }
 
-  if (input.executorOwnsRounds !== true) {
-    insertExecutorRound(
-      db,
-      buildRetryRound(
+    if (input.executorOwnsRounds !== true) {
+      const canonicalRound = buildRetryRound(
         retryable,
-        nextAttempt,
+        nextAttemptId,
+        nextAttemptNumber,
         nextRoundIndex,
         input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
-      ),
-      { now: input.now },
-    );
+      );
+      let nextRoundId = canonicalRound.roundId;
+      let roundAllocationSuffix = 0;
+      while (true) {
+        try {
+          insertExecutorRound(
+            db,
+            { ...canonicalRound, roundId: nextRoundId },
+            { now: input.now },
+          );
+          break;
+        } catch (error) {
+          if (!(error instanceof ExecutorRoundConflictError)) throw error;
+          const concurrentRound = db
+            .prepare(
+              `SELECT 1
+                 FROM executor_rounds
+                WHERE attempt_id = ? AND round_index = ?`,
+            )
+            .get(nextAttemptId, nextRoundIndex);
+          if (concurrentRound !== undefined) {
+            rollback();
+            return { started: false };
+          }
+          roundAllocationSuffix += 1;
+          nextRoundId = `${canonicalRound.roundId}::allocated-${roundAllocationSuffix}`;
+        }
+      }
+    }
+
+    db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    return {
+      started: true,
+      attemptId: nextAttemptId,
+      attemptNumber: nextAttemptNumber,
+      roundIndex: nextRoundIndex,
+    };
+  } catch (error) {
+    rollback();
+    throw error;
   }
-
-  return {
-    reopened: true,
-    invocationId: retryable.invocationId,
-    attempt: nextAttempt,
-    roundIndex: nextRoundIndex,
-  };
-}
-
-export function deriveDispatchRetryInvocationId(
-  runId: string,
-  stepId: string,
-): string {
-  return `${runId}::${stepId}::dispatch`;
 }
 
 function parseRetryableDispatchRow(
@@ -282,7 +346,7 @@ function parseRetryableDispatchRow(
   if (
     row.round_index === null ||
     row.recovery_code === null ||
-    !isRetryableInvocationState(row.invocation_state, row.recovery_code) ||
+    !isRetryableAttemptState(row.attempt_state, row.recovery_code) ||
     !isRetryableDispatchRecovery(row.executor_family, row.recovery_code)
   ) {
     return undefined;
@@ -292,10 +356,9 @@ function parseRetryableDispatchRow(
     runId: row.run_id,
     stepId: row.step_id,
     kind: row.kind,
-    invocationId: row.invocation_id,
+    attemptId: row.attempt_id,
     executorFamily: row.executor_family,
-    invocationState: row.invocation_state,
-    attempt: row.attempt,
+    attemptNumber: row.attempt_number,
     latestRoundIndex: row.round_index,
     recoveryCode: row.recovery_code,
     stepOrder: row.step_order,
@@ -333,18 +396,19 @@ function appendRetryableStepStartedEventBeforeClear(
 
 function buildRetryRound(
   retryable: RetryableDispatchedStepRecovery,
-  attempt: number,
+  attemptId: string,
+  attemptNumber: number,
   roundIndex: number,
   selection: RetryRoundSelection,
 ): ExecutorRoundRecord {
   return {
-    roundId: `${retryable.invocationId}::round-${roundIndex}`,
-    invocationId: retryable.invocationId,
+    roundId: `${attemptId}::round-${roundIndex}`,
+    attemptId,
     workflowRunId: retryable.runId,
     stepRunId: retryable.stepId,
     stepKey: retryable.stepId,
     executorFamily: retryable.executorFamily,
-    attempt,
+    attemptNumber,
     roundIndex,
     state: "pending",
     classification: null,
@@ -386,12 +450,12 @@ function isRetryableDispatchRecovery(
   );
 }
 
-function isRetryableInvocationState(
-  invocationState: string,
+function isRetryableAttemptState(
+  attemptState: string,
   recoveryCode: string,
-): invocationState is RetryableInvocationState {
+): attemptState is RetryableAttemptState {
   return (
-    invocationState === "manual_recovery_required" ||
-    (invocationState === "blocked" && recoveryCode === "external_state_blocked")
+    attemptState === "manual_recovery_required" ||
+    (attemptState === "blocked" && recoveryCode === "external_state_blocked")
   );
 }

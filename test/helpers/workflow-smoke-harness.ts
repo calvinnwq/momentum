@@ -4,13 +4,13 @@ import path from "node:path";
 
 import {
   dispatchWorkflowStepExecutor,
-  type WorkflowStepExecutorInput
+  type WorkflowStepExecutorInput,
 } from "../../src/core/workflow/step/executor.js";
 import type { WorkflowStepKind } from "../../src/core/workflow/run/reducer.js";
 
 import {
   buildFakeWorkflowStepExecutorRegistry,
-  type FakeWorkflowStepExecutorOutcome
+  type FakeWorkflowStepExecutorOutcome,
 } from "./fake-workflow-step-executor.js";
 import { runCliBinary } from "./smoke-harness.js";
 
@@ -49,7 +49,7 @@ export const E2E_STEPS: E2EStep[] = [
   { stepId: "implementation", kind: "implementation" },
   { stepId: "postflight:1", kind: "postflight" },
   { stepId: "no-mistakes", kind: "no-mistakes" },
-  { stepId: "merge-cleanup", kind: "merge-cleanup" }
+  { stepId: "merge-cleanup", kind: "merge-cleanup" },
 ];
 
 export function writeM7EndToEndFixture(rootDir: string, runId: string): string {
@@ -68,28 +68,28 @@ export function writeM7EndToEndFixture(rootDir: string, runId: string): string {
         resolvedScope: {
           issues: ["NGX-318"],
           source: "explicit",
-          status: "resolved"
+          status: "resolved",
         },
         skillRevision: {
           contract: "coding-workflow-pipeline compact skill architecture",
           digest:
             "e2e0000000000000000000000000000000000000000000000000000000000000",
           version: "2026.05.25.01",
-          schemaVersion: 1
+          schemaVersion: 1,
         },
         approvalsRequired: [
           "implementation",
           "postflight:1",
           "no-mistakes",
-          "merge-cleanup"
+          "merge-cleanup",
         ],
         taskFlow: {
-          childTasks: E2E_STEPS.map((s) => ({ stepId: s.stepId }))
-        }
+          childTasks: E2E_STEPS.map((s) => ({ stepId: s.stepId })),
+        },
       },
       null,
-      2
-    )
+      2,
+    ),
   );
   fs.writeFileSync(
     path.join(runDir, "approval-through-merge-cleanup.json"),
@@ -102,11 +102,11 @@ export function writeM7EndToEndFixture(rootDir: string, runId: string): string {
         phrase: "through-merge-cleanup",
         approvedAt: "2026-05-25T09:00:00Z",
         approvalContract: "approve plan <run-id> <boundary>",
-        allowedSteps: E2E_STEPS.map((s) => s.stepId)
+        allowedSteps: E2E_STEPS.map((s) => s.stepId),
       },
       null,
-      2
-    )
+      2,
+    ),
   );
   fs.writeFileSync(path.join(runDir, "ledger.jsonl"), "");
   return runDir;
@@ -118,11 +118,11 @@ function safeStepBaseName(stepId: string): string {
 
 export function appendLedgerEvent(
   runDir: string,
-  event: Record<string, unknown>
+  event: Record<string, unknown>,
 ): void {
   fs.appendFileSync(
     path.join(runDir, "ledger.jsonl"),
-    `${JSON.stringify(event)}\n`
+    `${JSON.stringify(event)}\n`,
   );
 }
 
@@ -139,39 +139,39 @@ export function driveStepWithFakeExecutor(
   outcome: FakeWorkflowStepExecutorOutcome,
   startTs: string,
   endTs: string,
-  attempt = 1
+  attempt = 1,
 ): DriveStepResult {
   const baseName = safeStepBaseName(step.stepId);
   const resultJsonPath = path.join(runDir, `step-${baseName}.result.json`);
   const executorLogPath = path.join(runDir, `step-${baseName}.log`);
   fs.writeFileSync(
     executorLogPath,
-    `executor=${step.kind} step=${step.stepId} attempt=${attempt} outcome=${outcome}\n`
+    `executor=${step.kind} step=${step.stepId} attempt=${attempt} outcome=${outcome}\n`,
   );
 
   const input: WorkflowStepExecutorInput = {
     runId,
     stepId: step.stepId,
     kind: step.kind,
-    attempt,
+    attemptNumber: attempt,
     repoPath: runDir,
     runDir,
     resultJsonPath,
     executorLogPath,
-    config: { outcome }
+    config: { outcome },
   };
 
   const dispatch = dispatchWorkflowStepExecutor(
     step.kind,
     input,
-    FAKE_WORKFLOW_STEP_EXECUTOR_REGISTRY
+    FAKE_WORKFLOW_STEP_EXECUTOR_REGISTRY,
   );
 
   appendLedgerEvent(runDir, {
     runId,
     step: step.stepId,
     status: "started",
-    ts: startTs
+    ts: startTs,
   });
 
   if (!dispatch.ok) {
@@ -180,8 +180,8 @@ export function driveStepWithFakeExecutor(
       JSON.stringify(
         { ok: false, code: dispatch.code, error: dispatch.error },
         null,
-        2
-      )
+        2,
+      ),
     );
     appendLedgerEvent(runDir, {
       runId,
@@ -189,12 +189,12 @@ export function driveStepWithFakeExecutor(
       status: "failed",
       ts: endTs,
       errorCode: dispatch.code,
-      errorMessage: dispatch.error
+      errorMessage: dispatch.error,
     });
     return {
       executorOk: false,
       ledgerStatus: "failed",
-      errorCode: dispatch.code
+      errorCode: dispatch.code,
     };
   }
 
@@ -208,7 +208,7 @@ export function driveStepWithFakeExecutor(
       runId,
       step: step.stepId,
       status: "complete",
-      ts: endTs
+      ts: endTs,
     });
     return { executorOk: true, ledgerStatus: "complete", errorCode: null };
   }
@@ -219,18 +219,18 @@ export function driveStepWithFakeExecutor(
     status: "failed",
     ts: endTs,
     errorCode: dispatch.result.errorCode ?? "command_failed",
-    errorMessage: dispatch.result.errorMessage ?? `fake ${step.kind} failed`
+    errorMessage: dispatch.result.errorMessage ?? `fake ${step.kind} failed`,
   });
   return {
     executorOk: true,
     ledgerStatus: "failed",
-    errorCode: dispatch.result.errorCode
+    errorCode: dispatch.result.errorCode,
   };
 }
 
 export function importWorkflowRun(
   dataDir: string,
-  runDir: string
+  runDir: string,
 ): Record<string, unknown> {
   const result = runCliBinary([
     "workflow",
@@ -239,7 +239,7 @@ export function importWorkflowRun(
     runDir,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `workflow import stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -247,7 +247,7 @@ export function importWorkflowRun(
 
 export function workflowStatusJson(
   dataDir: string,
-  args: string[] = []
+  args: string[] = [],
 ): Record<string, unknown> {
   const result = runCliBinary([
     "workflow",
@@ -255,7 +255,7 @@ export function workflowStatusJson(
     ...args,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `workflow status stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -263,7 +263,7 @@ export function workflowStatusJson(
 
 export function workflowHandoffJson(
   dataDir: string,
-  runId: string
+  runId: string,
 ): Record<string, unknown> {
   const result = runCliBinary([
     "workflow",
@@ -271,7 +271,7 @@ export function workflowHandoffJson(
     runId,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `workflow handoff stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -279,7 +279,7 @@ export function workflowHandoffJson(
 
 export function workflowRunListJson(
   dataDir: string,
-  args: string[] = []
+  args: string[] = [],
 ): Record<string, unknown> {
   const result = runCliBinary([
     "workflow",
@@ -288,7 +288,7 @@ export function workflowRunListJson(
     ...args,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `workflow run list stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;
@@ -296,7 +296,7 @@ export function workflowRunListJson(
 
 export function workflowRunMonitorJson(
   dataDir: string,
-  runId: string
+  runId: string,
 ): Record<string, unknown> {
   const result = runCliBinary([
     "workflow",
@@ -305,7 +305,7 @@ export function workflowRunMonitorJson(
     runId,
     "--data-dir",
     dataDir,
-    "--json"
+    "--json",
   ]);
   expect(result.code, `workflow run monitor stderr: ${result.stderr}`).toBe(0);
   return JSON.parse(result.stdout) as Record<string, unknown>;

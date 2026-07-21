@@ -224,7 +224,7 @@ export function createOneShotLiveWrapperRoundRunner(
       config,
       runId: round.workflowRunId,
       stepId: round.stepRunId,
-      attempt: round.attempt,
+      attempt: round.attemptNumber,
       ...(options.hostIdentity?.agent?.harness !== undefined
         ? { agentProvider: options.hostIdentity.agent.harness }
         : {}),

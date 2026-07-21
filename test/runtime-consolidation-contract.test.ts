@@ -68,7 +68,7 @@ describe("runtime consolidation contract", () => {
       planWorkflowStepReconciliation("manual_recovery_required"),
     ).toMatchObject({
       action: "manual_recovery",
-      invocationState: "manual_recovery_required",
+      attemptState: "manual_recovery_required",
     });
   });
 

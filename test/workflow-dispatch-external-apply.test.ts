@@ -17,7 +17,7 @@ import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dis
  * NGX-496 (RC-3) — the pure half of the daemon-dispatchable external-apply
  * adapter: translate an M6 `executeExternalApply` outcome into the
  * `WorkflowStepExecutorDispatchResult` evidence the existing terminalize bridge
- * (`terminalizeDispatchedExecutorInvocation`) consumes, so a dispatched
+ * (`terminalizeDispatchedExecutorAttempt`) consumes, so a dispatched
  * external-apply step can record durable terminal executor evidence the RC-2
  * reconciliation seam finalizes exactly once — reusing the M6 write path rather
  * than inventing a second one.
@@ -273,7 +273,7 @@ describe("mapExternalApplyResultToExecutorResult — composes with the terminali
     );
     expect(planDispatchedExecutorTerminalization(mapped)).toEqual({
       outcome: "clean_terminal",
-      invocationState: "succeeded",
+      attemptState: "succeeded",
       roundState: "succeeded",
       classification: "complete",
     });
@@ -286,6 +286,6 @@ describe("mapExternalApplyResultToExecutorResult — composes with the terminali
     );
     const plan = planDispatchedExecutorTerminalization(mapped);
     expect(plan.outcome).toBe("manual_recovery");
-    expect(plan.invocationState).toBe("manual_recovery_required");
+    expect(plan.attemptState).toBe("manual_recovery_required");
   });
 });

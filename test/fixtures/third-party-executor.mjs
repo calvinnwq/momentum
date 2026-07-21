@@ -16,16 +16,16 @@ export default {
       // Deliberately occupy the main event loop to prove lease heartbeats run
       // independently from synchronous third-party executor work.
     }
-    const invocation = context.state.invocation;
+    const attempt = context.state.attempt;
     const index = context.state.rounds.length + 1;
     const round = context.envelope.startRound({
-      roundId: `${invocation.invocationId}::round-${index}`,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
+      roundId: `${attempt.attemptId}::round-${index}`,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
       roundIndex: context.state.rounds.length,
       state: "capturing_result",
       agentProvider: null,
@@ -48,7 +48,7 @@ export default {
       roundId: round.roundId,
       recommendation: complete ? "complete" : "continue",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: complete ? "succeeded" : "running",
+      recommendedAttemptState: complete ? "succeeded" : "running",
       recoveryCode: null,
       humanGate: null,
       reason: complete

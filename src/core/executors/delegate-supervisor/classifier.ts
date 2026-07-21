@@ -30,7 +30,7 @@ function manualRecovery(
   return {
     classification: "manual_recovery_required",
     roundState: "manual_recovery_required",
-    invocationState: "manual_recovery_required",
+    attemptState: "manual_recovery_required",
     humanGate: "manual_recovery_required",
     recoveryCode,
     reason,
@@ -208,7 +208,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "continue",
         roundState: "mirroring_external_state",
-        invocationState: "running",
+        attemptState: "running",
         humanGate: null,
         recoveryCode: null,
         reason: `${subject} run is still in progress; keep mirroring`,
@@ -232,7 +232,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "operator_decision_required",
         roundState: "waiting_operator",
-        invocationState: "waiting_operator",
+        attemptState: "waiting_operator",
         humanGate: "operator_decision_required",
         recoveryCode: null,
         reason: `${subject} run surfaced a decision; pausing for an operator decision`,
@@ -242,7 +242,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "approval_required",
         roundState: "waiting_operator",
-        invocationState: "waiting_operator",
+        attemptState: "waiting_operator",
         humanGate: "approval_required",
         recoveryCode: null,
         reason: `${subject} run reached an approval boundary; pausing for approval`,
@@ -251,7 +251,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "blocked",
         roundState: "blocked",
-        invocationState: "blocked",
+        attemptState: "blocked",
         humanGate: "external_state_required",
         recoveryCode: "external_state_blocked",
         reason: `${subject} run is blocked on external state; resolve it and re-run`,
@@ -260,7 +260,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "failed",
         roundState: "failed",
-        invocationState: "failed",
+        attemptState: "failed",
         humanGate: null,
         recoveryCode: "external_run_failed",
         reason: `${subject} run failed`,
@@ -306,7 +306,7 @@ export function classifyDelegateSupervisorState(
       return {
         classification: "complete",
         roundState: "succeeded",
-        invocationState: "succeeded",
+        attemptState: "succeeded",
         humanGate: null,
         recoveryCode: null,
         reason: `${subject} run completed with passing CI and resolved decisions`,

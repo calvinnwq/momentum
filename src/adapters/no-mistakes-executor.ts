@@ -17,19 +17,19 @@
  *   - PR URL and CI state.
  *
  * This module preserves the legacy `no-mistakes` family API for recorded
- * invocations: the {@link NoMistakesExternalState} snapshot aliases, durable
- * finding / decision projections, and deterministic invocation / round
+ * attempts: the {@link NoMistakesExternalState} snapshot aliases, durable
+ * finding / decision projections, and deterministic attempt / round
  * identity. Classification delegates to the shared
  * `delegate-supervisor/classifier.ts` authority, so compatibility callers and
  * current tool adapters cannot drift. Like `single-shot/executor.ts` and
  * `goal-loop/executor.ts`, these compatibility helpers are pure functions of
- * their inputs: no SQLite, file system, git, or executor invocation. The legacy
+ * their inputs: no SQLite, file system, git, or executor attempt. The legacy
  * mechanism / orchestrator siblings layer external-state reading and durable
  * persistence on top; current coding definitions instead use the
  * `delegate-supervisor` executor with `tool: "no-mistakes"`.
  *
  * External state is evidence to classify, not trusted authority.
- * Unlike `decideSingleShotInvocation`, which classifies an outcome Momentum's
+ * Unlike `decideSingleShotAttempt`, which classifies an outcome Momentum's
  * own mechanism produced and therefore throws on an unknown code,
  * {@link decideNoMistakesMirror} classifies external evidence and is
  * total: any malformed, contradictory, or unrecognized snapshot routes to
@@ -59,7 +59,7 @@
  *     completion evidence.
  *   - `blocked` is `blocked` (`external_state_blocked`) with an
  *     `external_state_required` gate naming the blocker; the round ends blocked
- *     while the workflow may later start a fresh invocation once the blocker
+ *     while the workflow may later start a fresh attempt once the blocker
  *     clears.
  *   - A structurally unreadable snapshot (empty run id, malformed head SHA, a
  *     selected finding id with no surfaced finding, an empty finding title, a
@@ -79,8 +79,8 @@ import type {
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
   ExecutorHumanGateType,
-  ExecutorInvocationRecord,
-  ExecutorInvocationState,
+  ExecutorAttemptRecord,
+  ExecutorAttemptState,
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily,
@@ -223,14 +223,14 @@ export type NoMistakesExternalState = {
  * The daemon's decision for one mirrored no-mistakes snapshot. Unlike the
  * single-shot decision, a no-mistakes decision is not always terminal: a
  * still-running external run is `continue` (the round stays in
- * `mirroring_external_state`, the invocation stays `running`), and a gate is
+ * `mirroring_external_state`, the attempt stays `running`), and a gate is
  * `waiting_operator` (a durable, non-terminal pause). `recoveryCode` is a
  * {@link NoMistakesRecoveryCode} for any non-clean settle, or `null` otherwise.
  */
 export type NoMistakesMirrorDecision = {
   classification: ExecutorCompletionClassification;
   roundState: ExecutorRoundState;
-  invocationState: ExecutorInvocationState;
+  attemptState: ExecutorAttemptState;
   humanGate: ExecutorHumanGateType | null;
   recoveryCode: NoMistakesRecoveryCode | null;
   reason: string;
@@ -278,71 +278,71 @@ export function decideNoMistakesUnreadable(
 }
 
 /**
- * Mint the deterministic, reattachable executor-invocation id for a no-mistakes
+ * Mint the deterministic, reattachable executor-attempt id for a no-mistakes
  * mirror under a step run. The id embeds the `(workflowRunId, stepRunId)`
  * step-run identity, the `no-mistakes` family, and the `attempt`, so it is
  * globally unique yet recomputable from durable state alone. A re-run of the step is a fresh `attempt`, so it never collides
  * with the prior mirror.
  */
-export function noMistakesInvocationId(
+export function noMistakesAttemptId(
   workflowRunId: string,
   stepRunId: string,
-  attempt: number,
+  attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR_FAMILY}::${attempt}`;
+  return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR_FAMILY}::${attemptNumber}`;
 }
 
 /**
  * Mint the deterministic, reattachable round id for the single mirror round under
- * a no-mistakes invocation. The mirror is one long-lived round (index 0) that
+ * a no-mistakes attempt. The mirror is one long-lived round (index 0) that
  * lives in `mirroring_external_state` while the external run is in progress, so
- * the id is fixed by the invocation id alone — consistent with the
- * `(invocation_id, round_index)` uniqueness the persistence layer enforces.
+ * the id is fixed by the attempt id alone — consistent with the
+ * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
-export function noMistakesRoundId(invocationId: string): string {
-  return `${invocationId}::round::0`;
+export function noMistakesRoundId(attemptId: string): string {
+  return `${attemptId}::round::0`;
 }
 
 /**
- * The `StepRun` identity {@link planNoMistakesInvocation} projects into a durable
- * no-mistakes {@link ExecutorInvocationRecord}: the `(workflowRunId, stepRunId)`
+ * The `StepRun` identity {@link planNoMistakesAttempt} projects into a durable
+ * no-mistakes {@link ExecutorAttemptRecord}: the `(workflowRunId, stepRunId)`
  * step run, the step key, the re-run `attempt`, and the start clock the
  * orchestrator owns. There is no `family` field — the mirror serves exactly the
  * `no-mistakes` family — unlike the single-shot projection that carries a chosen
  * `one-shot` / `script` family.
  */
-export type PlanNoMistakesInvocationInput = {
+export type PlanNoMistakesAttemptInput = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  attempt: number;
-  /** Invocation start clock; stamped as `started_at` and the initial `heartbeat_at`. */
+  attemptNumber: number;
+  /** Attempt start clock; stamped as `started_at` and the initial `heartbeat_at`. */
   startedAt: number;
 };
 
 /**
  * Project a `StepRun` identity into the durable no-mistakes
- * {@link ExecutorInvocationRecord} the orchestrator twin inserts before the mirror
+ * {@link ExecutorAttemptRecord} the orchestrator twin inserts before the mirror
  * round runs. One configured mirror session for the step, materialized at
- * `running` with the deterministic {@link noMistakesInvocationId} and the start
+ * `running` with the deterministic {@link noMistakesAttemptId} and the start
  * clock copied in. Pure: no ids or clocks are invented beyond the supplied
- * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh invocation.
+ * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh attempt.
  */
-export function planNoMistakesInvocation(
-  input: PlanNoMistakesInvocationInput,
-): ExecutorInvocationRecord {
+export function planNoMistakesAttempt(
+  input: PlanNoMistakesAttemptInput,
+): ExecutorAttemptRecord {
   return {
-    invocationId: noMistakesInvocationId(
+    attemptId: noMistakesAttemptId(
       input.workflowRunId,
       input.stepRunId,
-      input.attempt,
+      input.attemptNumber,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
     executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
     state: "running",
-    attempt: input.attempt,
+    attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
     finishedAt: null,
@@ -364,22 +364,22 @@ export type NoMistakesRoundRuntimeInputs = {
 
 /**
  * The inputs to {@link planNoMistakesRoundStart}: the materialized no-mistakes
- * invocation (whose identity and family the single mirror round inherits), the
+ * attempt (whose identity and family the single mirror round inherits), the
  * per-round runtime inputs, and the round start clock. There is no round index — a
  * mirror is always the one long-lived round at index 0 — and no resolved
  * agent/model selection, because no-mistakes owns its own pipeline (the mirror
  * reflects external state, it never drives an agent Momentum chose).
  */
 export type PlanNoMistakesRoundStartInput = {
-  invocation: ExecutorInvocationRecord;
+  attempt: ExecutorAttemptRecord;
   runtime: NoMistakesRoundRuntimeInputs;
   startedAt: number;
 };
 
 /**
- * Project a materialized invocation + per-round runtime inputs into the durable
+ * Project a materialized attempt + per-round runtime inputs into the durable
  * round-start {@link ExecutorRoundRecord} the orchestrator inserts before it begins
- * mirroring. The round inherits the invocation's
+ * mirroring. The round inherits the attempt's
  * `(workflowRunId, stepRunId, stepKey, attempt)` identity and its `no-mistakes`
  * family, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
  * the round's input digest / artifact root / log paths.
@@ -397,26 +397,26 @@ export type PlanNoMistakesRoundStartInput = {
  * Pure: no ids or clock are invented here, so later config edits cannot rewrite
  * the historical record for an already-started round.
  *
- * @throws {Error} if the invocation's family is not `no-mistakes` — the mirror
- * round must inherit the family {@link planNoMistakesInvocation} establishes.
+ * @throws {Error} if the attempt's family is not `no-mistakes` — the mirror
+ * round must inherit the family {@link planNoMistakesAttempt} establishes.
  */
 export function planNoMistakesRoundStart(
   input: PlanNoMistakesRoundStartInput,
 ): ExecutorRoundRecord {
-  const { invocation, runtime } = input;
-  if (!isNoMistakesExecutorFamily(invocation.executorFamily)) {
+  const { attempt, runtime } = input;
+  if (!isNoMistakesExecutorFamily(attempt.executorFamily)) {
     throw new Error(
-      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`,
+      `planNoMistakesRoundStart: attempt ${attempt.attemptId} has non-no-mistakes family ${attempt.executorFamily}; the mirror round must inherit the no-mistakes family`,
     );
   }
   return {
-    roundId: noMistakesRoundId(invocation.invocationId),
-    invocationId: invocation.invocationId,
-    workflowRunId: invocation.workflowRunId,
-    stepRunId: invocation.stepRunId,
-    stepKey: invocation.stepKey,
+    roundId: noMistakesRoundId(attempt.attemptId),
+    attemptId: attempt.attemptId,
+    workflowRunId: attempt.workflowRunId,
+    stepRunId: attempt.stepRunId,
+    stepKey: attempt.stepKey,
     executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
-    attempt: invocation.attempt,
+    attemptNumber: attempt.attemptNumber,
     roundIndex: 0,
     state: "mirroring_external_state",
     classification: null,

@@ -11,10 +11,14 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
-  type WorkflowRunDetail
+  type WorkflowRunDetail,
 } from "./status.js";
 
-export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 1;
+/**
+ * Version 2 renamed the embedded gate anchor `invocationId` to `attemptId`
+ * alongside the attempt/round model migration.
+ */
+export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 2;
 
 export type LoadWorkflowHandoffOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
@@ -29,7 +33,7 @@ export type WorkflowHandoffEnvelope = {
 export function loadWorkflowHandoff(
   db: MomentumDb,
   runId: string,
-  options: LoadWorkflowHandoffOptions = {}
+  options: LoadWorkflowHandoffOptions = {},
 ): WorkflowHandoffEnvelope | null {
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
@@ -37,6 +41,6 @@ export function loadWorkflowHandoff(
   return {
     schemaVersion: WORKFLOW_HANDOFF_SCHEMA_VERSION,
     generatedAt,
-    detail
+    detail,
   };
 }

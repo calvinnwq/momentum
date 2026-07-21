@@ -100,8 +100,10 @@ The native goal-loop, single-shot, and live-step lifecycles record replay-safe `
 paths. The registered host-binding resolver keeps portable step config separate
 from executable paths, environment, repo ownership, verification, and commit-or-
 reset policy. Missing host bindings become precise durable recovery evidence
-rather than escaping across the scheduler boundary. `dispatch/retry.ts` reopens
-the same deterministic invocation with the next attempt. Ordinary live-wrapper
+rather than escaping across the scheduler boundary. `dispatch/retry.ts` inserts
+a fresh immutable attempt with the next attempt number, while the step-scoped
+dispatch correlation keeps repo-lock and delegate-handoff identity stable
+across retries. Ordinary live-wrapper
 evidence uses `attempt-<n>/` for later attempts, while delegate-supervisor
 evidence is first isolated beneath `delegate/<step-id>/`.
 The step-scoped `delegate-handoff.json` receipt records no-mistakes launch intent before process start and generic delegate reset or commit intent before repository mutation.
@@ -113,14 +115,14 @@ Repository ownership and commit evidence are checked again immediately before th
 Finalized profile-backed delegate state must match the repository's current full `HEAD`.
 After a durable handoff intent or completed handoff exists, an unclassified running, capturing-result, or `mirroring_external_state` round remains scheduler-resumable across stale auto-release dispatch-lease recovery instead of being parked or relaunched.
 A completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history is likewise scheduler-resumable.
-An invocation classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
-An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same invocation can finish classification and gate parking.
-A scheduler pass that releases a stale dispatch owner can transfer the same invocation's matching active repo lock to the replacement holder before the longer repo lock expires, with full identity compare-and-swap fencing.
+An attempt classified `waiting_operator` before a crash reuses or recreates its workflow gate from the durable decision selector and unresolved decision when stale dispatch recovery releases the abandoned lease.
+An earlier crash after the delegate persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation leaves the unclassified round resumable so the same attempt can finish classification and gate parking.
+A scheduler pass that releases a stale dispatch owner can transfer the same dispatch correlation's matching active repo lock to the replacement holder before the longer repo lock expires, with full identity compare-and-swap fencing.
 A valid non-terminal handoff is reconciled through adapter recovery before reuse across retry attempts.
 For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 A local wrapper-finalization failure first triggers a correlated status read on the newer attempt.
 A failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
-Only the invocation's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
+Only the attempt's first completed delegate handoff may receive an immediate second tick in its dispatcher pass; later passes and retry attempts use one tick.
 
 The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply.ts` maps the external-apply result into executor evidence,
@@ -153,7 +155,7 @@ compatibility.
 Before spawning, the helper validates that the run-local config has only a `steps` object and canonical snake_case per-step keys, rejects malformed `env_allow` and unsafe or mismatched `result_file` values as setup failures, and writes no runner evidence for rejected configs.
 The no-mistakes step also requires an explicit `runner_profile` with `interface: "axi"`, `stdin: "closed"`, `agent` set to one of `claude`, `codex`, `opencode`, or `rovodev`, `required_env` containing the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and an absolute executable `agent_path`; missing profile fields, missing filtered environment, `agent=auto`, a missing/non-executable agent path, or a no-mistakes `agent` / `agent_path_override.<agent>` mismatch fail closed before the no-mistakes command is spawned.
 The no-mistakes config check reads `HOME/.no-mistakes/config.yaml` with YAML semantics, accepts aliases and reordered top-level keys, and rejects malformed YAML, duplicate keys, non-mapping overrides, nested-only overrides, missing separators, and non-absolute override paths before any no-mistakes child process is spawned.
-For current coding definitions, that wrapper invocation is the no-mistakes handoff beneath `delegate-supervisor`; later ticks call the validated no-mistakes executable with `axi status --run <external-run-id>` and normalize the correlated run id, branch, current head commit id, findings, decisions, pull request, and CI state through `src/adapters/no-mistakes-tool-adapter.ts`.
+For current coding definitions, that wrapper launch is the no-mistakes handoff beneath `delegate-supervisor`; later ticks call the validated no-mistakes executable with `axi status --run <external-run-id>` and normalize the correlated run id, branch, current head commit id, findings, decisions, pull request, and CI state through `src/adapters/no-mistakes-tool-adapter.ts`.
 For `no-mistakes`, the helper also normalizes upstream terminal-success evidence: `checks-passed`, or a still-monitoring upstream run with current clean pull request evidence and green or explicitly absent checks, becomes successful runner evidence only when current blockers, active findings, unresolved gates, dirty / draft pull request state, and non-successful checks are absent.
 It parks missing branch-start state and current no-mistakes cancellation status or outcome evidence as retryable setup recovery instead of terminal failed verification.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, guarded `clear-recovery` can reconcile only the failed required `no-mistakes` step with either legacy `no-mistakes:<run-id>#checks-passed` evidence or a readable structured deterministic evidence JSON file.
@@ -185,7 +187,7 @@ Status, handoff, monitor, and logs expose the selected `route.steps` through dur
 The start and preview doors use it to validate built-in definition lookup, required run shape, approval boundary, issue scope, route profile, route steps, registered executor presence, and portable config against each registered declaration before durable writes.
 It emits compact `preflightEvidence` objects with stable fields (`checkId`, `status`, `severity`, `path`, `key`, `message`, `recommendedAction`) so CLI clients can fix setup without parsing prose.
 It also exposes wrapper config validation for canonical snake_case keys, env allowlists, timeouts, safe or expected result files, no-mistakes runner-profile shape, no-mistakes runner required-env allowlist coverage, and the merge-cleanup target shape, while GitHub, Linear, no-mistakes external config, and other side-effect checks stay inside the step that owns the side effect.
-Native `goal-loop` round evidence is currently consumed by `workflow run logs` from executor invocation / round rows and child evidence.
+Native `goal-loop` round evidence is currently consumed by `workflow run logs` from executor attempt / round rows and child evidence.
 Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
 
 The GUI-safe supervisor contract sits behind `workflow run watch --once`.

@@ -113,25 +113,25 @@ function seedRetryableDelegateRecovery(
 ): {
   runId: string;
   stepId: string;
-  invocationId: string;
+  attemptId: string;
   at: number;
   lockId: string;
 } {
   const runId = "run-delegate-retry";
   const stepId = "implementation";
-  const invocationId = `${runId}::${stepId}::dispatch`;
+  const attemptId = `${runId}::${stepId}::dispatch`;
   const at = 1_730_000_500_000;
   const executorFamily = options.executorFamily ?? "delegate-supervisor";
   const recoveryCode = options.recoveryCode ?? "delegate_handoff_failed";
   seedRun(db, runId);
   seedStep(db, runId, stepId, "running", { at });
   db.prepare(
-    `INSERT INTO executor_invocations (
-       invocation_id, workflow_run_id, step_run_id, step_key,
-       executor_family, state, attempt, started_at, created_at, updated_at
+    `INSERT INTO executor_attempts (
+       attempt_id, workflow_run_id, step_run_id, step_key,
+       executor_family, state, attempt_number, started_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    invocationId,
+    attemptId,
     runId,
     stepId,
     stepId,
@@ -144,13 +144,13 @@ function seedRetryableDelegateRecovery(
   );
   db.prepare(
     `INSERT INTO executor_rounds (
-       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt, round_index, state, recovery_code,
+       round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt_number, round_index, state, recovery_code,
        created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    `${invocationId}::round-2`,
-    invocationId,
+    `${attemptId}::round-2`,
+    attemptId,
     runId,
     stepId,
     stepId,
@@ -172,7 +172,7 @@ function seedRetryableDelegateRecovery(
     holder: "delegate-worker",
     goalId: runId,
     iteration: 2,
-    jobId: invocationId,
+    jobId: attemptId,
     leaseExpiresAt: at + 30_000,
     now: at,
   });
@@ -183,7 +183,7 @@ function seedRetryableDelegateRecovery(
     recoveryStatus: "unproven delegated handoff",
   });
   if (!parked.ok) throw new Error("failed to park delegate repo lock");
-  return { runId, stepId, invocationId, at, lockId: acquired.lockId };
+  return { runId, stepId, attemptId, at, lockId: acquired.lockId };
 }
 
 function seedNoMistakesCheckpoint(
@@ -203,8 +203,8 @@ function seedNoMistakesCheckpoint(
 ): void {
   const at = options.at ?? 1_730_000_000_000;
   const executorFamily = options.executorFamily ?? "no-mistakes";
-  const invocationId = `${runId}::${stepId}::dispatch`;
-  const roundId = `${invocationId}::round-0`;
+  const attemptId = `${runId}::${stepId}::dispatch`;
+  const roundId = `${attemptId}::round-0`;
   const externalState = {
     externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
     branch: options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
@@ -252,12 +252,12 @@ function seedNoMistakesCheckpoint(
               : {}),
           };
   db.prepare(
-    `INSERT INTO executor_invocations (
-       invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
-       state, attempt, started_at, heartbeat_at, created_at, updated_at
+    `INSERT INTO executor_attempts (
+       attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+       state, attempt_number, started_at, heartbeat_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    invocationId,
+    attemptId,
     runId,
     stepId,
     stepId,
@@ -271,12 +271,12 @@ function seedNoMistakesCheckpoint(
   );
   db.prepare(
     `INSERT INTO executor_rounds (
-       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt, round_index, state, created_at, updated_at
+       round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt_number, round_index, state, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     roundId,
-    invocationId,
+    attemptId,
     runId,
     stepId,
     stepId,
@@ -302,7 +302,7 @@ function seedNoMistakesCheckpoint(
       executorFamily === "delegate-supervisor"
         ? {
             tool: options.delegateTool ?? "no-mistakes",
-            invocationId,
+            attemptId,
             attempt: 1,
           }
         : checkpointDetail,
@@ -703,14 +703,14 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
-      const { runId, stepId, invocationId, at, lockId } =
+      const { runId, stepId, attemptId, at, lockId } =
         seedRetryableDelegateRecovery(db);
       const priorAttempt = acquireRepoLock(db, {
         repoRoot: "/repos/prior-attempt-recovery",
         holder: "other-worker",
         goalId: runId,
         iteration: 1,
-        jobId: invocationId,
+        jobId: attemptId,
         leaseExpiresAt: at + 30_000,
         now: at,
       });
@@ -723,8 +723,8 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       ) {
         throw new Error("failed to park prior-attempt repo lock");
       }
-      const otherInvocation = acquireRepoLock(db, {
-        repoRoot: "/repos/other-invocation-recovery",
+      const otherOwnerLock = acquireRepoLock(db, {
+        repoRoot: "/repos/other-attempt-recovery",
         holder: "other-worker",
         goalId: runId,
         iteration: 2,
@@ -732,14 +732,14 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         leaseExpiresAt: at + 30_000,
         now: at,
       });
-      if (!otherInvocation.ok) throw new Error(otherInvocation.reason);
+      if (!otherOwnerLock.ok) throw new Error(otherOwnerLock.reason);
       if (
         !markRepoLockNeedsManualRecovery(db, {
-          lockId: otherInvocation.lockId,
+          lockId: otherOwnerLock.lockId,
           now: at + 1,
         }).ok
       ) {
-        throw new Error("failed to park other-invocation repo lock");
+        throw new Error("failed to park other-attempt repo lock");
       }
 
       expect(
@@ -765,7 +765,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       expect(
         db
           .prepare("SELECT state FROM repo_locks WHERE id = ?")
-          .get(otherInvocation.lockId),
+          .get(otherOwnerLock.lockId),
       ).toEqual({ state: "needs_manual_recovery" });
       expect(
         acquireRepoLock(db, {
@@ -773,7 +773,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           holder: "retry-worker",
           goalId: runId,
           iteration: 3,
-          jobId: invocationId,
+          jobId: attemptId,
           leaseExpiresAt: at + 60_000,
           now: at + 3,
         }).ok,
@@ -1274,8 +1274,8 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     try {
       const runId = "run-ngx-561";
       const stepId = "no-mistakes";
-      const invocationId = `${runId}::${stepId}::dispatch`;
-      const roundId = `${invocationId}::round-1`;
+      const retryAttemptId = `${runId}::${stepId}::attempt-2`;
+      const roundId = `${retryAttemptId}::round-2`;
       seedRunWithState(db, runId, "failed", {
         finishedAt: 1_730_000_800_000,
         issueScope: { identifiers: ["NGX-561"] },
@@ -1289,18 +1289,33 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         delegateCheckpoint: "mirrored",
       });
       db.prepare(
-        `UPDATE executor_invocations
-            SET attempt = 2, updated_at = ?
-          WHERE invocation_id = ?`,
-      ).run(1_730_000_100_000, invocationId);
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+           state, attempt_number, started_at, heartbeat_at, created_at,
+           updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        retryAttemptId,
+        runId,
+        stepId,
+        stepId,
+        "delegate-supervisor",
+        "running",
+        2,
+        1_730_000_100_000,
+        1_730_000_100_000,
+        1_730_000_100_000,
+        1_730_000_100_000,
+      );
       db.prepare(
         `INSERT INTO executor_rounds (
-           round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-           executor_family, attempt, round_index, state, created_at, updated_at
+           round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+           executor_family, attempt_number, round_index, state, created_at,
+           updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         roundId,
-        invocationId,
+        retryAttemptId,
         runId,
         stepId,
         stepId,
@@ -1320,7 +1335,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         roundId,
         0,
         "delegate_handoff_intent",
-        JSON.stringify({ tool: "no-mistakes", invocationId, attempt: 2 }),
+        JSON.stringify({
+          tool: "no-mistakes",
+          attemptId: retryAttemptId,
+          attempt: 2,
+        }),
         1_730_000_100_000,
       );
       const evidence = JSON.parse(

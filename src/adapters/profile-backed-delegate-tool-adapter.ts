@@ -43,8 +43,8 @@ export function resolveDelegateBranch(repoPath: string): string {
 
 export type ProfileBackedDelegateToolInput = {
   tool: string;
-  invocationId: string;
-  attempt: number;
+  handoffCorrelationId: string;
+  attemptNumber: number;
   branch: string;
   headSha: string;
   statePath: string;
@@ -77,7 +77,7 @@ type DelegateDispatchOutcome =
 type LiveWrapperDelegateReceipt = {
   schemaVersion: 1;
   tool: string;
-  invocationId: string;
+  handoffCorrelationId: string;
   attempt: number;
   phase: "launched" | "completed" | "resetting" | "finalizing" | "finalized";
   baseHead: string;
@@ -97,7 +97,7 @@ type LiveWrapperDelegateReceipt = {
 
 type NoMistakesDelegateReceipt = {
   schemaVersion: 1;
-  invocationId: string;
+  handoffCorrelationId: string;
   attempt: number;
   phase:
     | "launching"
@@ -124,8 +124,8 @@ type NoMistakesDelegateReceipt = {
 type DelegateReceiptReadInput = Pick<
   ProfileBackedDelegateToolInput,
   | "tool"
-  | "invocationId"
-  | "attempt"
+  | "handoffCorrelationId"
+  | "attemptNumber"
   | "repoPath"
   | "handoffReceiptPath"
   | "statePath"
@@ -274,8 +274,8 @@ function createLiveWrapperDelegateToolAdapter(
       const launched: LiveWrapperDelegateReceipt = {
         schemaVersion: 1,
         tool: input.tool,
-        invocationId: input.invocationId,
-        attempt: input.attempt,
+        handoffCorrelationId: input.handoffCorrelationId,
+        attempt: input.attemptNumber,
         phase: "launched",
         baseHead: input.headSha,
         branch: input.branch,
@@ -389,7 +389,7 @@ function createLiveWrapperDelegateToolAdapter(
         );
       }
       const identity = {
-        externalRunId: input.invocationId,
+        externalRunId: input.handoffCorrelationId,
         branch: resolveDelegateBranch(input.repoPath),
         headSha: resolveCurrentHead(input.repoPath, input.headSha),
       };
@@ -675,7 +675,7 @@ function migrateLegacyLiveWrapperDelegateHandoff(
     const read = readPersistedDelegateState([candidate.statePath]);
     return (
       read.ok &&
-      read.value.externalRunId === input.invocationId &&
+      read.value.externalRunId === input.handoffCorrelationId &&
       read.value.branch === resolveDelegateBranch(input.repoPath) &&
       read.value.headSha === resolveCurrentHead(input.repoPath, "") &&
       (read.value.stepStatus === "completed" ||
@@ -686,7 +686,7 @@ function migrateLegacyLiveWrapperDelegateHandoff(
   const legacy = readPersistedDelegateState([legacyPaths.statePath]);
   if (
     !legacy.ok ||
-    legacy.value.externalRunId !== input.invocationId ||
+    legacy.value.externalRunId !== input.handoffCorrelationId ||
     legacy.value.branch !== resolveDelegateBranch(input.repoPath) ||
     legacy.value.headSha !== resolveCurrentHead(input.repoPath, "") ||
     (legacy.value.stepStatus !== "completed" &&
@@ -697,8 +697,8 @@ function migrateLegacyLiveWrapperDelegateHandoff(
   const receipt: LiveWrapperDelegateReceipt = {
     schemaVersion: 1,
     tool: input.tool,
-    invocationId: input.invocationId,
-    attempt: input.attempt,
+    handoffCorrelationId: input.handoffCorrelationId,
+    attempt: input.attemptNumber,
     phase: "finalized",
     baseHead: legacy.value.headSha,
     branch: legacy.value.branch,
@@ -738,7 +738,7 @@ function legacyDelegateAttemptPaths(
   verificationLogPath: string;
 }> {
   const paths = [];
-  for (let attempt = input.attempt; attempt >= 1; attempt -= 1) {
+  for (let attempt = input.attemptNumber; attempt >= 1; attempt -= 1) {
     const runDir =
       attempt === 1
         ? input.legacyPaths.rootDir
@@ -756,16 +756,38 @@ function legacyDelegateAttemptPaths(
   return paths;
 }
 
+/**
+ * Legacy reader: handoff receipts written before the attempt/round migration
+ * persist the step-scoped dispatch correlation under the historical
+ * `invocationId` field name. The value is unchanged, so normalizing the field
+ * name is enough to keep pre-migration external handoffs correlated.
+ */
+function normalizeLegacyReceiptCorrelation(parsed: unknown): unknown {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return parsed;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    record["handoffCorrelationId"] === undefined &&
+    typeof record["invocationId"] === "string"
+  ) {
+    return { ...record, handoffCorrelationId: record["invocationId"] };
+  }
+  return parsed;
+}
+
 function readLiveWrapperDelegateReceipt(
   input: DelegateReceiptReadInput,
 ): LiveWrapperDelegateReceipt {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(
-      readBoundedRegularFile(
-        input.handoffReceiptPath,
-        "delegated handoff receipt",
-      ).toString("utf8"),
+    parsed = normalizeLegacyReceiptCorrelation(
+      JSON.parse(
+        readBoundedRegularFile(
+          input.handoffReceiptPath,
+          "delegated handoff receipt",
+        ).toString("utf8"),
+      ),
     );
   } catch (error) {
     throw new Error(
@@ -786,10 +808,10 @@ function readLiveWrapperDelegateReceipt(
   if (
     receipt.schemaVersion !== 1 ||
     receipt.tool !== input.tool ||
-    receipt.invocationId !== input.invocationId ||
+    receipt.handoffCorrelationId !== input.handoffCorrelationId ||
     !Number.isInteger(receipt.attempt) ||
     receipt.attempt! < 1 ||
-    receipt.attempt! > input.attempt ||
+    receipt.attempt! > input.attemptNumber ||
     !["launched", "completed", "resetting", "finalizing", "finalized"].includes(
       receipt.phase ?? "",
     ) ||
@@ -1022,7 +1044,7 @@ function liveWrapperDelegateExternalState(
   headSha: string,
 ): DelegateSupervisorExternalState {
   return {
-    externalRunId: receipt.invocationId,
+    externalRunId: receipt.handoffCorrelationId,
     branch: receipt.branch,
     headSha,
     activeStep: null,
@@ -1041,7 +1063,7 @@ function persistRecoveredLiveWrapperHandoff(
   externalState: DelegateSupervisorExternalState,
 ): DelegateSupervisorHandoff {
   if (
-    externalState.externalRunId !== receipt.invocationId ||
+    externalState.externalRunId !== receipt.handoffCorrelationId ||
     externalState.branch !== receipt.branch ||
     externalState.headSha !== resolveCurrentHead(input.repoPath, "")
   ) {
@@ -1374,8 +1396,8 @@ function createProfileNoMistakesToolAdapter(
   const launchHandoff = async () => {
     const launchingReceipt: NoMistakesDelegateReceipt = {
       schemaVersion: 1,
-      invocationId: input.invocationId,
-      attempt: input.attempt,
+      handoffCorrelationId: input.handoffCorrelationId,
+      attempt: input.attemptNumber,
       phase: "launching",
       branch: input.branch,
       headSha: input.headSha,
@@ -1645,7 +1667,7 @@ function recoverNoMistakesHandoff(
     );
   }
   if (receipt.phase === "failed") {
-    if (receipt.attempt >= input.attempt) {
+    if (receipt.attempt >= input.attemptNumber) {
       throw new Error(
         `stored no-mistakes handoff failed finalization: ${receipt.failureSummary}`,
       );
@@ -1705,7 +1727,7 @@ function recoverNoMistakesHandoff(
     locallyFailed ? null : (receipt.terminalProofHeadSha ?? null),
   );
   if (
-    receipt.attempt < input.attempt &&
+    receipt.attempt < input.attemptNumber &&
     (observed.value.stepStatus === "failed" ||
       observed.value.stepStatus === "cancelled")
   ) {
@@ -1894,19 +1916,21 @@ function readNoMistakesHandoffReceipt(
   input: DelegateReceiptReadInput,
 ): NoMistakesDelegateReceipt {
   try {
-    const stored = JSON.parse(
-      readBoundedRegularFile(
-        input.handoffReceiptPath,
-        "no-mistakes handoff receipt",
-      ).toString("utf8"),
+    const stored = normalizeLegacyReceiptCorrelation(
+      JSON.parse(
+        readBoundedRegularFile(
+          input.handoffReceiptPath,
+          "no-mistakes handoff receipt",
+        ).toString("utf8"),
+      ),
     ) as Partial<NoMistakesDelegateReceipt>;
     if (
       (stored.schemaVersion !== undefined && stored.schemaVersion !== 1) ||
       typeof stored.attempt !== "number" ||
       !Number.isInteger(stored.attempt) ||
       stored.attempt < 1 ||
-      stored.attempt > input.attempt ||
-      stored.invocationId !== input.invocationId
+      stored.attempt > input.attemptNumber ||
+      stored.handoffCorrelationId !== input.handoffCorrelationId
     ) {
       throw new Error("stored handoff identity is incomplete");
     }
@@ -1920,7 +1944,7 @@ function readNoMistakesHandoffReceipt(
     const headSha = stored.headSha ?? stored.externalIdentity?.headSha;
     const receipt: NoMistakesDelegateReceipt = {
       schemaVersion: 1,
-      invocationId: stored.invocationId,
+      handoffCorrelationId: stored.handoffCorrelationId,
       attempt: stored.attempt,
       phase,
       branch: branch ?? "",
@@ -2182,8 +2206,8 @@ function migrateLegacyNoMistakesReceipt(
   if (stored === null || typeof stored !== "object" || Array.isArray(stored)) {
     return;
   }
-  const receipt = stored as {
-    invocationId?: unknown;
+  const receipt = normalizeLegacyReceiptCorrelation(stored) as {
+    handoffCorrelationId?: unknown;
     attempt?: unknown;
     externalIdentity?: {
       externalRunId?: unknown;
@@ -2198,8 +2222,8 @@ function migrateLegacyNoMistakesReceipt(
     typeof receipt.attempt !== "number" ||
     !Number.isInteger(receipt.attempt) ||
     receipt.attempt < 1 ||
-    receipt.attempt > input.attempt ||
-    receipt.invocationId !== input.invocationId ||
+    receipt.attempt > input.attemptNumber ||
+    receipt.handoffCorrelationId !== input.handoffCorrelationId ||
     identity === undefined ||
     typeof identity.externalRunId !== "string" ||
     typeof identity.branch !== "string" ||
@@ -2218,7 +2242,7 @@ function migrateLegacyNoMistakesReceipt(
       : path.join(input.legacyPaths.rootDir, `attempt-${receipt.attempt}`);
   writeJsonAtomically(input.handoffReceiptPath, {
     schemaVersion: 1,
-    invocationId: receipt.invocationId,
+    handoffCorrelationId: receipt.handoffCorrelationId,
     attempt: receipt.attempt,
     phase: "launched",
     branch: identity.branch,

@@ -6,11 +6,11 @@ import {
   getWorkflowStepExecutor,
   listExecutingWorkflowStepExecutorKinds,
   type WorkflowStepExecutorInput,
-  type WorkflowStepExecutorKind
+  type WorkflowStepExecutorKind,
 } from "../src/core/workflow/step/executor.js";
 import {
   buildFakeWorkflowStepExecutorRegistry,
-  createFakeWorkflowStepExecutor
+  createFakeWorkflowStepExecutor,
 } from "./helpers/fake-workflow-step-executor.js";
 
 function makeInput(kind: WorkflowStepExecutorKind): WorkflowStepExecutorInput {
@@ -18,13 +18,13 @@ function makeInput(kind: WorkflowStepExecutorKind): WorkflowStepExecutorInput {
     runId: "cwfp-feedface",
     stepId: `${kind}-step`,
     kind,
-    attempt: 1,
+    attemptNumber: 1,
     repoPath: "/tmp/momentum-repo",
     runDir: "/tmp/momentum-repo/.agent-workflows/cwfp-feedface",
     resultJsonPath:
       "/tmp/momentum-repo/.agent-workflows/cwfp-feedface/result.json",
     executorLogPath:
-      "/tmp/momentum-repo/.agent-workflows/cwfp-feedface/executor.log"
+      "/tmp/momentum-repo/.agent-workflows/cwfp-feedface/executor.log",
   };
 }
 
@@ -40,7 +40,7 @@ describe("fake WorkflowStepExecutor seam (test-only)", () => {
   it("builds a fake registry covering every canonical step kind, all executing", () => {
     const registry = buildFakeWorkflowStepExecutorRegistry();
     expect([...registry.keys()].sort()).toEqual(
-      [...WORKFLOW_STEP_EXECUTOR_KINDS].sort()
+      [...WORKFLOW_STEP_EXECUTOR_KINDS].sort(),
     );
     for (const kind of WORKFLOW_STEP_EXECUTOR_KINDS) {
       const adapter = registry.get(kind);
@@ -65,7 +65,7 @@ describe("fake WorkflowStepExecutor seam (test-only)", () => {
     const injected = dispatchWorkflowStepExecutor(
       "preflight",
       input,
-      buildFakeWorkflowStepExecutorRegistry()
+      buildFakeWorkflowStepExecutorRegistry(),
     );
     expect(injected.ok).toBe(true);
     if (injected.ok) {
@@ -83,15 +83,15 @@ describe("fake WorkflowStepExecutor seam (test-only)", () => {
     // Default: the real unconfigured adapters all execute (honest refusal at
     // execute time), so every canonical kind is reported.
     expect([...listExecutingWorkflowStepExecutorKinds()]).toEqual([
-      ...WORKFLOW_STEP_EXECUTOR_KINDS
+      ...WORKFLOW_STEP_EXECUTOR_KINDS,
     ]);
 
     // A partial injected registry only reports the kinds it actually wires.
     const partial = new Map([
-      ["preflight", createFakeWorkflowStepExecutor("preflight")]
+      ["preflight", createFakeWorkflowStepExecutor("preflight")],
     ] as const);
     expect([...listExecutingWorkflowStepExecutorKinds(partial)]).toEqual([
-      "preflight"
+      "preflight",
     ]);
     expect(getWorkflowStepExecutor("implementation", partial)).toBeUndefined();
   });

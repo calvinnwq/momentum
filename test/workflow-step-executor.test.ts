@@ -32,7 +32,7 @@ function makeInput(
     runId: "cwfp-deadbeef",
     stepId: rest.stepId ?? `${kind}-step`,
     kind,
-    attempt: 1,
+    attemptNumber: 1,
     repoPath: "/tmp/momentum-repo",
     runDir: "/tmp/momentum-repo/.agent-workflows/cwfp-deadbeef",
     resultJsonPath:
@@ -317,7 +317,7 @@ describe("dispatchWorkflowStepExecutor input validation (registry-agnostic bound
   });
 
   it("rejects attempt < 1 with invalid_input", () => {
-    const input = makeInput({ kind: "preflight", attempt: 0 });
+    const input = makeInput({ kind: "preflight", attemptNumber: 0 });
     const out = dispatchWorkflowStepExecutor("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;

@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
+  EXECUTOR_ATTEMPT_TERMINAL_STATES,
   EXECUTOR_ROUND_TERMINAL_STATES,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   transitionExecutorRound,
 } from "../src/core/executors/loop/reducer.js";
 import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
@@ -18,10 +18,10 @@ import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
   isNoMistakesExecutorFamily,
-  noMistakesInvocationId,
+  noMistakesAttemptId,
   noMistakesRoundId,
   noMistakesRoundUpdate,
-  planNoMistakesInvocation,
+  planNoMistakesAttempt,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
   planNoMistakesRoundPersistence,
@@ -31,9 +31,7 @@ import {
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
-const INVOCATION_TERMINAL_SET = new Set<string>(
-  EXECUTOR_INVOCATION_TERMINAL_STATES,
-);
+const ATTEMPT_TERMINAL_SET = new Set<string>(EXECUTOR_ATTEMPT_TERMINAL_STATES);
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
 const HEAD_SHA = "a".repeat(40);
@@ -130,7 +128,7 @@ describe("decideNoMistakesMirror — still running", () => {
     );
     expect(decision.classification).toBe("continue");
     expect(decision.roundState).toBe("mirroring_external_state");
-    expect(decision.invocationState).toBe("running");
+    expect(decision.attemptState).toBe("running");
     expect(decision.humanGate).toBeNull();
     expect(decision.recoveryCode).toBeNull();
     expect(decision.reason.length).toBeGreaterThan(0);
@@ -154,7 +152,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
     );
     expect(decision.classification).toBe("operator_decision_required");
     expect(decision.roundState).toBe("waiting_operator");
-    expect(decision.invocationState).toBe("waiting_operator");
+    expect(decision.attemptState).toBe("waiting_operator");
     expect(decision.humanGate).toBe("operator_decision_required");
     expect(decision.recoveryCode).toBeNull();
   });
@@ -165,7 +163,7 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
     );
     expect(decision.classification).toBe("approval_required");
     expect(decision.roundState).toBe("waiting_operator");
-    expect(decision.invocationState).toBe("waiting_operator");
+    expect(decision.attemptState).toBe("waiting_operator");
     expect(decision.humanGate).toBe("approval_required");
     expect(decision.recoveryCode).toBeNull();
   });
@@ -221,7 +219,7 @@ describe("decideNoMistakesMirror — completion reconciled against evidence", ()
     );
     expect(decision.classification).toBe("complete");
     expect(decision.roundState).toBe("succeeded");
-    expect(decision.invocationState).toBe("succeeded");
+    expect(decision.attemptState).toBe("succeeded");
     expect(decision.humanGate).toBeNull();
     expect(decision.recoveryCode).toBeNull();
   });
@@ -304,7 +302,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
     );
     expect(decision.classification).toBe("failed");
     expect(decision.roundState).toBe("failed");
-    expect(decision.invocationState).toBe("failed");
+    expect(decision.attemptState).toBe("failed");
     expect(decision.recoveryCode).toBe("external_run_failed");
     expect(decision.humanGate).toBeNull();
   });
@@ -315,7 +313,7 @@ describe("decideNoMistakesMirror — failure and blockage", () => {
     );
     expect(decision.classification).toBe("blocked");
     expect(decision.roundState).toBe("blocked");
-    expect(decision.invocationState).toBe("blocked");
+    expect(decision.attemptState).toBe("blocked");
     expect(decision.recoveryCode).toBe("external_state_blocked");
     expect(decision.humanGate).toBe("external_state_required");
   });
@@ -436,13 +434,13 @@ describe("decideNoMistakesMirror — totality", () => {
         decision.roundState,
       );
       expect(roundHop.ok).toBe(true);
-      // The mirror invocation runs; every decided invocation state must be
+      // The mirror attempt runs; every decided attempt state must be
       // reachable from running.
-      const invocationHop = transitionExecutorInvocation(
+      const attemptHop = transitionExecutorAttempt(
         "running",
-        decision.invocationState,
+        decision.attemptState,
       );
-      expect(invocationHop.ok).toBe(true);
+      expect(attemptHop.ok).toBe(true);
       expect(decision.reason.length).toBeGreaterThan(0);
     }
   });
@@ -452,31 +450,31 @@ describe("decideNoMistakesMirror — totality", () => {
       externalState({ stepStatus: "failed" }),
     );
     expect(ROUND_TERMINAL_SET.has(terminal.roundState)).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(terminal.invocationState)).toBe(true);
+    expect(ATTEMPT_TERMINAL_SET.has(terminal.attemptState)).toBe(true);
   });
 });
 
-describe("noMistakesInvocationId / noMistakesRoundId", () => {
+describe("noMistakesAttemptId / noMistakesRoundId", () => {
   it("embeds the step-run identity, the family, and the attempt", () => {
-    expect(noMistakesInvocationId("run1", "step1", 0)).toBe(
+    expect(noMistakesAttemptId("run1", "step1", 0)).toBe(
       "run1::step1::no-mistakes::0",
     );
-    expect(noMistakesInvocationId("run1", "step1", 2)).toBe(
+    expect(noMistakesAttemptId("run1", "step1", 2)).toBe(
       "run1::step1::no-mistakes::2",
     );
   });
 
   it("distinguishes attempts so re-runs never collide", () => {
-    const a = noMistakesInvocationId("run1", "step1", 0);
-    const b = noMistakesInvocationId("run1", "step1", 1);
+    const a = noMistakesAttemptId("run1", "step1", 0);
+    const b = noMistakesAttemptId("run1", "step1", 1);
     expect(a).not.toBe(b);
   });
 
-  it("mints a single deterministic round id under an invocation", () => {
-    const invocationId = noMistakesInvocationId("run1", "step1", 0);
-    const roundId = noMistakesRoundId(invocationId);
-    expect(roundId).toContain(invocationId);
-    expect(noMistakesRoundId(invocationId)).toBe(roundId);
+  it("mints a single deterministic round id under an attempt", () => {
+    const attemptId = noMistakesAttemptId("run1", "step1", 0);
+    const roundId = noMistakesRoundId(attemptId);
+    expect(roundId).toContain(attemptId);
+    expect(noMistakesRoundId(attemptId)).toBe(roundId);
   });
 });
 
@@ -579,82 +577,80 @@ describe("planNoMistakesRoundDecisions", () => {
   });
 });
 
-describe("planNoMistakesInvocation", () => {
-  it("projects a step-run identity into a running no-mistakes invocation record", () => {
-    const invocation = planNoMistakesInvocation({
+describe("planNoMistakesAttempt", () => {
+  it("projects a step-run identity into a running no-mistakes attempt record", () => {
+    const attempt = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1000,
     });
-    expect(invocation.invocationId).toBe(
-      noMistakesInvocationId("run1", "step1", 0),
-    );
-    expect(invocation.workflowRunId).toBe("run1");
-    expect(invocation.stepRunId).toBe("step1");
-    expect(invocation.stepKey).toBe("no-mistakes");
-    expect(invocation.executorFamily).toBe("no-mistakes");
-    expect(invocation.attempt).toBe(0);
-    expect(invocation.state).toBe("running");
-    expect(invocation.startedAt).toBe(1000);
-    expect(invocation.heartbeatAt).toBe(1000);
-    expect(invocation.finishedAt).toBeNull();
+    expect(attempt.attemptId).toBe(noMistakesAttemptId("run1", "step1", 0));
+    expect(attempt.workflowRunId).toBe("run1");
+    expect(attempt.stepRunId).toBe("step1");
+    expect(attempt.stepKey).toBe("no-mistakes");
+    expect(attempt.executorFamily).toBe("no-mistakes");
+    expect(attempt.attemptNumber).toBe(0);
+    expect(attempt.state).toBe("running");
+    expect(attempt.startedAt).toBe(1000);
+    expect(attempt.heartbeatAt).toBe(1000);
+    expect(attempt.finishedAt).toBeNull();
   });
 
-  it("mints a fresh invocation per attempt so a re-mirror never collides", () => {
-    const first = planNoMistakesInvocation({
+  it("mints a fresh attempt per attempt so a re-mirror never collides", () => {
+    const first = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1,
     });
-    const second = planNoMistakesInvocation({
+    const second = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 1,
+      attemptNumber: 1,
       startedAt: 2,
     });
-    expect(first.invocationId).not.toBe(second.invocationId);
-    expect(second.attempt).toBe(1);
+    expect(first.attemptId).not.toBe(second.attemptId);
+    expect(second.attemptNumber).toBe(1);
   });
 
-  it("starts a running invocation that can legally settle to a terminal state", () => {
-    const invocation = planNoMistakesInvocation({
+  it("starts a running attempt that can legally settle to a terminal state", () => {
+    const attempt = planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1,
     });
     const decision = decideNoMistakesMirror(
       externalState({ stepStatus: "failed" }),
     );
-    const transition = transitionExecutorInvocation(
-      invocation.state,
-      decision.invocationState,
+    const transition = transitionExecutorAttempt(
+      attempt.state,
+      decision.attemptState,
     );
     expect(transition.ok).toBe(true);
-    expect(INVOCATION_TERMINAL_SET.has(decision.invocationState)).toBe(true);
+    expect(ATTEMPT_TERMINAL_SET.has(decision.attemptState)).toBe(true);
   });
 });
 
 describe("planNoMistakesRoundStart", () => {
-  function invocation() {
-    return planNoMistakesInvocation({
+  function attempt() {
+    return planNoMistakesAttempt({
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "no-mistakes",
-      attempt: 0,
+      attemptNumber: 0,
       startedAt: 1000,
     });
   }
 
   it("projects a single mirror round born in mirroring_external_state at index 0", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: {
         inputDigest: "sha256:abc",
         artifactRoot: "/tmp/run1/step1",
@@ -663,13 +659,13 @@ describe("planNoMistakesRoundStart", () => {
       startedAt: 2000,
     });
 
-    expect(round.roundId).toBe(noMistakesRoundId(invocation().invocationId));
-    expect(round.invocationId).toBe(invocation().invocationId);
+    expect(round.roundId).toBe(noMistakesRoundId(attempt().attemptId));
+    expect(round.attemptId).toBe(attempt().attemptId);
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("no-mistakes");
     expect(round.executorFamily).toBe("no-mistakes");
-    expect(round.attempt).toBe(0);
+    expect(round.attemptNumber).toBe(0);
     // The mirror is one long-lived round.
     expect(round.roundIndex).toBe(0);
     expect(round.state).toBe("mirroring_external_state");
@@ -692,7 +688,7 @@ describe("planNoMistakesRoundStart", () => {
 
   it("resolves no Momentum agent/model/effort — no-mistakes owns its own pipeline", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: { inputDigest: null, artifactRoot: null },
       startedAt: 2000,
     });
@@ -702,11 +698,11 @@ describe("planNoMistakesRoundStart", () => {
     expect(round.logPaths).toEqual([]);
   });
 
-  it("refuses to mirror a round under a non-no-mistakes invocation", () => {
-    const foreign = { ...invocation(), executorFamily: "goal-loop" as const };
+  it("refuses to mirror a round under a non-no-mistakes attempt", () => {
+    const foreign = { ...attempt(), executorFamily: "goal-loop" as const };
     expect(() =>
       planNoMistakesRoundStart({
-        invocation: foreign,
+        attempt: foreign,
         runtime: { inputDigest: null, artifactRoot: null },
         startedAt: 2000,
       }),
@@ -715,7 +711,7 @@ describe("planNoMistakesRoundStart", () => {
 
   it("is born in a state from which every decided round state is reachable", () => {
     const round = planNoMistakesRoundStart({
-      invocation: invocation(),
+      attempt: attempt(),
       runtime: { inputDigest: null, artifactRoot: null },
       startedAt: 2000,
     });
@@ -759,11 +755,11 @@ describe("planNoMistakesRoundPersistence", () => {
 
   it("re-mirroring a still-running round is a legal same-state heartbeat", () => {
     const round = planNoMistakesRoundStart({
-      invocation: planNoMistakesInvocation({
+      attempt: planNoMistakesAttempt({
         workflowRunId: "run1",
         stepRunId: "step1",
         stepKey: "no-mistakes",
-        attempt: 0,
+        attemptNumber: 0,
         startedAt: 1,
       }),
       runtime: { inputDigest: null, artifactRoot: null },
@@ -895,7 +891,7 @@ describe("decideNoMistakesUnreadable", () => {
     );
     expect(decision.classification).toBe("manual_recovery_required");
     expect(decision.roundState).toBe("manual_recovery_required");
-    expect(decision.invocationState).toBe("manual_recovery_required");
+    expect(decision.attemptState).toBe("manual_recovery_required");
     expect(decision.humanGate).toBe("manual_recovery_required");
     expect(decision.recoveryCode).toBe("external_state_unreadable");
     // The reader's error is already a full sentence; it is preserved verbatim as
@@ -914,9 +910,7 @@ describe("decideNoMistakesUnreadable", () => {
     // untrusted external evidence and settle the same way (modulo the reason).
     expect(fromReadFailure.classification).toBe(fromBadSnapshot.classification);
     expect(fromReadFailure.roundState).toBe(fromBadSnapshot.roundState);
-    expect(fromReadFailure.invocationState).toBe(
-      fromBadSnapshot.invocationState,
-    );
+    expect(fromReadFailure.attemptState).toBe(fromBadSnapshot.attemptState);
     expect(fromReadFailure.humanGate).toBe(fromBadSnapshot.humanGate);
     expect(fromReadFailure.recoveryCode).toBe(fromBadSnapshot.recoveryCode);
   });

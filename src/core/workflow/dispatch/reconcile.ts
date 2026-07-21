@@ -5,12 +5,12 @@
  * runtime-consolidation plan names the reconciliation seam: the deterministic decision that turns a
  * dispatched executor-loop step's terminal executor evidence into a workflow-step
  * finalization outcome. It is the brain; the effect twin reads the
- * `<run>::<step>::dispatch` invocation, applies the decision durably
+ * newest dispatch attempt, applies the decision durably
  * (`finishWorkflowStep` + dispatch-lease release + run-state refresh), and is
  * idempotent on the deterministic dispatch id so re-entry cannot double-finalize.
  *
  * It follows the same discipline as `dispatch.ts` and the executor-loop reducer:
- * no SQLite, no file system, no daemon, no executor invocation.
+ * no SQLite, no file system, no daemon, no executor attempt.
  * {@link planWorkflowStepReconciliation} is pure and total — it never throws and
  * always returns a {@link WorkflowStepReconciliationPlan} discriminated union,
  * mirroring the `{ action: ... }` convention used by `planWorkflowStepDispatch`
@@ -22,16 +22,16 @@
  * ("Executor States" / "Core Boundary: the daemon, not the executor, decides
  * step progress"):
  *
- *   - The dispatch invocation's *state* is the canonical "bounded session ended"
+ *   - The dispatch attempt's *state* is the canonical "bounded session ended"
  *     rollup. While it is non-terminal (pending / preparing / running / pausing /
  *     waiting_operator) the executor session is still in progress, so the seam
  *     defers: the dispatch scaffold left the step `running` and reconciliation
  *     must not finalize it early.
- *   - A clean terminal invocation maps to the matching terminal `workflow_steps`
+ *   - A clean terminal attempt maps to the matching terminal `workflow_steps`
  *     state: `succeeded -> succeeded`, `failed -> failed`, `cancelled ->
  *     canceled`. These are the only outcomes that move a dispatched step to a
  *     clean workflow-step terminal.
- *   - A terminal-but-unclean invocation (`blocked` or `manual_recovery_required`)
+ *   - A terminal-but-unclean attempt (`blocked` or `manual_recovery_required`)
  *     is *not* a clean step terminal: the bounded attempt ended needing operator
  *     inspection or a later recovery round, so the seam routes to manual recovery
  *     rather than fabricating a `succeeded` / `failed` finalization. The effect
@@ -44,20 +44,20 @@
  */
 
 import {
-  isTerminalExecutorInvocationState,
-  type ExecutorInvocationState
+  isTerminalExecutorAttemptState,
+  type ExecutorAttemptState,
 } from "../../executors/loop/reducer.js";
 import type { WorkflowStepTerminalState } from "../step/transitions.js";
 
 /**
  * The reconciliation decision for a dispatched workflow step, given its dispatch
- * invocation's current state.
+ * attempt's current state.
  *
  *   - `not_terminal`: the bounded executor session is still in progress; leave
- *     the step `running` and reconcile again once the invocation is terminal.
- *   - `finalize`: the invocation reached a clean terminal; the effect twin moves
+ *     the step `running` and reconcile again once the attempt is terminal.
+ *   - `finalize`: the attempt reached a clean terminal; the effect twin moves
  *     the owning step to `stepState` via `finishWorkflowStep`.
- *   - `manual_recovery`: the invocation ended `blocked` / `manual_recovery_required`;
+ *   - `manual_recovery`: the attempt ended `blocked` / `manual_recovery_required`;
  *     the effect twin parks the run for operator recovery instead of finalizing
  *     the step to a clean terminal.
  */
@@ -66,58 +66,58 @@ export type WorkflowStepReconciliationPlan =
   | { action: "finalize"; stepState: WorkflowStepTerminalState; reason: string }
   | {
       action: "manual_recovery";
-      invocationState: ExecutorInvocationState;
+      attemptState: ExecutorAttemptState;
       reason: string;
     };
 
 /**
- * Clean terminal invocation states and the workflow-step terminal each maps to.
+ * Clean terminal attempt states and the workflow-step terminal each maps to.
  * Only these three move a dispatched step to a clean terminal; every other
- * terminal invocation state (`blocked`, `manual_recovery_required`) routes to
+ * terminal attempt state (`blocked`, `manual_recovery_required`) routes to
  * manual recovery instead.
  */
 const CLEAN_TERMINAL_STEP_STATE: Partial<
-  Record<ExecutorInvocationState, WorkflowStepTerminalState>
+  Record<ExecutorAttemptState, WorkflowStepTerminalState>
 > = {
   succeeded: "succeeded",
   failed: "failed",
-  cancelled: "canceled"
+  cancelled: "canceled",
 };
 
-const FINALIZE_REASON: Partial<Record<ExecutorInvocationState, string>> = {
+const FINALIZE_REASON: Partial<Record<ExecutorAttemptState, string>> = {
   succeeded:
-    "Dispatch invocation reached terminal `succeeded`; finalizing the workflow step succeeded.",
+    "Dispatch attempt reached terminal `succeeded`; finalizing the workflow step succeeded.",
   failed:
-    "Dispatch invocation reached terminal `failed`; finalizing the workflow step failed.",
+    "Dispatch attempt reached terminal `failed`; finalizing the workflow step failed.",
   cancelled:
-    "Dispatch invocation reached terminal `cancelled`; finalizing the workflow step canceled."
+    "Dispatch attempt reached terminal `cancelled`; finalizing the workflow step canceled.",
 };
 
 /**
  * Decide how the reconciliation seam should finalize a dispatched workflow step,
- * given its dispatch invocation's current state.
+ * given its dispatch attempt's current state.
  *
  * Pure and total: never throws, always returns a
- * {@link WorkflowStepReconciliationPlan}. A non-terminal invocation defers; a
+ * {@link WorkflowStepReconciliationPlan}. A non-terminal attempt defers; a
  * clean terminal finalizes the step; an unclean terminal (`blocked` /
  * `manual_recovery_required`) routes to manual recovery so the seam never
  * fabricates a clean finalization over an outcome that needs operator inspection.
  */
 export function planWorkflowStepReconciliation(
-  invocationState: ExecutorInvocationState
+  attemptState: ExecutorAttemptState,
 ): WorkflowStepReconciliationPlan {
-  if (!isTerminalExecutorInvocationState(invocationState)) {
+  if (!isTerminalExecutorAttemptState(attemptState)) {
     return { action: "not_terminal" };
   }
 
-  const stepState = CLEAN_TERMINAL_STEP_STATE[invocationState];
+  const stepState = CLEAN_TERMINAL_STEP_STATE[attemptState];
   if (stepState !== undefined) {
     return {
       action: "finalize",
       stepState,
       reason:
-        FINALIZE_REASON[invocationState] ??
-        `Dispatch invocation reached terminal \`${invocationState}\`; finalizing the workflow step.`
+        FINALIZE_REASON[attemptState] ??
+        `Dispatch attempt reached terminal \`${attemptState}\`; finalizing the workflow step.`,
     };
   }
 
@@ -126,7 +126,7 @@ export function planWorkflowStepReconciliation(
   // recovery round.
   return {
     action: "manual_recovery",
-    invocationState,
-    reason: `Dispatch invocation ended \`${invocationState}\`; routing the dispatched step to manual recovery rather than a clean workflow-step terminal.`
+    attemptState,
+    reason: `Dispatch attempt ended \`${attemptState}\`; routing the dispatched step to manual recovery rather than a clean workflow-step terminal.`,
   };
 }

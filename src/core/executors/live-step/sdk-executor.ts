@@ -7,6 +7,7 @@ import type {
   ExecutorTickResult,
 } from "../sdk/types.js";
 import { DELEGATE_SUPERVISOR_CONFIG_SCHEMA } from "../delegate-supervisor/executor.js";
+import { nextExecutorRoundIndex } from "../loop/reducer.js";
 import type {
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorErrorCode,
@@ -45,7 +46,7 @@ type DurableLiveStepDecision = Pick<
   ExecutorTickResult,
   | "recommendation"
   | "recommendedRoundState"
-  | "recommendedInvocationState"
+  | "recommendedAttemptState"
   | "recoveryCode"
   | "humanGate"
   | "reason"
@@ -77,12 +78,13 @@ export class LiveStepSdkExecutor implements Executor<
       LiveStepSdkHostBindings
     >,
   ): Promise<ExecutorTickResult> {
-    const invocation = context.state.invocation;
+    const attempt = context.state.attempt;
     const existing =
       [...context.state.rounds]
         .reverse()
-        .find((snapshot) => snapshot.round.attempt === invocation.attempt) ??
-      null;
+        .find(
+          (snapshot) => snapshot.round.attemptNumber === attempt.attemptNumber,
+        ) ?? null;
     if (existing !== null) {
       const completed = [...existing.checkpoints]
         .reverse()
@@ -104,16 +106,19 @@ export class LiveStepSdkExecutor implements Executor<
       };
     }
 
-    const roundId = `${invocation.invocationId}::round-${context.state.rounds.length + 1}`;
-    context.envelope.startRound({
-      roundId,
-      invocationId: invocation.invocationId,
-      workflowRunId: invocation.workflowRunId,
-      stepRunId: invocation.stepRunId,
-      stepKey: invocation.stepKey,
-      executorFamily: invocation.executorFamily,
-      attempt: invocation.attempt,
-      roundIndex: context.state.rounds.length,
+    const nextRoundIndex = nextExecutorRoundIndex(
+      context.state.rounds.map((snapshot) => snapshot.round),
+    );
+    const requestedRoundId = `${attempt.attemptId}::round-${nextRoundIndex + 1}`;
+    const durableRound = context.envelope.startRound({
+      roundId: requestedRoundId,
+      attemptId: attempt.attemptId,
+      workflowRunId: attempt.workflowRunId,
+      stepRunId: attempt.stepRunId,
+      stepKey: attempt.stepKey,
+      executorFamily: attempt.executorFamily,
+      attemptNumber: attempt.attemptNumber,
+      roundIndex: nextRoundIndex,
       state: "running",
       agentProvider: null,
       model: null,
@@ -130,6 +135,7 @@ export class LiveStepSdkExecutor implements Executor<
       verificationStatus: null,
       commitSha: null,
     });
+    const roundId = durableRound.roundId;
     context.envelope.recordCheckpoint(roundId, {
       checkpointId: `${roundId}-checkpoint-0`,
       sequence: 0,
@@ -209,7 +215,7 @@ function decisionForResult(
     return {
       recommendation: "manual_recovery_required",
       recommendedRoundState: "manual_recovery_required",
-      recommendedInvocationState: "manual_recovery_required",
+      recommendedAttemptState: "manual_recovery_required",
       recoveryCode:
         typeof precise === "string" && precise.length > 0
           ? precise
@@ -222,7 +228,7 @@ function decisionForResult(
     return {
       recommendation: "complete",
       recommendedRoundState: "succeeded",
-      recommendedInvocationState: "succeeded",
+      recommendedAttemptState: "succeeded",
       recoveryCode: null,
       humanGate: null,
       reason: result.result.summary,
@@ -232,7 +238,7 @@ function decisionForResult(
     return {
       recommendation: "failed",
       recommendedRoundState: "failed",
-      recommendedInvocationState: "failed",
+      recommendedAttemptState: "failed",
       recoveryCode: result.result.errorCode ?? "command_failed",
       humanGate: null,
       reason: result.result.errorMessage ?? result.result.summary,
@@ -241,7 +247,7 @@ function decisionForResult(
   return {
     recommendation: "manual_recovery_required",
     recommendedRoundState: "manual_recovery_required",
-    recommendedInvocationState: "manual_recovery_required",
+    recommendedAttemptState: "manual_recovery_required",
     recoveryCode: "unexpected_skipped_terminal",
     humanGate: "manual_recovery_required",
     reason: "A dispatched executor unexpectedly returned skipped.",
@@ -249,8 +255,21 @@ function decisionForResult(
 }
 
 function parseDurableDecision(detail: string): DurableLiveStepDecision {
-  const parsed = JSON.parse(detail) as DurableLiveStepDecision;
-  return parsed;
+  const parsed = JSON.parse(detail) as DurableLiveStepDecision & {
+    recommendedInvocationState?: DurableLiveStepDecision["recommendedAttemptState"];
+  };
+  // Legacy reader: completion checkpoints recorded before the attempt/round
+  // migration serialized the decision with `recommendedInvocationState`, and
+  // the migration preserves checkpoint payloads verbatim.
+  return {
+    recommendation: parsed.recommendation,
+    recommendedRoundState: parsed.recommendedRoundState,
+    recommendedAttemptState:
+      parsed.recommendedAttemptState ?? parsed.recommendedInvocationState,
+    recoveryCode: parsed.recoveryCode,
+    humanGate: parsed.humanGate,
+    reason: parsed.reason,
+  };
 }
 
 /**

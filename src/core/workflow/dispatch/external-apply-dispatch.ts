@@ -1,5 +1,4 @@
-import { loadExecutorInvocation } from "../../executors/loop/persist.js";
-import { deriveDispatchInvocationId } from "./execute.js";
+import { loadLatestExecutorAttemptForStep } from "../../executors/loop/persist.js";
 import {
   recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
@@ -45,11 +44,12 @@ export function createExternalApplyWorkflowDispatch(
     const result = await baseDispatch(claim, context);
     if (!shouldDriveDispatchedExecutor(result.status)) return result;
 
-    const invocation = loadExecutorInvocation(
+    const attempt = loadLatestExecutorAttemptForStep(
       context.db,
-      deriveDispatchInvocationId(claim.runId, claim.stepId),
+      claim.runId,
+      claim.stepId,
     );
-    if (invocation?.executorFamily !== "external-apply") return result;
+    if (attempt?.executorFamily !== "external-apply") return result;
 
     try {
       const terminalReentry =

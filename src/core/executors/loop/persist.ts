@@ -1,9 +1,9 @@
 /**
  * Persistence layer for the executor-loop spine.
  *
- * Takes the pure {@link ExecutorDefinitionRecord} / {@link ExecutorInvocationRecord}
+ * Takes the pure {@link ExecutorDefinitionRecord} / {@link ExecutorAttemptRecord}
  * / {@link ExecutorRoundRecord} shapes owned by `loop/reducer.ts` and
- * writes them into the durable `executor_definitions` / `executor_invocations` /
+ * writes them into the durable `executor_definitions` / `executor_attempts` /
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * scheduler lane is owned separately by `src/core/workflow/dispatch/scheduler.ts`; the
@@ -17,8 +17,8 @@
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
  *     the same key is idempotent (it never duplicates rows), preserves `created_at`,
  *     and bumps `updated_at`, mirroring `persistWorkflowDefinition`.
- *   - An invocation's identity is its `invocationId`; a round's is its `roundId`,
- *     and `(invocationId, roundIndex)` is unique so round ordering can never
+ *   - An attempt's identity is its `attemptId`; a round's is its `roundId`,
+ *     and `(attemptId, roundIndex)` is unique so round ordering can never
  *     collide. Inserting a duplicate refuses with a typed conflict error and
  *     leaves the existing row untouched — a durable executor row is the proof a
  *     bounded unit started, not an idempotent re-ingest.
@@ -27,7 +27,7 @@
  *     {@link InvalidExecutorRecordError} *before* any row is written, so durable
  *     executor state can never carry a value outside the contract.
  *   - State changes are transition-gated through the same
- *     {@link transitionExecutorInvocation} / {@link transitionExecutorRound}
+ *     {@link transitionExecutorAttempt} / {@link transitionExecutorRound}
  *     reducers used everywhere else: a round can never fast-path to `succeeded`
  *     without first entering the capture or mirror phase, and the refusal leaves
  *     the durable row unchanged.
@@ -52,9 +52,9 @@ import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
-  EXECUTOR_INVOCATION_STATES,
+  EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
-  transitionExecutorInvocation,
+  transitionExecutorAttempt,
   transitionExecutorRound,
   type ExecutorArtifactClass,
   type ExecutorArtifactRecord,
@@ -64,9 +64,9 @@ import {
   type ExecutorDefinitionRecord,
   type ExecutorFindingRecord,
   type ExecutorHumanGateType,
-  type ExecutorInvocationRecord,
-  type ExecutorInvocationState,
-  type ExecutorInvocationTransitionErrorCode,
+  type ExecutorAttemptRecord,
+  type ExecutorAttemptState,
+  type ExecutorAttemptTransitionErrorCode,
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
@@ -76,9 +76,7 @@ import {
 } from "./reducer.js";
 import { isExecutorName } from "../../workflow/definition/definition.js";
 
-const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
-  EXECUTOR_INVOCATION_STATES,
-);
+const ATTEMPT_STATE_SET: ReadonlySet<string> = new Set(EXECUTOR_ATTEMPT_STATES);
 const ROUND_STATE_SET: ReadonlySet<string> = new Set(EXECUTOR_ROUND_STATES);
 const CLASSIFICATION_SET: ReadonlySet<string> = new Set(
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
@@ -109,52 +107,52 @@ export class InvalidExecutorRecordError extends Error {
   }
 }
 
-/** Thrown when inserting an invocation whose id already exists. */
-export class ExecutorInvocationConflictError extends Error {
-  readonly invocationId: string;
+/** Thrown when inserting an attempt whose id already exists. */
+export class ExecutorAttemptConflictError extends Error {
+  readonly attemptId: string;
 
-  constructor(invocationId: string) {
-    super(`Executor invocation already exists: ${invocationId}`);
-    this.name = "ExecutorInvocationConflictError";
-    this.invocationId = invocationId;
+  constructor(attemptId: string) {
+    super(`Executor attempt already exists: ${attemptId}`);
+    this.name = "ExecutorAttemptConflictError";
+    this.attemptId = attemptId;
   }
 }
 
-/** Thrown when updating an invocation that does not exist. */
-export class ExecutorInvocationNotFoundError extends Error {
-  readonly invocationId: string;
+/** Thrown when updating an attempt that does not exist. */
+export class ExecutorAttemptNotFoundError extends Error {
+  readonly attemptId: string;
 
-  constructor(invocationId: string) {
-    super(`Executor invocation not found: ${invocationId}`);
-    this.name = "ExecutorInvocationNotFoundError";
-    this.invocationId = invocationId;
+  constructor(attemptId: string) {
+    super(`Executor attempt not found: ${attemptId}`);
+    this.name = "ExecutorAttemptNotFoundError";
+    this.attemptId = attemptId;
   }
 }
 
-/** Thrown when an invocation state change violates the transition graph. */
-export class ExecutorInvocationTransitionError extends Error {
-  readonly invocationId: string;
-  readonly from: ExecutorInvocationState;
-  readonly to: ExecutorInvocationState;
-  readonly code: ExecutorInvocationTransitionErrorCode;
+/** Thrown when an attempt state change violates the transition graph. */
+export class ExecutorAttemptTransitionError extends Error {
+  readonly attemptId: string;
+  readonly from: ExecutorAttemptState;
+  readonly to: ExecutorAttemptState;
+  readonly code: ExecutorAttemptTransitionErrorCode;
 
   constructor(
-    invocationId: string,
-    from: ExecutorInvocationState,
-    to: ExecutorInvocationState,
-    code: ExecutorInvocationTransitionErrorCode,
+    attemptId: string,
+    from: ExecutorAttemptState,
+    to: ExecutorAttemptState,
+    code: ExecutorAttemptTransitionErrorCode,
     message: string,
   ) {
     super(message);
-    this.name = "ExecutorInvocationTransitionError";
-    this.invocationId = invocationId;
+    this.name = "ExecutorAttemptTransitionError";
+    this.attemptId = attemptId;
     this.from = from;
     this.to = to;
     this.code = code;
   }
 }
 
-/** Thrown when inserting a round whose id or `(invocation, index)` collides. */
+/** Thrown when inserting a round whose id or `(attemptId, roundIndex)` collides. */
 export class ExecutorRoundConflictError extends Error {
   readonly roundId: string;
 
@@ -220,6 +218,76 @@ export class ExecutorEvidenceConflictError extends Error {
     this.entity = entity;
     this.id = id;
   }
+}
+
+/**
+ * Allocate a round id before executor-owned code writes the round.
+ *
+ * The `(attemptId, roundIndex)` row is the concurrency identity and must refuse
+ * a genuine duplicate, while an unrelated historical row that already occupies
+ * the requested global id receives a deterministic suffix.
+ */
+export function allocateExecutorRoundId(
+  db: MomentumDb,
+  round: ExecutorRoundRecord,
+): string {
+  const concurrentRound = db
+    .prepare(
+      `SELECT 1
+         FROM executor_rounds
+        WHERE attempt_id = ? AND round_index = ?`,
+    )
+    .get(round.attemptId, round.roundIndex);
+  if (concurrentRound !== undefined) {
+    throw new ExecutorRoundConflictError(round.roundId);
+  }
+
+  let roundId = round.roundId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_rounds WHERE round_id = ?")
+      .get(roundId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    roundId = `${round.roundId}::allocated-${allocationSuffix}`;
+  }
+  return roundId;
+}
+
+/** Allocate a checkpoint id while preserving same-round sequence conflicts. */
+export function allocateExecutorCheckpointId(
+  db: MomentumDb,
+  checkpoint: Pick<
+    ExecutorCheckpointRecord,
+    "checkpointId" | "roundId" | "sequence"
+  >,
+): string {
+  const concurrentCheckpoint = db
+    .prepare(
+      `SELECT 1
+         FROM executor_checkpoints
+        WHERE round_id = ? AND sequence = ?`,
+    )
+    .get(checkpoint.roundId, checkpoint.sequence);
+  if (concurrentCheckpoint !== undefined) {
+    throw new ExecutorEvidenceConflictError(
+      "checkpoint",
+      checkpoint.checkpointId,
+    );
+  }
+
+  let checkpointId = checkpoint.checkpointId;
+  let allocationSuffix = 0;
+  while (
+    db
+      .prepare("SELECT 1 FROM executor_checkpoints WHERE checkpoint_id = ?")
+      .get(checkpointId) !== undefined
+  ) {
+    allocationSuffix += 1;
+    checkpointId = `${checkpoint.checkpointId}::allocated-${allocationSuffix}`;
+  }
+  return checkpointId;
 }
 
 export type PersistExecutorDefinitionOptions = {
@@ -319,42 +387,42 @@ export function loadExecutorDefinition(
   };
 }
 
-export type InsertExecutorInvocationOptions = {
+export type InsertExecutorAttemptOptions = {
   now?: number;
 };
 
 /**
- * Durably insert a new {@link ExecutorInvocationRecord}.
+ * Durably insert a new {@link ExecutorAttemptRecord}.
  *
  * @throws {InvalidExecutorRecordError} if the family/state is unknown.
- * @throws {ExecutorInvocationConflictError} if `invocationId` already exists; the
+ * @throws {ExecutorAttemptConflictError} if `attemptId` already exists; the
  * existing row is left untouched.
  */
-export function insertExecutorInvocation(
+export function insertExecutorAttempt(
   db: MomentumDb,
-  record: ExecutorInvocationRecord,
-  options: InsertExecutorInvocationOptions = {},
-): ExecutorInvocationRecord {
-  const errors = validateInvocationRecord(record);
+  record: ExecutorAttemptRecord,
+  options: InsertExecutorAttemptOptions = {},
+): ExecutorAttemptRecord {
+  const errors = validateAttemptRecord(record);
   if (errors.length > 0) {
     throw new InvalidExecutorRecordError(errors);
   }
   const now = options.now ?? Date.now();
   try {
     db.prepare(
-      `INSERT INTO executor_invocations (
-         invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
-         state, attempt, started_at, heartbeat_at, finished_at,
+      `INSERT INTO executor_attempts (
+         attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+         state, attempt_number, started_at, heartbeat_at, finished_at,
          created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      record.invocationId,
+      record.attemptId,
       record.workflowRunId,
       record.stepRunId,
       record.stepKey,
       record.executorFamily,
       record.state,
-      record.attempt,
+      record.attemptNumber,
       record.startedAt,
       record.heartbeatAt,
       record.finishedAt,
@@ -363,41 +431,83 @@ export function insertExecutorInvocation(
     );
   } catch (error) {
     if (isUniqueViolation(error)) {
-      throw new ExecutorInvocationConflictError(record.invocationId);
+      throw new ExecutorAttemptConflictError(record.attemptId);
     }
     throw error;
   }
   return record;
 }
 
-/** Load a persisted invocation; `undefined` when none matches. */
-export function loadExecutorInvocation(
+/** Load a persisted attempt; `undefined` when none matches. */
+export function loadExecutorAttempt(
   db: MomentumDb,
-  invocationId: string,
-): ExecutorInvocationRecord | undefined {
-  return loadExecutorInvocationSnapshot(db, invocationId)?.record;
+  attemptId: string,
+): ExecutorAttemptRecord | undefined {
+  return loadExecutorAttemptSnapshot(db, attemptId)?.record;
 }
 
 /**
- * List every invocation for a workflow run in deterministic executor read-back
+ * List every attempt for a workflow run in deterministic executor read-back
  * order.
  * This surfaces the whole attempt below a step, including attempts that have no
  * round rows yet or are paused between rounds.
  */
-export function listExecutorInvocationsForRun(
+export function listExecutorAttemptsForRun(
   db: MomentumDb,
   runId: string,
-): ExecutorInvocationRecord[] {
+): ExecutorAttemptRecord[] {
   const rows = db
     .prepare(
-      `${INVOCATION_SELECT} WHERE workflow_run_id = ?
-       ORDER BY step_key, attempt, invocation_id`,
+      `${ATTEMPT_SELECT} WHERE workflow_run_id = ?
+       ORDER BY step_key, attempt_number, attempt_id`,
     )
-    .all(runId) as ExecutorInvocationRow[];
-  return rows.map(rowToInvocation);
+    .all(runId) as ExecutorAttemptRow[];
+  return rows.map(rowToAttempt);
 }
 
-export type UpdateExecutorInvocationOptions = {
+/**
+ * Load the highest-numbered attempt for one step run; `undefined` when the step
+ * was never dispatched. This is the active-hierarchy read model that replaces
+ * the legacy deterministic reopenable-row lookup: the newest attempt is the only
+ * one a scheduler, reconciler, or recovery surface may act on, and every earlier
+ * attempt row is immutable history.
+ */
+export function loadLatestExecutorAttemptForStep(
+  db: MomentumDb,
+  runId: string,
+  stepRunId: string,
+): ExecutorAttemptRecord | undefined {
+  const row = db
+    .prepare(
+      `${ATTEMPT_SELECT} WHERE workflow_run_id = ? AND step_run_id = ?
+       ORDER BY attempt_number DESC, attempt_id DESC LIMIT 1`,
+    )
+    .get(runId, stepRunId) as ExecutorAttemptRow | undefined;
+  if (row === undefined) return undefined;
+  return rowToAttempt(row);
+}
+
+/**
+ * List every round for one step run across all of its attempts, ordered by
+ * attempt number then round index then round id. Cross-attempt readers (for
+ * example delegate handoff history) use this instead of widening the
+ * per-attempt round reader.
+ */
+export function listExecutorRoundsForStep(
+  db: MomentumDb,
+  runId: string,
+  stepRunId: string,
+): ExecutorRoundRecord[] {
+  const rows = db
+    .prepare(
+      `${ROUND_SELECT} WHERE workflow_run_id = ? AND step_run_id = ?
+       ORDER BY attempt_number, round_index, round_id`,
+    )
+    .all(runId, stepRunId) as ExecutorRoundRow[];
+  return rows.map(rowToRound);
+}
+
+export type UpdateExecutorAttemptOptions = {
   now?: number;
   startedAt?: number | null;
   heartbeatAt?: number | null;
@@ -405,29 +515,29 @@ export type UpdateExecutorInvocationOptions = {
 };
 
 /**
- * Transition-gate an invocation to `toState`, optionally stamping
+ * Transition-gate an attempt to `toState`, optionally stamping
  * started/heartbeat/finished timestamps. A same-state update is a heartbeat-only
  * no-op transition.
  *
- * @throws {ExecutorInvocationNotFoundError} if no invocation has `invocationId`.
- * @throws {ExecutorInvocationTransitionError} if the transition is illegal; the
+ * @throws {ExecutorAttemptNotFoundError} if no attempt has `attemptId`.
+ * @throws {ExecutorAttemptTransitionError} if the transition is illegal; the
  * durable row is left unchanged.
  */
-export function updateExecutorInvocationState(
+export function updateExecutorAttemptState(
   db: MomentumDb,
-  invocationId: string,
-  toState: ExecutorInvocationState,
-  options: UpdateExecutorInvocationOptions = {},
-): ExecutorInvocationRecord {
-  const currentSnapshot = loadExecutorInvocationSnapshot(db, invocationId);
+  attemptId: string,
+  toState: ExecutorAttemptState,
+  options: UpdateExecutorAttemptOptions = {},
+): ExecutorAttemptRecord {
+  const currentSnapshot = loadExecutorAttemptSnapshot(db, attemptId);
   if (currentSnapshot === undefined) {
-    throw new ExecutorInvocationNotFoundError(invocationId);
+    throw new ExecutorAttemptNotFoundError(attemptId);
   }
   const current = currentSnapshot.record;
-  const result = transitionExecutorInvocation(current.state, toState);
+  const result = transitionExecutorAttempt(current.state, toState);
   if (!result.ok) {
-    throw new ExecutorInvocationTransitionError(
-      invocationId,
+    throw new ExecutorAttemptTransitionError(
+      attemptId,
       current.state,
       toState,
       result.errorCode,
@@ -435,7 +545,7 @@ export function updateExecutorInvocationState(
     );
   }
   const now = options.now ?? Date.now();
-  const next: ExecutorInvocationRecord = {
+  const next: ExecutorAttemptRecord = {
     ...current,
     state: toState,
     startedAt: coalesce(options.startedAt, current.startedAt),
@@ -444,10 +554,10 @@ export function updateExecutorInvocationState(
   };
   const updateResult = db
     .prepare(
-      `UPDATE executor_invocations
+      `UPDATE executor_attempts
        SET state = ?, started_at = ?, heartbeat_at = ?, finished_at = ?,
            updated_at = ?
-     WHERE invocation_id = ? AND state = ? AND updated_at = ?`,
+     WHERE attempt_id = ? AND state = ? AND updated_at = ?`,
     )
     .run(
       next.state,
@@ -455,17 +565,12 @@ export function updateExecutorInvocationState(
       next.heartbeatAt,
       next.finishedAt,
       now,
-      invocationId,
+      attemptId,
       current.state,
       currentSnapshot.updatedAt,
     );
   if (Number(updateResult.changes) === 0) {
-    return handleInvocationPostWriteConflict(
-      db,
-      invocationId,
-      toState,
-      options,
-    );
+    return handleAttemptPostWriteConflict(db, attemptId, toState, options);
   }
   return next;
 }
@@ -481,7 +586,7 @@ export type InsertExecutorRoundOptions = {
  *
  * @throws {InvalidExecutorRecordError} if family/state/classification/human-gate
  * is unknown.
- * @throws {ExecutorRoundConflictError} if `roundId` or `(invocationId, roundIndex)`
+ * @throws {ExecutorRoundConflictError} if `roundId` or `(attemptId, roundIndex)`
  * already exists; the existing row is left untouched.
  */
 export function insertExecutorRound(
@@ -497,8 +602,8 @@ export function insertExecutorRound(
   try {
     db.prepare(
       `INSERT INTO executor_rounds (
-         round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification, executor_recommendation,
+         round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+         executor_family, attempt_number, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
@@ -511,12 +616,12 @@ export function insertExecutorRound(
        )`,
     ).run(
       record.roundId,
-      record.invocationId,
+      record.attemptId,
       record.workflowRunId,
       record.stepRunId,
       record.stepKey,
       record.executorFamily,
-      record.attempt,
+      record.attemptNumber,
       record.roundIndex,
       record.state,
       record.classification,
@@ -561,20 +666,20 @@ export function loadExecutorRound(
   return loadExecutorRoundSnapshot(db, roundId)?.record;
 }
 
-/** List an invocation's rounds, ordered by `round_index`. */
-export function listExecutorRoundsForInvocation(
+/** List an attempt's rounds, ordered by `round_index`. */
+export function listExecutorRoundsForAttempt(
   db: MomentumDb,
-  invocationId: string,
+  attemptId: string,
 ): ExecutorRoundRecord[] {
   const rows = db
-    .prepare(`${ROUND_SELECT} WHERE invocation_id = ? ORDER BY round_index`)
-    .all(invocationId) as ExecutorRoundRow[];
+    .prepare(`${ROUND_SELECT} WHERE attempt_id = ? ORDER BY round_index`)
+    .all(attemptId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
 }
 
 /**
- * List every round for a workflow run across all of its invocations, ordered
- * deterministically by step key, invocation attempt, invocation id, then round
+ * List every round for a workflow run across all of its attempts, ordered
+ * deterministically by step key, attempt number, attempt id, then round
  * index and round id. This is the run-scoped read-back the workflow-first logs
  * surface needs to aggregate per-round executor evidence (logs, summaries,
  * verification, commit, recovery) that the run-detail loader does not carry.
@@ -586,7 +691,7 @@ export function listExecutorRoundsForRun(
   const rows = db
     .prepare(
       `${ROUND_SELECT} WHERE workflow_run_id = ?
-       ORDER BY step_key, attempt, invocation_id, round_index, round_id`,
+       ORDER BY step_key, attempt_number, attempt_id, round_index, round_id`,
     )
     .all(runId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
@@ -1005,14 +1110,14 @@ type ExecutorDefinitionRow = {
   policy_envelope: string | null;
 };
 
-type ExecutorInvocationRow = {
-  invocation_id: string;
+type ExecutorAttemptRow = {
+  attempt_id: string;
   workflow_run_id: string;
   step_run_id: string;
   step_key: string;
   executor_family: string;
   state: string;
-  attempt: number;
+  attempt_number: number;
   started_at: number | null;
   heartbeat_at: number | null;
   finished_at: number | null;
@@ -1021,12 +1126,13 @@ type ExecutorInvocationRow = {
 
 type ExecutorRoundRow = {
   round_id: string;
-  invocation_id: string;
+  attempt_id: string;
   workflow_run_id: string;
   step_run_id: string;
   step_key: string;
   executor_family: string;
-  attempt: number;
+  attempt_number: number;
+  legacy_provenance: string | null;
   round_index: number;
   state: string;
   classification: string | null;
@@ -1054,8 +1160,8 @@ type ExecutorRoundRow = {
   updated_at: number;
 };
 
-type ExecutorInvocationSnapshot = {
-  record: ExecutorInvocationRecord;
+type ExecutorAttemptSnapshot = {
+  record: ExecutorAttemptRecord;
   updatedAt: number;
 };
 
@@ -1102,31 +1208,34 @@ type ExecutorDecisionRow = {
   external_ref: string | null;
 };
 
-const INVOCATION_SELECT = `
-  SELECT invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, state, attempt, started_at, heartbeat_at,
+const ATTEMPT_SELECT = `
+  SELECT attempt_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt_number, started_at, heartbeat_at,
          finished_at, updated_at
-    FROM executor_invocations`;
+    FROM executor_attempts`;
 
 const ROUND_SELECT = `
-  SELECT round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification, executor_recommendation,
+  SELECT round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+         executor_family, attempt_number, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
          verification_status, verification_results, commit_sha, recovery_code, human_gate,
+         (SELECT legacy_provenance
+            FROM executor_attempts
+           WHERE attempt_id = executor_rounds.attempt_id) AS legacy_provenance,
          updated_at
     FROM executor_rounds`;
 
-function loadExecutorInvocationSnapshot(
+function loadExecutorAttemptSnapshot(
   db: MomentumDb,
-  invocationId: string,
-): ExecutorInvocationSnapshot | undefined {
+  attemptId: string,
+): ExecutorAttemptSnapshot | undefined {
   const row = db
-    .prepare(`${INVOCATION_SELECT} WHERE invocation_id = ?`)
-    .get(invocationId) as ExecutorInvocationRow | undefined;
+    .prepare(`${ATTEMPT_SELECT} WHERE attempt_id = ?`)
+    .get(attemptId) as ExecutorAttemptRow | undefined;
   if (row === undefined) return undefined;
-  return { record: rowToInvocation(row), updatedAt: row.updated_at };
+  return { record: rowToAttempt(row), updatedAt: row.updated_at };
 }
 
 function loadExecutorRoundSnapshot(
@@ -1139,15 +1248,15 @@ function loadExecutorRoundSnapshot(
   return { record: rowToRound(row), updatedAt: row.updated_at };
 }
 
-function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
+function rowToAttempt(row: ExecutorAttemptRow): ExecutorAttemptRecord {
   return {
-    invocationId: row.invocation_id,
+    attemptId: row.attempt_id,
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
     executorFamily: row.executor_family as ExecutorName,
-    state: row.state as ExecutorInvocationState,
-    attempt: row.attempt,
+    state: row.state as ExecutorAttemptState,
+    attemptNumber: row.attempt_number,
     startedAt: row.started_at,
     heartbeatAt: row.heartbeat_at,
     finishedAt: row.finished_at,
@@ -1158,14 +1267,16 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
   const verificationResults = parseVerificationResults(
     row.verification_results,
   );
+  const legacyAttemptNumber = parseLegacyAttemptNumber(row.legacy_provenance);
   return {
     roundId: row.round_id,
-    invocationId: row.invocation_id,
+    attemptId: row.attempt_id,
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
     executorFamily: row.executor_family as ExecutorName,
-    attempt: row.attempt,
+    attemptNumber: row.attempt_number,
+    ...(legacyAttemptNumber !== undefined ? { legacyAttemptNumber } : {}),
     roundIndex: row.round_index,
     state: row.state as ExecutorRoundState,
     classification:
@@ -1193,6 +1304,22 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     recoveryCode: row.recovery_code,
     humanGate: row.human_gate as ExecutorHumanGateType | null,
   };
+}
+
+function parseLegacyAttemptNumber(
+  provenance: string | null,
+): number | undefined {
+  if (provenance === null) return undefined;
+  try {
+    const parsed = JSON.parse(provenance) as unknown;
+    if (parsed === null || typeof parsed !== "object") return undefined;
+    const value = (parsed as Record<string, unknown>).legacyAttemptNumber;
+    return Number.isSafeInteger(value) && Number(value) > 0
+      ? Number(value)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function rowToArtifact(row: ExecutorArtifactRow): ExecutorArtifactRecord {
@@ -1257,20 +1384,20 @@ function validateDefinitionRecord(
   return errors;
 }
 
-function validateInvocationRecord(
-  record: ExecutorInvocationRecord,
+function validateAttemptRecord(
+  record: ExecutorAttemptRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
   if (!isExecutorName(record.executorFamily)) {
     errors.push({
-      code: "executor_invocation_unknown_family",
+      code: "executor_attempt_unknown_family",
       message: `unknown executor family: ${String(record.executorFamily)}`,
     });
   }
-  if (!INVOCATION_STATE_SET.has(record.state)) {
+  if (!ATTEMPT_STATE_SET.has(record.state)) {
     errors.push({
-      code: "executor_invocation_unknown_state",
-      message: `unknown executor invocation state: ${String(record.state)}`,
+      code: "executor_attempt_unknown_state",
+      message: `unknown executor attempt state: ${String(record.state)}`,
     });
   }
   return errors;
@@ -1332,25 +1459,25 @@ function validateArtifactRecord(
   return errors;
 }
 
-function handleInvocationPostWriteConflict(
+function handleAttemptPostWriteConflict(
   db: MomentumDb,
-  invocationId: string,
-  toState: ExecutorInvocationState,
-  options: UpdateExecutorInvocationOptions,
-): ExecutorInvocationRecord {
-  const current = loadExecutorInvocation(db, invocationId);
+  attemptId: string,
+  toState: ExecutorAttemptState,
+  options: UpdateExecutorAttemptOptions,
+): ExecutorAttemptRecord {
+  const current = loadExecutorAttempt(db, attemptId);
   if (current === undefined) {
-    throw new ExecutorInvocationNotFoundError(invocationId);
+    throw new ExecutorAttemptNotFoundError(attemptId);
   }
-  if (current.state === toState && invocationPatchMatches(current, options)) {
+  if (current.state === toState && attemptPatchMatches(current, options)) {
     return current;
   }
-  throw new ExecutorInvocationTransitionError(
-    invocationId,
+  throw new ExecutorAttemptTransitionError(
+    attemptId,
     current.state,
     toState,
-    "executor_invocation_invalid_transition",
-    `executor invocation ${invocationId} changed concurrently; refusing ambiguous ${toState} update`,
+    "executor_attempt_invalid_transition",
+    `executor attempt ${attemptId} changed concurrently; refusing ambiguous ${toState} update`,
   );
 }
 
@@ -1375,9 +1502,9 @@ function handleRoundPostWriteConflict(
   );
 }
 
-function invocationPatchMatches(
-  current: ExecutorInvocationRecord,
-  options: UpdateExecutorInvocationOptions,
+function attemptPatchMatches(
+  current: ExecutorAttemptRecord,
+  options: UpdateExecutorAttemptOptions,
 ): boolean {
   return (
     fieldMatches(current.startedAt, options.startedAt) &&
