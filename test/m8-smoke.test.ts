@@ -149,7 +149,7 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
       expect(monitor).toMatchObject({
         ok: true,
         command: "workflow run monitor",
-        schemaVersion: 1,
+        schemaVersion: 2,
         runId,
         runState: "succeeded",
         terminal: true,

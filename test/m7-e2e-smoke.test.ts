@@ -105,7 +105,7 @@ describe("Milestone 7 end-to-end coding workflow smoke (NGX-318)", () => {
       const handoff = workflowHandoffJson(dataDir, runId);
       expect(handoff).toMatchObject({
         ok: true,
-        schemaVersion: 1
+        schemaVersion: 2
       });
       expect((handoff["run"] as Record<string, unknown>)["state"]).toBe(
         "succeeded"
