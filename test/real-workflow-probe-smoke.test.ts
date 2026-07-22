@@ -37,13 +37,13 @@ import {
  *     dry-run), classifies the outcome, and records evidence under gitignored
  *     `.agent-runs/real-smoke/`.
  *
- * Manual run (probe-only dry-run of, e.g., the no-mistakes wrapper):
+ * Manual run (probe-only dry-run of, e.g., the validate wrapper):
  *   MOMENTUM_REAL_SMOKE_WORKFLOW=1 \
- *   MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=no-mistakes \
+ *   MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=validate \
  *   MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json \
  *     pnpm vitest run --config vitest.integration.config.ts test/real-workflow-probe-smoke.test.ts
  *
- * External writes stay closed: a `linear-refresh` (external-apply) probe needs
+ * External writes stay closed: a `tracker-refresh` (external-apply) probe needs
  * the separate `MOMENTUM_REAL_SMOKE_WORKFLOW_ALLOW_WRITE=1` gate (enforced by
  * the planner), and this smoke runs only the cheap availability probe, never the
  * full agent (that needs `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`, out of scope here).
@@ -171,7 +171,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     const file = path.join(dir, "live-wrappers.json");
     const doc = {
       name: "smoke",
-      wrappers: { "no-mistakes": { command: "/usr/bin/true" } },
+      wrappers: { validate: { command: "/usr/bin/true" } },
     };
     fs.writeFileSync(file, JSON.stringify(doc));
     expect(
@@ -209,7 +209,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
       JSON.stringify({
         name: "smoke",
         wrappers: {
-          "no-mistakes": {
+          validate: {
             command: NODE,
             args: ["-e", "process.exit(0)"],
             cwd: "repo",
@@ -227,7 +227,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     );
     const env = {
       [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1",
-      [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
+      [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "validate",
       [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
     };
     const plan = planWorkflowHarnessSmoke(
@@ -271,7 +271,7 @@ describe.skipIf(!shouldRunProbeSmoke)(
         issue: "NGX-372",
         smoke: "opt-in-real-workflow-harness-probe",
         kind: smokePlan.kind,
-        family: smokePlan.family,
+        executor: smokePlan.executor,
         isExternalWrite: smokePlan.isExternalWrite,
         probeOnly: smokePlan.probeOnly,
         probe: smokePlan.probe,
@@ -298,11 +298,11 @@ describe("NGX-372 real workflow harness probe smoke gating", () => {
     const offPlan = planWorkflowHarnessSmoke(
       {
         [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: undefined,
-        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
+        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "validate",
       },
       {
         name: "smoke",
-        wrappers: { "no-mistakes": { command: "/usr/bin/true" } },
+        wrappers: { validate: { command: "/usr/bin/true" } },
       },
     );
     expect(offPlan.mode).toBe("skip");

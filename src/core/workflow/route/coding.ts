@@ -86,15 +86,15 @@ export const CODING_ROUTE_STEPS_KEY = "steps";
 /**
  * The coding-workflow steps that accept operator route/config overrides - the
  * steps that are currently operationally meaningful for harness/model/effort
- * selection (implementation, postflight, no-mistakes, merge-cleanup). `preflight`
- * (bounded prep) and `linear-refresh` (the safety-gated external-apply adapter)
+ * selection (implementation, postflight, validate, merge-cleanup). `preflight`
+ * (bounded prep) and `tracker-refresh` (the safety-gated external-apply adapter)
  * are intentionally excluded; configuring them fails closed (`step_unsupported`).
  * Declared in canonical order so a normalized override map is byte-stable.
  */
 export const CONFIGURABLE_CODING_STEP_KEYS = [
   "implementation",
   "postflight",
-  "no-mistakes",
+  "validate",
   "merge-cleanup",
 ] as const;
 

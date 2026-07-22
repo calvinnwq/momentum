@@ -67,7 +67,8 @@ import {
   executeWorkflowStepDispatch,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../../core/workflow/dispatch/execute.js";
-import { resolveClaimedWorkflowStepFamily } from "../../core/workflow/dispatch/persist.js";
+import { resolveClaimedWorkflowStepExecutor } from "../../core/workflow/dispatch/persist.js";
+import { legacyApprovalBoundarySynonyms } from "../../core/workflow/definition/legacy.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
   resolveDaemonWorkflowStepDispatch,
@@ -1443,11 +1444,15 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
       });
     }
 
+    // Frozen workflow_approvals rows keep their recorded boundary spelling
+    // (the artifact digest embeds it), so duplicate detection matches every
+    // legacy synonym of the requested boundary instead of rewriting rows.
+    const boundarySynonyms = legacyApprovalBoundarySynonyms(boundary);
     const duplicate = db
       .prepare(
-        "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
+        `SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary IN (${boundarySynonyms.map(() => "?").join(", ")})`,
       )
-      .get(runId, boundary);
+      .get(runId, ...boundarySynonyms);
     if (duplicate) {
       return emitWorkflowRunApproveFailure(parsed, io, {
         command: "workflow run approve",
@@ -1510,9 +1515,9 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
 
       const duplicateInTransaction = db
         .prepare(
-          "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
+          `SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary IN (${boundarySynonyms.map(() => "?").join(", ")})`,
         )
-        .get(runId, boundary);
+        .get(runId, ...boundarySynonyms);
       if (duplicateInTransaction) {
         db.exec("ROLLBACK");
         return emitWorkflowRunApproveFailure(parsed, io, {
@@ -2665,7 +2670,12 @@ function isWorkflowWatchTailStepDispatchBlocked(
   if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
     return false;
   }
-  return stepId === "merge-cleanup" || stepId === "linear-refresh";
+  return (
+    stepId === "merge-cleanup" ||
+    stepId === "tracker-refresh" ||
+    // Step ids on runs recorded before the tracker-refresh rename are frozen.
+    stepId === "linear-refresh"
+  );
 }
 
 function isWorkflowWatchLiveWrapperProfileRequired(
@@ -2678,11 +2688,11 @@ function isWorkflowWatchLiveWrapperProfileRequired(
   }
   if (stepId === "preflight" || stepId === "postflight") return true;
 
-  const resolution = resolveClaimedWorkflowStepFamily(db, {
+  const resolution = resolveClaimedWorkflowStepExecutor(db, {
     runId: envelope.runId,
     stepId,
   });
-  return resolution.ok && resolution.executorFamily === "delegate-supervisor";
+  return resolution.ok && resolution.executor === "delegate-supervisor";
 }
 
 function hasDaemonLiveWrapperProfileConfigured(

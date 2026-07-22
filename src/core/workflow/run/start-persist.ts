@@ -7,8 +7,8 @@
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
- * is owned separately by `dispatch/scheduler.ts`; the native goal-loop,
- * one-shot / script SDK paths and the legacy no-mistakes mirror /
+ * is owned separately by `dispatch/scheduler.ts`; the native agent-loop,
+ * agent-once / script SDK paths and the legacy no-mistakes mirror /
  * delegate-supervisor profile-backed paths attach through executor-loop
  * persistence rather than this start persistence layer. The retired goal-first
  * lane no longer starts work;

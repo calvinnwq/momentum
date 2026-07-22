@@ -12,11 +12,25 @@ export const WORKFLOW_STEP_KINDS = [
   "preflight",
   "implementation",
   "postflight",
-  "no-mistakes",
+  "validate",
   "merge-cleanup",
-  "linear-refresh"
+  "tracker-refresh",
 ] as const;
 export type WorkflowStepKind = (typeof WORKFLOW_STEP_KINDS)[number];
+
+/**
+ * Retired step-kind spellings retained by previously recorded workflow
+ * definitions. Runtime rows and new definitions use only the canonical
+ * {@link WORKFLOW_STEP_KINDS}; these legacy values stay readable and are
+ * projected to their canonical twins by the shared definition legacy
+ * projection instead of being rewritten in place.
+ */
+export const LEGACY_WORKFLOW_STEP_KINDS = [
+  "no-mistakes",
+  "linear-refresh",
+] as const;
+export type LegacyWorkflowStepKind =
+  (typeof LEGACY_WORKFLOW_STEP_KINDS)[number];
 
 /**
  * Tail steps whose child command performs irreversible external side effects -
@@ -31,10 +45,10 @@ export type WorkflowStepKind = (typeof WORKFLOW_STEP_KINDS)[number];
  * shares one definition.
  */
 export const EXTERNAL_SIDE_EFFECT_TAIL_STEP_KINDS: ReadonlySet<WorkflowStepKind> =
-  new Set<WorkflowStepKind>(["merge-cleanup", "linear-refresh"]);
+  new Set<WorkflowStepKind>(["merge-cleanup", "tracker-refresh"]);
 
 export function isExternalSideEffectTailStepKind(
-  kind: WorkflowStepKind
+  kind: WorkflowStepKind,
 ): boolean {
   return EXTERNAL_SIDE_EFFECT_TAIL_STEP_KINDS.has(kind);
 }
@@ -47,7 +61,7 @@ export const WORKFLOW_STEP_STATES = [
   "failed",
   "skipped",
   "blocked",
-  "canceled"
+  "canceled",
 ] as const;
 export type WorkflowStepState = (typeof WORKFLOW_STEP_STATES)[number];
 
@@ -55,7 +69,7 @@ export const WORKFLOW_STEP_TERMINAL_STATES = [
   "succeeded",
   "failed",
   "skipped",
-  "canceled"
+  "canceled",
 ] as const satisfies readonly WorkflowStepState[];
 
 export const WORKFLOW_RUN_STATES = [
@@ -65,21 +79,21 @@ export const WORKFLOW_RUN_STATES = [
   "succeeded",
   "failed",
   "blocked",
-  "canceled"
+  "canceled",
 ] as const;
 export type WorkflowRunState = (typeof WORKFLOW_RUN_STATES)[number];
 
 export const WORKFLOW_RUN_TERMINAL_STATES = [
   "succeeded",
   "failed",
-  "canceled"
+  "canceled",
 ] as const satisfies readonly WorkflowRunState[];
 
 export const WORKFLOW_APPROVAL_BOUNDARIES = [
   "implementation",
   "through-implementation",
-  "no-mistakes",
-  "through-no-mistakes",
+  "validate",
+  "through-validate",
   "merge-cleanup",
   "through-merge-cleanup",
   "full",
@@ -88,20 +102,20 @@ export const WORKFLOW_APPROVAL_BOUNDARIES = [
   "through-postflight",
   "through-merge-gates",
   "final-cleanup",
-  "full-batch"
+  "full-batch",
 ] as const;
 export type WorkflowApprovalBoundary =
   (typeof WORKFLOW_APPROVAL_BOUNDARIES)[number];
 
 export function isWorkflowApprovalBoundary(
-  value: string
+  value: string,
 ): value is WorkflowApprovalBoundary {
   return (WORKFLOW_APPROVAL_BOUNDARIES as readonly string[]).includes(value);
 }
 
 export function highestWorkflowApprovalBoundary(
   current: string | null,
-  next: WorkflowApprovalBoundary | null
+  next: WorkflowApprovalBoundary | null,
 ): WorkflowApprovalBoundary | null {
   if (next === null) {
     return current !== null && isWorkflowApprovalBoundary(current)
@@ -117,31 +131,31 @@ export function highestWorkflowApprovalBoundary(
 }
 
 export function workflowApprovalBoundaryRank(
-  boundary: WorkflowApprovalBoundary
+  boundary: WorkflowApprovalBoundary,
 ): number {
   return workflowStepKindsForApprovalBoundary(boundary).length;
 }
 
 export function workflowStepKindsForApprovalBoundary(
-  boundary: WorkflowApprovalBoundary
+  boundary: WorkflowApprovalBoundary,
 ): WorkflowStepKind[] {
   switch (boundary) {
     case "implementation":
     case "through-implementation":
       return ["preflight", "implementation"];
-    case "no-mistakes":
-    case "through-no-mistakes":
+    case "validate":
+    case "through-validate":
     case "overnight-safe":
     case "through-merge-gates":
-      return ["preflight", "implementation", "postflight", "no-mistakes"];
+      return ["preflight", "implementation", "postflight", "validate"];
     case "merge-cleanup":
     case "through-merge-cleanup":
       return [
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
-        "merge-cleanup"
+        "validate",
+        "merge-cleanup",
       ];
     case "full":
     case "final-cleanup":
@@ -150,9 +164,9 @@ export function workflowStepKindsForApprovalBoundary(
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
+        "validate",
         "merge-cleanup",
-        "linear-refresh"
+        "tracker-refresh",
       ];
     case "through-postflight":
       return ["preflight", "implementation", "postflight"];
@@ -164,13 +178,13 @@ export function workflowStepKindsForApprovalBoundary(
 export const WORKFLOW_LEASE_KINDS = [
   "monitor",
   "managed-step",
-  "dispatch"
+  "dispatch",
 ] as const;
 export type WorkflowLeaseKind = (typeof WORKFLOW_LEASE_KINDS)[number];
 
 export const WORKFLOW_LEASE_STALE_POLICIES = [
   "auto-release",
-  "manual-recovery-required"
+  "manual-recovery-required",
 ] as const;
 export type WorkflowLeaseStalePolicy =
   (typeof WORKFLOW_LEASE_STALE_POLICIES)[number];
@@ -179,7 +193,7 @@ export const WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS = [
   "released",
   "fresh",
   "stale-auto-release",
-  "stale-manual-recovery-required"
+  "stale-manual-recovery-required",
 ] as const;
 export type WorkflowLeaseFreshnessClassification =
   (typeof WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS)[number];
@@ -204,16 +218,16 @@ export type WorkflowStepRecord = {
 };
 
 const STEP_STATE_SET: ReadonlySet<WorkflowStepState> = new Set(
-  WORKFLOW_STEP_STATES
+  WORKFLOW_STEP_STATES,
 );
 const RUN_STATE_SET: ReadonlySet<WorkflowRunState> = new Set(
-  WORKFLOW_RUN_STATES
+  WORKFLOW_RUN_STATES,
 );
 const STEP_TERMINAL_SET: ReadonlySet<WorkflowStepState> = new Set(
-  WORKFLOW_STEP_TERMINAL_STATES
+  WORKFLOW_STEP_TERMINAL_STATES,
 );
 const RUN_TERMINAL_SET: ReadonlySet<WorkflowRunState> = new Set(
-  WORKFLOW_RUN_TERMINAL_STATES
+  WORKFLOW_RUN_TERMINAL_STATES,
 );
 
 const STEP_ALLOWED: Readonly<
@@ -226,7 +240,7 @@ const STEP_ALLOWED: Readonly<
   succeeded: [],
   failed: [],
   skipped: [],
-  canceled: []
+  canceled: [],
 };
 
 const RUN_ALLOWED: Readonly<
@@ -238,7 +252,7 @@ const RUN_ALLOWED: Readonly<
   blocked: ["approved", "canceled"],
   succeeded: [],
   failed: [],
-  canceled: []
+  canceled: [],
 };
 
 export type StepTransitionErrorCode =
@@ -252,8 +266,7 @@ export type RunTransitionErrorCode =
   | "workflow_run_invalid_transition";
 
 export type TransitionResult<S, E> =
-  | { ok: true; state: S }
-  | { ok: false; errorCode: E; errorMessage: string };
+  { ok: true; state: S } | { ok: false; errorCode: E; errorMessage: string };
 
 export function isTerminalStepState(state: WorkflowStepState): boolean {
   return STEP_TERMINAL_SET.has(state);
@@ -265,13 +278,13 @@ export function isTerminalRunState(state: WorkflowRunState): boolean {
 
 export function transitionWorkflowStep(
   from: WorkflowStepState,
-  to: WorkflowStepState
+  to: WorkflowStepState,
 ): TransitionResult<WorkflowStepState, StepTransitionErrorCode> {
   if (!STEP_STATE_SET.has(from) || !STEP_STATE_SET.has(to)) {
     return {
       ok: false,
       errorCode: "workflow_step_unknown_state",
-      errorMessage: `unknown workflow step state: from=${String(from)} to=${String(to)}`
+      errorMessage: `unknown workflow step state: from=${String(from)} to=${String(to)}`,
     };
   }
   if (from === to) {
@@ -281,7 +294,7 @@ export function transitionWorkflowStep(
     return {
       ok: false,
       errorCode: "workflow_step_terminal",
-      errorMessage: `workflow step is in terminal state ${from}; cannot transition to ${to}`
+      errorMessage: `workflow step is in terminal state ${from}; cannot transition to ${to}`,
     };
   }
   const allowed = STEP_ALLOWED[from];
@@ -289,7 +302,7 @@ export function transitionWorkflowStep(
     return {
       ok: false,
       errorCode: "workflow_step_invalid_transition",
-      errorMessage: `workflow step cannot transition from ${from} to ${to}`
+      errorMessage: `workflow step cannot transition from ${from} to ${to}`,
     };
   }
   return { ok: true, state: to };
@@ -297,13 +310,13 @@ export function transitionWorkflowStep(
 
 export function transitionWorkflowRun(
   from: WorkflowRunState,
-  to: WorkflowRunState
+  to: WorkflowRunState,
 ): TransitionResult<WorkflowRunState, RunTransitionErrorCode> {
   if (!RUN_STATE_SET.has(from) || !RUN_STATE_SET.has(to)) {
     return {
       ok: false,
       errorCode: "workflow_run_unknown_state",
-      errorMessage: `unknown workflow run state: from=${String(from)} to=${String(to)}`
+      errorMessage: `unknown workflow run state: from=${String(from)} to=${String(to)}`,
     };
   }
   if (from === to) {
@@ -313,7 +326,7 @@ export function transitionWorkflowRun(
     return {
       ok: false,
       errorCode: "workflow_run_terminal",
-      errorMessage: `workflow run is in terminal state ${from}; cannot transition to ${to}`
+      errorMessage: `workflow run is in terminal state ${from}; cannot transition to ${to}`,
     };
   }
   const allowed = RUN_ALLOWED[from];
@@ -321,7 +334,7 @@ export function transitionWorkflowRun(
     return {
       ok: false,
       errorCode: "workflow_run_invalid_transition",
-      errorMessage: `workflow run cannot transition from ${from} to ${to}`
+      errorMessage: `workflow run cannot transition from ${from} to ${to}`,
     };
   }
   return { ok: true, state: to };
@@ -361,7 +374,7 @@ export function deriveWorkflowRunState(
     leases: readonly WorkflowLeaseRecord[];
     now: number;
     graceMs?: number;
-  }
+  },
 ): WorkflowRunState {
   const stepState = deriveStepOnlyRunState(steps);
   if (!leaseContext) return stepState;
@@ -373,7 +386,7 @@ export function deriveWorkflowRunState(
       now: leaseContext.now,
       ...(leaseContext.graceMs !== undefined
         ? { graceMs: leaseContext.graceMs }
-        : {})
+        : {}),
     });
     if (classification === "released") continue;
     anyOutstanding = true;
@@ -392,7 +405,7 @@ export function deriveWorkflowRunState(
 }
 
 function deriveStepOnlyRunState(
-  steps: readonly WorkflowStepRecord[]
+  steps: readonly WorkflowStepRecord[],
 ): WorkflowRunState {
   if (steps.length === 0) return "pending";
 
@@ -483,7 +496,7 @@ function deriveStepOnlyRunState(
  */
 export function classifyWorkflowLease(
   lease: WorkflowLeaseRecord,
-  input: { now: number; graceMs?: number }
+  input: { now: number; graceMs?: number },
 ): WorkflowLeaseFreshnessClassification {
   if (!Number.isFinite(input.now)) {
     throw new Error("classifyWorkflowLease: now must be a finite number");
@@ -491,7 +504,7 @@ export function classifyWorkflowLease(
   const graceMs = input.graceMs ?? 0;
   if (!Number.isFinite(graceMs) || graceMs < 0) {
     throw new Error(
-      "classifyWorkflowLease: graceMs must be a non-negative finite number"
+      "classifyWorkflowLease: graceMs must be a non-negative finite number",
     );
   }
   if (lease.releasedAt !== null) return "released";

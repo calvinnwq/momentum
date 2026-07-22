@@ -11,7 +11,7 @@ import {
   resolveCodingRouteStepSelections,
   validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
-  type CodingStepRouteOverrides
+  type CodingStepRouteOverrides,
 } from "../src/core/workflow/route/coding.js";
 
 /**
@@ -41,20 +41,24 @@ describe("coding-route-config — configurable surface", () => {
     expect([...CONFIGURABLE_CODING_STEP_KEYS]).toEqual([
       "implementation",
       "postflight",
-      "no-mistakes",
-      "merge-cleanup"
+      "validate",
+      "merge-cleanup",
     ]);
   });
 
   it("exposes exactly the harness/model/effort fields in order", () => {
-    expect([...CODING_STEP_ROUTE_FIELDS]).toEqual(["harness", "model", "effort"]);
+    expect([...CODING_STEP_ROUTE_FIELDS]).toEqual([
+      "harness",
+      "model",
+      "effort",
+    ]);
   });
 
   it("defaults every selection field to null (inherit at execution)", () => {
     expect(DEFAULT_CODING_STEP_ROUTE_SELECTION).toEqual({
       harness: null,
       model: null,
-      effort: null
+      effort: null,
     });
   });
 });
@@ -83,12 +87,12 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
 
   it("accepts a single-step single-field override", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { model: "claude-opus-4-8" }
+      implementation: { model: "claude-opus-4-8" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.overrides).toEqual({
-      implementation: { model: "claude-opus-4-8" }
+      implementation: { model: "claude-opus-4-8" },
     });
   });
 
@@ -96,37 +100,37 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: { harness: "gnhf", model: "opus", effort: "high" },
       postflight: { harness: "claude", model: "sonnet", effort: "medium" },
-      "no-mistakes": { harness: "codex", model: "gpt", effort: "low" },
-      "merge-cleanup": { harness: "script", model: "none", effort: "low" }
+      validate: { harness: "codex", model: "gpt", effort: "low" },
+      "merge-cleanup": { harness: "script", model: "none", effort: "low" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(Object.keys(result.overrides)).toEqual([
       "implementation",
       "postflight",
-      "no-mistakes",
-      "merge-cleanup"
+      "validate",
+      "merge-cleanup",
     ]);
   });
 
   it("normalizes to canonical step and field order (byte-stable)", () => {
     const result = validateCodingStepRouteOverrides({
       postflight: { effort: "high", harness: "claude" },
-      implementation: { model: "opus" }
+      implementation: { model: "opus" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(JSON.stringify(result.overrides)).toBe(
       JSON.stringify({
         implementation: { model: "opus" },
-        postflight: { harness: "claude", effort: "high" }
-      })
+        postflight: { harness: "claude", effort: "high" },
+      }),
     );
   });
 
   it("trims field values", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { model: "  opus  " }
+      implementation: { model: "  opus  " },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
@@ -137,8 +141,8 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: { harness: "claude", model: "opus", effort: "max" },
       postflight: { harness: "claude", model: "sonnet-4.6" },
-      "no-mistakes": { harness: "codex", model: "openai/gpt-5.5" },
-      "merge-cleanup": { harness: "opencode", model: "glm-5.2" }
+      validate: { harness: "codex", model: "openai/gpt-5.5" },
+      "merge-cleanup": { harness: "opencode", model: "glm-5.2" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
@@ -146,11 +150,11 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
       implementation: {
         harness: "claude",
         model: "claude-opus-4-8",
-        effort: "max"
+        effort: "max",
       },
       postflight: { harness: "claude", model: "claude-sonnet-4-6" },
-      "no-mistakes": { harness: "codex", model: "gpt-5.5" },
-      "merge-cleanup": { harness: "opencode", model: "opencode-go/glm-5.2" }
+      validate: { harness: "codex", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "opencode", model: "opencode-go/glm-5.2" },
     });
   });
 
@@ -158,23 +162,23 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: { model: "sonnet" },
       postflight: { harness: "auto", model: "opus" },
-      "no-mistakes": { harness: "trusted-shell", model: "gpt-5.5" },
-      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" }
+      validate: { harness: "trusted-shell", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.overrides).toEqual({
       implementation: { model: "sonnet" },
       postflight: { harness: "auto", model: "opus" },
-      "no-mistakes": { harness: "trusted-shell", model: "gpt-5.5" },
-      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" }
+      validate: { harness: "trusted-shell", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" },
     });
   });
 
   it("drops a step whose override object has no recognized fields", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: {},
-      postflight: { model: "opus" }
+      postflight: { model: "opus" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
@@ -191,9 +195,9 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
   });
 
   it("fails closed step_unsupported for steps outside the configurable set", () => {
-    for (const step of ["preflight", "linear-refresh", "bogus"]) {
+    for (const step of ["preflight", "tracker-refresh", "bogus"]) {
       const result = validateCodingStepRouteOverrides({
-        [step]: { model: "opus" }
+        [step]: { model: "opus" },
       });
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("expected refusal");
@@ -210,7 +214,7 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
 
   it("fails closed field_unsupported for an unknown field", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { temperature: "hot" }
+      implementation: { temperature: "hot" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
@@ -219,7 +223,7 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
 
   it("fails closed value_invalid for a non-string field value", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { model: 7 }
+      implementation: { model: 7 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
@@ -228,7 +232,7 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
 
   it("fails closed value_invalid for a blank field value", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { model: "   " }
+      implementation: { model: "   " },
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
@@ -239,16 +243,16 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
 describe("resolveCodingRouteModelAlias — provider-aware command strings", () => {
   it("maps Claude aliases only when the harness selects Claude", () => {
     expect(resolveCodingRouteModelAlias("claude", "sonnet")).toBe(
-      "claude-sonnet-4-6"
+      "claude-sonnet-4-6",
     );
     expect(resolveCodingRouteModelAlias("Claude", "sonnet-4.6")).toBe(
-      "claude-sonnet-4-6"
+      "claude-sonnet-4-6",
     );
     expect(resolveCodingRouteModelAlias("claude", "opus")).toBe(
-      "claude-opus-4-8"
+      "claude-opus-4-8",
     );
     expect(resolveCodingRouteModelAlias("claude", "claude-opus-4.8")).toBe(
-      "claude-opus-4-8"
+      "claude-opus-4-8",
     );
     expect(resolveCodingRouteModelAlias("codex", "sonnet")).toBe("sonnet");
     expect(resolveCodingRouteModelAlias(undefined, "sonnet")).toBe("sonnet");
@@ -256,45 +260,45 @@ describe("resolveCodingRouteModelAlias — provider-aware command strings", () =
 
   it("maps Codex aliases to un-namespaced Codex CLI model ids", () => {
     expect(resolveCodingRouteModelAlias("codex", "spark")).toBe(
-      "gpt-5.3-codex-spark"
+      "gpt-5.3-codex-spark",
     );
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.1")).toBe(
-      "gpt-5.1"
+      "gpt-5.1",
     );
-    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.3-codex-spark")).toBe(
-      "gpt-5.3-codex-spark"
-    );
+    expect(
+      resolveCodingRouteModelAlias("codex", "openai/gpt-5.3-codex-spark"),
+    ).toBe("gpt-5.3-codex-spark");
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.4-fast")).toBe(
-      "gpt-5.4-fast"
+      "gpt-5.4-fast",
     );
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5")).toBe(
-      "gpt-5.5"
+      "gpt-5.5",
     );
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5-pro")).toBe(
-      "gpt-5.5-pro"
+      "gpt-5.5-pro",
     );
   });
 
   it("maps OpenCode aliases to provider-qualified OpenCode model ids", () => {
     expect(resolveCodingRouteModelAlias("opencode", "gpt-5.5")).toBe(
-      "openai/gpt-5.5"
+      "openai/gpt-5.5",
     );
     expect(resolveCodingRouteModelAlias("opencode", "glm-5.2")).toBe(
-      "opencode-go/glm-5.2"
+      "opencode-go/glm-5.2",
     );
     expect(resolveCodingRouteModelAlias("opencode", "qwen3.7-plus")).toBe(
-      "opencode-go/qwen3.7-plus"
+      "opencode-go/qwen3.7-plus",
     );
   });
 
   it("keeps unsupported or non-agent harness model strings free-form", () => {
     expect(resolveCodingRouteModelAlias("trusted-shell", "gpt-5.5")).toBe(
-      "gpt-5.5"
+      "gpt-5.5",
     );
     expect(resolveCodingRouteModelAlias("gh-cli", "glm-5.2")).toBe("glm-5.2");
     expect(resolveCodingRouteModelAlias("deterministic", "opus")).toBe("opus");
     expect(resolveCodingRouteModelAlias("codex", "future-model")).toBe(
-      "future-model"
+      "future-model",
     );
   });
 });
@@ -311,8 +315,8 @@ describe("readCodingStepRouteOverrides — persisted read-back", () => {
     const result = readCodingStepRouteOverrides({
       profile: "fast",
       [CODING_ROUTE_STEPS_KEY]: {
-        implementation: { model: "opus" }
-      }
+        implementation: { model: "opus" },
+      },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
@@ -321,7 +325,7 @@ describe("readCodingStepRouteOverrides — persisted read-back", () => {
 
   it("fails closed when the persisted steps namespace is corrupt", () => {
     const result = readCodingStepRouteOverrides({
-      [CODING_ROUTE_STEPS_KEY]: { preflight: { model: "opus" } }
+      [CODING_ROUTE_STEPS_KEY]: { preflight: { model: "opus" } },
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
@@ -338,23 +342,23 @@ describe("writeCodingStepRouteOverrides — durable embedding", () => {
 
   it("embeds overrides under the steps namespace, preserving other keys", () => {
     const overrides: CodingStepRouteOverrides = {
-      implementation: { model: "opus" }
+      implementation: { model: "opus" },
     };
     const route = writeCodingStepRouteOverrides(
       { profile: "fast", subworkflow: { lineage: {} } },
-      overrides
+      overrides,
     );
     expect(route.profile).toBe("fast");
     expect(route.subworkflow).toEqual({ lineage: {} });
     expect(route[CODING_ROUTE_STEPS_KEY]).toEqual({
-      implementation: { model: "opus" }
+      implementation: { model: "opus" },
     });
   });
 
   it("does not mutate the input route", () => {
     const input = { profile: "fast" };
     writeCodingStepRouteOverrides(input, {
-      implementation: { model: "opus" }
+      implementation: { model: "opus" },
     });
     expect(input).toEqual({ profile: "fast" });
   });
@@ -362,7 +366,7 @@ describe("writeCodingStepRouteOverrides — durable embedding", () => {
   it("round-trips write -> read", () => {
     const built = validateCodingStepRouteOverrides({
       implementation: { harness: "gnhf", model: "opus" },
-      "merge-cleanup": { effort: "low" }
+      "merge-cleanup": { effort: "low" },
     });
     expect(built.ok).toBe(true);
     if (!built.ok) throw new Error("expected ok");
@@ -380,14 +384,14 @@ describe("resolveCodingRouteStepSelections — effective preview projection", ()
     expect(Object.keys(selections)).toEqual([
       "implementation",
       "postflight",
-      "no-mistakes",
-      "merge-cleanup"
+      "validate",
+      "merge-cleanup",
     ]);
     for (const key of CONFIGURABLE_CODING_STEP_KEYS) {
       expect(selections[key]).toEqual({
         harness: null,
         model: null,
-        effort: null
+        effort: null,
       });
     }
   });
@@ -395,22 +399,22 @@ describe("resolveCodingRouteStepSelections — effective preview projection", ()
   it("fills overridden fields and defaults the rest to null", () => {
     const selections = resolveCodingRouteStepSelections({
       implementation: { harness: "gnhf", model: "opus" },
-      "merge-cleanup": { effort: "low" }
+      "merge-cleanup": { effort: "low" },
     });
     expect(selections.implementation).toEqual({
       harness: "gnhf",
       model: "opus",
-      effort: null
+      effort: null,
     });
     expect(selections.postflight).toEqual({
       harness: null,
       model: null,
-      effort: null
+      effort: null,
     });
     expect(selections["merge-cleanup"]).toEqual({
       harness: null,
       model: null,
-      effort: "low"
+      effort: "low",
     });
   });
 });
@@ -418,14 +422,14 @@ describe("resolveCodingRouteStepSelections — effective preview projection", ()
 describe("formatCodingRouteStepSelectionLines - human audit surface", () => {
   it("renders a header and every configurable step with the (default) sentinel when empty", () => {
     const lines = formatCodingRouteStepSelectionLines(
-      resolveCodingRouteStepSelections({})
+      resolveCodingRouteStepSelections({}),
     );
     expect(lines).toEqual([
       "Per-step route:",
       "  implementation: harness=(default), model=(default), effort=(default)",
       "  postflight: harness=(default), model=(default), effort=(default)",
-      "  no-mistakes: harness=(default), model=(default), effort=(default)",
-      "  merge-cleanup: harness=(default), model=(default), effort=(default)"
+      "  validate: harness=(default), model=(default), effort=(default)",
+      "  merge-cleanup: harness=(default), model=(default), effort=(default)",
     ]);
   });
 
@@ -433,31 +437,31 @@ describe("formatCodingRouteStepSelectionLines - human audit surface", () => {
     const lines = formatCodingRouteStepSelectionLines(
       resolveCodingRouteStepSelections({
         "merge-cleanup": { effort: "low" },
-        implementation: { harness: "gnhf", model: "opus" }
-      })
+        implementation: { harness: "gnhf", model: "opus" },
+      }),
     );
     expect(lines).toEqual([
       "Per-step route:",
       "  implementation: harness=gnhf, model=opus, effort=(default)",
       "  postflight: harness=(default), model=(default), effort=(default)",
-      "  no-mistakes: harness=(default), model=(default), effort=(default)",
-      "  merge-cleanup: harness=(default), model=(default), effort=low"
+      "  validate: harness=(default), model=(default), effort=(default)",
+      "  merge-cleanup: harness=(default), model=(default), effort=low",
     ]);
   });
 
   it("is byte-stable across repeated calls for the same selections", () => {
     const overrides: CodingStepRouteOverrides = {
-      postflight: { harness: "claude", effort: "high" }
+      postflight: { harness: "claude", effort: "high" },
     };
     const first = formatCodingRouteStepSelectionLines(
-      resolveCodingRouteStepSelections(overrides)
+      resolveCodingRouteStepSelections(overrides),
     );
     const second = formatCodingRouteStepSelectionLines(
-      resolveCodingRouteStepSelections(overrides)
+      resolveCodingRouteStepSelections(overrides),
     );
     expect(first).toEqual(second);
     expect(first).toContain(
-      "  postflight: harness=claude, model=(default), effort=high"
+      "  postflight: harness=claude, model=(default), effort=high",
     );
   });
 });

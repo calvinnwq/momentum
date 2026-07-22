@@ -45,8 +45,8 @@ import {
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs,
-} from "../src/core/executors/goal-loop/executor.js";
-import { runGoalLoopStep } from "../src/core/executors/goal-loop/orchestrator.js";
+} from "../src/core/executors/agent-loop/executor.js";
+import { runGoalLoopStep } from "../src/core/executors/agent-loop/orchestrator.js";
 import {
   noMistakesAttemptId,
   noMistakesRoundId,
@@ -92,10 +92,10 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
  * `runNoMistakesMirrorStep` adapters, whose seam-level reconciliation with the
  * scaffold is the documented real-adapter follow-up (see the phase-1 boundary
  * note in src/core/workflow/dispatch/execute.ts). This proof therefore exercises the
- * scaffold via the production seam on one one-shot step (`preflight`) and the
- * terminal finalization via the landed adapters on distinct steps: the one-shot
- * adapter on `postflight`, the goal-loop adapter on `implementation` (the
- * goal-loop family in the real coding workflow definition), which drives a
+ * scaffold via the production seam on one agent-once step (`preflight`) and the
+ * terminal finalization via the landed adapters on distinct steps: the agent-once
+ * adapter on `postflight`, the agent-loop adapter on `implementation` (the
+ * agent-loop family in the real coding workflow definition), which drives a
  * bounded multi-round attempt to terminal `succeeded` with a passing
  * verification gate, and the no-mistakes mirror adapter on `no-mistakes`, which
  * settles its single long-lived mirror round to terminal `succeeded` on a
@@ -103,7 +103,7 @@ import type { RunnerResult } from "../src/core/executors/runner/types.js";
  * passing verification gate). Each carries a deliberately distinct attempt id
  * (`...::dispatch` for the scaffold vs each landed adapter's own reattachable
  * id), so composing scaffold + multiple terminal families never mints two owners
- * for one step. With the one-shot, goal-loop, and no-mistakes mirror terminals
+ * for one step. With the agent-once, agent-loop, and no-mistakes mirror terminals
  * composed, the layered adapter-test strategy is complete. (The M9 live-wrapper
  * managed-step lane that used to compose on `merge-cleanup` was deleted with
  * the rest of the M9 live-step orchestration under NGX-599; the RC-2
@@ -120,7 +120,7 @@ const CODING_WORKFLOW_STEP_IDS = [
   "postflight",
   "no-mistakes",
   "merge-cleanup",
-  "linear-refresh",
+  "tracker-refresh",
 ] as const;
 
 const tempRoots: string[] = [];
@@ -259,11 +259,11 @@ function roundInputs(artifactRoot: string): SingleShotRoundRuntimeInputs {
   };
 }
 
-// The goal-loop adapter derives a round's verification/commit evidence from the
+// The agent-loop adapter derives a round's verification/commit evidence from the
 // total `finalize` outcome (mirroring the M9 repo-safety finalize) rather than a
 // caller-supplied `evidence` block. A `committed` outcome with passing
 // verification settles the round `succeeded` with `verificationStatus: "passed"`
-// and the finalize commit's SHA — the goal-loop equivalent of the one-shot
+// and the finalize commit's SHA — the agent-loop equivalent of the agent-once
 // adapter's passing verification gate.
 const PARENT_SHA = "b".repeat(40);
 
@@ -306,7 +306,7 @@ function goalLoopRoundInputs(
 // The no-mistakes mirror reflects external review-gate state rather than driving
 // an agent Momentum chose, so its terminal-success evidence is a *corroborated*
 // `completed` external snapshot with CI passed — the mirror's equivalent of the
-// one-shot / goal-loop adapters' passing verification gate. The snapshot's
+// agent-once / agent-loop adapters' passing verification gate. The snapshot's
 // identity is corroborated against the expected identity pinned at start, and a
 // completed-with-CI-passed snapshot settles the long-lived round straight to
 // `succeeded` from `mirroring_external_state` (no intervening capture phase).
@@ -429,7 +429,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       });
 
       // --- Layer 3: production dispatch seam -> phase-1 executor start scaffold ---
-      // preflight is the one-shot family; approve, claim through the real scheduler,
+      // preflight is the agent-once family; approve, claim through the real scheduler,
       // and dispatch through the shipped production seam.
       setStepState(db, runId, "preflight", "approved");
       const claim = claimRunnableWorkflowStep(db, {
@@ -452,7 +452,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       const scaffoldAttemptId = `${runId}::preflight::attempt-1`;
       const scaffoldAttempt = loadExecutorAttempt(db, scaffoldAttemptId);
-      expect(scaffoldAttempt?.executorFamily).toBe("one-shot");
+      expect(scaffoldAttempt?.executor).toBe("agent-once");
       expect(scaffoldAttempt?.state).toBe("running");
       const scaffoldRound = loadExecutorRound(
         db,
@@ -464,11 +464,11 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(scaffoldRound?.commitSha).toBeNull();
 
       // --- Layer 4: landed executor adapter -> terminal finalization + verification ---
-      // postflight is also one-shot; the landed adapter drives it to a terminal
+      // postflight is also agent-once; the landed adapter drives it to a terminal
       // `succeeded` with a passing verification gate and a recorded commit.
       const finalize = await runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: runId,
         stepRunId: "postflight",
         stepKey: "postflight",
@@ -514,7 +514,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       const finalizeAttemptId = singleShotAttemptId(
         runId,
         "postflight",
-        "one-shot",
+        "agent-once",
         1,
       );
       expect(finalize.attempt.attemptId).toBe(finalizeAttemptId);
@@ -564,7 +564,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         },
         dispatchScaffold: {
           attemptId: scaffoldAttemptId,
-          executorFamily: scaffoldAttempt?.executorFamily ?? null,
+          executor: scaffoldAttempt?.executor ?? null,
           attemptState: scaffoldAttempt?.state ?? null,
           roundState: scaffoldRound?.state ?? null,
         },
@@ -592,7 +592,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     }
   });
 
-  it("composes the goal-loop landed adapter: the implementation step drives a bounded multi-round attempt to terminal succeeded with a passing verification gate", async () => {
+  it("composes the agent-loop landed adapter: the implementation step drives a bounded multi-round attempt to terminal succeeded with a passing verification gate", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
     const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
@@ -620,22 +620,22 @@ describe("NGX-372 full adapter E2E proof", () => {
       const sourceItem = sourceItems[0];
 
       // --- Layer 2: workflow run start, objective threaded from the source read ---
-      const runId = "ngx-372-goal-loop-e2e";
+      const runId = "ngx-372-agent-loop-e2e";
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
         objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
       });
 
-      // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
-      // `implementation` is the goal-loop family in the real coding workflow
+      // --- Layer 3: agent-loop landed adapter -> terminal finalization ---
+      // `implementation` is the agent-loop family in the real coding workflow
       // definition (src/core/workflow/definition/definition.ts). The landed adapter drives a
       // bounded multi-round attempt below the StepRun: round 0 commits progress
       // but is incomplete (continue); round 1 commits and recommends completion,
       // each round gated by a passing verification finalize. `runGoalLoopStep`
       // mints its own deterministic, reattachable attempt id, distinct from the
-      // one-shot scaffold's `...::dispatch` id and the one-shot adapter's id, so
-      // composing the goal-loop terminal alongside them never mints two owners for
+      // agent-once scaffold's `...::dispatch` id and the agent-once adapter's id, so
+      // composing the agent-loop terminal alongside them never mints two owners for
       // one step.
       const result = runGoalLoopStep({
         db,
@@ -675,8 +675,8 @@ describe("NGX-372 full adapter E2E proof", () => {
               },
       });
 
-      // The attempt is the goal-loop family and terminalized succeeded.
-      expect(result.attempt.executorFamily).toBe("goal-loop");
+      // The attempt is the agent-loop family and terminalized succeeded.
+      expect(result.attempt.executor).toBe("agent-loop");
       expect(result.attempt.state).toBe("succeeded");
       expect(result.attempt.finishedAt).not.toBeNull();
 
@@ -726,7 +726,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // --- Composition evidence (acceptance criterion: the proof records it) ---
       const evidence = {
         issue: "NGX-372",
-        proof: "full-adapter-e2e-goal-loop",
+        proof: "full-adapter-e2e-agent-loop",
         source: {
           runState: reconciliation.run.state,
           externalKey: sourceItem?.externalKey ?? null,
@@ -734,7 +734,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         goalLoopFinalization: {
           attemptId,
-          executorFamily: result.attempt.executorFamily,
+          executor: result.attempt.executor,
           attemptState: result.attempt.state,
           rounds: result.rounds.map((r) => r.round.classification),
           lastRoundVerification: lastRound?.verificationStatus ?? null,
@@ -743,7 +743,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       };
       const evidencePath = recordCompositionEvidence(
         dataDir,
-        "goal-loop",
+        "agent-loop",
         evidence,
       );
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
@@ -804,8 +804,8 @@ describe("NGX-372 full adapter E2E proof", () => {
       // identity, then runs the first poll. A corroborated `completed` snapshot with
       // CI passed settles the round straight to terminal `succeeded` — the mirror's
       // equivalent of the other adapters' passing verification gate. Its
-      // deterministic attempt id is distinct from the one-shot scaffold's
-      // `...::dispatch` id, the one-shot adapter's id, and the goal-loop adapter's
+      // deterministic attempt id is distinct from the agent-once scaffold's
+      // `...::dispatch` id, the agent-once adapter's id, and the agent-loop adapter's
       // id, so composing a fourth terminal family never mints two owners for one
       // step.
       const result = runNoMistakesMirrorStep({
@@ -825,7 +825,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       });
 
       // The attempt is the no-mistakes family and terminalized succeeded.
-      expect(result.attempt.executorFamily).toBe("no-mistakes");
+      expect(result.attempt.executor).toBe("no-mistakes");
       expect(result.attempt.state).toBe("succeeded");
       expect(result.attempt.finishedAt).not.toBeNull();
 
@@ -867,7 +867,7 @@ describe("NGX-372 full adapter E2E proof", () => {
         workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
         noMistakesFinalization: {
           attemptId,
-          executorFamily: result.attempt.executorFamily,
+          executor: result.attempt.executor,
           attemptState: result.attempt.state,
           roundState: result.round.round.state,
           classification: result.round.decision.classification,
@@ -892,7 +892,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     }
   });
 
-  it("keeps the external-write family policy-gated closed: the real linear-refresh step creates only the base scaffold", () => {
+  it("keeps the external-write family policy-gated closed: the real tracker-refresh step creates only the base scaffold", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
     const db = openDb(dataDir);
@@ -905,12 +905,12 @@ describe("NGX-372 full adapter E2E proof", () => {
           "Prove the external-write step scaffolds without a policy-gated write",
       });
 
-      // Advance every step before `linear-refresh` to terminal success so the real
-      // external-write step (executor family `external-apply`) becomes the next
+      // Advance every step before `tracker-refresh` to terminal success so the real
+      // external-write step (executor `external-apply`) becomes the next
       // runnable step — no executor advancement is wired yet, so the prior steps
-      // are settled directly. linear-refresh itself is approved and claimable.
+      // are settled directly. tracker-refresh itself is approved and claimable.
       for (const stepId of CODING_WORKFLOW_STEP_IDS) {
-        if (stepId === "linear-refresh") {
+        if (stepId === "tracker-refresh") {
           setStepState(db, runId, stepId, "approved");
         } else {
           setStepState(db, runId, stepId, "succeeded");
@@ -919,7 +919,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       const claim = claimRunnableWorkflowStep(db, {
         runId,
-        stepId: "linear-refresh",
+        stepId: "tracker-refresh",
         holder: WORKER,
         leaseExpiresAt: NOW + 30_000,
         now: NOW + 1,
@@ -927,7 +927,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       expect(claim.ok).toBe(true);
       if (!claim.ok)
         throw new Error(`test setup: claim failed (${claim.reason})`);
-      expect(claim.claim.kind).toBe("linear-refresh");
+      expect(claim.claim.kind).toBe("tracker-refresh");
 
       const dispatch = executeWorkflowStepDispatch(claim.claim, {
         db,
@@ -955,8 +955,8 @@ describe("NGX-372 full adapter E2E proof", () => {
         issue: "NGX-372",
         proof: "full-adapter-e2e",
         externalWriteStep: {
-          stepId: "linear-refresh",
-          executorFamily: "external-apply",
+          stepId: "tracker-refresh",
+          executor: "external-apply",
           dispatchStatus: dispatch.status,
           executorRows:
             countRows(db, "executor_attempts") +

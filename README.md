@@ -8,7 +8,7 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It 
 
 - **Durable by default** - state lives in SQLite plus per-run artifact evidence.
 - **Operator-first** - workflow status, logs, handoff, monitor, watch, doctor, daemon, and recovery commands are all inspectable.
-- **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only through `intent apply --external-apply` or the approved built-in `linear-refresh` workflow step, and `linear-refresh` proves the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic evidence to seed the expected `Done` intent, a valid one-of `state` / `stateId` payload, a credentialed process environment, repo policy, and a stable idempotency marker before applying or reconciling from already-successful audit evidence without another Linear mutation.
+- **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only through `intent apply --external-apply` or the approved built-in `tracker-refresh` workflow step, and `tracker-refresh` proves the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic evidence to seed the expected `Done` intent, a valid one-of `state` / `stateId` payload, a credentialed process environment, repo policy, and a stable idempotency marker before applying or reconciling from already-successful audit evidence without another Linear mutation.
 
 Full documentation: <https://calvinnwq.github.io/momentum/>
 

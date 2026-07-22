@@ -35,8 +35,7 @@ export const WORKFLOW_EVIDENCE_SOURCE = "agent-workflow";
 export const WORKFLOW_EVIDENCE_FORMAT_VERSION = 1;
 
 export type WorkflowEvidenceDiagnosticCode =
-  | "evidence_format_unknown"
-  | "evidence_format_invalid";
+  "evidence_format_unknown" | "evidence_format_invalid";
 
 export type WorkflowEvidenceDiagnostic = {
   code: WorkflowEvidenceDiagnosticCode;
@@ -79,23 +78,28 @@ const KNOWN_STEPS: Record<
   implementation: {
     started: "implementation_started",
     complete: "implementation_complete",
-    failed: "implementation_failed"
+    failed: "implementation_failed",
+  },
+  validate: {
+    started: "validate_started",
+    complete: "validate_complete",
+    failed: "validate_failed",
   },
   "no-mistakes": {
     started: "no_mistakes_started",
     complete: "no_mistakes_complete",
-    failed: "no_mistakes_failed"
+    failed: "no_mistakes_failed",
   },
   "merge-cleanup": {
     started: "merge_cleanup_started",
     complete: "merge_complete",
-    failed: "merge_cleanup_failed"
-  }
+    failed: "merge_cleanup_failed",
+  },
 };
 
 export function parseWorkflowArtifact(
   artifactPath: string,
-  options: ParseWorkflowArtifactOptions = {}
+  options: ParseWorkflowArtifactOptions = {},
 ): ParseWorkflowArtifactResult {
   const records: EvidenceRecordIngestInput[] = [];
   const diagnostics: WorkflowEvidenceDiagnostic[] = [];
@@ -109,7 +113,7 @@ export function parseWorkflowArtifact(
       code: "evidence_format_invalid",
       path: artifactPath,
       reason: "path_not_readable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return { records, diagnostics, sources };
   }
@@ -122,7 +126,7 @@ export function parseWorkflowArtifact(
     diagnostics.push({
       code: "evidence_format_unknown",
       path: artifactPath,
-      reason: "path_not_file_or_directory"
+      reason: "path_not_file_or_directory",
     });
   }
 
@@ -134,7 +138,7 @@ function parseDirectory(
   options: ParseWorkflowArtifactOptions,
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
-  sources: WorkflowEvidenceSource[]
+  sources: WorkflowEvidenceSource[],
 ): void {
   const runIdFromDir = runIdFromBasename(path.basename(dirPath));
   sources.push({ kind: "directory", path: dirPath, runId: runIdFromDir });
@@ -147,7 +151,7 @@ function parseDirectory(
       code: "evidence_format_invalid",
       path: dirPath,
       reason: "directory_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return;
   }
@@ -166,7 +170,7 @@ function parseDirectory(
       diagnostics.push({
         code: "evidence_format_unknown",
         path: full,
-        reason: "unsupported_subdirectory"
+        reason: "unsupported_subdirectory",
       });
       continue;
     }
@@ -174,7 +178,7 @@ function parseDirectory(
       diagnostics.push({
         code: "evidence_format_unknown",
         path: full,
-        reason: "unsupported_entry_kind"
+        reason: "unsupported_entry_kind",
       });
       continue;
     }
@@ -183,13 +187,16 @@ function parseDirectory(
       planEntries.push(full);
     } else if (entry.name === "ledger.jsonl") {
       ledgerEntries.push(full);
-    } else if (entry.name.startsWith("approval-") && entry.name.endsWith(".json")) {
+    } else if (
+      entry.name.startsWith("approval-") &&
+      entry.name.endsWith(".json")
+    ) {
       approvalEntries.push(full);
     } else {
       diagnostics.push({
         code: "evidence_format_unknown",
         path: full,
-        reason: "unrecognized_filename"
+        reason: "unrecognized_filename",
       });
     }
   }
@@ -201,7 +208,14 @@ function parseDirectory(
     parseLedgerFile(full, options, records, diagnostics, sources);
   }
   for (const full of approvalEntries.slice().sort()) {
-    parseApprovalFile(full, options, records, diagnostics, sources, safeStat(full));
+    parseApprovalFile(
+      full,
+      options,
+      records,
+      diagnostics,
+      sources,
+      safeStat(full),
+    );
   }
 }
 
@@ -211,7 +225,7 @@ function parseFile(
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
   sources: WorkflowEvidenceSource[],
-  stat: fs.Stats
+  stat: fs.Stats,
 ): void {
   const base = path.basename(filePath);
   if (base === "plan.json") {
@@ -224,7 +238,7 @@ function parseFile(
     diagnostics.push({
       code: "evidence_format_unknown",
       path: filePath,
-      reason: "unrecognized_filename"
+      reason: "unrecognized_filename",
     });
   }
 }
@@ -235,7 +249,7 @@ function parsePlanFile(
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
   sources: WorkflowEvidenceSource[],
-  stat: fs.Stats | null
+  stat: fs.Stats | null,
 ): void {
   const parsed = readJsonFile(filePath, diagnostics);
   if (parsed === undefined) return;
@@ -244,20 +258,20 @@ function parsePlanFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "plan_not_object"
+      reason: "plan_not_object",
     });
     return;
   }
 
   const plan = parsed as Record<string, unknown>;
-  const runId = stringField(plan, "runId") ?? runIdFromBasename(
-    path.basename(path.dirname(filePath))
-  );
+  const runId =
+    stringField(plan, "runId") ??
+    runIdFromBasename(path.basename(path.dirname(filePath)));
   if (!runId) {
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "plan_missing_run_id"
+      reason: "plan_missing_run_id",
     });
     return;
   }
@@ -266,10 +280,12 @@ function parsePlanFile(
 
   const objective = stringField(plan, "objective");
   const occurredAt = stat ? Math.floor(stat.mtimeMs) : 0;
-  const summary = objective ? `Plan created: ${objective}` : `Plan created (${runId})`;
+  const summary = objective
+    ? `Plan created: ${objective}`
+    : `Plan created (${runId})`;
   const metadata: Record<string, unknown> = {
     runId,
-    schemaVersion: numberField(plan, "schemaVersion") ?? null
+    schemaVersion: numberField(plan, "schemaVersion") ?? null,
   };
   if (objective) metadata.objective = objective;
   const mode = stringField(plan, "mode");
@@ -292,7 +308,7 @@ function parsePlanFile(
     sourceItemId: options.sourceItemId ?? null,
     runId,
     stepId: null,
-    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:plan_created`
+    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:plan_created`,
   });
 }
 
@@ -301,7 +317,7 @@ function parseLedgerFile(
   options: ParseWorkflowArtifactOptions,
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
-  sources: WorkflowEvidenceSource[]
+  sources: WorkflowEvidenceSource[],
 ): void {
   let content: string;
   try {
@@ -311,7 +327,7 @@ function parseLedgerFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "ledger_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return;
   }
@@ -330,7 +346,7 @@ function parseLedgerFile(
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
         reason: "ledger_line_not_json",
-        detail: err instanceof Error ? err.message : String(err)
+        detail: err instanceof Error ? err.message : String(err),
       });
       continue;
     }
@@ -338,7 +354,7 @@ function parseLedgerFile(
       diagnostics.push({
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
-        reason: "ledger_line_not_object"
+        reason: "ledger_line_not_object",
       });
       continue;
     }
@@ -353,7 +369,7 @@ function parseLedgerFile(
       diagnostics.push({
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
-        reason: "ledger_line_missing_required_fields"
+        reason: "ledger_line_missing_required_fields",
       });
       continue;
     }
@@ -365,7 +381,7 @@ function parseLedgerFile(
         code: "evidence_format_unknown",
         path: `${filePath}:${lineNumber}`,
         reason: "unknown_step_or_status",
-        detail: `step=${step} status=${status}`
+        detail: `step=${step} status=${status}`,
       });
       continue;
     }
@@ -376,7 +392,7 @@ function parseLedgerFile(
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
         reason: "ledger_line_invalid_timestamp",
-        detail: ts ?? "(missing)"
+        detail: ts ?? "(missing)",
       });
       continue;
     }
@@ -397,7 +413,7 @@ function parseLedgerFile(
       sourceItemId: options.sourceItemId ?? null,
       runId,
       stepId: step,
-      ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`
+      ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`,
     });
   }
 
@@ -410,7 +426,7 @@ function parseApprovalFile(
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
   sources: WorkflowEvidenceSource[],
-  stat: fs.Stats | null
+  stat: fs.Stats | null,
 ): void {
   const parsed = readJsonFile(filePath, diagnostics);
   if (parsed === undefined) return;
@@ -418,29 +434,30 @@ function parseApprovalFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "approval_not_object"
+      reason: "approval_not_object",
     });
     return;
   }
   const approval = parsed as Record<string, unknown>;
-  const runId = stringField(approval, "runId") ?? runIdFromBasename(
-    path.basename(path.dirname(filePath))
-  );
+  const runId =
+    stringField(approval, "runId") ??
+    runIdFromBasename(path.basename(path.dirname(filePath)));
   if (!runId) {
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "approval_missing_run_id"
+      reason: "approval_missing_run_id",
     });
     return;
   }
 
-  const boundary = stringField(approval, "boundary") ?? deriveBoundaryFromFilename(filePath);
+  const boundary =
+    stringField(approval, "boundary") ?? deriveBoundaryFromFilename(filePath);
   if (!boundary) {
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "approval_missing_boundary"
+      reason: "approval_missing_boundary",
     });
     return;
   }
@@ -452,18 +469,21 @@ function parseApprovalFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "approval_invalid_timestamp",
-      detail: approvedAt
+      detail: approvedAt,
     });
     return;
   }
-  const effectiveOccurredAt = occurredAt ?? (stat ? Math.floor(stat.mtimeMs) : 0);
+  const effectiveOccurredAt =
+    occurredAt ?? (stat ? Math.floor(stat.mtimeMs) : 0);
 
   sources.push({ kind: "approval", path: filePath, runId });
 
   const allowed = approval.allowedSteps;
   const metadata: Record<string, unknown> = { runId, boundary };
   if (Array.isArray(allowed)) {
-    metadata.allowedSteps = allowed.filter((step): step is string => typeof step === "string");
+    metadata.allowedSteps = allowed.filter(
+      (step): step is string => typeof step === "string",
+    );
   }
   const approvalContract = stringField(approval, "approvalContract");
   if (approvalContract) metadata.approvalContract = approvalContract;
@@ -481,7 +501,7 @@ function parseApprovalFile(
     sourceItemId: options.sourceItemId ?? null,
     runId,
     stepId: null,
-    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${boundary}`
+    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${boundary}`,
   });
 }
 
@@ -491,7 +511,7 @@ function normalizeStep(step: string, status: string): NormalizedStep | null {
   }
   const ledgerStatus = status as LedgerStatus;
 
-  // Bare known step (preflight, implementation, no-mistakes, merge-cleanup).
+  // Bare known step (preflight, implementation, validate, merge-cleanup).
   const entry = KNOWN_STEPS[step];
   if (entry) {
     const type = entry[ledgerStatus];
@@ -508,7 +528,7 @@ function normalizeStep(step: string, status: string): NormalizedStep | null {
     if (status === "complete") type = "postflight_complete";
     return {
       type,
-      ingestSuffix: `postflight:${attempt}:${status}`
+      ingestSuffix: `postflight:${attempt}:${status}`,
     };
   }
 
@@ -518,7 +538,7 @@ function normalizeStep(step: string, status: string): NormalizedStep | null {
 function buildLedgerSummary(
   type: string,
   entry: Record<string, unknown>,
-  runId: string
+  runId: string,
 ): string {
   switch (type) {
     case "merge_complete": {
@@ -531,9 +551,17 @@ function buildLedgerSummary(
       if (mergeCommit) parts.push(`merge=${mergeCommit.slice(0, 12)}`);
       return parts.join(" ");
     }
+    case "validate_complete": {
+      const pr = stringField(entry, "pr") ?? stringField(entry, "prUrl");
+      return pr
+        ? `Validate complete (pr=${pr})`
+        : `Validate complete (${runId})`;
+    }
     case "no_mistakes_complete": {
       const pr = stringField(entry, "pr") ?? stringField(entry, "prUrl");
-      return pr ? `No-mistakes complete (pr=${pr})` : `No-mistakes complete (${runId})`;
+      return pr
+        ? `No-mistakes complete (pr=${pr})`
+        : `No-mistakes complete (${runId})`;
     }
     case "implementation_complete":
       return `Implementation complete (${runId})`;
@@ -551,6 +579,10 @@ function buildLedgerSummary(
       return `Postflight complete (${runId})`;
     case "postflight_failed":
       return `Postflight failed (${runId})`;
+    case "validate_started":
+      return `Validate started (${runId})`;
+    case "validate_failed":
+      return `Validate failed (${runId})`;
     case "no_mistakes_started":
       return `No-mistakes started (${runId})`;
     case "no_mistakes_failed":
@@ -567,7 +599,7 @@ function buildLedgerSummary(
 function buildLedgerMetadata(
   entry: Record<string, unknown>,
   step: string,
-  status: string
+  status: string,
 ): Record<string, unknown> {
   const metadata: Record<string, unknown> = { step, status };
   const passthrough = [
@@ -584,7 +616,7 @@ function buildLedgerMetadata(
     "toolRunId",
     "head",
     "harness",
-    "model"
+    "model",
   ] as const;
   for (const key of passthrough) {
     const value = entry[key];
@@ -594,12 +626,16 @@ function buildLedgerMetadata(
   }
   const verification = entry.verification;
   if (Array.isArray(verification)) {
-    const filtered = verification.filter((item): item is string => typeof item === "string");
+    const filtered = verification.filter(
+      (item): item is string => typeof item === "string",
+    );
     if (filtered.length > 0) metadata.verification = filtered;
   }
   const artifacts = entry.artifacts;
   if (Array.isArray(artifacts)) {
-    const filtered = artifacts.filter((item): item is string => typeof item === "string");
+    const filtered = artifacts.filter(
+      (item): item is string => typeof item === "string",
+    );
     if (filtered.length > 0) metadata.artifacts = filtered;
   }
   return metadata;
@@ -607,7 +643,7 @@ function buildLedgerMetadata(
 
 function readJsonFile(
   filePath: string,
-  diagnostics: WorkflowEvidenceDiagnostic[]
+  diagnostics: WorkflowEvidenceDiagnostic[],
 ): unknown | undefined {
   let raw: string;
   try {
@@ -617,7 +653,7 @@ function readJsonFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
@@ -628,7 +664,7 @@ function readJsonFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_not_json",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
@@ -667,10 +703,12 @@ function parseIsoTimestamp(ts: string): number | null {
 }
 
 function runIdFromBasename(basename: string): string | null {
-  return /^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/.test(basename) ? basename : null;
+  return /^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/.test(basename)
+    ? basename
+    : null;
 }
 
 function deriveBoundaryFromFilename(filePath: string): string | null {
   const match = /^approval-(.+)\.json$/.exec(path.basename(filePath));
-  return match ? match[1] ?? null : null;
+  return match ? (match[1] ?? null) : null;
 }

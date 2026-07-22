@@ -7,13 +7,13 @@
  * two-phase persistence patches, and the artifact / checkpoint projections. This
  * module is the stateful seam that composes those projections with the *real*
  * executor-loop persistence layer and round transition graph around the
- * bounded mechanism, exactly the way `goal-loop/orchestrator.ts` composes the
- * goal-loop projections — but simpler, because a single shot owns exactly one
+ * bounded mechanism, exactly the way `agent-loop/orchestrator.ts` composes the
+ * agent-loop projections — but simpler, because a single shot owns exactly one
  * round and never loops:
  *
  *   atomically insert attempt + round-start + dispatch-binding checkpoint
  *      (running, deterministic identity and agent/model/input frozen in)
- *   -> run the bounded mechanism  (the one-shot agent pass / the script command)
+ *   -> run the bounded mechanism  (the agent-once agent pass / the script command)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
  *   -> run capture/result transition  (running -> capturing_result)
  *   -> persist non-terminal lifecycle checkpoints
@@ -34,12 +34,12 @@
  * A re-run is a fresh `attempt` minting a fresh attempt, never a `continue`.
  *
  * The bounded mechanism is injected as a {@link SingleShotRoundRunner} so the real
- * one-shot mechanism (an agent/review pass producing a normalized result
+ * agent-once mechanism (an agent/review pass producing a normalized result
  * document), the real script mechanism (a deterministic local command, exit-code
  * based), a no-op, or a deterministic fake can all drive the round through the
- * identical durable lifecycle. The two families differ only in what the mechanism
- * returns — `one-shot` captures a {@link RunnerResult} document, `script` is
- * exit-code based with no result document — and the driver stays family-agnostic:
+ * identical durable lifecycle. The two executors differ only in what the mechanism
+ * returns — `agent-once` captures a {@link RunnerResult} document, `script` is
+ * exit-code based with no result document — and the driver stays executor-agnostic:
  * it routes the normalized {@link SingleShotAttemptOutcome} through the pure
  * decision so the verification-authority and repo-safety boundaries hold end to
  * end.
@@ -61,7 +61,7 @@
  *     directly. A non-success outcome captures nothing and transitions from
  *     `running` straight to its terminal abort state, never inventing a result.
  *     The `result_captured` checkpoint, by contrast, appears only when a result
- *     *document* was actually captured (one-shot on success), never for a bare
+ *     *document* was actually captured (agent-once on success), never for a bare
  *     script capture — so the durable checkpoint stream stays honest about whether
  *     a result document exists.
  */
@@ -174,25 +174,25 @@ export async function runSingleShotRound(
     input.now ??
     (fixedFinishedAt === undefined ? Date.now : () => fixedFinishedAt);
   const derivedConfig = singleShotSdkConfigFromSelection(
-    start.family,
+    start.executor,
     start.selection,
   );
   if (input.config !== undefined) {
     const explicitConfigError = singleShotExecutorConfigError(
-      start.family,
+      start.executor,
       input.config,
     );
     if (explicitConfigError !== null) throw new Error(explicitConfigError);
   }
   const config = mergeSingleShotConfig(derivedConfig, input.config);
-  const configError = singleShotExecutorConfigError(start.family, config);
+  const configError = singleShotExecutorConfigError(start.executor, config);
   if (configError !== null) throw new Error(configError);
   const envelope = createDurableExecutorEnvelope({
     db,
     attemptId: start.attemptId,
     now,
   });
-  const executor = new SingleShotExecutor(start.family, runRound);
+  const executor = new SingleShotExecutor(start.executor, runRound);
   const { selection: _selection, ...sdkStart } = start;
 
   // The built-in now performs its bounded turn through the exact public SDK
@@ -293,10 +293,10 @@ function mergeSingleShotConfig(
 /**
  * The inputs to {@link runSingleShotStep}: the `StepRun` identity
  * (`workflowRunId` / `stepRunId` / `stepKey` / `attempt`), the single-shot
- * `family`, the resolved {@link SingleShotRoundSelection} the round runs under, the
+ * `executor`, the resolved {@link SingleShotRoundSelection} the round runs under, the
  * bounded mechanism, a per-round runtime-input resolver, and a clock. The adapter
  * mints the attempt / round identities itself, so the caller supplies a
- * `StepRun`, not pre-built executor-loop records. Unlike the goal-loop step there
+ * `StepRun`, not pre-built executor-loop records. Unlike the agent-loop step there
  * is no `maxRounds` and the runtime resolver takes no round index — a single shot
  * is always the one round at index 0.
  */
@@ -322,12 +322,12 @@ type RunSingleShotStepBase = {
 export type RunSingleShotStepInput =
   | (RunSingleShotStepBase & {
       /** Agent-once uses the resolved selection when portable config is omitted. */
-      family: "one-shot";
+      executor: "agent-once";
       config?: AgentOnceExecutorConfig;
     })
   | (RunSingleShotStepBase & {
       /** Scripts require a portable command identity before durable materialization. */
-      family: "script";
+      executor: "script";
       config: ScriptExecutorConfig;
     });
 
@@ -350,12 +350,12 @@ export type RunSingleShotStepResult = {
  * and hashed dispatch-binding checkpoint with a deterministic, reattachable id,
  * then drives the round through {@link runSingleShotRound}. The round identity
  * comes from {@link planSingleShotRoundStartForAttempt}, inherits the
- * attempt identity and family, and uses the deterministic
+ * attempt identity and executor, and uses the deterministic
  * {@link singleShotRoundId}. The final daemon decision settles the attempt
  * into the round decision's terminal state.
  *
  * The adapter owns the deterministic id scheme so no caller reinvents it: an
- * attempt reattaches from `(workflowRunId, stepRunId, family, attempt)` and the
+ * attempt reattaches from `(workflowRunId, stepRunId, executor, attempt)` and the
  * round from the attempt id alone (a single shot is always round 0), both
  * recomputable from durable state (contract "Heartbeat And Reattach"). The
  * resolved selection is frozen into the round before work runs (contract "Agent
@@ -391,17 +391,17 @@ export async function runSingleShotStep(
   input.signal?.throwIfAborted();
   if (input.config !== undefined) {
     const explicitConfigError = singleShotExecutorConfigError(
-      input.family,
+      input.executor,
       input.config,
     );
     if (explicitConfigError !== null) throw new Error(explicitConfigError);
   }
   const effectiveConfig = mergeSingleShotConfig(
-    singleShotSdkConfigFromSelection(input.family, input.selection),
+    singleShotSdkConfigFromSelection(input.executor, input.selection),
     input.config,
   );
   const configError = singleShotExecutorConfigError(
-    input.family,
+    input.executor,
     effectiveConfig,
   );
   if (configError !== null) throw new Error(configError);
@@ -419,7 +419,7 @@ export async function runSingleShotStep(
   //    either no owner or a complete recovery binding, never an attempt-only
   //    owner that deterministic reattach cannot classify.
   const plannedAttempt = planSingleShotAttempt({
-    family: input.family,
+    executor: input.executor,
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
@@ -449,7 +449,7 @@ export async function runSingleShotStep(
       planSingleShotRoundStartedCheckpoint(
         start.roundId,
         singleShotDispatchBindingDetail(
-          input.family,
+          input.executor,
           effectiveConfig,
           sdkStart,
         ),
@@ -538,7 +538,7 @@ function assertMatchingSingleShotAttempt(
     "workflowRunId",
     "stepRunId",
     "stepKey",
-    "executorFamily",
+    "executor",
     "attemptNumber",
   ] as const;
   const mismatch = identityFields.find(

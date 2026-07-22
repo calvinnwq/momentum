@@ -20,7 +20,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
 - `workflow run watch` watches a run two ways.
   `--once` emits a one-shot supervisor envelope for a Momentum-native coding run: it safely runs at most one run-scoped dispatcher tick when the target run has one approved non-tail next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
-  Approved `merge-cleanup` and `linear-refresh` tail steps are surfaced as operator decisions instead of being started by the poller.
+  Approved `merge-cleanup` and `tracker-refresh` tail steps are surfaced as operator decisions instead of being started by the poller.
   `--stream --jsonl` instead opens a read-only, long-lived JSONL event stream over the durable event cursor API for a TUI, GUI, or sidecar, resumable from a `--since` cursor and bounded in memory.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
@@ -33,7 +33,7 @@ modules for contract and schema preflight; the no-write guarantee covers
 Momentum state, not arbitrary module-initialization behavior.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
 `workflow run watch --once` is write-limited to the target run's safe dispatcher tick, the same advisory baseline columns, and append-only quiet-heartbeat / stuck-risk event rows for supported Momentum-native coding runs.
-That dispatcher tick does not start approved `merge-cleanup` or `linear-refresh` tail steps; those side-effecting steps stay on a human-required operator-decision path.
+That dispatcher tick does not start approved `merge-cleanup` or `tracker-refresh` tail steps; those side-effecting steps stay on a human-required operator-decision path.
 `workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files, running dispatch, delivering to OpenClaw, or invoking an LLM.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` call print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
@@ -73,7 +73,7 @@ The examples below are branching examples; the full `workflow run watch --once` 
 - `workflow run watch --once`.
   This is the compact supervisor envelope used for regular GUI polling.
   It is write-limited to a safe non-tail run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
-  If the next approved step is `merge-cleanup` or `linear-refresh`, the tick reports an operator decision rather than starting the side-effecting tail step.
+  If the next approved step is `merge-cleanup` or `tracker-refresh`, the tick reports an operator decision rather than starting the side-effecting tail step.
 - `workflow run monitor --advance`.
   This is the write-limited monitor mode for supported Momentum-native coding runs.
   It persists only advisory progress-suppression baselines and must be an explicit polling choice, not a read-only status call.
@@ -207,7 +207,7 @@ The examples below are branching examples; the full `workflow run watch --once` 
   ```
 
 - Approved side-effecting tail steps are operator-decision states even when the low-level next action is `advance_to_step`.
-  The poller must not start `merge-cleanup` or `linear-refresh` from this state.
+  The poller must not start `merge-cleanup` or `tracker-refresh` from this state.
   ```json
   {
     "emit": true,
@@ -284,7 +284,7 @@ Behaviour:
   Approved steps are claimed by bounded `daemon start --max-*`, which dispatches valid executor identities into durable `executor_attempts` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
   The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them.
   Native coding runs with `route.steps` freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; a corrupt persisted `route.steps` namespace routes to manual recovery with `route_config_invalid` instead of silently falling back.
-  The `external-apply` family is filled by the daemon itself for the built-in `linear-refresh` step: it proves `LINEAR_API_KEY`, repo `intent_apply_policy: external_apply_allowed`, the run issue scope, a matching source item, and either one pending Linear `status_update` intent or enough unique issue-scope/source evidence to seed the expected pending `status_update` intent with a `Done` payload deterministically.
+  The `external-apply` executor is filled by the daemon itself for the built-in `tracker-refresh` step: it proves `LINEAR_API_KEY`, repo `intent_apply_policy: external_apply_allowed`, the run issue scope, a matching source item, and either one pending Linear `status_update` intent or enough unique issue-scope/source evidence to seed the expected pending `status_update` intent with a `Done` payload deterministically.
   The resulting intent must have a valid one-of `state` / `stateId` payload and a stable idempotency marker before the daemon reuses the policy-gated `intent apply --external-apply` write path.
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
@@ -311,7 +311,7 @@ Behaviour:
   "state": "pending",
   "approvalBoundary": null,
   "definitionKey": "coding-workflow",
-  "definitionVersion": 2,
+  "definitionVersion": 3,
   "route": {},
   "implementationEngine": null,
   "repoPath": "/path/to/repo",
@@ -444,7 +444,7 @@ Optional arguments:
   Valid values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`; when omitted, the coding doors select and persist the honest `gnhf` label.
   Execution semantics for those values are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
-  The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
+  The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `validate`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
   Provider-specific model aliases are normalized when the step also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
   Unknown harness/model values remain free-form after structural validation, so future provider model ids can still be passed through before Momentum learns a shorthand for them.
@@ -458,14 +458,14 @@ Optional arguments:
 Behaviour:
 
 - **Forced definition**: the run always materializes the selected built-in `coding-workflow` recipe, using the latest known built-in version unless `--definition-version` pins one.
-  The current built-in version has six ordered steps (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
-  Implementation and no-mistakes both use `delegate-supervisor`; their portable step config selects `gnhf` and `no-mistakes` respectively.
+  The current built-in version has six ordered steps (`preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh`).
+  The implementation and validate steps both use `delegate-supervisor`; their portable step config selects `gnhf` and `no-mistakes` respectively.
   The merge-cleanup `script` step carries `{ "command": "merge-cleanup" }` as portable command identity.
   Built-in version 1 remains available for recorded runs with its legacy implementation and no-mistakes executor identities and the same required merge-cleanup command identity.
   Passing `--definition coding-workflow` is an accepted no-op selector; passing any other `--definition` value refuses with `definition_not_allowed`.
 - **Reserved run ids**: a `--run-id` that begins with a reserved compatibility prefix refuses with `reserved_run_id` and writes nothing, so a fresh Momentum-native run can never be confused with an imported `cwfp-*` compatibility run.
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
-- **Built-in dispatch provenance**: native coding dispatch resolves executor families from the built-in `coding-workflow` definition recorded on the run by key and version, even if a persisted `coding-workflow` definition with the same key/version exists.
+- **Built-in dispatch provenance**: native coding dispatch resolves executors from the built-in `coding-workflow` definition recorded on the run by key and version, even if a persisted `coding-workflow` definition with the same key/version exists.
   If the recorded built-in version is unavailable, dispatch fails closed with `step_definition_not_found` instead of substituting persisted rows or a later built-in version.
 - **Structural preflight**: built-in definition lookup, required repository/objective shape, approval boundary, issue scope, route profile, implementation engine, per-step route overrides, and configured executor declarations fail closed before durable writes when they are structurally invalid.
   JSON failures from these checks include `preflightEvidence` with the failing check id, path, key, message, severity, and recommended action.
@@ -520,7 +520,7 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
   "state": "pending",
   "approvalBoundary": null,
   "definitionKey": "coding-workflow",
-  "definitionVersion": 2,
+  "definitionVersion": 3,
   "repoPath": "/path/to/repo",
   "objective": "Ship the slice",
   "issueScope": {},
@@ -530,12 +530,12 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
   "implementationEngine": "gnhf",
   "skillRevision": null,
   "steps": [
-    { "stepId": "preflight", "kind": "preflight", "executor": "one-shot", "order": 0, "required": true, "state": "pending" },
+    { "stepId": "preflight", "kind": "preflight", "executor": "agent-once", "order": 0, "required": true, "state": "pending" },
     { "stepId": "implementation", "kind": "implementation", "executor": "delegate-supervisor", "config": { "tool": "gnhf" }, "order": 1, "required": true, "state": "pending" },
-    { "stepId": "postflight", "kind": "postflight", "executor": "one-shot", "order": 2, "required": true, "state": "pending" },
-    { "stepId": "no-mistakes", "kind": "no-mistakes", "executor": "delegate-supervisor", "config": { "tool": "no-mistakes" }, "order": 3, "required": true, "state": "pending" },
+    { "stepId": "postflight", "kind": "postflight", "executor": "agent-once", "order": 2, "required": true, "state": "pending" },
+    { "stepId": "validate", "kind": "validate", "executor": "delegate-supervisor", "config": { "tool": "no-mistakes" }, "order": 3, "required": true, "state": "pending" },
     { "stepId": "merge-cleanup", "kind": "merge-cleanup", "executor": "script", "config": { "command": "merge-cleanup" }, "order": 4, "required": true, "state": "pending" },
-    { "stepId": "linear-refresh", "kind": "linear-refresh", "executor": "external-apply", "order": 5, "required": true, "state": "pending" }
+    { "stepId": "tracker-refresh", "kind": "tracker-refresh", "executor": "external-apply", "order": 5, "required": true, "state": "pending" }
   ],
   "counts": { "steps": 6 },
   "policy": { "present": false, "path": "/path/to/repo/MOMENTUM.md" }
@@ -545,7 +545,7 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 ### Text output (success)
 
 Text output is a human-readable preview of the same frozen plan and includes the command's no-Momentum-write status, definition key/version, source, projected run state, approval boundary, profile, implementation engine, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor identity, required/optional marker, and projected state.
-The per-step route block lists every configurable step (implementation, postflight, no-mistakes, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
+The per-step route block lists every configurable step (implementation, postflight, validate, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
 
 ```text
 Coding workflow plan preview (not started): native-coding-1
@@ -558,27 +558,27 @@ Implementation engine: gnhf
 Per-step route:
   implementation: harness=(default), model=(default), effort=(default)
   postflight: harness=(default), model=(default), effort=(default)
-  no-mistakes: harness=(default), model=(default), effort=(default)
+  validate: harness=(default), model=(default), effort=(default)
   merge-cleanup: harness=(default), model=(default), effort=(default)
 Repo: /path/to/repo
 Objective: Ship the slice
 Policy: (none)
 Data dir: /path/to/data
 Steps (6):
-  0. preflight (preflight) -> one-shot [required, pending]
+  0. preflight (preflight) -> agent-once [required, pending]
   1. implementation (implementation) -> delegate-supervisor config={"tool":"gnhf"} [required, pending]
-  2. postflight (postflight) -> one-shot [required, pending]
-  3. no-mistakes (no-mistakes) -> delegate-supervisor config={"tool":"no-mistakes"} [required, pending]
+  2. postflight (postflight) -> agent-once [required, pending]
+  3. validate (validate) -> delegate-supervisor config={"tool":"no-mistakes"} [required, pending]
   4. merge-cleanup (merge-cleanup) -> script config={"command":"merge-cleanup"} [required, pending]
-  5. linear-refresh (linear-refresh) -> external-apply [required, pending]
+  5. tracker-refresh (tracker-refresh) -> external-apply [required, pending]
 ```
 
-With provider-specific aliases such as `{"implementation":{"harness":"claude","model":"sonnet","effort":"high"},"postflight":{"harness":"opencode","model":"glm-5.2"},"no-mistakes":{"harness":"codex","model":"openai/gpt-5.5","effort":"high"}}`, the preview prints the normalized command-ready values:
+With provider-specific aliases such as `{"implementation":{"harness":"claude","model":"sonnet","effort":"high"},"postflight":{"harness":"opencode","model":"glm-5.2"},"validate":{"harness":"codex","model":"openai/gpt-5.5","effort":"high"}}`, the preview prints the normalized command-ready values:
 
 ```text
   implementation: harness=claude, model=claude-sonnet-4-6, effort=high
   postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)
-  no-mistakes: harness=codex, model=gpt-5.5, effort=high
+  validate: harness=codex, model=gpt-5.5, effort=high
 ```
 
 ### Text output (failure)
@@ -618,8 +618,8 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view.
   When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
   The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
-  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the canonical external state is verified: the pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh`.
-  For an interrupted failed required `no-mistakes` step, `clear-recovery` is the narrow resolving action after the external no-mistakes run proves success, using either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
+  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the canonical external state is verified: the pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh`.
+  For an interrupted failed required `validate` step, `clear-recovery` is the narrow resolving action after the external no-mistakes run proves success, using either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
   The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
@@ -755,7 +755,7 @@ Records an explicit durable approval for one workflow run boundary and emits a s
 
 Validation rules:
 
-- `--approval-boundary` must be one of: `implementation`, `through-implementation`, `no-mistakes`, `through-no-mistakes`, `merge-cleanup`, `through-merge-cleanup`, `full`, `plan-only`, `overnight-safe`, `through-postflight`, `through-merge-gates`, `final-cleanup`, `full-batch`.
+- `--approval-boundary` must be one of: `implementation`, `through-implementation`, `validate`, `through-validate`, `merge-cleanup`, `through-merge-cleanup`, `full`, `plan-only`, `overnight-safe`, `through-postflight`, `through-merge-gates`, `final-cleanup`, `full-batch`.
 - `--phrase` must be non-empty, affirmative, include `approve`, and include the requested boundary.
 - `--artifact-path`, when supplied, must be readable.
 - If `--artifact-digest` is supplied with `--artifact-path`, it must match the SHA-256 digest of that file (or the command refuses).
@@ -771,9 +771,9 @@ Boundary coverage:
 | `plan-only` | none |
 | `implementation`, `through-implementation` | `preflight`, `implementation` |
 | `through-postflight` | `preflight`, `implementation`, `postflight` |
-| `no-mistakes`, `through-no-mistakes`, `overnight-safe`, `through-merge-gates` | `preflight`, `implementation`, `postflight`, `no-mistakes` |
-| `merge-cleanup`, `through-merge-cleanup` | `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup` |
-| `full`, `final-cleanup`, `full-batch` | `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh` |
+| `validate`, `through-validate`, `overnight-safe`, `through-merge-gates` | `preflight`, `implementation`, `postflight`, `validate` |
+| `merge-cleanup`, `through-merge-cleanup` | `preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup` |
+| `full`, `final-cleanup`, `full-batch` | `preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh` |
 
 The command is idempotent by `(run-id, boundary)`; approving the same pair twice returns a stable duplicate refusal instead of creating duplicate rows.
 
@@ -839,7 +839,7 @@ Drives an operator-initiated step transition through the existing state machine 
 Required arguments:
 
 - `<run-id>` — the run to update.
-- `--step <step-id>` — the step to transition (e.g. `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
+- `--step <step-id>` — the step to transition (e.g. `preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh`).
 - `--state <target>` — one of `succeeded`, `skipped`, `failed`, `blocked`.
 - `--reason <text>` — operator-supplied rationale, stored in the durable audit record.
 
@@ -923,8 +923,8 @@ Options:
 
 - `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step` or interrupted no-mistakes success; stores the operator-supplied proof that the external state landed successfully.
   For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
-  For a failed `linear-refresh` step, supply the Linear issue URL or stable audit/snapshot proving the intended `status_update` landed with the expected idempotency marker (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
-  For an interrupted failed `no-mistakes` step whose external no-mistakes run later proved success, supply either legacy `no-mistakes:<run-id>#checks-passed` proof or a readable local JSON evidence file path.
+  For a failed `tracker-refresh` step, supply the Linear issue URL or stable audit/snapshot proving the intended `status_update` landed with the expected idempotency marker (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+  For an interrupted failed `validate` step whose external no-mistakes run later proved success, supply either legacy `no-mistakes:<run-id>#checks-passed` proof or a readable local JSON evidence file path.
   Structured no-mistakes evidence uses `schemaVersion: 1` and must include the workflow run id, issue scope identifiers, branch name and head SHA, pull request id, head SHA, state, draft flag, and check state when a pull request exists, the no-mistakes run id, successful no-mistakes outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
   Required no-mistakes phases must be current and complete: `review`, `tests`, and `push` must be `passed`, while the remaining phases must be `passed` or `not_applicable`.
   The structured path refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown pull request checks, and partial or non-success phase evidence.
@@ -941,9 +941,9 @@ Behaviour:
 - After a successful flagged clear, resolves every open `manual_recovery_required` gate for the run whose `allowedActions` includes `clear_recovery` in that same transaction.
   The gate records `workflow run clear-recovery` as its operator actor and `clear_recovery` as its chosen action; other gate types and manual-recovery gates without that action remain open.
 - Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
-  The only `failed_required_step` exception is a failed required `no-mistakes` step with explicit legacy `no-mistakes:<run-id>#checks-passed` proof or a structured deterministic evidence JSON file, used when the wrapper was interrupted after the external no-mistakes run had already proved current success.
-- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state and `finished_at` from the re-derived terminal or non-terminal state, and clearing the flag.
-  Operators should use this only after confirming the canonical external state is consistent: pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh`.
+  The only `failed_required_step` exception is a failed required `validate` step with explicit legacy `no-mistakes:<run-id>#checks-passed` proof or a structured deterministic evidence JSON file, used when the wrapper was interrupted after the external no-mistakes run had already proved current success.
+- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `tracker-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state and `finished_at` from the re-derived terminal or non-terminal state, and clearing the flag.
+  Operators should use this only after confirming the canonical external state is consistent: pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh`.
   Re-running the tail step could repeat those side effects.
   A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, `unsupported_platform`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
@@ -958,19 +958,19 @@ Behaviour:
   Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
   The same transaction releases only the retrying attempt's `needs_manual_recovery` repo locks; a refused or failed clear rolls back both retry preparation and lock release.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
-- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
-  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
-  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
-  Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `validate` reconciliation paths above.
+  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `validate` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
+  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.
+  Ordinary failed validate steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 - Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
   Before interrupted no-mistakes reconciliation, monitor/status/watch advertise `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-  Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
-  The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `no-mistakes` row.
+  Ordinary failed validate steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.
+  The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `validate` row.
   After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null` only when no downstream required work remains.
   Its progress tick then reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null` so a delivery wrapper can stop instead of carrying forward the pre-clear recovery phase.
-  If a full workflow still has `linear-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
+  If a full workflow still has `tracker-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
 
 ### JSON envelope
 
@@ -1125,7 +1125,7 @@ State and filter compose: passing both returns runs whose literal state matches 
   "ok": true,
   "command": "workflow status",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "state": null,
   "filter": "active",
   "count": 1,
@@ -1175,7 +1175,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
   "ok": true,
   "command": "workflow status",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "run": { "runId": "cwfp-abc123", "state": "running", "...": "..." },
   "steps": [
     {
@@ -1268,7 +1268,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 }
 ```
 
-`schemaVersion` is `2` in both list and detail mode.
+`schemaVersion` is `3` in both list and detail mode.
 `gates` is the list of durable workflow / step / executor gates for the run, oldest first.
 Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 Gate rows migrated from the legacy invocation model may retain `targetScope: "invocation"` as read-only provenance so their replay event ids remain stable; new gates never emit that scope.
@@ -1302,18 +1302,18 @@ manual-recovery gates, and `run.manualRecoveryReason` rather than copied onto
 
 - `no_action` - terminal run (succeeded / canceled); no follow-up needed.
 - `advance_to_step` - an approved step is ready for dispatcher consideration.
-  Approved `merge-cleanup` and `linear-refresh` tail steps still use this low-level code, but status, handoff, monitor, and watch expose `actionClass: "operator_decision"` so a poller does not start side effects without operator authority.
+  Approved `merge-cleanup` and `tracker-refresh` tail steps still use this low-level code, but status, handoff, monitor, and watch expose `actionClass: "operator_decision"` so a poller does not start side effects without operator authority.
 - `await_approval` - a pending step needs approval before it can run.
 - `resume_running` - a running step has fresh evidence; let it continue.
 - `investigate_stale` - a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
-- `clear_recovery` - the run is blocked (manual-recovery-required lease or blocked step), or a failed external-side-effect tail step (`merge-cleanup` / `linear-refresh`) needs operator reconciliation; verify external state and clear the recovery once the cause is resolved rather than re-running the step.
+- `clear_recovery` - the run is blocked (manual-recovery-required lease or blocked step), or a failed external-side-effect tail step (`merge-cleanup` / `tracker-refresh`) needs operator reconciliation; verify external state and clear the recovery once the cause is resolved rather than re-running the step.
   For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
 - `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
 `monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `operator_decision`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
 `monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
 
-`monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
+`monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `tracker-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
 
 `run.needsManualRecovery`, `run.manualRecoveryReason`, and `run.manualRecoveryAt` mirror the durable run-scoped recovery flag. Monitor-derived blockers populate `monitor.recovery`; stale scheduler-lane `manual-recovery-required` workflow leases remain outstanding and can populate it as `manual_recovery_lease`. Live dispatch / finalization recovery can set the durable run fields while `monitor.recovery` remains `null`. The stored reason and timestamp are authoritative for those non-monitor classifications; `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
@@ -1396,7 +1396,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
   "ok": true,
   "command": "workflow handoff",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": 1730000600000,
   "run": { "...": "same shape as workflow status detail" },
   "steps": [ "..." ],
@@ -1428,7 +1428,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
 
 ```text
 Workflow handoff: cwfp-abc123
-Schema version: 2
+Schema version: 3
 Generated at (epoch ms): 1730000600000
 
 Workflow run: cwfp-abc123
@@ -1597,7 +1597,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
   "ok": true,
   "command": "workflow run monitor",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": 1730000600000,
   "runId": "cwfp-abc123",
   "runState": "running",
@@ -1654,7 +1654,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 }
 ```
 
-`schemaVersion` is `2`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
+`schemaVersion` is `3`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
 
 ### Progress digest tick
 
@@ -1719,7 +1719,7 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
 - Read `recommendedActionPolicy` before turning a recommendation into any
   behavior. `auto_allowed` is only for explicit wait/release/read-only or local
   recheck cases; approvals, operator decisions, recovery clearing, stale manual
-  recovery, no-mistakes recovery, merge cleanup, Linear refresh, and
+  recovery, no-mistakes recovery, merge cleanup, tracker refresh, and
   external-apply require human authority. If policy metadata is missing or
   invalid, treat every non-wait action as `human_required`.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
@@ -1748,7 +1748,7 @@ workflow runs, not the semantic contract.
 
 ```text
 Workflow run monitor: cwfp-abc123
-Schema version: 2
+Schema version: 3
 Run state: running
 Step state: running
 Terminal: false
@@ -1792,7 +1792,7 @@ That wrapper also config-gates and audits its own local auto-actions before any 
 When the wrapper's local auto-action audit fails closed, it suppresses its own monitor-removal cleanup hint and surfaces a human-required OpenClaw escalation instead of changing the raw watch contract.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
 When `--once` is eligible to dispatch a profile-backed step, including native
-`goal-loop`, `one-shot`, `script`, or `delegate-supervisor`,
+`agent-loop`, `agent-once`, `script`, or `delegate-supervisor`,
 `MOMENTUM_LIVE_WRAPPER_PROFILE` must be configured.
 Without that profile, watch refuses before moving the step to `running` so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
@@ -1825,7 +1825,7 @@ Options:
   "command": "workflow run watch",
   "mode": "once",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": 1730000600000,
   "runId": "mwf-abc123",
   "runState": "running",
@@ -1873,7 +1873,7 @@ Options:
 When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved non-tail next step or to recheck one active running step that the scheduler can safely revisit.
 For a live-wrapper-owned step, that dispatcher tick can execute the wrapper and terminalize the round only after repo-safety, verification, and commit/reset finalization succeed or produce precise recovery evidence.
-Approved `merge-cleanup` and `linear-refresh` tail steps are not started by that dispatcher tick; the envelope reports `recommendedAction: "operator_decision"` with a human-required merge-cleanup or Linear-refresh policy instead.
+Approved `merge-cleanup` and `tracker-refresh` tail steps are not started by that dispatcher tick; the envelope reports `recommendedAction: "operator_decision"` with a human-required merge-cleanup or tracker-refresh policy instead.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
 `humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
@@ -1887,7 +1887,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `command` | string | Always `"workflow run watch"`. |
 | `mode` | string | `"once"` for the one-shot envelope below. Stream-mode records carry `"stream"` instead; see [Stream mode](#stream-mode). |
 | `dataDir` | string | Resolved data directory the tick read. |
-| `schemaVersion` | number | Envelope schema version; currently `2`. |
+| `schemaVersion` | number | Envelope schema version; currently `3`. |
 | `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
 | `runId` | string | The inspected run id. |
 | `runState` | string | Durable run state (`pending`, `running`, `succeeded`, `failed`, `canceled`). |
@@ -1902,7 +1902,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `recommendedActionPolicy` | object | Authority metadata for the recommendation: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Consumers must fail closed by treating absent or invalid policy as `human_required` for every non-wait action. |
 | `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
 | `quietForSeconds` | number | Elapsed seconds since the last surfaced tick for this run. It is `0` on a first observation or meaningful state change, grows across suppressed unchanged polls, and is included on throttled `quiet_heartbeat` / `stuck_risk` emissions. |
-| `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, no-mistakes `900`, merge-cleanup `300`, linear-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
+| `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, validate `900`, merge-cleanup `300`, tracker-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
 | `stuckRisk` | enum | `low` for ordinary progressing work, `medium` for idle or approval waits and active-execution stuck-risk advisories, `high` for blocked or recovery states. |
 | `inspectionCommand` | string \| null | Suggested inspection command when `reason` is `stuck_risk`; otherwise `null`. The command includes the resolved `--data-dir` so follow-up inspection reads the same state. The CLI never performs diagnosis itself. |
 | `cleanup` | enum | `release` once the wrapper can stop polling, otherwise `none`. |
@@ -1926,7 +1926,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 `recoveryDetail` is `null` for ordinary states.
 Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
 Current `kind` values are `no_mistakes_deterministic_evidence` and `external_tail_reconcile`.
-`recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
+`recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, tracker refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
 `humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), `detail` (the reason or evidence sentence), and `gateType`.
 `gateType` is `null` for approval and clear-recovery commands, and carries the durable workflow gate type when `code` is `resolve_gate`.
 When an open gate and an approved side-effecting tail step coexist, `humanAction.gateType` makes the gate policy authoritative before any tail-step policy implied by `nextAction.stepId`.
@@ -2240,7 +2240,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 - Otherwise branch on `recommendedAction`:
   - `poll` - work is advancing or idle; wait `nextPollSeconds` and tick again.
   - `approve` - run `humanAction.command` (a `workflow run approve` call) to release the approval gate.
-  - `operator_decision` - a required step failed, a gate is open, or an approved `merge-cleanup` / `linear-refresh` tail step needs operator authority before dispatch; an operator inspects and chooses via `workflow run decide`, a rerun, or the appropriate side-effecting tail path, so `humanAction` may be `null`.
+  - `operator_decision` - a required step failed, a gate is open, or an approved `merge-cleanup` / `tracker-refresh` tail step needs operator authority before dispatch; an operator inspects and chooses via `workflow run decide`, a rerun, or the appropriate side-effecting tail path, so `humanAction` may be `null`.
   - `recover` - run `humanAction.command` (a `workflow run clear-recovery` call, with `--evidence-pointer` for external-side-effect steps) after resolving the underlying cause.
   - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling only when `recommendedActionPolicy` allows `release_monitor`.
 - `emit` is the machine-polling signal, `nextAction.actionClass` is the compact operator branch, and `reason` / `humanAction` are the human-facing content.
@@ -2373,23 +2373,23 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 `workflow run events` is replay-only. It does not hold a connection open, emit JSONL, or watch for filesystem/database changes after the read. A caller that wants a live connection should use `workflow run watch <run-id> --stream --jsonl`, which holds the connection open and emits JSONL records over the same durable event cursor API; a caller that prefers discrete reads should poll `workflow run events` with the last returned cursor.
 
-## Native goal-loop evidence contract
+## Agent-loop evidence contract
 
-Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth.
+Agent-loop log readers treat Momentum executor rows and child evidence as the source of truth.
 `workflow run logs` is the shipped consumer of this projection today.
 Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
-A step classified with the legacy/native `goal-loop` executor records one `executor_attempt` for the autonomous attempt and one ordered `executor_round` per durable iteration.
+A step classified with the `agent-loop` executor records one `executor_attempt` for the autonomous attempt and one ordered `executor_round` per durable iteration.
 Before each round's runner starts, Momentum renders a deterministic prompt from objective, source context, round identity, repo/base-head context, acceptance and verification requirements, prior round evidence, and the configured result path.
 Source context and prior-round evidence are quoted as untrusted JSON context, and stale result files are cleared before the runner is asked to write the fresh normalized result JSON.
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 Post-finalization native round evidence exposes the executor's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 It exposes Momentum's post-policy daemon decision separately as `daemonClassification`, so quota, recovery, and operator gates do not overwrite what the executor recommended.
-When the native goal-loop mechanism receives a usable absolute verification log path, it writes `commit_or_reset_evidence` at `<verification-log>.finalization.json` with a content digest and stable `momentum.goal-loop.finalization-evidence.v1` outcome metadata.
-For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
-For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
+When the native agent-loop mechanism receives a usable absolute verification log path, it writes `commit_or_reset_evidence` at `<verification-log>.finalization.json` with a content digest and stable `momentum.goal-loop.finalization-evidence.v1` outcome metadata.
+For `agent-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
+For non-`agent-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
-The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while legacy definitions may still run it beneath `goal-loop`.
-In both cases `gnhf` is not a workflow executor family, and its work must remain represented by Momentum attempt and round evidence.
+The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while retained legacy definitions may still run it beneath the legacy `goal-loop` spelling.
+In both cases `gnhf` is not a workflow executor, and its work must remain represented by Momentum attempt and round evidence.
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
 
@@ -2434,7 +2434,7 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
-It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor attempt read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor attempt read-back plus the per-round executor evidence that the detail loader does not carry - executor / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
 The derived `outcome` reports any terminal `succeeded` round as `successful`, including a `continue` round with no commit SHA.
 This distinguishes a successful bounded handoff or poll from a failed continuation while keeping the attempt eligible for its next scheduler tick.
@@ -2449,7 +2449,7 @@ Rounds are returned across every attempt in the run, ordered by step key, then a
   "ok": true,
   "command": "workflow run logs",
   "dataDir": "/path/to/data",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": 1730000600000,
   "run": { "...": "same shape as workflow status detail" },
   "steps": [ "..." ],
@@ -2464,7 +2464,7 @@ Rounds are returned across every attempt in the run, ordered by step key, then a
       "workflowRunId": "cwfp-abc123",
       "stepRunId": "implementation",
       "stepKey": "implementation",
-      "executorFamily": "goal-loop",
+      "executor": "agent-loop",
       "state": "running",
       "attemptNumber": 1,
       "startedAt": 1730000500000,
@@ -2478,7 +2478,7 @@ Rounds are returned across every attempt in the run, ordered by step key, then a
       "attemptId": "cwfp-abc123::implementation::attempt-1",
       "stepRunId": "implementation",
       "stepKey": "implementation",
-      "executorFamily": "goal-loop",
+      "executor": "agent-loop",
       "attemptNumber": 1,
       "roundIndex": 0,
       "state": "succeeded",
@@ -2594,7 +2594,7 @@ Rounds are returned across every attempt in the run, ordered by step key, then a
 
 ```text
 Workflow run logs: cwfp-abc123
-Schema version: 2
+Schema version: 3
 Generated at (epoch ms): 1730000600000
 Run state: running
 Implementation engine: native-goal-loop
@@ -2604,7 +2604,7 @@ Leases: 1
 Gates: 1 (open: 1)
 - gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
 Executor attempts: 1
-- cwfp-abc123::implementation::attempt-1 [implementation/running] attempt=1 executor=goal-loop
+- cwfp-abc123::implementation::attempt-1 [implementation/running] attempt=1 executor=agent-loop
 Executor rounds: 1
 - cwfp-abc123::implementation::attempt-1::round-1 [implementation/succeeded] complete outcome=successful
     summary: implemented the slice

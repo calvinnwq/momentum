@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODING_WORKFLOW_DEFINITION,
+  CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION_V2,
   type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import {
@@ -25,7 +27,7 @@ function baseInput(
 }
 
 describe("materializeWorkflowCodingPlanPreview", () => {
-  it("surfaces every built-in coding step with its executor family and pending state", () => {
+  it("surfaces every built-in coding step with its executor and pending state", () => {
     const result = materializeWorkflowCodingPlanPreview(baseInput());
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -33,7 +35,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       {
         stepId: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 0,
         required: true,
         state: "pending",
@@ -50,14 +52,14 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       {
         stepId: "postflight",
         kind: "postflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 2,
         required: true,
         state: "pending",
       },
       {
-        stepId: "no-mistakes",
-        kind: "no-mistakes",
+        stepId: "validate",
+        kind: "validate",
         executor: "delegate-supervisor",
         config: { tool: "no-mistakes" },
         order: 3,
@@ -74,8 +76,8 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         state: "pending",
       },
       {
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         executor: "external-apply",
         order: 5,
         required: true,
@@ -104,7 +106,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       objective: "Inspect the plan",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 2,
+      definitionVersion: 3,
       issueScope: { identifier: "NGX-509" },
       route: {
         profile: "live-wrapper",
@@ -130,7 +132,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       preflight: "approved",
       implementation: "approved",
       postflight: "pending",
-      "no-mistakes": "pending",
+      validate: "pending",
     });
   });
 
@@ -145,7 +147,7 @@ describe("materializeWorkflowCodingPlanPreview", () => {
     );
   });
 
-  it("joins executor families for a custom multi-step definition", () => {
+  it("joins executors for a custom multi-step definition", () => {
     const definition: WorkflowDefinition = {
       key: "coding-workflow",
       title: "Custom",
@@ -154,14 +156,14 @@ describe("materializeWorkflowCodingPlanPreview", () => {
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 1,
           required: false,
         },
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -176,8 +178,48 @@ describe("materializeWorkflowCodingPlanPreview", () => {
     expect(
       result.preview.steps.map((step) => [step.stepId, step.executor]),
     ).toEqual([
-      ["preflight", "one-shot"],
-      ["implementation", "goal-loop"],
+      ["preflight", "agent-once"],
+      ["implementation", "agent-loop"],
     ]);
   });
+
+  it.each([
+    [CODING_WORKFLOW_DEFINITION_V1, "agent-loop", "no-mistakes"],
+    [
+      CODING_WORKFLOW_DEFINITION_V2,
+      "delegate-supervisor",
+      "delegate-supervisor",
+    ],
+  ] as const)(
+    "previews retained definition version $version through the effective projection",
+    (definition, implementationExecutor, validateExecutor) => {
+      // Deliberate legacy seeds: V1/V2 are frozen with retired executor values and
+      // step-kind spellings; the preview projects executors and kinds to the
+      // effective vocabulary while step ids keep the recorded step keys.
+      const frozen = JSON.stringify(definition);
+      const result = materializeWorkflowCodingPlanPreview(
+        baseInput({ definition }),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(
+        result.preview.steps.map((step) => [
+          step.stepId,
+          step.kind,
+          step.executor,
+        ]),
+      ).toEqual([
+        ["preflight", "preflight", "agent-once"],
+        ["implementation", "implementation", implementationExecutor],
+        ["postflight", "postflight", "agent-once"],
+        // The legacy no-mistakes executor identity stays dispatchable as-is.
+        ["no-mistakes", "validate", validateExecutor],
+        ["merge-cleanup", "merge-cleanup", "script"],
+        ["linear-refresh", "tracker-refresh", "external-apply"],
+      ]);
+      expect(result.preview.definitionVersion).toBe(definition.version);
+      // The stored definition stays byte-identical after the projection.
+      expect(JSON.stringify(definition)).toBe(frozen);
+    },
+  );
 });

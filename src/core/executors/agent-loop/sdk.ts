@@ -68,7 +68,7 @@ const AGENT_CONFIG_SCHEMA = {
 
 export const GOAL_LOOP_EXECUTOR_CONFIG_SCHEMA = {
   type: "object",
-  description: "Portable configuration for bounded native goal-loop rounds.",
+  description: "Portable configuration for bounded native agent-loop rounds.",
   properties: {
     agent: AGENT_CONFIG_SCHEMA,
     timeoutMs: {
@@ -87,7 +87,7 @@ export class GoalLoopSdkExecutor implements Executor<
   GoalLoopExecutorConfig,
   GoalLoopExecutorHostBindings
 > {
-  readonly name = "goal-loop";
+  readonly name = "agent-loop";
   readonly configSchema = GOAL_LOOP_EXECUTOR_CONFIG_SCHEMA;
 
   tick(
@@ -96,9 +96,9 @@ export class GoalLoopSdkExecutor implements Executor<
       GoalLoopExecutorHostBindings
     >,
   ): ExecutorTickResult {
-    if (context.state.attempt.executorFamily !== this.name) {
+    if (context.state.attempt.executor !== this.name) {
       throw new Error(
-        `GoalLoopSdkExecutor cannot run attempt ${context.state.attempt.attemptId} for ${context.state.attempt.executorFamily}.`,
+        `GoalLoopSdkExecutor cannot run attempt ${context.state.attempt.attemptId} for ${context.state.attempt.executor}.`,
       );
     }
     const selection =
@@ -153,7 +153,7 @@ export class GoalLoopSdkExecutor implements Executor<
       hostStart.roundId !== expectedRoundId
     ) {
       throw new Error(
-        "Native goal-loop host round binding is stale or invalid.",
+        "Native agent-loop host round binding is stale or invalid.",
       );
     }
     const start = planGoalLoopRoundStart({ ...hostStart, selection });
@@ -186,7 +186,7 @@ export class GoalLoopSdkExecutor implements Executor<
       context.signal.throwIfAborted();
       const runner = context.hostBindings.runRound;
       if (runner === undefined) {
-        throw new Error("Native goal-loop runner binding is unavailable.");
+        throw new Error("Native agent-loop runner binding is unavailable.");
       }
       const mechanism = runner(cloneRound(durableRound));
       const plan = planGoalLoopRoundPersistence({
@@ -387,7 +387,7 @@ function roundStartForSdk(round: ExecutorRoundRecord): ExecutorRoundStart {
     workflowRunId: round.workflowRunId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
-    executorFamily: round.executorFamily,
+    executor: round.executor,
     attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: "running",

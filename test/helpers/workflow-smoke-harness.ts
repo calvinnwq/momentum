@@ -48,7 +48,7 @@ export const E2E_STEPS: E2EStep[] = [
   { stepId: "preflight", kind: "preflight" },
   { stepId: "implementation", kind: "implementation" },
   { stepId: "postflight:1", kind: "postflight" },
-  { stepId: "no-mistakes", kind: "no-mistakes" },
+  { stepId: "validate", kind: "validate" },
   { stepId: "merge-cleanup", kind: "merge-cleanup" },
 ];
 
@@ -80,7 +80,7 @@ export function writeM7EndToEndFixture(rootDir: string, runId: string): string {
         approvalsRequired: [
           "implementation",
           "postflight:1",
-          "no-mistakes",
+          "validate",
           "merge-cleanup",
         ],
         taskFlow: {

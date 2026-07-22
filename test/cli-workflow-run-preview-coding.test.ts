@@ -82,7 +82,7 @@ function previewCodingArgs(input: PreviewArgs): string[] {
 }
 
 describe("momentum workflow run preview-coding", () => {
-  it("previews the built-in coding plan with every step and executor family", async () => {
+  it("previews the built-in coding plan with every step and executor", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -104,7 +104,7 @@ describe("momentum workflow run preview-coding", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 2,
+      definitionVersion: 3,
       repoPath: repoDir,
       objective: "Inspect before approval",
     });
@@ -113,7 +113,7 @@ describe("momentum workflow run preview-coding", () => {
       {
         stepId: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 0,
         required: true,
         state: "pending",
@@ -130,14 +130,14 @@ describe("momentum workflow run preview-coding", () => {
       {
         stepId: "postflight",
         kind: "postflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 2,
         required: true,
         state: "pending",
       },
       {
-        stepId: "no-mistakes",
-        kind: "no-mistakes",
+        stepId: "validate",
+        kind: "validate",
         executor: "delegate-supervisor",
         config: { tool: "no-mistakes" },
         order: 3,
@@ -154,8 +154,8 @@ describe("momentum workflow run preview-coding", () => {
         state: "pending",
       },
       {
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         executor: "external-apply",
         order: 5,
         required: true,
@@ -196,7 +196,7 @@ describe("momentum workflow run preview-coding", () => {
           config: { tool: "gnhf" },
         }),
         expect.objectContaining({
-          stepId: "no-mistakes",
+          stepId: "validate",
           executor: "delegate-supervisor",
           config: { tool: "no-mistakes" },
         }),
@@ -215,7 +215,7 @@ describe("momentum workflow run preview-coding", () => {
         objective: "Block bad route config",
         extra: [
           "--steps-json",
-          JSON.stringify({ "linear-refresh": { model: "opus" } }),
+          JSON.stringify({ "tracker-refresh": { model: "opus" } }),
         ],
       }),
     );
@@ -234,12 +234,12 @@ describe("momentum workflow run preview-coding", () => {
         checkId: "route.steps",
         status: "failed",
         severity: "error",
-        path: "route.steps.linear-refresh",
-        key: "linear-refresh",
+        path: "route.steps.tracker-refresh",
+        key: "tracker-refresh",
         message:
-          'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
+          'Coding route step "tracker-refresh" is not configurable; supported steps: implementation, postflight, validate, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key.",
+          "Use route.steps only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
       },
     ]);
   });
@@ -366,7 +366,7 @@ describe("momentum workflow run preview-coding", () => {
         repoDir,
         runId: "preview-invalid-approval",
         objective: "Block bad approval boundary",
-        extra: ["--approval-boundary", "through-linear-refresh"],
+        extra: ["--approval-boundary", "through-tracker-refresh"],
       }),
     );
 
@@ -503,7 +503,7 @@ describe("momentum workflow run preview-coding", () => {
     );
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("preview-human");
-    expect(result.stdout).toContain("coding-workflow v2");
+    expect(result.stdout).toContain("coding-workflow v3");
     expect(result.stdout).toContain("Profile: live-wrapper");
     expect(result.stdout).toContain("Implementation engine: gnhf");
     expect(result.stdout).toContain("implementation");
@@ -609,7 +609,7 @@ describe("momentum workflow run preview-coding", () => {
               model: "sonnet",
               effort: "high",
             },
-            "no-mistakes": {
+            validate: {
               harness: "codex",
               model: "openai/gpt-5.5",
               effort: "high",
@@ -633,7 +633,7 @@ describe("momentum workflow run preview-coding", () => {
       "postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)",
     );
     expect(result.stdout).toContain(
-      "no-mistakes: harness=codex, model=gpt-5.5, effort=high",
+      "validate: harness=codex, model=gpt-5.5, effort=high",
     );
 
     const jsonResult = await run(
@@ -650,7 +650,7 @@ describe("momentum workflow run preview-coding", () => {
               model: "sonnet",
               effort: "high",
             },
-            "no-mistakes": {
+            validate: {
               harness: "codex",
               model: "openai/gpt-5.5",
               effort: "high",
@@ -677,7 +677,7 @@ describe("momentum workflow run preview-coding", () => {
             harness: "opencode",
             model: "opencode-go/glm-5.2",
           },
-          "no-mistakes": {
+          validate: {
             harness: "codex",
             model: "gpt-5.5",
             effort: "high",
@@ -860,7 +860,7 @@ describe("momentum workflow run preview-coding", () => {
       db.close();
     }
 
-    // Executor families in the preview are reconstructable from the durable
+    // Executors in the preview are reconstructable from the durable
     // (key, version) pin alone, so dispatch/approval can reference them later.
     expect(previewSteps.map((step) => step.executor)).toEqual(
       CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor),

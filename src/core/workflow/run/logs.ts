@@ -39,7 +39,7 @@ import {
  * an `attempt` counter) with immutable `attempts` (`attemptId` /
  * `attemptNumber`), and re-keyed rounds by `attemptId` / `attemptNumber`.
  */
-export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 2;
+export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 3;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;

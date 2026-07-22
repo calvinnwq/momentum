@@ -96,8 +96,8 @@ is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 A continuation-only registered-executor tick still counts as `dispatched`, but it also increments `idleCycles` and waits the configured poll interval before the next external-state read.
 For a valid executor identity, dispatch advances the step to `running` and
 creates durable executor attempt / round scaffold rows with deterministic
-dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
-family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
+dispatcher ids. The built-in `tracker-refresh` step uses the `external-apply`
+executor as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
 `daemon start` proves the run's issue scope, `LINEAR_API_KEY`, repo
 `intent_apply_policy: external_apply_allowed`, a matching Linear source item, and
 either one pending Linear `status_update` intent or enough unique issue-scope /
@@ -148,7 +148,7 @@ committed as work.
 Process-backed live-wrapper dispatch is supported on Linux and macOS.
 On native Windows, the wrapper launches no supervised command, parks the run
 with `unsupported_platform`, and preserves the refused round for recovery.
-When the variable is unset or blank, native `goal-loop`, `one-shot`, and
+When the variable is unset or blank, native `agent-loop`, `agent-once`, and
 `script` dispatches fail honestly with `runtime_unavailable` instead of using
 another execution mechanism.
 Other supported live-wrapper-owned steps keep the durable start scaffold for a
@@ -235,7 +235,7 @@ MOMENTUM_LIVE_WRAPPER_PROFILE=/path/to/live-wrapper-profile.json \
 
 The profile has a non-empty `name` and a `wrappers` object keyed by
 non-`external-apply` workflow step kind (`preflight`, `implementation`,
-`postflight`, `no-mistakes`, or `merge-cleanup`). The built-in `linear-refresh`
+`postflight`, `validate`, or `merge-cleanup`). The built-in `tracker-refresh`
 step is handled by the daemon's policy-gated `external-apply` adapter, not a
 live-wrapper command. Each wrapper requires:
 
@@ -309,7 +309,7 @@ The `--profile <name>` option on `workflow run start` and `workflow run start-co
 The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
-The version-pinned built-in definition remains authoritative for the implementation executor: current version 2 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label, while recorded version 1 runs use the native `goal-loop` SDK lifecycle.
+The version-pinned built-in definition remains authoritative for the implementation executor: current version 3 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label, while retained version 1 projects its recorded executor to the native `agent-loop` SDK lifecycle.
 Both executor paths resolve their machine-local mechanism from the step-kind live-wrapper binding.
 A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
@@ -319,7 +319,7 @@ Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_
 `workflow run watch --once` resolves the same profile for its bounded run-scoped dispatcher tick when it is eligible to dispatch a non-tail step, so an invalid profile can also fail that supervisor command with `daemon_live_wrapper_profile_invalid`.
 The checked-in coding-workflow live-wrapper profile runs the shared coding
 workflow wrapper for `preflight`, `implementation`, `postflight`,
-`no-mistakes`, and `merge-cleanup`. That wrapper also requires
+`validate`, and `merge-cleanup`. That wrapper also requires
 `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` to point at the run-local command
 configuration. If the profile is present but that run-local config is missing,
 unreadable, invalid, or lacks the current step, the wrapper exits as an operator
@@ -351,7 +351,7 @@ For example, this command block is valid:
 }
 ```
 
-For `no-mistakes`, include an explicit runner profile so the wrapper does not depend on ambient daemon environment.
+For the `validate` step's no-mistakes tool, include an explicit runner profile so the wrapper does not depend on ambient daemon environment.
 The runner profile requires the `axi` interface, `stdin: "closed"`, and the environment variables that the configured no-mistakes agent needs.
 Momentum supports the no-mistakes agent choices `claude`, `codex`, `opencode`, and `rovodev`; `agent=auto` is rejected in the native wrapper because it cannot be validated deterministically.
 Before spawning no-mistakes, the wrapper reads `HOME/.no-mistakes/config.yaml` with strict YAML parsing and requires the top-level `agent` plus the top-level `agent_path_override.<agent>` entry to match the runner profile.
@@ -362,7 +362,7 @@ For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrap
 ```json
 {
   "steps": {
-    "no-mistakes": {
+    "validate": {
       "command": "/usr/bin/env",
       "args": ["no-mistakes", "axi", "run", "--intent", "verify this branch"],
       "cwd": "repo",
@@ -381,7 +381,7 @@ For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrap
 
 If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no runner evidence.
 
-For current coding definitions, the implementation and no-mistakes steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
+For current coding definitions, the implementation and validate steps run through `delegate-supervisor` with `tool: "gnhf"` and `tool: "no-mistakes"` respectively.
 The implementation adapter performs the configured live-wrapper handoff once, records a normalized terminal external-state artifact, and lets a later bounded tick corroborate it.
 The no-mistakes adapter uses the configured wrapper command for the initial `axi run` handoff, then invokes that validated executable as `axi status --run <external-run-id>` with the same filtered child environment on later ticks.
 Status read-back must match the pinned run id and branch.
@@ -437,7 +437,7 @@ must prove explicit GitHub auth in the live-wrapper environment (`GH_TOKEN`,
 state showing the target is open, non-draft, mergeable, and still at the expected
 head. If GitHub shows the PR is already merged or the cleanup branch is already
 deleted, the wrapper stops before mutation and routes operators to evidence-backed
-reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
+reconciliation instead of a blind rerun. The built-in `tracker-refresh` step requires the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
 Missing auth, issue scope, target, source evidence, deterministic intent evidence, or missing valid payload fails closed with operator-actionable recovery evidence;
 Momentum does not store these credentials.
 
@@ -469,7 +469,7 @@ Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
 When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the adapter normalizes a completed external state and the delegate supervisor records successful executor evidence while upstream no-mistakes may continue its own PR-lifecycle monitoring.
-If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` can reconcile only that failed required `no-mistakes` step and re-derive the run for downstream work from either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
+If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` can reconcile only that failed required `validate` step and re-derive the run for downstream work from either legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
 Structured no-mistakes recovery evidence must match the current workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
 Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, running, or otherwise non-successful checks suppress that successful classification; explicitly skipped checks are treated as absent checks.
 

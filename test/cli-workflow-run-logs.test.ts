@@ -72,7 +72,7 @@ function makeAttempt(runId: string): ExecutorAttemptRecord {
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 10,
@@ -91,7 +91,7 @@ function makeRound(
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
@@ -358,7 +358,7 @@ describe("momentum workflow run logs", () => {
       attempts: Array<{
         attemptId: string;
         stepKey: string;
-        executorFamily: string;
+        executor: string;
         attemptNumber: number;
         state: string;
         startedAt: number | null;
@@ -409,7 +409,7 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",
@@ -485,7 +485,7 @@ describe("momentum workflow run logs", () => {
       expect.objectContaining({
         attemptId: "inv-1",
         stepKey: "implementation",
-        executorFamily: "goal-loop",
+        executor: "agent-loop",
         attemptNumber: 1,
         state: "running",
         startedAt: 10,
@@ -497,7 +497,7 @@ describe("momentum workflow run logs", () => {
       [
         "attemptId",
         "attemptNumber",
-        "executorFamily",
+        "executor",
         "finishedAt",
         "heartbeatAt",
         "startedAt",
@@ -523,7 +523,7 @@ describe("momentum workflow run logs", () => {
         "commitSha",
         "decisions",
         "effort",
-        "executorFamily",
+        "executor",
         "executorRecommendation",
         "findings",
         "finishedAt",
@@ -952,7 +952,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 2");
+    expect(result.stdout).toContain("Schema version: 3");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -1040,7 +1040,7 @@ describe("momentum workflow run logs", () => {
         roundId: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(
       payload.gates.find((gate) => gate.gateId === "gate-invocation"),
     ).toEqual(

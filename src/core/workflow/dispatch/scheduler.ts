@@ -85,6 +85,7 @@ import {
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryArtifactInput,
 } from "../recovery/artifact.js";
+import { canonicalExecutorIdentity } from "../definition/legacy.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
 import {
   classifyWorkflowLease,
@@ -117,8 +118,8 @@ const NON_MONITOR_LEASE_KINDS: ReadonlySet<WorkflowLeaseKind> = new Set([
 ]);
 
 const NATIVE_RESUMABLE_SDK_EXECUTORS: ReadonlySet<string> = new Set([
-  "goal-loop",
-  "one-shot",
+  "agent-loop",
+  "agent-once",
   "script",
 ]);
 
@@ -773,7 +774,7 @@ function tryParkStaleRunningDispatchLease(
           );
     if (
       attempt !== undefined &&
-      attempt.executorFamily === "subworkflow" &&
+      attempt.executor === "subworkflow" &&
       !isTerminalExecutorAttemptState(attempt.state)
     ) {
       db.exec("ROLLBACK");
@@ -1162,6 +1163,13 @@ export type WorkflowStepDispatchContext = {
   now: number;
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
+  /**
+   * When provided, a recorded executor identity that is registered under its
+   * own raw name keeps that identity on new attempt rows; only unregistered
+   * legacy spellings project to their canonical alias.
+   */
+  isRegisteredExecutor?: (executorName: string) => boolean;
+  isDurablyClaimedExecutor?: (executorName: string) => boolean;
   /** Optional SDK hook that binds the attempt and first round atomically. */
   materializeOwnedRound?: (input: {
     attempt: ExecutorAttemptRecord;
@@ -1194,7 +1202,7 @@ export type WorkflowStepDispatchResult = {
 /**
  * The executor-dispatch seam. {@link runWorkflowSchedulerOnce} claims the next
  * runnable step and hands the claim to this callback. The production dispatcher
- * starts durable executor attempt / round scaffolds for supported families
+ * starts durable executor attempt / round scaffolds for supported executors
  * and fail-closes unsupported or unresolvable steps to manual recovery when the
  * run row still exists, or releases only the lease when the run has vanished.
  * On a normal return the dispatcher owns the dispatch lease's lifecycle (refresh
@@ -1416,8 +1424,10 @@ function isResumableRegisteredSdkTick(
   // Legacy dispatch inserts its attempt and first round in one transaction.
   // Only an SDK-owned dispatch can durably expose a roundless attempt.
   if (
-    (attempt.executorFamily === "delegate-supervisor" ||
-      NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executorFamily)) &&
+    (attempt.executor === "delegate-supervisor" ||
+      NATIVE_RESUMABLE_SDK_EXECUTORS.has(
+        canonicalExecutorIdentity(attempt.executor),
+      )) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1425,7 +1435,7 @@ function isResumableRegisteredSdkTick(
   const round = currentAttemptRounds.at(-1);
   if (round === undefined) return false;
   if (
-    attempt.executorFamily === "delegate-supervisor" &&
+    attempt.executor === "delegate-supervisor" &&
     currentAttemptRounds.length === 1 &&
     round.classification === null &&
     round.state === "running" &&
@@ -1439,7 +1449,9 @@ function isResumableRegisteredSdkTick(
   }
   if (round.classification === "continue") return true;
   if (
-    NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executorFamily) &&
+    NATIVE_RESUMABLE_SDK_EXECUTORS.has(
+      canonicalExecutorIdentity(attempt.executor),
+    ) &&
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(
@@ -1475,7 +1487,7 @@ function hasResumableDelegateCheckpoint(
   const activeRound = currentAttemptRounds.at(-1);
   if (
     attempt.state !== "running" ||
-    attempt.executorFamily !== "delegate-supervisor" ||
+    attempt.executor !== "delegate-supervisor" ||
     activeRound === undefined
   ) {
     return false;
@@ -1647,7 +1659,7 @@ function buildActiveSubworkflowClaim(
     isResumableRegisteredSdkTick(db, attempt, attemptRounds);
   if (
     attempt === undefined ||
-    (attempt.executorFamily !== "subworkflow" && !resumableSdkTick) ||
+    (attempt.executor !== "subworkflow" && !resumableSdkTick) ||
     isTerminalExecutorAttemptState(attempt.state)
   ) {
     return undefined;

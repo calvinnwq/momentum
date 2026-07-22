@@ -17,7 +17,7 @@ import {
   planSingleShotRoundStart,
   resolveSingleShotRoundSelection,
   singleShotRoundId,
-  type SingleShotExecutorFamily,
+  type SingleShotExecutorName,
 } from "../src/core/executors/single-shot/executor.js";
 
 // This is the integration twin of the pure projections in
@@ -25,7 +25,7 @@ import {
 // the terminal persistence plan through the *real* executor-loop persistence layer
 // and round transition graph. It proves the per-round agent/model/input evidence
 // frozen at start survives the result/verification/commit evidence written at the
-// end (contract Round Schema), and — the family-specific crux — that an exit-code
+// end (contract Round Schema), and — the executor-specific crux — that an exit-code
 // based `script` success still legally reaches `succeeded` through a bare capture
 // even though it captured no result document (the graph forbids running ->
 // succeeded directly).
@@ -52,7 +52,7 @@ function makeTempDir(): string {
 
 // Foreign keys are enforced, so a round needs a real attempt, which needs a
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows.
-function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
+function openRoundDb(executor: SingleShotExecutorName): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
     "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
@@ -66,7 +66,7 @@ function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: family,
+    executor: executor,
     state: "running",
     attemptNumber: 1,
     startedAt: 1,
@@ -77,11 +77,11 @@ function openRoundDb(family: SingleShotExecutorFamily): MomentumDb {
   return db;
 }
 
-// `withAgent` resolves a concrete agent/model/effort (the one-shot family); the
-// script family resolves the all-null floor.
+// `withAgent` resolves a concrete agent/model/effort (the agent-once executor); the
+// script executor resolves the all-null floor.
 function startRound(
   db: MomentumDb,
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   withAgent: boolean,
 ): void {
   const selection = resolveSingleShotRoundSelection(
@@ -101,7 +101,7 @@ function startRound(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    family,
+    executor,
     attemptNumber: 1,
     selection,
     inputDigest: "sha256:input",
@@ -114,7 +114,7 @@ function startRound(
 
 const ONE_SHOT_RESULT: RunnerResult = {
   success: true,
-  summary: "ran the one-shot review pass",
+  summary: "ran the agent-once review pass",
   key_changes_made: ["approved the bounded change"],
   key_learnings: [],
   remaining_work: [],
@@ -122,16 +122,16 @@ const ONE_SHOT_RESULT: RunnerResult = {
   commit: {
     type: "chore",
     scope: "single-shot",
-    subject: "one-shot pass",
+    subject: "agent-once pass",
     body: "",
     breaking: false,
   },
 };
 
-describe("single-shot round persistence — one-shot success round-trip", () => {
+describe("single-shot round persistence — agent-once success round-trip", () => {
   it("freezes agent/model/input at start and adds result/verification/commit at the end", () => {
-    const db = openRoundDb("one-shot");
-    startRound(db, "one-shot", true);
+    const db = openRoundDb("agent-once");
+    startRound(db, "agent-once", true);
 
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: true },
@@ -161,7 +161,7 @@ describe("single-shot round persistence — one-shot success round-trip", () => 
     expect(final.startedAt).toBe(1_000);
 
     // Result/verification/commit evidence written at the end.
-    expect(final.summary).toBe("ran the one-shot review pass");
+    expect(final.summary).toBe("ran the agent-once review pass");
     expect(final.keyChanges).toEqual(["approved the bounded change"]);
     expect(final.resultDigest).toBe("sha256:result");
     expect(final.verificationStatus).toBe("passed");
@@ -195,7 +195,7 @@ describe("single-shot round persistence — script success round-trip", () => {
 
     expect(final.state).toBe("succeeded");
     expect(final.classification).toBe("complete");
-    // The script family resolves no agent/model and captured no result document.
+    // The script executor resolves no agent/model and captured no result document.
     expect(final.agentProvider).toBeNull();
     expect(final.model).toBeNull();
     expect(final.summary).toBeNull();
@@ -234,8 +234,8 @@ describe("single-shot round persistence — execution failure round-trip", () =>
 
 describe("single-shot round persistence — manual recovery round-trip", () => {
   it("routes an unsafe finalize from running to manual recovery with the gate and code", () => {
-    const db = openRoundDb("one-shot");
-    startRound(db, "one-shot", true);
+    const db = openRoundDb("agent-once");
+    startRound(db, "agent-once", true);
 
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: false, recoveryCode: "head_mismatch" },

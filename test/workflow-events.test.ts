@@ -679,7 +679,7 @@ describe("workflow run events", () => {
   it("preserves a retry-cleared step start with stable identity", async () => {
     const dataDir = makeTempDir();
     const runId = "run-retry-start-preserved";
-    const stepId = "no-mistakes";
+    const stepId = "validate";
     const attemptId = `${runId}::${stepId}::dispatch`;
     const db = openDb(dataDir);
     seedRun(db, {
@@ -690,7 +690,7 @@ describe("workflow run events", () => {
     seedStep(db, {
       runId,
       stepId,
-      kind: "no-mistakes",
+      kind: "validate",
       state: "running",
       order: 3,
       startedAt: 100,
@@ -703,14 +703,14 @@ describe("workflow run events", () => {
     db.prepare(
       `INSERT INTO executor_attempts
          (attempt_id, workflow_run_id, step_run_id, step_key,
-          executor_family, state, attempt_number, started_at, created_at, updated_at)
+          executor, state, attempt_number, started_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       attemptId,
       runId,
       stepId,
       stepId,
-      "no-mistakes",
+      "delegate-supervisor",
       "manual_recovery_required",
       1,
       100,
@@ -720,7 +720,7 @@ describe("workflow run events", () => {
     db.prepare(
       `INSERT INTO executor_rounds
          (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-          executor_family, attempt_number, round_index, state, recovery_code,
+          executor, attempt_number, round_index, state, recovery_code,
           created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
@@ -729,7 +729,7 @@ describe("workflow run events", () => {
       runId,
       stepId,
       stepId,
-      "no-mistakes",
+      "delegate-supervisor",
       1,
       0,
       "manual_recovery_required",

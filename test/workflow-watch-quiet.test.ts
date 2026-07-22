@@ -99,7 +99,7 @@ function makeEnvelope(
   overrides: Partial<WorkflowMonitorEnvelope> = {},
 ): WorkflowMonitorEnvelope {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAt: NOW,
     runId: "mwf-watch-quiet",
     source: "momentum-native-coding",
@@ -245,9 +245,9 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
     expect(WORKFLOW_WATCH_DEFAULT_QUIET_THRESHOLDS_SECONDS).toEqual({
       implementation: 15 * 60,
       postflight: 10 * 60,
-      "no-mistakes": 15 * 60,
+      validate: 15 * 60,
       "merge-cleanup": 5 * 60,
-      "linear-refresh": 5 * 60,
+      "tracker-refresh": 5 * 60,
       approval: 30 * 60,
       recovery: 60 * 60,
       idle: 15 * 60,
@@ -330,9 +330,9 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
   it.each([
     ["implementation", 15 * 60],
     ["postflight", 10 * 60],
-    ["no-mistakes", 15 * 60],
+    ["validate", 15 * 60],
     ["merge-cleanup", 5 * 60],
-    ["linear-refresh", 5 * 60],
+    ["tracker-refresh", 5 * 60],
   ] as const)(
     "uses the %s quiet threshold for active execution stuck risk",
     (kind, thresholdSeconds) => {

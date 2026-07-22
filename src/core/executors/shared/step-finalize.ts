@@ -12,14 +12,14 @@
  * It began as the live-step lane's
  * `live-step/finalize.ts`, then was extracted here so the
  * finalization consumers depend on one shared seam instead of the
- * executor-loop families reaching into a live-step module for it. The retired
+ * executor lanes reaching into a live-step module for it. The retired
  * live-step orchestration lane and its back-compat alias have since been
  * deleted. The consumers:
  *
- *   - the goal-loop executor family - `goal-loop/mechanism.ts`,
- *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
+ *   - the agent-loop executor - `agent-loop/mechanism.ts`,
+ *     `agent-loop/executor.ts`, and `agent-loop/orchestrator.ts`, imported
  *     directly; and
- *   - the single-shot executor family - `single-shot/mechanism.ts`, imported
+ *   - the single-shot executors - `single-shot/mechanism.ts`, imported
  *     directly; and
  *   - the production live-step SDK finalizer, reused by the profile-backed
  *     delegate-tool bridge before handoff evidence becomes durable.
@@ -53,7 +53,7 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The goal-loop, single-shot, and profile-backed delegate paths project the
+ * The agent-loop, single-shot, and profile-backed delegate paths project the
  * run-level recovery outcomes this seam surfaces (`manual_recovery_required`,
  * `result_missing`, `result_invalid`, unsafe finalization failures such as
  * `reset_failed`, `repo_lock_lost`, `git_failed`, `commit_failed`, or

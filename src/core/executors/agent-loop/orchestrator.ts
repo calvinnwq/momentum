@@ -1,7 +1,7 @@
 /**
  * Goal-loop executor adapter — single-round driver.
  *
- * `goal-loop/executor.ts` owns the *pure* projections for one bounded round: the
+ * `agent-loop/executor.ts` owns the *pure* projections for one bounded round: the
  * round-start record ({@link planGoalLoopRoundStart}), the daemon classification
  * + two-phase persistence patches ({@link planGoalLoopRoundPersistence}), and the
  * deterministic agent/model selection. This module is the stateful seam that
@@ -22,11 +22,11 @@
  * {@link attemptStateForRoundClassification} - succeeded on completion, the
  * durable `waiting_operator` pause on a quota / operator gate, a terminal
  * failure / manual recovery on the repo-safety boundaries. The concrete
- * result-file mechanism lives in `goal-loop/mechanism.ts`, while
+ * result-file mechanism lives in `agent-loop/mechanism.ts`, while
  * {@link runGoalLoopStep} materializes the attempt/round identity and leaves
  * the real daemon wiring to thread each round's result into the next round's
  * input through its runtime input resolver. The prompted-result helper in
- * `goal-loop/mechanism.ts` is the concrete runner-input variant: it renders the
+ * `agent-loop/mechanism.ts` is the concrete runner-input variant: it renders the
  * per-round prompt, invokes a runner with that prompt and result path, then
  * returns the same mechanism result shape this driver persists.
  *
@@ -138,7 +138,7 @@ export type GoalLoopRoundMechanismResult = {
  * (its frozen agent/model/effort, input digest, artifact root, and identity) and
  * returns the round's normalized result + finalize outcome. It must be total —
  * encode failures as finalize outcomes rather than throwing — mirroring
- * `finalizeWorkflowStepFromResultFile`. `goal-loop/mechanism.ts` provides the
+ * `finalizeWorkflowStepFromResultFile`. `agent-loop/mechanism.ts` provides the
  * concrete result-file mechanism and the prompted-result wrapper that renders a
  * native round prompt before asking a runner to produce that result document.
  * Tests inject a deterministic fake.
@@ -158,7 +158,7 @@ export type RunGoalLoopRoundInput = {
 };
 
 /**
- * The durable result of one finished goal-loop round: the persisted terminal
+ * The durable result of one finished agent-loop round: the persisted terminal
  * round record, the daemon's decision (its `continueLoop` drives the future
  * multi-round loop), and the projected repo-safety evidence.
  */
@@ -173,7 +173,7 @@ export type RunGoalLoopRoundResult = {
 };
 
 /**
- * Drive one bounded goal-loop round end to end through its durable round-record
+ * Drive one bounded agent-loop round end to end through its durable round-record
  * lifecycle. See the module doc for the ordered contract.
  *
  * @throws {ExecutorRoundConflictError} if the round id / `(attempt, index)`
@@ -317,7 +317,7 @@ export type RunGoalLoopAttemptInput = {
 };
 
 /**
- * The durable result of one finished goal-loop attempt: the persisted terminal
+ * The durable result of one finished agent-loop attempt: the persisted terminal
  * (or `waiting_operator`-paused) attempt record and every round outcome it
  * drove, in order. The last round's decision is what settled the attempt.
  */
@@ -327,7 +327,7 @@ export type RunGoalLoopAttemptResult = {
 };
 
 /**
- * Drive a bounded goal-loop attempt across its rounds. See the module doc for
+ * Drive a bounded agent-loop attempt across its rounds. See the module doc for
  * the ordered contract. The loop inserts the durable attempt before any round,
  * runs {@link runGoalLoopRound} per round index, and — after each round — either
  * heartbeats the still-running attempt and loops (when the daemon decision
@@ -450,10 +450,10 @@ export type RunGoalLoopStepInput = {
 };
 
 /**
- * The goal-loop executor adapter "below `StepRun`" (contract "State Model":
+ * The agent-loop executor adapter "below `StepRun`" (contract "State Model":
  * `StepRun -> ExecutorAttempt -> ExecutorRound[]`). This is the single
  * entrypoint a daemon / scheduler calls with a step-run identity: it
- * {@link planGoalLoopAttempt | materializes} the durable goal-loop
+ * {@link planGoalLoopAttempt | materializes} the durable agent-loop
  * `executor_attempts` row with a deterministic, reattachable id, then drives
  * the whole attempt through {@link runGoalLoopAttempt}, materializing each
  * round's identity via {@link planGoalLoopRoundStartForAttempt} so every round

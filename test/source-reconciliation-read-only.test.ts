@@ -208,12 +208,12 @@ function seedForbiddenTables(db: MomentumDb): void {
       ('executor_existing', 'manual', 'operator', 'none', 1011, 1011);
 
     INSERT INTO executor_attempts
-      (attempt_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
+      (attempt_id, workflow_run_id, step_run_id, step_key, executor, state, created_at, updated_at)
       VALUES
       ('attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
 
     INSERT INTO executor_rounds
-      (round_id, attempt_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
+      (round_id, attempt_id, workflow_run_id, step_run_id, step_key, executor, round_index, state, created_at, updated_at)
       VALUES
       ('round_existing', 'attempt_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
 

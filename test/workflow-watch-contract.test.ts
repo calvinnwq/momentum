@@ -7,6 +7,8 @@ import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
+import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
+import { WORKFLOW_STEP_KINDS } from "../src/core/workflow/run/reducer.js";
 import {
   WORKFLOW_MONITOR_DISPOSITIONS,
   WORKFLOW_MONITOR_REPORT_REASONS,
@@ -26,6 +28,7 @@ import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/monitor/watch-advis
 
 type WorkflowGuiWatchContractFixture = {
   watch: {
+    schemaVersion: number;
     envelopeKeys: string[];
     scenarioKeys: {
       activeStep: string[];
@@ -61,6 +64,8 @@ type WorkflowGuiWatchContractFixture = {
     >;
     nextActionCodes: string[];
     humanActionCodes: string[];
+    stepKinds: string[];
+    executors: string[];
     recommendedActions: string[];
     dispositions: string[];
     phases: string[];
@@ -347,7 +352,7 @@ function assertWatchEnvelopeContract(
   expect(payload["command"]).toBe("workflow run watch");
   expect(payload["mode"]).toBe("once");
   expect(payload["runId"]).toBe(runId);
-  expect(payload["schemaVersion"]).toBe(2);
+  expect(payload["schemaVersion"]).toBe(WATCH_CONTRACT.watch.schemaVersion);
   expect(typeof payload["generatedAt"]).toBe("number");
   expect(typeof payload["dataDir"]).toBe("string");
   expect(typeof payload["runState"]).toBe("string");
@@ -517,6 +522,8 @@ describe("workflow run watch supervisor envelope contract", () => {
       "resolve_gate",
       "clear_recovery",
     ]);
+    expect([...WORKFLOW_STEP_KINDS]).toEqual(WATCH_CONTRACT.watch.stepKinds);
+    expect([...WORKFLOW_EXECUTORS]).toEqual(WATCH_CONTRACT.watch.executors);
     expect([...WORKFLOW_WATCH_REASONS]).toEqual(WATCH_CONTRACT.watch.reasons);
     expect([...WORKFLOW_MONITOR_NEXT_ACTION_CODES]).toEqual(
       WATCH_CONTRACT.watch.nextActionCodes,
@@ -757,7 +764,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     });
   });
 
-  it.each([["merge-cleanup"] as const, ["linear-refresh"] as const])(
+  it.each([["merge-cleanup"] as const, ["tracker-refresh"] as const])(
     "external-tail recovery: labels %s evidence-backed reconciliation",
     async (kind) => {
       const dataDir = makeTempDir();
@@ -794,7 +801,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     },
   );
 
-  it.each([["merge-cleanup"] as const, ["linear-refresh"] as const])(
+  it.each([["merge-cleanup"] as const, ["tracker-refresh"] as const])(
     "external-tail manual recovery: keeps %s external reconciliation action class",
     async (kind) => {
       const dataDir = makeTempDir();

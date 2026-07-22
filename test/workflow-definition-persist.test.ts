@@ -188,7 +188,7 @@ describe("persistWorkflowDefinition", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "one-shot",
+            executor: "agent-once",
             order: 0,
             required: true,
           },
@@ -220,14 +220,14 @@ describe("persistWorkflowDefinition", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "one-shot",
+            executor: "agent-once",
             order: 0,
             required: true,
           },
           {
             key: "implementation",
             kind: "implementation",
-            executor: "goal-loop",
+            executor: "agent-loop",
             order: 1,
             required: true,
           },
@@ -269,7 +269,7 @@ describe("seedBuiltInWorkflowDefinitions", () => {
       const second = seedBuiltInWorkflowDefinitions(db, { now: 2000 });
       expect(second.every((s) => s.inserted)).toBe(false);
 
-      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(2);
+      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(3);
       expect(
         loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key),
       ).toEqual(CODING_WORKFLOW_DEFINITION);
@@ -299,7 +299,7 @@ describe("listWorkflowDefinitionKeys", () => {
             {
               key: "preflight",
               kind: "preflight",
-              executor: "one-shot",
+              executor: "agent-once",
               order: 0,
               required: true,
             },
@@ -317,7 +317,7 @@ describe("listWorkflowDefinitionKeys", () => {
             {
               key: "preflight",
               kind: "preflight",
-              executor: "one-shot",
+              executor: "agent-once",
               order: 0,
               required: true,
             },

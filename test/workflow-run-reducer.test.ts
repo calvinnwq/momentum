@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  LEGACY_WORKFLOW_STEP_KINDS,
   WORKFLOW_APPROVAL_BOUNDARIES,
   WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS,
   WORKFLOW_LEASE_KINDS,
@@ -15,10 +16,11 @@ import {
   highestWorkflowApprovalBoundary,
   isTerminalRunState,
   isTerminalStepState,
+  isWorkflowApprovalBoundary,
   transitionWorkflowRun,
   transitionWorkflowStep,
   type WorkflowLeaseRecord,
-  type WorkflowStepRecord
+  type WorkflowStepRecord,
 } from "../src/core/workflow/run/reducer.js";
 
 describe("workflow-run-reducer constants", () => {
@@ -27,10 +29,20 @@ describe("workflow-run-reducer constants", () => {
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
-      "linear-refresh"
+      "tracker-refresh",
     ]);
+  });
+
+  it("keeps the retired step-kind spellings readable as legacy values only", () => {
+    expect([...LEGACY_WORKFLOW_STEP_KINDS]).toEqual([
+      "no-mistakes",
+      "linear-refresh",
+    ]);
+    for (const legacy of LEGACY_WORKFLOW_STEP_KINDS) {
+      expect(WORKFLOW_STEP_KINDS).not.toContain(legacy);
+    }
   });
 
   it("exposes canonical step states", () => {
@@ -43,8 +55,8 @@ describe("workflow-run-reducer constants", () => {
         "failed",
         "skipped",
         "blocked",
-        "canceled"
-      ].sort()
+        "canceled",
+      ].sort(),
     );
   });
 
@@ -57,8 +69,8 @@ describe("workflow-run-reducer constants", () => {
         "succeeded",
         "failed",
         "blocked",
-        "canceled"
-      ].sort()
+        "canceled",
+      ].sort(),
     );
   });
 
@@ -67,8 +79,8 @@ describe("workflow-run-reducer constants", () => {
     for (const b of [
       "implementation",
       "through-implementation",
-      "no-mistakes",
-      "through-no-mistakes",
+      "validate",
+      "through-validate",
       "merge-cleanup",
       "through-merge-cleanup",
       "full",
@@ -77,27 +89,36 @@ describe("workflow-run-reducer constants", () => {
       "through-postflight",
       "through-merge-gates",
       "final-cleanup",
-      "full-batch"
+      "full-batch",
     ]) {
       expect(boundaries.has(b as never)).toBe(true);
     }
   });
 
+  it("refuses retired approval-boundary spellings as input", () => {
+    // Pre-1.0 surface break: legacy boundary INPUT values are refused;
+    // frozen workflow_approvals rows are matched via synonym sets instead.
+    expect(isWorkflowApprovalBoundary("no-mistakes")).toBe(false);
+    expect(isWorkflowApprovalBoundary("through-no-mistakes")).toBe(false);
+    expect(isWorkflowApprovalBoundary("validate")).toBe(true);
+    expect(isWorkflowApprovalBoundary("through-validate")).toBe(true);
+  });
+
   it("exposes the lease kinds and stale policies", () => {
     expect([...WORKFLOW_LEASE_KINDS].sort()).toEqual(
-      ["dispatch", "managed-step", "monitor"].sort()
+      ["dispatch", "managed-step", "monitor"].sort(),
     );
     expect([...WORKFLOW_LEASE_STALE_POLICIES].sort()).toEqual(
-      ["auto-release", "manual-recovery-required"].sort()
+      ["auto-release", "manual-recovery-required"].sort(),
     );
   });
 
   it("flags terminal states", () => {
     expect([...WORKFLOW_STEP_TERMINAL_STATES].sort()).toEqual(
-      ["canceled", "failed", "skipped", "succeeded"].sort()
+      ["canceled", "failed", "skipped", "succeeded"].sort(),
     );
     expect([...WORKFLOW_RUN_TERMINAL_STATES].sort()).toEqual(
-      ["canceled", "failed", "succeeded"].sort()
+      ["canceled", "failed", "succeeded"].sort(),
     );
     expect(isTerminalStepState("succeeded")).toBe(true);
     expect(isTerminalStepState("blocked")).toBe(false);
@@ -109,17 +130,23 @@ describe("workflow-run-reducer constants", () => {
 describe("highestWorkflowApprovalBoundary", () => {
   it("surfaces the newly recorded boundary when coverage is equal", () => {
     expect(
-      highestWorkflowApprovalBoundary("implementation", "through-implementation")
+      highestWorkflowApprovalBoundary(
+        "implementation",
+        "through-implementation",
+      ),
     ).toBe("through-implementation");
-    expect(
-      highestWorkflowApprovalBoundary("no-mistakes", "overnight-safe")
-    ).toBe("overnight-safe");
+    expect(highestWorkflowApprovalBoundary("validate", "overnight-safe")).toBe(
+      "overnight-safe",
+    );
   });
 
   it("keeps the higher-coverage boundary when the new one is lower", () => {
     expect(highestWorkflowApprovalBoundary("full", "plan-only")).toBe("full");
     expect(
-      highestWorkflowApprovalBoundary("through-merge-cleanup", "implementation")
+      highestWorkflowApprovalBoundary(
+        "through-merge-cleanup",
+        "implementation",
+      ),
     ).toBe("through-merge-cleanup");
   });
 });
@@ -150,7 +177,12 @@ describe("transitionWorkflowStep", () => {
   });
 
   it("rejects transitions out of a terminal step state with workflow_step_terminal", () => {
-    for (const from of ["succeeded", "failed", "skipped", "canceled"] as const) {
+    for (const from of [
+      "succeeded",
+      "failed",
+      "skipped",
+      "canceled",
+    ] as const) {
       const result = transitionWorkflowStep(from, "running");
       expect(result.ok, `${from} -> running should fail`).toBe(false);
       if (!result.ok) expect(result.errorCode).toBe("workflow_step_terminal");
@@ -158,10 +190,7 @@ describe("transitionWorkflowStep", () => {
   });
 
   it("rejects unknown from-state with workflow_step_unknown_state", () => {
-    const result = transitionWorkflowStep(
-      "bogus" as never,
-      "running" as never
-    );
+    const result = transitionWorkflowStep("bogus" as never, "running" as never);
     expect(result.ok).toBe(false);
     if (!result.ok)
       expect(result.errorCode).toBe("workflow_step_unknown_state");
@@ -217,8 +246,7 @@ describe("transitionWorkflowRun", () => {
   it("rejects unknown from-state with workflow_run_unknown_state", () => {
     const result = transitionWorkflowRun("bogus" as never, "running" as never);
     expect(result.ok).toBe(false);
-    if (!result.ok)
-      expect(result.errorCode).toBe("workflow_run_unknown_state");
+    if (!result.ok) expect(result.errorCode).toBe("workflow_run_unknown_state");
   });
 
   it("rejects an otherwise unknown transition with workflow_run_invalid_transition", () => {
@@ -234,7 +262,7 @@ function step(
   kind: WorkflowStepRecord["kind"],
   state: WorkflowStepRecord["state"],
   order: number,
-  required = true
+  required = true,
 ): WorkflowStepRecord {
   return { stepId, kind, state, order, required };
 }
@@ -243,7 +271,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns pending when no required step has progressed past pending", () => {
     const steps = [
       step("s-1", "preflight", "pending", 0),
-      step("s-2", "implementation", "pending", 1)
+      step("s-2", "implementation", "pending", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("pending");
   });
@@ -251,7 +279,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns approved when at least one step is approved and none running", () => {
     const steps = [
       step("s-1", "preflight", "approved", 0),
-      step("s-2", "implementation", "pending", 1)
+      step("s-2", "implementation", "pending", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("approved");
   });
@@ -259,7 +287,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns running while any step is running", () => {
     const steps = [
       step("s-1", "preflight", "succeeded", 0),
-      step("s-2", "implementation", "running", 1)
+      step("s-2", "implementation", "running", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("running");
   });
@@ -267,7 +295,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns blocked when any step is blocked and none running", () => {
     const steps = [
       step("s-1", "preflight", "succeeded", 0),
-      step("s-2", "implementation", "blocked", 1)
+      step("s-2", "implementation", "blocked", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("blocked");
   });
@@ -275,7 +303,7 @@ describe("deriveWorkflowRunState", () => {
   it("blocked takes precedence over failed when both present and none running", () => {
     const steps = [
       step("s-1", "preflight", "failed", 0),
-      step("s-2", "implementation", "blocked", 1)
+      step("s-2", "implementation", "blocked", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("blocked");
   });
@@ -283,7 +311,7 @@ describe("deriveWorkflowRunState", () => {
   it("running takes precedence over blocked", () => {
     const steps = [
       step("s-1", "preflight", "blocked", 0),
-      step("s-2", "implementation", "running", 1)
+      step("s-2", "implementation", "running", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("running");
   });
@@ -291,7 +319,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns failed when any required step is failed and no blocked/running step exists", () => {
     const steps = [
       step("s-1", "preflight", "failed", 0),
-      step("s-2", "implementation", "pending", 1)
+      step("s-2", "implementation", "pending", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("failed");
   });
@@ -299,7 +327,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns canceled when every step is canceled or skipped (no success at all)", () => {
     const steps = [
       step("s-1", "preflight", "canceled", 0),
-      step("s-2", "implementation", "skipped", 1)
+      step("s-2", "implementation", "skipped", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("canceled");
   });
@@ -307,7 +335,7 @@ describe("deriveWorkflowRunState", () => {
   it("returns canceled when every required step is skipped and none succeeded", () => {
     const steps = [
       step("s-1", "preflight", "skipped", 0),
-      step("s-2", "implementation", "skipped", 1)
+      step("s-2", "implementation", "skipped", 1),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("canceled");
   });
@@ -317,7 +345,7 @@ describe("deriveWorkflowRunState", () => {
       step("s-1", "preflight", "succeeded", 0),
       step("s-2", "implementation", "succeeded", 1),
       step("s-3", "postflight", "skipped", 2),
-      step("s-4", "no-mistakes", "skipped", 3, false)
+      step("s-4", "validate", "skipped", 3, false),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("succeeded");
   });
@@ -326,7 +354,7 @@ describe("deriveWorkflowRunState", () => {
     const steps = [
       step("s-1", "preflight", "succeeded", 0),
       step("s-2", "implementation", "succeeded", 1),
-      step("s-3", "linear-refresh", "failed", 2, false)
+      step("s-3", "tracker-refresh", "failed", 2, false),
     ];
     expect(deriveWorkflowRunState(steps)).toBe("succeeded");
   });
@@ -339,7 +367,7 @@ describe("deriveWorkflowRunState", () => {
 describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
   const succeededSteps = [
     step("s-1", "preflight", "succeeded", 0),
-    step("s-2", "implementation", "succeeded", 1)
+    step("s-2", "implementation", "succeeded", 1),
   ];
 
   it("is backward compatible: no leaseContext behaves like the old single-arg form", () => {
@@ -347,27 +375,27 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
     expect(
       deriveWorkflowRunState(succeededSteps, {
         leases: [],
-        now: 1_000
-      })
+        now: 1_000,
+      }),
     ).toBe("succeeded");
   });
 
   it("treats released-only leases as 'no outstanding leases' and allows succeeded", () => {
     const leases = [
       lease({ leaseKind: "monitor", releasedAt: 9_000 }),
-      lease({ leaseKind: "managed-step", releasedAt: 9_500 })
+      lease({ leaseKind: "managed-step", releasedAt: 9_500 }),
     ];
     expect(
-      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 }),
     ).toBe("succeeded");
   });
 
   it("demotes succeeded to running when any fresh lease is still outstanding", () => {
     const leases = [
-      lease({ leaseKind: "monitor", expiresAt: 20_000, releasedAt: null })
+      lease({ leaseKind: "monitor", expiresAt: 20_000, releasedAt: null }),
     ];
     expect(
-      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 }),
     ).toBe("running");
   });
 
@@ -380,29 +408,29 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
         leaseKind: "monitor",
         expiresAt: 5_000,
         stalePolicy: "auto-release",
-        releasedAt: null
-      })
+        releasedAt: null,
+      }),
     ];
     expect(
-      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 }),
     ).toBe("running");
   });
 
   it("forces blocked when any stale-manual-recovery-required lease is outstanding, even if steps are still running", () => {
     const steps = [
       step("s-1", "preflight", "succeeded", 0),
-      step("s-2", "implementation", "running", 1)
+      step("s-2", "implementation", "running", 1),
     ];
     const leases = [
       lease({
         leaseKind: "managed-step",
         expiresAt: 5_000,
         stalePolicy: "manual-recovery-required",
-        releasedAt: null
-      })
+        releasedAt: null,
+      }),
     ];
     expect(deriveWorkflowRunState(steps, { leases, now: 10_000 })).toBe(
-      "blocked"
+      "blocked",
     );
   });
 
@@ -412,11 +440,11 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
         leaseKind: "monitor",
         expiresAt: 5_000,
         stalePolicy: "manual-recovery-required",
-        releasedAt: null
-      })
+        releasedAt: null,
+      }),
     ];
     expect(
-      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 }),
     ).toBe("blocked");
   });
 
@@ -425,26 +453,26 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
     // pretend to be recoverable; the run is already failed/canceled.
     const failedSteps = [
       step("s-1", "preflight", "failed", 0),
-      step("s-2", "implementation", "succeeded", 1)
+      step("s-2", "implementation", "succeeded", 1),
     ];
     const canceledSteps = [
       step("s-1", "preflight", "canceled", 0),
-      step("s-2", "implementation", "skipped", 1)
+      step("s-2", "implementation", "skipped", 1),
     ];
     const leases = [
       lease({
         leaseKind: "managed-step",
         expiresAt: 5_000,
         stalePolicy: "manual-recovery-required",
-        releasedAt: null
-      })
+        releasedAt: null,
+      }),
     ];
-    expect(
-      deriveWorkflowRunState(failedSteps, { leases, now: 10_000 })
-    ).toBe("failed");
-    expect(
-      deriveWorkflowRunState(canceledSteps, { leases, now: 10_000 })
-    ).toBe("canceled");
+    expect(deriveWorkflowRunState(failedSteps, { leases, now: 10_000 })).toBe(
+      "failed",
+    );
+    expect(deriveWorkflowRunState(canceledSteps, { leases, now: 10_000 })).toBe(
+      "canceled",
+    );
   });
 
   it("honours graceMs when classifying lease freshness for demotion", () => {
@@ -453,16 +481,16 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
         leaseKind: "monitor",
         expiresAt: 5_000,
         stalePolicy: "auto-release",
-        releasedAt: null
-      })
+        releasedAt: null,
+      }),
     ];
     // Within grace window: still fresh, so succeeded demotes to running.
     expect(
       deriveWorkflowRunState(succeededSteps, {
         leases,
         now: 5_500,
-        graceMs: 1_000
-      })
+        graceMs: 1_000,
+      }),
     ).toBe("running");
     // Past grace window: stale-auto-release; still demotes to running per
     // strict "no outstanding leases" reading.
@@ -470,8 +498,8 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
       deriveWorkflowRunState(succeededSteps, {
         leases,
         now: 7_000,
-        graceMs: 1_000
-      })
+        graceMs: 1_000,
+      }),
     ).toBe("running");
   });
 
@@ -481,21 +509,23 @@ describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
     const running = [step("s-1", "preflight", "running", 0)];
     const leases = [
       lease({ leaseKind: "monitor", releasedAt: 100 }),
-      lease({ leaseKind: "dispatch", releasedAt: 200 })
+      lease({ leaseKind: "dispatch", releasedAt: 200 }),
     ];
     expect(deriveWorkflowRunState(pending, { leases, now: 1_000 })).toBe(
-      "pending"
+      "pending",
     );
     expect(deriveWorkflowRunState(approved, { leases, now: 1_000 })).toBe(
-      "approved"
+      "approved",
     );
     expect(deriveWorkflowRunState(running, { leases, now: 1_000 })).toBe(
-      "running"
+      "running",
     );
   });
 });
 
-function lease(overrides: Partial<WorkflowLeaseRecord> = {}): WorkflowLeaseRecord {
+function lease(
+  overrides: Partial<WorkflowLeaseRecord> = {},
+): WorkflowLeaseRecord {
   return {
     runId: "cwfp-deadbeef",
     leaseKind: "monitor",
@@ -505,7 +535,7 @@ function lease(overrides: Partial<WorkflowLeaseRecord> = {}): WorkflowLeaseRecor
     heartbeatAt: 1_000,
     releasedAt: null,
     stalePolicy: "auto-release",
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -516,8 +546,8 @@ describe("classifyWorkflowLease", () => {
         "released",
         "fresh",
         "stale-auto-release",
-        "stale-manual-recovery-required"
-      ].sort()
+        "stale-manual-recovery-required",
+      ].sort(),
     );
   });
 
@@ -543,20 +573,20 @@ describe("classifyWorkflowLease", () => {
   it("classifies an expired manual-recovery-required lease as stale-manual-recovery-required", () => {
     const l = lease({
       expiresAt: 5_000,
-      stalePolicy: "manual-recovery-required"
+      stalePolicy: "manual-recovery-required",
     });
     expect(classifyWorkflowLease(l, { now: 5_001 })).toBe(
-      "stale-manual-recovery-required"
+      "stale-manual-recovery-required",
     );
   });
 
   it("honours graceMs so a lease just past expiry is still fresh within the grace window", () => {
     const l = lease({ expiresAt: 5_000, stalePolicy: "auto-release" });
     expect(classifyWorkflowLease(l, { now: 5_500, graceMs: 1_000 })).toBe(
-      "fresh"
+      "fresh",
     );
     expect(classifyWorkflowLease(l, { now: 6_001, graceMs: 1_000 })).toBe(
-      "stale-auto-release"
+      "stale-auto-release",
     );
   });
 
@@ -567,21 +597,21 @@ describe("classifyWorkflowLease", () => {
     const l = lease({
       expiresAt: 5_000,
       heartbeatAt: 9_000,
-      stalePolicy: "auto-release"
+      stalePolicy: "auto-release",
     });
     expect(classifyWorkflowLease(l, { now: 6_000 })).toBe("stale-auto-release");
   });
 
   it("rejects non-finite now / negative graceMs at the boundary", () => {
     const l = lease();
+    expect(() => classifyWorkflowLease(l, { now: Number.NaN })).toThrowError(
+      /now/,
+    );
     expect(() =>
-      classifyWorkflowLease(l, { now: Number.NaN })
-    ).toThrowError(/now/);
-    expect(() =>
-      classifyWorkflowLease(l, { now: 1_000, graceMs: -1 })
+      classifyWorkflowLease(l, { now: 1_000, graceMs: -1 }),
     ).toThrowError(/graceMs/);
     expect(() =>
-      classifyWorkflowLease(l, { now: 1_000, graceMs: Number.NaN })
+      classifyWorkflowLease(l, { now: 1_000, graceMs: Number.NaN }),
     ).toThrowError(/graceMs/);
   });
 
@@ -595,7 +625,7 @@ describe("classifyWorkflowLease", () => {
         expect(classifyWorkflowLease(l, { now: 5_001 })).toBe(
           stalePolicy === "auto-release"
             ? "stale-auto-release"
-            : "stale-manual-recovery-required"
+            : "stale-manual-recovery-required",
         );
       }
     }

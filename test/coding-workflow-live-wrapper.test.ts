@@ -128,14 +128,14 @@ describe("coding workflow live wrapper profile", () => {
     expect(Array.from(parsed.profile.wrappers.keys()).sort()).toEqual([
       "implementation",
       "merge-cleanup",
-      "no-mistakes",
       "postflight",
       "preflight",
+      "validate",
     ]);
     expect(parsed.profile.wrappers.get("merge-cleanup")?.envAllow).toEqual(
       expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"]),
     );
-    expect(parsed.profile.wrappers.get("no-mistakes")?.envAllow).toEqual(
+    expect(parsed.profile.wrappers.get("validate")?.envAllow).toEqual(
       expect.arrayContaining(["HOME", "CODEX_HOME", "PATH"]),
     );
   });
@@ -711,7 +711,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     },
   );
 
-  it.each(["implementation", "postflight", "no-mistakes", "merge-cleanup"])(
+  it.each(["implementation", "postflight", "validate", "merge-cleanup"])(
     "accepts validated step config for %s",
     (stepKind) => {
       const loaded = loadCodingWorkflowWrapperConfig({
@@ -725,7 +725,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
                 cwd: "repo",
                 timeout_sec: 30,
                 env_allow: ["PATH"],
-                ...(stepKind === "no-mistakes"
+                ...(stepKind === "validate"
                   ? { runner_profile: noMistakesRunnerProfile() }
                   : {}),
                 commit: { type: "test", subject: `validate ${stepKind}` },
@@ -747,7 +747,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME", "CODEX_HOME"],
             },
@@ -766,7 +766,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
@@ -788,7 +788,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
@@ -809,7 +809,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
@@ -832,7 +832,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME"],
               runner_profile: noMistakesRunnerProfile({
@@ -855,7 +855,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       readFile: () =>
         JSON.stringify({
           steps: {
-            "no-mistakes": {
+            validate: {
               command: "/bin/sh",
               env_allow: ["PATH", "HOME", "CODEX_HOME"],
               runner_profile: noMistakesRunnerProfile({
@@ -881,7 +881,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -895,7 +895,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -922,7 +922,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -938,7 +938,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -966,7 +966,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -982,7 +982,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1010,7 +1010,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1024,7 +1024,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1052,7 +1052,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1066,7 +1066,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_AGENT_PROVIDER: "claude",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
@@ -1109,7 +1109,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1123,7 +1123,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1165,7 +1165,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1179,7 +1179,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1221,7 +1221,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1235,7 +1235,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1280,7 +1280,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1294,7 +1294,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1341,7 +1341,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1355,7 +1355,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1402,7 +1402,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1416,7 +1416,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1457,7 +1457,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1471,7 +1471,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1513,7 +1513,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1527,7 +1527,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1569,7 +1569,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1583,7 +1583,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1627,7 +1627,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1641,7 +1641,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1683,7 +1683,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1697,7 +1697,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1739,7 +1739,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1753,7 +1753,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1784,7 +1784,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
           cwd: "repo",
@@ -1798,7 +1798,7 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -1983,7 +1983,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", 'test "$HOME" != "" && test "$PATH" != ""'],
           cwd: "repo",
@@ -2002,7 +2002,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -2042,7 +2042,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", 'test "$CODEX_HOME" != ""'],
           cwd: "repo",
@@ -2057,7 +2057,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -2099,7 +2099,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: ["-c", 'test "$CODEX_HOME" != ""'],
           cwd: "repo",
@@ -2114,7 +2114,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -2411,7 +2411,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       const configPath = path.join(dir, "wrapper-config.json");
       writeJson(configPath, {
         steps: {
-          "no-mistakes": {
+          validate: {
             command: "/bin/sh",
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
@@ -2425,7 +2425,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
       const outcome = runCodingWorkflowLiveWrapper(
         deps({
-          MOMENTUM_STEP_KIND: "no-mistakes",
+          MOMENTUM_STEP_KIND: "validate",
           MOMENTUM_REPO_PATH: repo,
           MOMENTUM_ITERATION_DIR: iteration,
           MOMENTUM_RESULT_PATH: resultPath,
@@ -2925,7 +2925,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
       const configPath = path.join(dir, "wrapper-config.json");
       writeJson(configPath, {
         steps: {
-          "no-mistakes": {
+          validate: {
             command: "/bin/sh",
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
@@ -2941,7 +2941,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
       const outcome = runCodingWorkflowLiveWrapper(
         deps({
-          MOMENTUM_STEP_KIND: "no-mistakes",
+          MOMENTUM_STEP_KIND: "validate",
           MOMENTUM_REPO_PATH: repo,
           MOMENTUM_ITERATION_DIR: iteration,
           MOMENTUM_RESULT_PATH: resultPath,
@@ -5042,7 +5042,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: [
             "-c",
@@ -5059,7 +5059,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
 
     const outcome = runCodingWorkflowLiveWrapper(
       deps({
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
@@ -5075,11 +5075,11 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const result = readResult(resultPath);
     expect(result.success).toBe(false);
     expect(result.remaining_work).toEqual([
-      "Fix no-mistakes command failure before advancing the workflow.",
+      "Fix validate command failure before advancing the workflow.",
     ]);
   });
 
-  it.each(["merge-cleanup", "linear-refresh"] as const)(
+  it.each(["merge-cleanup", "tracker-refresh"] as const)(
     "guides %s failures toward evidence-backed external-state reconciliation",
     (stepKind) => {
       const dir = makeTempDir();
@@ -5153,7 +5153,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const configPath = path.join(dir, "wrapper-config.json");
     writeJson(configPath, {
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           args: [
             "-c",
@@ -5171,7 +5171,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     const productionDeps = {
       ...defaultCodingWorkflowWrapperDeps(),
       env: {
-        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_STEP_KIND: "validate",
         MOMENTUM_REPO_PATH: repo,
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,

@@ -19,6 +19,7 @@ import type {
   ExecutorTickResult,
 } from "../../executors/sdk/types.js";
 import {
+  hasExecutorDefinition,
   listExecutorRoundsForStep,
   loadExecutorAttempt,
   loadLatestExecutorAttemptForStep,
@@ -34,8 +35,9 @@ import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
 import { ExecutorOwnedRoundMaterializationError } from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
+import { effectiveStepExecutor } from "../definition/legacy.js";
 import {
-  resolveClaimedWorkflowStepFamily,
+  resolveClaimedWorkflowStepExecutor,
   resolveWorkflowStepExecutorRuntime,
 } from "./persist.js";
 import type {
@@ -112,16 +114,33 @@ export function createRegisteredExecutorWorkflowDispatch(
     if (resolvedRuntime.ok) {
       runtime = resolvedRuntime;
     } else {
-      const durableIdentity = resolveClaimedWorkflowStepFamily(
+      const durableIdentity = resolveClaimedWorkflowStepExecutor(
         context.db,
         claim,
       );
       if (!durableIdentity.ok) return baseDispatch(claim, context);
       runtime = {
-        executorName: durableIdentity.executorFamily,
+        executorName: durableIdentity.executor,
         config: {},
       };
     }
+
+    // Registry resolution honours the recorded identity first: a raw-name
+    // registration always wins, so a user-defined executor that resembles a
+    // retired built-in value is never redirected. Only an unregistered legacy
+    // spelling projects to its canonical alias, and that effective identity is
+    // what new attempt rows record.
+    const isRegisteredExecutor = (name: string): boolean =>
+      resolveRegisteredExecutor(options.registry, name) !== undefined;
+    const isDurablyClaimedExecutor = (name: string): boolean =>
+      hasExecutorDefinition(context.db, name);
+    runtime = {
+      ...runtime,
+      executorName: effectiveStepExecutor(runtime.executorName, {
+        isRegistered: isRegisteredExecutor,
+        isDurablyClaimed: isDurablyClaimedExecutor,
+      }),
+    };
 
     const registered = resolveRegisteredExecutor(
       options.registry,
@@ -179,6 +198,8 @@ export function createRegisteredExecutorWorkflowDispatch(
       result = baseDispatch(claim, {
         ...context,
         executorOwnsRounds: true,
+        isRegisteredExecutor,
+        isDurablyClaimedExecutor,
         ...(materializeOwnedRound === undefined
           ? {}
           : { materializeOwnedRound }),
@@ -196,6 +217,8 @@ export function createRegisteredExecutorWorkflowDispatch(
       result = baseDispatch(claim, {
         ...context,
         executorOwnsRounds: true,
+        isRegisteredExecutor,
+        isDurablyClaimedExecutor,
         materializeOwnedRound: ({
           attempt,
           now,
@@ -649,7 +672,7 @@ function genericRoundStart(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "running",

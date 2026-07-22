@@ -16,22 +16,22 @@ import type { ExecutorAttemptRecord } from "../src/core/executors/loop/reducer.j
 import {
   resolveGoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput,
-} from "../src/core/executors/goal-loop/executor.js";
+} from "../src/core/executors/agent-loop/executor.js";
 import {
   goalLoopRoundMechanismFromPromptedResultFile,
   goalLoopRoundMechanismFromResultFile,
-} from "../src/core/executors/goal-loop/mechanism.js";
-import { runGoalLoopRound } from "../src/core/executors/goal-loop/orchestrator.js";
+} from "../src/core/executors/agent-loop/mechanism.js";
+import { runGoalLoopRound } from "../src/core/executors/agent-loop/orchestrator.js";
 import type {
   CommitIntent,
   RunnerResult,
 } from "../src/core/executors/runner/types.js";
 
-// Proves the goal-loop round *mechanism* bridge reuses the shared goal /
+// Proves the agent-loop round *mechanism* bridge reuses the shared goal /
 // iteration safety (the `finalizeWorkflowStepFromResultFile` verify -> commit /
 // reset transaction with its moved-HEAD / result-document recovery) rather than
 // re-implementing it, projecting a finished round's durable result
-// document into the `{ result, finalize, artifacts }` the goal-loop driver
+// document into the `{ result, finalize, artifacts }` the agent-loop driver
 // consumes — including the recovery / finalization boundaries the ticket
 // requires (NGX-349 "Reuse existing Goal / iteration safety where possible").
 
@@ -44,7 +44,7 @@ afterEach(() => {
   }
 });
 
-function makeTempDir(prefix = "momentum-goal-loop-mechanism-"): string {
+function makeTempDir(prefix = "momentum-agent-loop-mechanism-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -78,7 +78,7 @@ function setupRepoWithRoundEdits(): { repoPath: string; baseHead: string } {
   const baseHead = commitInitial(repoPath);
   fs.writeFileSync(
     path.join(repoPath, "round-edit.txt"),
-    "from-goal-loop-round\n",
+    "from-agent-loop-round\n",
     "utf-8",
   );
   return { repoPath, baseHead };
@@ -87,8 +87,8 @@ function setupRepoWithRoundEdits(): { repoPath: string; baseHead: string } {
 function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
   return {
     type: "feat",
-    scope: "goal-loop",
-    subject: "prove goal-loop round mechanism",
+    scope: "agent-loop",
+    subject: "prove agent-loop round mechanism",
     body: "",
     breaking: false,
     ...overrides,
@@ -109,14 +109,14 @@ function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
 }
 
 function writeResultFile(content: string): string {
-  const dir = makeTempDir("momentum-goal-loop-mechanism-result-");
+  const dir = makeTempDir("momentum-agent-loop-mechanism-result-");
   const resultPath = path.join(dir, "runner-result.json");
   fs.writeFileSync(resultPath, content, "utf-8");
   return resultPath;
 }
 
 function makeVerificationLogPath(): string {
-  const dir = makeTempDir("momentum-goal-loop-mechanism-log-");
+  const dir = makeTempDir("momentum-agent-loop-mechanism-log-");
   return path.join(dir, "verification.log");
 }
 
@@ -125,7 +125,7 @@ function makePromptedArtifactPaths(resultName: string): {
   resultFilePath: string;
   verificationLogPath: string;
 } {
-  const root = makeTempDir("momentum-goal-loop-mechanism-round-");
+  const root = makeTempDir("momentum-agent-loop-mechanism-round-");
   return {
     promptFilePath: path.join(root, "prompt.md"),
     resultFilePath: path.join(root, resultName),
@@ -356,7 +356,7 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
   it("skips commit/reset evidence when the verification log path is blank", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
-    const cwd = makeTempDir("momentum-goal-loop-mechanism-cwd-");
+    const cwd = makeTempDir("momentum-agent-loop-mechanism-cwd-");
     const cwdEvidencePath = path.join(cwd, ".finalization.json");
     const previousCwd = process.cwd();
 
@@ -777,13 +777,13 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
   it("returns recovery evidence when the prompt cannot be written", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptParentFile = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      makeTempDir("momentum-agent-loop-mechanism-prompt-"),
       "not-a-directory",
     );
     fs.writeFileSync(promptParentFile, "not a directory\n", "utf-8");
     const promptFilePath = path.join(promptParentFile, "prompt.md");
     const resultFilePath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-result-"),
+      makeTempDir("momentum-agent-loop-mechanism-result-"),
       "runner-result.json",
     );
     const verificationLogPath = makeVerificationLogPath();
@@ -820,9 +820,9 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("does not follow a symlinked prompt artifact", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const promptDir = makeTempDir("momentum-goal-loop-mechanism-prompt-");
+    const promptDir = makeTempDir("momentum-agent-loop-mechanism-prompt-");
     const escapedPromptPath = path.join(
-      makeTempDir("momentum-goal-loop-mechanism-escaped-"),
+      makeTempDir("momentum-agent-loop-mechanism-escaped-"),
       "escaped-prompt.md",
     );
     fs.writeFileSync(escapedPromptPath, "preserve me\n", "utf-8");
@@ -865,8 +865,8 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 
   it("rejects a replaced artifact directory after the prompted runner returns", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
-    const artifactRoot = makeTempDir("momentum-goal-loop-mechanism-round-");
-    const escapedRoot = makeTempDir("momentum-goal-loop-mechanism-escaped-");
+    const artifactRoot = makeTempDir("momentum-agent-loop-mechanism-round-");
+    const escapedRoot = makeTempDir("momentum-agent-loop-mechanism-escaped-");
     const promptFilePath = path.join(artifactRoot, "prompt.md");
     const resultFilePath = path.join(artifactRoot, "result.json");
     const verificationLogPath = path.join(artifactRoot, "verification.log");
@@ -1152,7 +1152,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
       makePromptedArtifactPaths("runner-result.json");
     const roundRoot = path.dirname(promptFilePath);
     const movedRoundRoot = `${roundRoot}-moved`;
-    const attackerRoot = makeTempDir("momentum-goal-loop-attacker-");
+    const attackerRoot = makeTempDir("momentum-agent-loop-attacker-");
     tempRoots.push(movedRoundRoot);
 
     const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
@@ -1239,7 +1239,7 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows; the driver
 // inserts the round.
 function openRoundDb(): MomentumDb {
-  const db = openDb(makeTempDir("momentum-goal-loop-mechanism-db-"));
+  const db = openDb(makeTempDir("momentum-agent-loop-mechanism-db-"));
   db.prepare(
     "INSERT INTO workflow_runs (id, source, created_at, updated_at) VALUES ('run-1', 'test', 1, 1)",
   ).run();
@@ -1252,7 +1252,7 @@ function openRoundDb(): MomentumDb {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 1,

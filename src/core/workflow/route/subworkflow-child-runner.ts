@@ -1,6 +1,6 @@
 /**
  * Production start-or-attach child-run runner builder for the `subworkflow`
- * executor family.
+ * executor.
  *
  * The the subworkflow seam producer (`dispatch/subworkflow-run.ts`) drives a dispatched
  * `subworkflow` step through an injected {@link DispatchedSubworkflowChildRunner}
@@ -17,7 +17,7 @@
  * closed when it does not resolve. This module owns exactly that — the keystone IO
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
  * and nothing else: it does not itself touch
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; the production lane
+ * `PHASE1_DISPATCHABLE_EXECUTORS` or wire any daemon lane; the production lane
  * flipped `subworkflow` into that allowlist and wired the production
  * lane that injects this runner once the configured lane was proven.
  *
@@ -54,7 +54,7 @@ import { loadWorkflowDefinition } from "../definition/persist.js";
 import type { DispatchedSubworkflowChildRunner } from "../dispatch/subworkflow-run.js";
 import {
   persistWorkflowRunStart,
-  WorkflowRunStartConflictError
+  WorkflowRunStartConflictError,
 } from "../run/start-persist.js";
 import { loadWorkflowRunDetail } from "../run/status.js";
 
@@ -100,17 +100,17 @@ export type DispatchedSubworkflowChildRunnerResolution =
  * parent/child ownership boundary.
  */
 export function buildDispatchedSubworkflowChildRunner(
-  input: BuildDispatchedSubworkflowChildRunnerInput
+  input: BuildDispatchedSubworkflowChildRunnerInput,
 ): DispatchedSubworkflowChildRunnerResolution {
   const definition = loadWorkflowDefinition(
     input.db,
     input.childDefinitionKey,
-    input.childDefinitionVersion
+    input.childDefinitionVersion,
   );
   if (definition === undefined) {
     return {
       ok: false,
-      reason: `Subworkflow child definition '${formatDefinitionRef(input.childDefinitionKey, input.childDefinitionVersion)}' is not persisted; routing to manual recovery.`
+      reason: `Subworkflow child definition '${formatDefinitionRef(input.childDefinitionKey, input.childDefinitionVersion)}' is not persisted; routing to manual recovery.`,
     };
   }
 
@@ -126,8 +126,8 @@ export function buildDispatchedSubworkflowChildRunner(
         input.childDefinitionKey,
         input.childDefinitionVersion,
         existingAttachment.definitionKey,
-        existingAttachment.definitionVersion
-      )
+        existingAttachment.definitionVersion,
+      ),
     };
   }
 
@@ -139,7 +139,7 @@ export function buildDispatchedSubworkflowChildRunner(
 
 function startOrAttachAndObserveChildRun(
   input: BuildDispatchedSubworkflowChildRunnerInput,
-  definition: WorkflowDefinition
+  definition: WorkflowDefinition,
 ) {
   const { db, childRunId, childRoute, repoPath, objective, now } = input;
 
@@ -150,7 +150,7 @@ function startOrAttachAndObserveChildRun(
       repoPath,
       objective,
       route: childRoute,
-      now
+      now,
     });
   } catch (error) {
     // Attach: a prior tick already started this child run. Idempotent re-entry —
@@ -168,8 +168,8 @@ function startOrAttachAndObserveChildRun(
           input.childDefinitionKey,
           input.childDefinitionVersion,
           attached?.definitionKey ?? null,
-          attached?.definitionVersion ?? null
-        )
+          attached?.definitionVersion ?? null,
+        ),
       );
     }
   }
@@ -177,7 +177,7 @@ function startOrAttachAndObserveChildRun(
   const detail = loadWorkflowRunDetail(db, childRunId);
   if (detail === null) {
     throw new Error(
-      `Subworkflow child run ${childRunId} not found after start/attach.`
+      `Subworkflow child run ${childRunId} not found after start/attach.`,
     );
   }
 
@@ -185,17 +185,19 @@ function startOrAttachAndObserveChildRun(
     childRunId,
     childState: detail.run.state,
     childNeedsManualRecovery: detail.run.needsManualRecovery,
-    childManualRecoveryReason: detail.run.manualRecoveryReason
+    childManualRecoveryReason: detail.run.manualRecoveryReason,
   };
 }
 
 function loadChildRunAttachment(
   db: MomentumDb,
-  runId: string
-): { definitionKey: string | null; definitionVersion: number | null } | undefined {
+  runId: string,
+):
+  | { definitionKey: string | null; definitionVersion: number | null }
+  | undefined {
   const row = db
     .prepare(
-      "SELECT workflow_definition_key, workflow_definition_version FROM workflow_runs WHERE id = ?"
+      "SELECT workflow_definition_key, workflow_definition_version FROM workflow_runs WHERE id = ?",
     )
     .get(runId) as
     | {
@@ -206,13 +208,16 @@ function loadChildRunAttachment(
   if (row === undefined) return undefined;
   return {
     definitionKey: row.workflow_definition_key,
-    definitionVersion: row.workflow_definition_version
+    definitionVersion: row.workflow_definition_version,
   };
 }
 
 function matchesExpectedAttachment(
-  attachment: { definitionKey: string | null; definitionVersion: number | null },
-  input: BuildDispatchedSubworkflowChildRunnerInput
+  attachment: {
+    definitionKey: string | null;
+    definitionVersion: number | null;
+  },
+  input: BuildDispatchedSubworkflowChildRunnerInput,
 ): boolean {
   return (
     attachment.definitionKey === input.childDefinitionKey &&
@@ -225,7 +230,7 @@ function unsupportedAttachmentReason(
   expectedDefinitionKey: string,
   expectedDefinitionVersion: number,
   actualDefinitionKey: string | null,
-  actualDefinitionVersion: number | null
+  actualDefinitionVersion: number | null,
 ): string {
   return (
     `Subworkflow child run ${childRunId} already exists for definition ` +
@@ -237,7 +242,7 @@ function unsupportedAttachmentReason(
 
 function formatDefinitionRef(
   definitionKey: string | null,
-  definitionVersion: number | null
+  definitionVersion: number | null,
 ): string {
   if (definitionKey === null || definitionVersion === null) return "<unlinked>";
   return `${definitionKey}@${definitionVersion}`;

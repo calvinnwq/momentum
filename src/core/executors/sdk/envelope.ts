@@ -560,8 +560,8 @@ export class DurableExecutorEnvelope {
     }
     if (round.stepRunId !== attempt.stepRunId) mismatches.push("stepRunId");
     if (round.stepKey !== attempt.stepKey) mismatches.push("stepKey");
-    if (round.executorFamily !== attempt.executorFamily) {
-      mismatches.push("executorFamily");
+    if (round.executor !== attempt.executor) {
+      mismatches.push("executor");
     }
     if (round.attemptNumber !== attempt.attemptNumber)
       mismatches.push("attemptNumber");
@@ -784,9 +784,18 @@ function assertRoundStartInput(
     "workflowRunId",
     "stepRunId",
     "stepKey",
-    "executorFamily",
   ]) {
     assertNonEmptyString(value[field], `round start ${field}`);
+  }
+  // Persisted round-start payloads recorded before the rename carry the
+  // legacy `executorFamily` field name; accept both and normalize to
+  // `executor` so replayed legacy payloads keep validating. New writes emit
+  // `executor` only.
+  const executorIdentity = value["executor"] ?? value["executorFamily"];
+  assertNonEmptyString(executorIdentity, "round start executor");
+  if (value["executor"] === undefined) {
+    value["executor"] = executorIdentity;
+    delete value["executorFamily"];
   }
   if (
     !Number.isInteger(value["attemptNumber"]) ||

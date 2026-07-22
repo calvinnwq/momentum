@@ -6,6 +6,8 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
+  CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION_V2,
   type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
@@ -119,7 +121,7 @@ function persistedCodingOverride(
       {
         key: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "agent-loop",
         order: 1,
         required: false,
       },
@@ -227,13 +229,71 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     const attempt = db
       .prepare(
-        `SELECT executor_family
+        `SELECT executor
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
-      .get(RUN_ID) as { executor_family: string };
-    expect(attempt.executor_family).toBe("one-shot");
+      .get(RUN_ID) as { executor: string };
+    expect(attempt.executor).toBe("agent-once");
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
+
+  it.each([
+    [CODING_WORKFLOW_DEFINITION_V1, "agent-loop"],
+    [CODING_WORKFLOW_DEFINITION_V2, "delegate-supervisor"],
+  ] as const)(
+    "dispatches retained definition version $version through the effective executor without rewriting its stored rows",
+    (definition, expectedExecutor) => {
+      const db = openDb(makeTempDir());
+      const runId = `native-retained-v${definition.version}`;
+      persistWorkflowDefinition(db, definition, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Dispatch retained workflow definition",
+        now: NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      const storedBefore = JSON.stringify(
+        db
+          .prepare(
+            `SELECT step_key, kind, executor, step_order, required, config_json,
+                    created_at, updated_at
+               FROM step_definitions
+              WHERE definition_key = ? AND definition_version = ?
+              ORDER BY step_order`,
+          )
+          .all(definition.key, definition.version),
+      );
+
+      const claim = approveAndClaim(db, "implementation", runId);
+      const result = executeWorkflowStepDispatch(claim, {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+
+      expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+      const attempt = db
+        .prepare(
+          "SELECT executor FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { executor: string };
+      expect(attempt.executor).toBe(expectedExecutor);
+      const storedAfter = JSON.stringify(
+        db
+          .prepare(
+            `SELECT step_key, kind, executor, step_order, required, config_json,
+                    created_at, updated_at
+               FROM step_definitions
+              WHERE definition_key = ? AND definition_version = ?
+              ORDER BY step_order`,
+          )
+          .all(definition.key, definition.version),
+      );
+      expect(storedAfter).toBe(storedBefore);
+    },
+  );
 
   it("ignores persisted coding overrides when dispatching native coding runs", () => {
     const db = openDb(makeTempDir());
@@ -259,11 +319,11 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     const attempt = db
       .prepare(
-        `SELECT executor_family
+        `SELECT executor
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
-      .get(RUN_ID) as { executor_family: string };
-    expect(attempt.executor_family).toBe("one-shot");
+      .get(RUN_ID) as { executor: string };
+    expect(attempt.executor).toBe("agent-once");
   });
 
   it("creates the executor attempt + round scaffold and advances the step", () => {
@@ -279,10 +339,10 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
     // A durable attempt row proves the bounded unit started through the
-    // production path (preflight resolves to the one-shot family).
+    // production path (preflight resolves to the agent-once family).
     const attempt = db
       .prepare(
-        `SELECT attempt_id, step_run_id, step_key, executor_family, state,
+        `SELECT attempt_id, step_run_id, step_key, executor, state,
                 attempt_number AS attempt
            FROM executor_attempts WHERE workflow_run_id = ?`,
       )
@@ -290,14 +350,14 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       attempt_id: string;
       step_run_id: string;
       step_key: string;
-      executor_family: string;
+      executor: string;
       state: string;
       attempt: number;
     };
     expect(attempt).toMatchObject({
       step_run_id: "preflight",
       step_key: "preflight",
-      executor_family: "one-shot",
+      executor: "agent-once",
       state: "running",
       attempt: 1,
     });
@@ -305,17 +365,17 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     // The first round scaffold exists, created before external work runs.
     const round = db
       .prepare(
-        `SELECT attempt_id, round_index, state, executor_family
+        `SELECT attempt_id, round_index, state, executor
            FROM executor_rounds WHERE workflow_run_id = ?`,
       )
       .get(RUN_ID) as {
       attempt_id: string;
       round_index: number;
       state: string;
-      executor_family: string;
+      executor: string;
     };
     expect(round.attempt_id).toBe(attempt.attempt_id);
-    expect(round.executor_family).toBe("one-shot");
+    expect(round.executor).toBe("agent-once");
     expect(round.state).toBe("pending");
 
     // The step advanced approved -> running so the lane will not re-offer it.
@@ -518,7 +578,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workflowRunId: RUN_ID,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       state: "manual_recovery_required",
       attemptNumber: 1,
       startedAt: NOW,
@@ -531,7 +591,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workflowRunId: RUN_ID,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "manual_recovery_required",
@@ -562,7 +622,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workflowRunId: RUN_ID,
       stepRunId: "preflight",
       stepKey: "preflight",
-      executorFamily: "one-shot",
+      executor: "agent-once",
       state: "succeeded",
       attemptNumber: 1,
       startedAt: NOW,
@@ -575,7 +635,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workflowRunId: RUN_ID,
       stepRunId: "preflight",
       stepKey: "preflight",
-      executorFamily: "one-shot",
+      executor: "agent-once",
       attemptNumber: 1,
       roundIndex: 0,
       state: "succeeded",
@@ -621,7 +681,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
           workflowRunId: attempt.workflowRunId,
           stepRunId: attempt.stepRunId,
           stepKey: attempt.stepKey,
-          executorFamily: attempt.executorFamily,
+          executor: attempt.executor,
           attemptNumber: attempt.attemptNumber,
           roundIndex: 1,
           state: "running",
@@ -771,7 +831,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
 
-    // The gate stamps the stable `unknown_executor_family` code as evidence and
+    // The gate stamps the stable `unknown_executor` code as evidence and
     // surfaces the offending raw family string to the operator.
     const gates = listWorkflowGatesForRun(db, RUN_ID);
     expect(gates).toHaveLength(1);
@@ -779,7 +839,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       gateType: "manual_recovery_required",
       targetScope: "step",
       stepRunId: "preflight",
-      evidence: "unknown_executor_family",
+      evidence: "unknown_executor",
       resolvedAt: null,
     });
     expect(gates[0]?.reason).toContain("Invalid Executor Name");
@@ -797,7 +857,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
     // The step definition row vanished between claim and dispatch, so the claimed
-    // step can no longer be resolved to an executor family.
+    // step can no longer be resolved to an executor.
     db.prepare(
       `DELETE FROM step_definitions
          WHERE definition_key = ? AND definition_version = ? AND step_key = ?`,

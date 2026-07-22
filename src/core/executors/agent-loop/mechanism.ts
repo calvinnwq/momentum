@@ -1,7 +1,7 @@
 /**
  * Goal-loop executor adapter — round mechanism bridge.
  *
- * `goal-loop/orchestrator.ts` drives one bounded round through its durable
+ * `agent-loop/orchestrator.ts` drives one bounded round through its durable
  * lifecycle around an *injected* {@link GoalLoopRoundRunner} mechanism; every
  * test so far has injected a deterministic fake mechanism. This module is the
  * concrete mechanism that reuses the existing Goal / iteration safety the ticket
@@ -29,7 +29,7 @@
  * boundary intact end to end — a moved HEAD routes to `manual_recovery_required`
  * rather than a destructive reset, a lost repo lock surfaces `repo_lock_lost`, and
  * a missing / invalid result document refuses to mutate git — which is exactly the
- * recovery / finalization behaviour the goal-loop decision (`decideGoalLoopRound`)
+ * recovery / finalization behaviour the agent-loop decision (`decideGoalLoopRound`)
  * then turns into a durable classification.
  *
  * Two consistency rules tie the projection together:
@@ -94,7 +94,7 @@ export type GoalLoopRoundMechanismFromResultFileInput =
   };
 
 /**
- * Runner-facing input for a prompted native goal-loop round.
+ * Runner-facing input for a prompted native agent-loop round.
  *
  * The runner reads `promptFilePath` or the in-memory `prompt`, writes exactly one
  * normalized result JSON document at `resultFilePath`, and leaves git commit /
@@ -124,7 +124,7 @@ export type GoalLoopRoundMechanismFromPromptedResultFileInput =
 /**
  * Run the existing shared goal / iteration finalize safety over a finished round's
  * result document and project the outcome into the {@link GoalLoopRoundMechanismResult}
- * the goal-loop driver consumes. See the module doc for the consistency rules.
+ * the agent-loop driver consumes. See the module doc for the consistency rules.
  */
 export function goalLoopRoundMechanismFromResultFile(
   input: GoalLoopRoundMechanismFromResultFileInput,
@@ -159,7 +159,7 @@ export function goalLoopRoundMechanismFromResultFile(
 }
 
 /**
- * Render the native goal-loop prompt, let a runner author the configured result
+ * Render the native agent-loop prompt, let a runner author the configured result
  * document, then reuse {@link goalLoopRoundMechanismFromResultFile} for parsing,
  * verification, commit/reset, and recovery classification.
  *
@@ -182,7 +182,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
     return promptedRoundRecovery(
       input,
       "result_invalid",
-      `goal-loop artifact directory is unsafe: ${errorMessage(error)}`,
+      `agent-loop artifact directory is unsafe: ${errorMessage(error)}`,
     );
   }
 
@@ -199,7 +199,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
       return promptedRoundRecovery(
         securedInput,
         "result_invalid",
-        `goal-loop result path could not be prepared: ${clearedResult.error}`,
+        `agent-loop result path could not be prepared: ${clearedResult.error}`,
       );
     }
 
@@ -214,7 +214,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
       return promptedRoundRecovery(
         securedInput,
         promptedResultRecoveryOutcome(input.resultFilePath),
-        `goal-loop round prompt could not be written: ${errorMessage(error)}`,
+        `agent-loop round prompt could not be written: ${errorMessage(error)}`,
       );
     }
 
@@ -229,7 +229,7 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
       return promptedRoundRecovery(
         securedInput,
         promptedResultRecoveryOutcome(input.resultFilePath),
-        `goal-loop prompted runner failed: ${errorMessage(error)}`,
+        `agent-loop prompted runner failed: ${errorMessage(error)}`,
       );
     }
 

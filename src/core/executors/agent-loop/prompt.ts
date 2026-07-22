@@ -5,7 +5,7 @@ export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_CHARS = 2000;
 export const DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_ITEMS = 8;
 export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_ROUNDS = 5;
 
-/** Durable identity values rendered into one native goal-loop round prompt. */
+/** Durable identity values rendered into one native agent-loop round prompt. */
 export type GoalLoopRoundPromptRound = {
   workflowRunId: string;
   stepRunId: string;
@@ -15,7 +15,7 @@ export type GoalLoopRoundPromptRound = {
   attemptNumber: number;
 };
 
-/** Repository context rendered into one native goal-loop round prompt. */
+/** Repository context rendered into one native agent-loop round prompt. */
 export type GoalLoopRoundPromptRepo = {
   path: string;
   baseHead: string;
@@ -52,7 +52,7 @@ export type GoalLoopRoundPromptPriorRound = {
 };
 
 /**
- * Complete input for the deterministic native goal-loop round prompt.
+ * Complete input for the deterministic native agent-loop round prompt.
  *
  * `resultPath` is the exact file path the runner must populate with the
  * normalized `RunnerResult` JSON consumed by finalization.
@@ -73,7 +73,7 @@ export type GoalLoopRoundPromptInput = {
 };
 
 /**
- * Render the deterministic Markdown prompt for one native goal-loop round.
+ * Render the deterministic Markdown prompt for one native agent-loop round.
  *
  * The prompt carries objective, round identity, repo/base-head context,
  * acceptance and verification requirements, quoted untrusted source/prior-round
@@ -85,7 +85,7 @@ export function renderGoalLoopRoundPrompt(
   validatePromptInput(input);
 
   const lines: string[] = [];
-  lines.push("# Momentum native goal-loop round prompt");
+  lines.push("# Momentum native agent-loop round prompt");
   lines.push("");
 
   lines.push("## Objective");

@@ -66,14 +66,14 @@ describe("workflow-step-executor registry", () => {
     ]);
   });
 
-  it("includes preflight, implementation, postflight, no-mistakes, merge-cleanup, linear-refresh", () => {
+  it("includes preflight, implementation, postflight, validate, merge-cleanup, tracker-refresh", () => {
     for (const kind of [
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
-      "linear-refresh",
+      "tracker-refresh",
     ] as const) {
       const adapter = getWorkflowStepExecutor(kind);
       expect(adapter, `expected executor for ${kind}`).toBeDefined();
@@ -192,10 +192,10 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
 
   it("maps a fail_retry outcome to a failed result with retry/recovery hints", () => {
     const input = makeInput({
-      kind: "no-mistakes",
+      kind: "validate",
       config: { outcome: "fail_retry", errorMessage: "patch conflict" },
     });
-    const out = dispatchFake("no-mistakes", input);
+    const out = dispatchFake("validate", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.state).toBe("failed");
@@ -248,13 +248,13 @@ describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
 
   it("surfaces runtime_unavailable when the executor reports missing prerequisites", () => {
     const input = makeInput({
-      kind: "linear-refresh",
+      kind: "tracker-refresh",
       config: {
         outcome: "runtime_unavailable",
         errorMessage: "linear cli not installed",
       },
     });
-    const out = dispatchFake("linear-refresh", input);
+    const out = dispatchFake("tracker-refresh", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("runtime_unavailable");
@@ -492,7 +492,7 @@ describe("fake executors driving the workflow state machine", () => {
       { stepId: "s1", kind: "preflight", order: 1, required: true },
       { stepId: "s2", kind: "implementation", order: 2, required: true },
       { stepId: "s3", kind: "postflight", order: 3, required: true },
-      { stepId: "s4", kind: "no-mistakes", order: 4, required: true },
+      { stepId: "s4", kind: "validate", order: 4, required: true },
       { stepId: "s5", kind: "merge-cleanup", order: 5, required: true },
     ];
 

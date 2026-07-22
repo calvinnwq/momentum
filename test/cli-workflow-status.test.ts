@@ -234,7 +234,7 @@ describe("momentum workflow status", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow status");
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(payload.count).toBe(0);
     expect(payload.runs).toEqual([]);
   });
@@ -664,7 +664,7 @@ describe("momentum workflow status", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow status");
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(payload.run.runId).toBe("cwfp-detail001");
     expect(payload.steps.map((s) => s.stepId)).toEqual([
       "preflight",
@@ -707,7 +707,7 @@ describe("momentum workflow status", () => {
           workflowRunId: "cwfp-gates001",
           stepRunId: "implementation",
           stepKey: "implementation",
-          executorFamily: "goal-loop",
+          executor: "agent-loop",
           state: "running",
           attemptNumber: 1,
           startedAt: RECENT,
@@ -791,7 +791,7 @@ describe("momentum workflow status", () => {
         chosenAction: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",
@@ -988,20 +988,20 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.recovery?.stepId).toBe("implementation");
   });
 
-  it("labels failed linear-refresh as external tail reconciliation", async () => {
+  it("labels failed tracker-refresh as external tail reconciliation", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       seedRun(db, {
-        runId: "cwfp-linear-refresh-reconcile",
+        runId: "cwfp-tracker-refresh-reconcile",
         state: "failed",
         source: "momentum-native-coding",
         startedAt: RECENT,
         finishedAt: NOW,
       });
-      seedStep(db, "cwfp-linear-refresh-reconcile", {
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+      seedStep(db, "cwfp-tracker-refresh-reconcile", {
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         state: "failed",
         order: 4,
         startedAt: RECENT,
@@ -1015,7 +1015,7 @@ describe("momentum workflow status", () => {
     const result = await run([
       "workflow",
       "status",
-      "cwfp-linear-refresh-reconcile",
+      "cwfp-tracker-refresh-reconcile",
       "--data-dir",
       dataDir,
       "--json",
@@ -1034,7 +1034,7 @@ describe("momentum workflow status", () => {
     };
     expect(payload.monitor.nextAction).toMatchObject({
       code: "clear_recovery",
-      stepId: "linear-refresh",
+      stepId: "tracker-refresh",
       actionClass: "reconcile_external_tail",
       recoveryDetail: {
         kind: "external_tail_reconcile",
@@ -1044,7 +1044,7 @@ describe("momentum workflow status", () => {
     });
     expect(payload.monitor.recovery).toMatchObject({
       code: "failed_external_side_effect_step",
-      stepId: "linear-refresh",
+      stepId: "tracker-refresh",
     });
   });
 
@@ -1061,7 +1061,7 @@ describe("momentum workflow status", () => {
       });
       seedStep(db, "cwfp-no-mistakes-evidence", {
         stepId: "no-mistakes",
-        kind: "no-mistakes",
+        kind: "validate",
         state: "failed",
         order: 3,
         startedAt: RECENT,
@@ -1113,7 +1113,7 @@ describe("momentum workflow status", () => {
       });
       seedStep(db, "cwfp-no-mistakes-broad-manual", {
         stepId: "no-mistakes",
-        kind: "no-mistakes",
+        kind: "validate",
         state: "failed",
         order: 3,
         startedAt: RECENT,
@@ -1165,7 +1165,7 @@ describe("momentum workflow status", () => {
       });
       seedStep(db, "cwfp-no-mistakes-evidence-manual", {
         stepId: "no-mistakes",
-        kind: "no-mistakes",
+        kind: "validate",
         state: "failed",
         order: 3,
         startedAt: RECENT,

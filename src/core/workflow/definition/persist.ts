@@ -32,9 +32,9 @@ import {
   type StepDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionValidationError,
-  type WorkflowExecutorFamily,
+  type ExecutorName,
+  type StepDefinitionKind,
 } from "./definition.js";
-import type { WorkflowStepKind } from "../run/reducer.js";
 
 /**
  * Thrown by {@link persistWorkflowDefinition} when the supplied value is not a
@@ -208,8 +208,8 @@ export function loadWorkflowDefinition(
     );
     return {
       key: row.step_key,
-      kind: row.kind as WorkflowStepKind,
-      executor: row.executor as WorkflowExecutorFamily,
+      kind: row.kind as StepDefinitionKind,
+      executor: row.executor as ExecutorName,
       ...(config === undefined ? {} : { config }),
       order: row.step_order,
       required: row.required === 1,
