@@ -1617,7 +1617,9 @@ function workflowShouldEmitNativeRoundEvidence(
   return (
     // Replayed frozen artifacts may still surface the legacy `goal-loop`
     // spelling, so classify through the canonical identity.
-    (round.executor === "agent-loop" || round.executor === "goal-loop") &&
+    (round.executor === "agent-loop" ||
+      (round.executor === "goal-loop" &&
+        !round.executorIdentityDurablyClaimed)) &&
     (round.classification !== null || round.executorRecommendation != null)
   );
 }

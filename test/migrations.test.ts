@@ -3271,7 +3271,10 @@ VALUES
 `;
 
   function seedPreRenameDataDir(
-    options: { claimOneShotDefinition?: boolean } = {},
+    options: {
+      claimOneShotDefinition?: boolean;
+      claimNoMistakesDefinition?: boolean;
+    } = {},
   ): string {
     const dataDir = makeTempDir("momentum-nam02-migration-");
     const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
@@ -3285,6 +3288,13 @@ VALUES
           `INSERT INTO executor_definitions
              (executor_key, family, created_at, updated_at)
            VALUES ('one-shot', 'one-shot', 1, 1)`,
+        ).run();
+      }
+      if (options.claimNoMistakesDefinition) {
+        db.prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('no-mistakes', 'no-mistakes', 1, 1)`,
         ).run();
       }
     } finally {
@@ -3462,6 +3472,38 @@ VALUES
         reason: "no-mistakes step parked",
         evidence: "external_state_blocked",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not convert a provable no-mistakes row when durable configuration claims that identity", () => {
+    const dataDir = seedPreRenameDataDir({
+      claimNoMistakesDefinition: true,
+    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor, legacy_provenance
+               FROM executor_attempts
+              WHERE attempt_id = 'vocab-nm-provable'`,
+          )
+          .get(),
+      ).toEqual({
+        executor: "no-mistakes",
+        legacy_provenance:
+          '{"source":"legacy_invocation_row","legacyExecutor":"recorded-value"}',
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-nm-provable-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "no-mistakes" });
     } finally {
       db.close();
     }

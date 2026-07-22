@@ -289,6 +289,40 @@ describe("parseWorkflowRunImport", () => {
     expect(result.import.run.approvalBoundary).toBe("through-validate");
   });
 
+  it("joins a legacy ledger step to its canonical plan step", () => {
+    const root = makeTempDir();
+    const runId = "cwfp-canonical-plan-legacy-ledger";
+    const runDir = path.join(root, runId);
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        approvalsRequired: ["validate"],
+        taskFlow: { childTasks: [{ stepId: "validate" }] },
+      }),
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowRunImport(runDir);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.import.diagnostics).toEqual([]);
+    expect(result.import.steps).toHaveLength(1);
+    expect(result.import.steps[0]).toMatchObject({
+      stepId: "validate",
+      kind: "validate",
+      state: "succeeded",
+      required: true,
+    });
+  });
+
   it("derives step state from the latest ledger event for each step (terminal evidence wins)", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-terminalwins");

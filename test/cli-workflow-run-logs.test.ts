@@ -13,6 +13,7 @@ import {
   insertExecutorFinding,
   insertExecutorAttempt,
   insertExecutorRound,
+  persistExecutorDefinition,
 } from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -930,6 +931,65 @@ describe("momentum workflow run logs", () => {
         daemonClassification: "operator_decision_required",
       },
     });
+  });
+
+  it("does not emit native evidence for a custom executor claiming goal-loop", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-custom-goal-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      persistExecutorDefinition(
+        db,
+        {
+          executorKey: "goal-loop",
+          executor: "goal-loop",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          timeoutMs: null,
+          maxRounds: null,
+          policyEnvelope: null,
+        },
+        { now: 1 },
+      );
+      insertExecutorAttempt(
+        db,
+        { ...makeAttempt(runId), executor: "goal-loop" },
+        { now: 1 },
+      );
+      insertExecutorRound(db, makeRound(runId, { executor: "goal-loop" }), {
+        now: 1,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
   });
 
   it("renders text output with schema version and round log lines", async () => {

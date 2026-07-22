@@ -1577,6 +1577,10 @@ function migrateWorkflowVocabulary(db: MomentumDb): void {
       .prepare(
         `SELECT attempt_id, legacy_provenance FROM executor_attempts
           WHERE executor = 'no-mistakes'
+            AND NOT EXISTS (
+              SELECT 1 FROM executor_definitions
+               WHERE executor_key = 'no-mistakes'
+            )
             AND state IN (${terminalStates.map(() => "?").join(", ")})`,
       )
       .all(...terminalStates) as Array<{

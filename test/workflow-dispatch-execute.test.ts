@@ -23,12 +23,14 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
+  resolveWorkflowStepDispatchRouteSelection,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
 import {
   insertExecutorCheckpoint,
   insertExecutorAttempt,
   insertExecutorRound,
+  persistExecutorDefinition,
 } from "../src/core/executors/loop/persist.js";
 
 const NOW = 1_700_000_000_000;
@@ -294,6 +296,102 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       expect(storedAfter).toBe(storedBefore);
     },
   );
+
+  it("preserves a durably claimed retired executor identity without optional dispatch callbacks", () => {
+    const db = openDb(makeTempDir());
+    const definition: WorkflowDefinition = {
+      key: "custom-retired-executor",
+      title: "Custom Retired Executor",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistExecutorDefinition(
+      db,
+      {
+        executorKey: "goal-loop",
+        executor: "goal-loop",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        timeoutMs: null,
+        maxRounds: null,
+        policyEnvelope: null,
+      },
+      { now: NOW },
+    );
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "custom-retired-executor-run",
+      repoPath: "/repos/momentum",
+      objective: "Preserve the custom executor identity",
+      now: NOW,
+    });
+    const claim = approveAndClaim(
+      db,
+      "preflight",
+      "custom-retired-executor-run",
+    );
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(
+      db
+        .prepare(
+          "SELECT executor FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get("custom-retired-executor-run"),
+    ).toEqual({ executor: "goal-loop" });
+  });
+
+  it("applies canonical route overrides to a retained legacy step id", () => {
+    const db = openDb(makeTempDir());
+    const runId = "native-retained-route-v1";
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION_V1,
+      runId,
+      repoPath: "/repos/momentum",
+      objective: "Route a retained validation step",
+      now: NOW,
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      route: {
+        steps: {
+          validate: {
+            harness: "codex",
+            model: "gpt-5.1",
+            effort: "high",
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveWorkflowStepDispatchRouteSelection(db, {
+        runId,
+        stepId: "no-mistakes",
+      }),
+    ).toEqual({
+      ok: true,
+      selection: {
+        agentProvider: "codex",
+        model: "gpt-5.1",
+        effort: "high",
+      },
+    });
+  });
 
   it("ignores persisted coding overrides when dispatching native coding runs", () => {
     const db = openDb(makeTempDir());

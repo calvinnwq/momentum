@@ -63,6 +63,7 @@ import {
   insertExecutorCheckpoint,
   insertExecutorAttempt,
   insertExecutorRound,
+  hasExecutorDefinition,
   loadExecutorAttempt,
   loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
@@ -73,7 +74,10 @@ import type {
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
-import { effectiveStepExecutor } from "../definition/legacy.js";
+import {
+  canonicalWorkflowStepKind,
+  effectiveStepExecutor,
+} from "../definition/legacy.js";
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
@@ -186,15 +190,14 @@ export function executeWorkflowStepDispatch(
   // New attempt rows record the effective identity: a recorded name that is
   // registered under its own raw name is preserved verbatim; an unregistered
   // legacy spelling projects to its canonical alias.
-  const effectiveExecutor =
-    context.isRegisteredExecutor === undefined
-      ? effectiveStepExecutor(plan.executor)
-      : effectiveStepExecutor(plan.executor, {
-          isRegistered: context.isRegisteredExecutor,
-          ...(context.isDurablyClaimedExecutor === undefined
-            ? {}
-            : { isDurablyClaimed: context.isDurablyClaimedExecutor }),
-        });
+  const effectiveExecutor = effectiveStepExecutor(plan.executor, {
+    ...(context.isRegisteredExecutor === undefined
+      ? {}
+      : { isRegistered: context.isRegisteredExecutor }),
+    isDurablyClaimed:
+      context.isDurablyClaimedExecutor ??
+      ((executor) => hasExecutorDefinition(db, executor)),
+  });
   return dispatchExecutorScaffold(
     db,
     claim,
@@ -603,7 +606,7 @@ export function resolveWorkflowStepDispatchRouteSelection(
     ok: true,
     selection: resolveCodingStepExecutorSelection(
       overrides.overrides,
-      claim.stepId,
+      canonicalWorkflowStepKind(claim.stepId) ?? claim.stepId,
     ),
   };
 }

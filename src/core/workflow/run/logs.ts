@@ -19,6 +19,7 @@ import {
   listExecutorFindingsForRound,
   listExecutorAttemptsForRun,
   listExecutorRoundsForRun,
+  hasExecutorDefinition,
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -46,6 +47,7 @@ export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
 };
 
 export type WorkflowRunLogRound = ExecutorRoundRecord & {
+  executorIdentityDurablyClaimed: boolean;
   artifacts: ExecutorArtifactRecord[];
   checkpoints: ExecutorCheckpointRecord[];
   findings: ExecutorFindingRecord[];
@@ -71,6 +73,7 @@ export function loadWorkflowRunLogs(
   const attempts = listExecutorAttemptsForRun(db, runId);
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
+    executorIdentityDurablyClaimed: hasExecutorDefinition(db, round.executor),
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
     checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
     findings: listExecutorFindingsForRound(db, round.roundId),

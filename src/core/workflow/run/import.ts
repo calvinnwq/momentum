@@ -748,6 +748,14 @@ function mergeLedgerIntoSteps(
   let nextOrder = planSteps.length;
   for (const event of events) {
     let step = byStepId.get(event.step);
+    const canonicalStepId = canonicalWorkflowStepKind(event.step);
+    if (
+      !step &&
+      canonicalStepId !== undefined &&
+      canonicalStepId !== event.step
+    ) {
+      step = byStepId.get(canonicalStepId);
+    }
     if (!step) {
       const kind = classifyStepKind(event.step);
       if (!kind) {
