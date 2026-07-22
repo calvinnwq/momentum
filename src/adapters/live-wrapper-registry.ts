@@ -5,6 +5,7 @@ import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind,
 } from "../core/workflow/run/reducer.js";
+import { canonicalWorkflowStepKind } from "../core/workflow/definition/legacy.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
 
 /**
@@ -132,14 +133,6 @@ export type LiveWrapperResolveResult =
 
 export const DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC = 30;
 
-const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_KINDS,
-);
-
-function isWorkflowStepKind(value: string): value is WorkflowStepKind {
-  return WORKFLOW_STEP_KIND_SET.has(value);
-}
-
 export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (value === undefined || value === null) {
     return {
@@ -263,9 +256,14 @@ export function parseLiveWrapperProfile(
     );
   }
 
-  const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
+  const parsedWrappers: Array<{
+    rawKind: string;
+    kind: WorkflowStepKind;
+    config: LiveWrapperConfig;
+  }> = [];
   for (const [kind, rawConfig] of entries) {
-    if (!isWorkflowStepKind(kind)) {
+    const canonicalKind = canonicalWorkflowStepKind(kind);
+    if (canonicalKind === undefined) {
       return profileInvalid(
         `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
       );
@@ -276,7 +274,18 @@ export function parseLiveWrapperProfile(
         `Live wrapper profile "${name}" wrapper "${kind}" is invalid: ${parsed.error}`,
       );
     }
-    wrappers.set(kind, parsed.config);
+    parsedWrappers.push({
+      rawKind: kind,
+      kind: canonicalKind,
+      config: parsed.config,
+    });
+  }
+
+  const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
+  for (const entry of parsedWrappers) {
+    if (entry.rawKind === entry.kind || !wrappers.has(entry.kind)) {
+      wrappers.set(entry.kind, entry.config);
+    }
   }
 
   return { ok: true, profile: { name, wrappers } };
@@ -286,7 +295,8 @@ export function resolveLiveWrapper(
   profile: LiveWrapperProfile,
   kind: string,
 ): LiveWrapperResolveResult {
-  if (!isWorkflowStepKind(kind)) {
+  const canonicalKind = canonicalWorkflowStepKind(kind);
+  if (canonicalKind === undefined) {
     return {
       ok: false,
       code: "live_wrapper_unsupported_kind",
@@ -301,7 +311,7 @@ export function resolveLiveWrapper(
       error: `Live wrapper profile "${profile.name}" has no wrapper configured for step kind "${kind}".`,
     };
   }
-  return { ok: true, kind, config };
+  return { ok: true, kind: canonicalKind, config };
 }
 
 export function listConfiguredLiveWrapperKinds(

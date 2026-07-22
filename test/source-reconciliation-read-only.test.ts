@@ -203,7 +203,7 @@ function seedForbiddenTables(db: MomentumDb): void {
       ('workflow_run_existing', 'execution', 'worker-1', 1010, 2010, 1010, 1010, 1010);
 
     INSERT INTO executor_definitions
-      (executor_key, family, agent_provider, model, created_at, updated_at)
+      (executor_key, executor, agent_provider, model, created_at, updated_at)
       VALUES
       ('executor_existing', 'manual', 'operator', 'none', 1011, 1011);
 

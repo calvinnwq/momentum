@@ -140,6 +140,26 @@ describe("coding workflow live wrapper profile", () => {
     );
   });
 
+  it("canonicalizes legacy wrapper step keys", () => {
+    const parsed = parseLiveWrapperProfile({
+      name: "legacy-wrapper",
+      wrappers: {
+        "no-mistakes": {
+          command: process.execPath,
+          args: [],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(Array.from(parsed.profile.wrappers.keys())).toEqual(["validate"]);
+  });
+
   it("keeps merge-cleanup executable independent of generated dist", () => {
     const profilePath = path.join(
       process.cwd(),

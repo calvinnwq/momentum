@@ -206,6 +206,29 @@ describe("momentum workflow run list (NGX-324)", () => {
     });
   });
 
+  it.each(["no-mistakes", "through-no-mistakes"])(
+    "refuses retired --approval-boundary %s with invalid_boundary",
+    async (approvalBoundary) => {
+      const dataDir = makeTempDir();
+      const result = await run([
+        "workflow",
+        "run",
+        "list",
+        "--approval-boundary",
+        approvalBoundary,
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.stderr)).toMatchObject({
+        ok: false,
+        command: "workflow run list",
+        code: "invalid_boundary",
+      });
+    },
+  );
+
   it("refuses a negative --limit at the flag-parsing layer", async () => {
     const dataDir = makeTempDir();
     const result = await run([

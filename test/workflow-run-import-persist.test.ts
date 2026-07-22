@@ -564,6 +564,61 @@ describe("persistWorkflowRunImport", () => {
     }
   });
 
+  it("deduplicates a canonical approval against a frozen legacy approval row", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-import-legacy-approval";
+    const runDir = path.join(artifactRoot, runId);
+    const legacyApprovalPath = path.join(
+      runDir,
+      "approval-through-no-mistakes.json",
+    );
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+    writeJsonFile(legacyApprovalPath, {
+      runId,
+      boundary: "through-no-mistakes",
+      actor: "legacy-operator@example.com",
+      phrase: "through-no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z",
+    });
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000,
+      });
+      const legacyDigest = sha256OfFile(legacyApprovalPath);
+
+      fs.rmSync(legacyApprovalPath);
+      writeJsonFile(path.join(runDir, "approval-through-validate.json"), {
+        runId,
+        boundary: "through-validate",
+        actor: "canonical-operator@example.com",
+        phrase: "through-validate",
+        approvedAt: "2026-05-17T10:00:00Z",
+      });
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500,
+      });
+
+      expect(readWorkflowApprovals(db, runId)).toEqual([
+        expect.objectContaining({
+          boundary: "through-no-mistakes",
+          actor: "legacy-operator@example.com",
+          artifact_digest: legacyDigest,
+        }),
+      ]);
+      expect(readWorkflowRun(db, runId).approval_boundary).toBe(
+        "through-validate",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves the highest durable approval boundary across re-imports", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();

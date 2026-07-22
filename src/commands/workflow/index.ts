@@ -1187,7 +1187,6 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
       message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`,
     });
   }
-
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
   if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
@@ -1281,6 +1280,16 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow run list",
       code: "invalid_limit",
       message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`,
+    });
+  }
+  if (
+    parsed.approvalBoundary !== undefined &&
+    !isWorkflowApprovalBoundary(parsed.approvalBoundary)
+  ) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "invalid_boundary",
+      message: `Invalid --approval-boundary: ${parsed.approvalBoundary}.`,
     });
   }
 

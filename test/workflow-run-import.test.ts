@@ -241,6 +241,55 @@ describe("parseWorkflowRunImport", () => {
     expect(imp.diagnostics).toEqual([]);
   });
 
+  it("reads legacy step and approval vocabulary while projecting mutable boundaries", () => {
+    const root = makeTempDir();
+    const runId = "cwfp-legacy-vocabulary";
+    const runDir = path.join(root, runId);
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        approvalsRequired: ["no-mistakes"],
+        taskFlow: {
+          childTasks: [
+            { stepId: "no-mistakes" },
+            { stepId: "linear-refresh" },
+          ],
+        },
+      }),
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+      {
+        runId,
+        step: "linear-refresh",
+        status: "complete",
+        ts: "2026-05-17T10:01:00Z",
+      },
+    ]);
+    writeJsonFile(path.join(runDir, "approval-through-no-mistakes.json"), {
+      runId,
+      boundary: "through-no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z",
+    });
+
+    const result = parseWorkflowRunImport(runDir);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.import.diagnostics).toEqual([]);
+    expect(result.import.steps.map((step) => [step.stepId, step.kind])).toEqual([
+      ["no-mistakes", "validate"],
+      ["linear-refresh", "tracker-refresh"],
+    ]);
+    expect(result.import.approvals[0]?.boundary).toBe("through-no-mistakes");
+    expect(result.import.run.approvalBoundary).toBe("through-validate");
+  });
+
   it("derives step state from the latest ledger event for each step (terminal evidence wins)", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-terminalwins");

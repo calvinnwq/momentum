@@ -85,10 +85,20 @@ const KNOWN_STEPS: Record<
     complete: "validate_complete",
     failed: "validate_failed",
   },
+  "tracker-refresh": {
+    started: "tracker_refresh_started",
+    complete: "tracker_refresh_complete",
+    failed: "tracker_refresh_failed",
+  },
   "no-mistakes": {
     started: "no_mistakes_started",
     complete: "no_mistakes_complete",
     failed: "no_mistakes_failed",
+  },
+  "linear-refresh": {
+    started: "linear_refresh_started",
+    complete: "linear_refresh_complete",
+    failed: "linear_refresh_failed",
   },
   "merge-cleanup": {
     started: "merge_cleanup_started",
@@ -557,6 +567,8 @@ function buildLedgerSummary(
         ? `Validate complete (pr=${pr})`
         : `Validate complete (${runId})`;
     }
+    case "tracker_refresh_complete":
+      return `Tracker refresh complete (${runId})`;
     case "no_mistakes_complete": {
       const pr = stringField(entry, "pr") ?? stringField(entry, "prUrl");
       return pr
@@ -583,10 +595,20 @@ function buildLedgerSummary(
       return `Validate started (${runId})`;
     case "validate_failed":
       return `Validate failed (${runId})`;
+    case "tracker_refresh_started":
+      return `Tracker refresh started (${runId})`;
+    case "tracker_refresh_failed":
+      return `Tracker refresh failed (${runId})`;
     case "no_mistakes_started":
       return `No-mistakes started (${runId})`;
     case "no_mistakes_failed":
       return `No-mistakes failed (${runId})`;
+    case "linear_refresh_started":
+      return `Linear refresh started (${runId})`;
+    case "linear_refresh_complete":
+      return `Linear refresh complete (${runId})`;
+    case "linear_refresh_failed":
+      return `Linear refresh failed (${runId})`;
     case "merge_cleanup_started":
       return `Merge cleanup started (${runId})`;
     case "merge_cleanup_failed":

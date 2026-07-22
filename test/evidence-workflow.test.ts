@@ -80,6 +80,58 @@ describe("parseWorkflowArtifact", () => {
     });
   });
 
+  it.each([
+    [
+      "tracker-refresh",
+      "tracker_refresh_started",
+      "tracker_refresh_complete",
+      "tracker_refresh_failed",
+    ],
+    [
+      "linear-refresh",
+      "linear_refresh_started",
+      "linear_refresh_complete",
+      "linear_refresh_failed",
+    ],
+  ])("keeps %s ledger events readable", (step, started, complete, failed) => {
+    const root = makeTempDir();
+    const ledgerPath = path.join(root, "ledger.jsonl");
+    writeLedger(ledgerPath, [
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "started",
+        ts: "2026-05-17T10:00:00Z",
+      },
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "complete",
+        ts: "2026-05-17T10:01:00Z",
+      },
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "failed",
+        ts: "2026-05-17T10:02:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(ledgerPath);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.records.map((record) => record.type)).toEqual([
+      started,
+      complete,
+      failed,
+    ]);
+    expect(result.records.map((record) => record.stepId)).toEqual([
+      step,
+      step,
+      step,
+    ]);
+  });
+
   it("normalizes a workflow directory into plan_created + ledger lifecycle records", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-abc123def456");

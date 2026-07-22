@@ -36,10 +36,13 @@ import type {
   WorkflowRunImportStep
 } from "./import.js";
 import {
+  canonicalWorkflowApprovalBoundary,
+  legacyApprovalBoundarySynonyms
+} from "../definition/legacy.js";
+import {
   deriveWorkflowRunState,
   classifyWorkflowLease,
   isTerminalRunState,
-  isWorkflowApprovalBoundary,
   workflowApprovalBoundaryRank,
   workflowStepKindsForApprovalBoundary,
   type WorkflowApprovalBoundary,
@@ -225,6 +228,17 @@ export function persistWorkflowRunImport(
        WHERE excluded.recorded_at >= workflow_approvals.recorded_at`
     );
     for (const approval of approvals) {
+      const synonyms = legacyApprovalBoundarySynonyms(approval.boundary);
+      const existingApproval = db
+        .prepare(
+          `SELECT boundary FROM workflow_approvals
+             WHERE run_id = ? AND boundary IN (${synonyms.map(() => "?").join(", ")})
+             LIMIT 1`
+        )
+        .get(run.runId, ...synonyms) as { boundary: string } | undefined;
+      if (existingApproval && existingApproval.boundary !== approval.boundary) {
+        continue;
+      }
       runApprovalUpsert(approvalStmt, run.runId, approval, now);
     }
 
@@ -365,8 +379,10 @@ function approvalBoundaryCandidate(
   boundary: string | null,
   recordedAt: number | null
 ): ApprovalBoundaryCandidate | null {
-  if (boundary === null || !isWorkflowApprovalBoundary(boundary)) return null;
-  return { boundary, recordedAt };
+  if (boundary === null) return null;
+  const canonical = canonicalWorkflowApprovalBoundary(boundary);
+  if (canonical === undefined) return null;
+  return { boundary: canonical, recordedAt };
 }
 
 function highestApprovalBoundaryCandidate(

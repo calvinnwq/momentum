@@ -25,6 +25,7 @@
  */
 
 import {
+  isWorkflowApprovalBoundary,
   WORKFLOW_STEP_KINDS,
   type LegacyWorkflowStepKind,
   type WorkflowApprovalBoundary,
@@ -61,8 +62,12 @@ export const LEGACY_STEP_KIND_ALIASES: Readonly<
 };
 
 /** Retired approval-boundary spellings and their canonical replacements. */
+export type LegacyWorkflowApprovalBoundary =
+  | "no-mistakes"
+  | "through-no-mistakes";
+
 export const LEGACY_APPROVAL_BOUNDARY_ALIASES: Readonly<
-  Record<string, WorkflowApprovalBoundary>
+  Record<LegacyWorkflowApprovalBoundary, WorkflowApprovalBoundary>
 > = {
   "no-mistakes": "validate",
   "through-no-mistakes": "through-validate",
@@ -92,6 +97,15 @@ export function canonicalWorkflowStepKind(
  */
 export function canonicalExecutorIdentity(name: ExecutorName): ExecutorName {
   return LEGACY_EXECUTOR_ALIASES[name] ?? name;
+}
+
+export function canonicalWorkflowApprovalBoundary(
+  boundary: string,
+): WorkflowApprovalBoundary | undefined {
+  if (isWorkflowApprovalBoundary(boundary)) return boundary;
+  return LEGACY_APPROVAL_BOUNDARY_ALIASES[
+    boundary as LegacyWorkflowApprovalBoundary
+  ];
 }
 
 export type EffectiveExecutorOptions = {
@@ -162,11 +176,13 @@ export function effectiveWorkflowDefinition(
 export function legacyApprovalBoundarySynonyms(
   boundary: string,
 ): readonly string[] {
-  const synonyms = [boundary];
-  for (const [legacy, canonical] of Object.entries(
+  const canonicalBoundary = canonicalWorkflowApprovalBoundary(boundary);
+  const synonyms = [canonicalBoundary ?? boundary];
+  if (canonicalBoundary === undefined) return synonyms;
+  for (const [legacy, replacement] of Object.entries(
     LEGACY_APPROVAL_BOUNDARY_ALIASES,
   )) {
-    if (canonical === boundary) synonyms.push(legacy);
+    if (replacement === canonicalBoundary) synonyms.push(legacy);
   }
   return synonyms;
 }

@@ -32,6 +32,11 @@ import path from "node:path";
 
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
 import {
+  canonicalWorkflowApprovalBoundary,
+  canonicalWorkflowStepKind,
+  type LegacyWorkflowApprovalBoundary
+} from "../definition/legacy.js";
+import {
   WORKFLOW_APPROVAL_BOUNDARIES,
   WORKFLOW_STEP_KINDS,
   type WorkflowApprovalBoundary,
@@ -84,7 +89,7 @@ export type WorkflowRunImportStep = {
 };
 
 export type WorkflowRunImportApproval = {
-  boundary: WorkflowApprovalBoundary;
+  boundary: WorkflowApprovalBoundary | LegacyWorkflowApprovalBoundary;
   actor: string | null;
   phrase: string;
   artifactPath: string;
@@ -136,16 +141,15 @@ export type WorkflowRunImportResult =
       diagnostics: WorkflowRunImportDiagnostic[];
     };
 
-const APPROVAL_BOUNDARY_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_APPROVAL_BOUNDARIES
-);
-
 const APPROVAL_BOUNDARY_INDEX: ReadonlyMap<string, number> = new Map(
   WORKFLOW_APPROVAL_BOUNDARIES.map((boundary, index) => [boundary, index])
 );
 
 function approvalBoundaryOrder(boundary: string): number {
-  return APPROVAL_BOUNDARY_INDEX.get(boundary) ?? WORKFLOW_APPROVAL_BOUNDARIES.length;
+  const canonical = canonicalWorkflowApprovalBoundary(boundary);
+  return canonical === undefined
+    ? WORKFLOW_APPROVAL_BOUNDARIES.length
+    : APPROVAL_BOUNDARY_INDEX.get(canonical) ?? WORKFLOW_APPROVAL_BOUNDARIES.length;
 }
 
 const STEP_KIND_BY_BARE_NAME: ReadonlyMap<string, WorkflowStepKind> = new Map(
@@ -296,7 +300,10 @@ export function parseWorkflowRunImport(
   const route = plan ? extractRoute(plan) : {};
   const skillRevision = plan ? extractSkillRevisionDigest(plan) : null;
   const approvalBoundary =
-    approvals.length > 0 ? approvals[approvals.length - 1]!.boundary : null;
+    approvals.length > 0
+      ? canonicalWorkflowApprovalBoundary(approvals[approvals.length - 1]!.boundary) ??
+        null
+      : null;
 
   const run: WorkflowRunImportRun = {
     runId,
@@ -617,7 +624,7 @@ function readApprovalFile(
     });
     return null;
   }
-  if (!APPROVAL_BOUNDARY_SET.has(boundary)) {
+  if (canonicalWorkflowApprovalBoundary(boundary) === undefined) {
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
@@ -643,7 +650,9 @@ function readApprovalFile(
   const phrase = stringField(approval, "phrase") ?? (boundary as string);
 
   return {
-    boundary: boundary as WorkflowApprovalBoundary,
+    boundary: boundary as
+      | WorkflowApprovalBoundary
+      | LegacyWorkflowApprovalBoundary,
     actor,
     phrase,
     artifactPath: filePath,
@@ -702,7 +711,8 @@ function extractStepsFromPlan(
 }
 
 function classifyStepKind(stepId: string): WorkflowStepKind | null {
-  const bare = STEP_KIND_BY_BARE_NAME.get(stepId);
+  const bare =
+    STEP_KIND_BY_BARE_NAME.get(stepId) ?? canonicalWorkflowStepKind(stepId);
   if (bare) return bare;
   if (/^postflight:\d+$/.test(stepId)) return "postflight";
   return null;
