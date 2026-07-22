@@ -118,7 +118,7 @@ const CODING_WORKFLOW_STEP_IDS = [
   "preflight",
   "implementation",
   "postflight",
-  "no-mistakes",
+  "validate",
   "merge-cleanup",
   "tracker-refresh",
 ] as const;
@@ -795,7 +795,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       });
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
-      // `no-mistakes` is the no-mistakes family in the real coding workflow
+      // `validate` is the no-mistakes step in the real coding workflow
       // definition (src/core/workflow/definition/definition.ts). Unlike the result-bearing
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
@@ -811,8 +811,8 @@ describe("NGX-372 full adapter E2E proof", () => {
       const result = runNoMistakesMirrorStep({
         db,
         workflowRunId: runId,
-        stepRunId: "no-mistakes",
-        stepKey: "no-mistakes",
+        stepRunId: "validate",
+        stepKey: "validate",
         attemptNumber: 1,
         read: () => ({
           ok: true,
@@ -840,7 +840,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       // Durable + reattachable below the StepRun: a deterministic attempt id and
       // its single mirror round (index 0), distinct from every other terminal
       // family's id composed in this proof.
-      const attemptId = noMistakesAttemptId(runId, "no-mistakes", 1);
+      const attemptId = noMistakesAttemptId(runId, "validate", 1);
       expect(result.attempt.attemptId).toBe(attemptId);
       expect(attemptId).not.toBe(`${runId}::no-mistakes::dispatch`);
       expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
