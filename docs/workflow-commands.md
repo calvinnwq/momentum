@@ -394,7 +394,7 @@ The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `
 
 ```text
 Workflow run started: run-1
-Definition: coding-workflow v2
+Definition: coding-workflow v3
 State: pending
 Approval boundary: (none)
 Steps: 6
@@ -461,7 +461,7 @@ Behaviour:
   The current built-in version has six ordered steps (`preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh`).
   The implementation and validate steps both use `delegate-supervisor`; their portable step config selects `gnhf` and `no-mistakes` respectively.
   The merge-cleanup `script` step carries `{ "command": "merge-cleanup" }` as portable command identity.
-  Built-in version 1 remains available for recorded runs with its legacy implementation and no-mistakes executor identities and the same required merge-cleanup command identity.
+  Built-in versions 1 and 2 remain available for recorded runs with their legacy vocabulary; version 1 retains its legacy implementation and no-mistakes executor identities, while version 2 retains its legacy step keys and uses the delegated tool configuration.
   Passing `--definition coding-workflow` is an accepted no-op selector; passing any other `--definition` value refuses with `definition_not_allowed`.
 - **Reserved run ids**: a `--run-id` that begins with a reserved compatibility prefix refuses with `reserved_run_id` and writes nothing, so a fresh Momentum-native run can never be confused with an imported `cwfp-*` compatibility run.
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
@@ -549,7 +549,7 @@ The per-step route block lists every configurable step (implementation, postflig
 
 ```text
 Coding workflow plan preview (not started): native-coding-1
-Definition: coding-workflow v2
+Definition: coding-workflow v3
 Source: momentum-native-coding
 State on start: pending
 Approval boundary: (none)

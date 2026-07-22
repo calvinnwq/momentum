@@ -1,5 +1,5 @@
 /**
- * Goal-loop executor adapter — single-round driver.
+ * Agent-loop executor adapter - single-round driver.
  *
  * `agent-loop/executor.ts` owns the *pure* projections for one bounded round: the
  * round-start record ({@link planGoalLoopRoundStart}), the daemon classification

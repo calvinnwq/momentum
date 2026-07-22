@@ -171,7 +171,7 @@ Ordinary failed validate steps remain `retry_failed_step` with `recoveryDetail: 
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, stores the selected implementation path under `route.implementationEngine`, and keeps CWFP/default switching explicit.
 The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-live-wrapper-profile).
 The current built-in definition classifies implementation and validate as `delegate-supervisor` with their tool in portable step config.
-Version 1 remains registered unchanged for recorded runs with its legacy executor identities.
+Versions 1 and 2 remain registered unchanged for recorded runs with their legacy vocabulary.
 Native dispatch projects the portable merge-cleanup command for those V1 runs without rewriting the immutable definition.
 
 `workflow run preview-coding` is the read-only native plan-preview door.

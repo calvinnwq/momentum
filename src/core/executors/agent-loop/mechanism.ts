@@ -1,5 +1,5 @@
 /**
- * Goal-loop executor adapter — round mechanism bridge.
+ * Agent-loop executor adapter - round mechanism bridge.
  *
  * `agent-loop/orchestrator.ts` drives one bounded round through its durable
  * lifecycle around an *injected* {@link GoalLoopRoundRunner} mechanism; every

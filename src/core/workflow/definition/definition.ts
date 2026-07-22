@@ -43,8 +43,8 @@ import {
 } from "../run/reducer.js";
 
 /**
- * Built-in executor identities pinned by SPEC.md's Runtime Model and Native
- * Goal-Loop Contract anchors. A `StepDefinition` may select one of these or an
+ * Built-in executor identities pinned by SPEC.md's Runtime Model and Agent-Loop
+ * Contract anchors. A `StepDefinition` may select one of these or an
  * arbitrary valid registered identity; delegated tools such as GNHF belong in
  * portable step config below `delegate-supervisor`, never in this built-in list.
  * Retired spellings (`goal-loop`, `one-shot`) and the legacy `no-mistakes`

@@ -411,7 +411,7 @@ There are four public extension levels:
 4. Implement `Executor` directly for a new lifecycle.
 
 The shipped delegate-supervisor has a narrower tool-adapter interface inside the profile-backed built-in host, but there is not yet a public tool-adapter registry for third-party modules.
-Goal-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
+Agent-loop has no default iteration cap: requirements are the stop condition, and an explicit `maxRounds` value may stop continuation with a durable `quota_exhausted` gate.
 A looping executor must never add an implicit cap in its own adapter.
 
 ## RunnerResult SDK surface

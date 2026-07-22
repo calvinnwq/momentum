@@ -1,5 +1,5 @@
 /**
- * Goal-loop executor adapter — round decision brain.
+ * Agent-loop executor adapter - round decision brain.
  *
  * The executor-loop contract (SPEC.md) pins the
  * `agent-loop` executor as "bounded autonomous implementation rounds. It may
