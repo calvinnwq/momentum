@@ -632,6 +632,21 @@ describe("resolveLiveWrapper", () => {
     expect(result.config.command).toBe("/usr/bin/gnhf-runner");
   });
 
+  it("resolves a legacy step kind through its canonical wrapper", () => {
+    const parsed = parseLiveWrapperProfile({
+      name: "legacy-openclaw-live",
+      wrappers: { "no-mistakes": clone(validWrapper) },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const result = resolveLiveWrapper(parsed.profile, "no-mistakes");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.kind).toBe("validate");
+    expect(result.config.command).toBe("/usr/bin/gnhf-runner");
+  });
+
   it("refuses an unknown step kind with live_wrapper_unsupported_kind", () => {
     const result = resolveLiveWrapper(profile, "teleport");
     expect(result.ok).toBe(false);

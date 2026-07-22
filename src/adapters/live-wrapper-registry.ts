@@ -303,7 +303,7 @@ export function resolveLiveWrapper(
       error: `Live wrapper kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
-  const config = profile.wrappers.get(kind);
+  const config = profile.wrappers.get(canonicalKind);
   if (config === undefined) {
     return {
       ok: false,
