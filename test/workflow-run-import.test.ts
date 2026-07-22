@@ -250,10 +250,7 @@ describe("parseWorkflowRunImport", () => {
       basePlan(runId, {
         approvalsRequired: ["no-mistakes"],
         taskFlow: {
-          childTasks: [
-            { stepId: "no-mistakes" },
-            { stepId: "linear-refresh" },
-          ],
+          childTasks: [{ stepId: "no-mistakes" }, { stepId: "linear-refresh" }],
         },
       }),
     );
@@ -282,10 +279,12 @@ describe("parseWorkflowRunImport", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.import.diagnostics).toEqual([]);
-    expect(result.import.steps.map((step) => [step.stepId, step.kind])).toEqual([
-      ["no-mistakes", "validate"],
-      ["linear-refresh", "tracker-refresh"],
-    ]);
+    expect(result.import.steps.map((step) => [step.stepId, step.kind])).toEqual(
+      [
+        ["no-mistakes", "validate"],
+        ["linear-refresh", "tracker-refresh"],
+      ],
+    );
     expect(result.import.approvals[0]?.boundary).toBe("through-no-mistakes");
     expect(result.import.run.approvalBoundary).toBe("through-validate");
   });

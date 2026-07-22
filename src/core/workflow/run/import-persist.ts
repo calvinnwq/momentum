@@ -33,11 +33,11 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import type {
   WorkflowRunImport,
   WorkflowRunImportApproval,
-  WorkflowRunImportStep
+  WorkflowRunImportStep,
 } from "./import.js";
 import {
   canonicalWorkflowApprovalBoundary,
-  legacyApprovalBoundarySynonyms
+  legacyApprovalBoundarySynonyms,
 } from "../definition/legacy.js";
 import {
   deriveWorkflowRunState,
@@ -49,7 +49,7 @@ import {
   type WorkflowLeaseRecord,
   type WorkflowRunState,
   type WorkflowStepKind,
-  type WorkflowStepRecord
+  type WorkflowStepRecord,
 } from "./reducer.js";
 
 export type PersistWorkflowRunImportOptions = {
@@ -69,7 +69,7 @@ export type PersistWorkflowRunImportSummary = {
 export function persistWorkflowRunImport(
   db: MomentumDb,
   result: WorkflowRunImport,
-  options: PersistWorkflowRunImportOptions = {}
+  options: PersistWorkflowRunImportOptions = {},
 ): PersistWorkflowRunImportSummary {
   const now = options.now ?? Date.now();
   const { run, steps, approvals, monitor } = result;
@@ -81,23 +81,22 @@ export function persistWorkflowRunImport(
     const existing = db
       .prepare("SELECT id, approval_boundary FROM workflow_runs WHERE id = ?")
       .get(run.runId) as
-      | { id: string; approval_boundary: string | null }
-      | undefined;
+      { id: string; approval_boundary: string | null } | undefined;
     const inserted = existing === undefined;
     const existingApprovalRows = db
       .prepare(
-        "SELECT boundary, recorded_at FROM workflow_approvals WHERE run_id = ? ORDER BY recorded_at, boundary"
+        "SELECT boundary, recorded_at FROM workflow_approvals WHERE run_id = ? ORDER BY recorded_at, boundary",
       )
       .all(run.runId) as Array<{ boundary: string; recorded_at: number }>;
     const approvalBoundaryCandidates = [
       approvalBoundaryCandidate(existing?.approval_boundary ?? null, null),
       ...existingApprovalRows.map((approval) =>
-        approvalBoundaryCandidate(approval.boundary, approval.recorded_at)
+        approvalBoundaryCandidate(approval.boundary, approval.recorded_at),
       ),
       approvalBoundaryCandidate(run.approvalBoundary, null),
       ...approvals.map((approval) =>
-        approvalBoundaryCandidate(approval.boundary, approval.recordedAt)
-      )
+        approvalBoundaryCandidate(approval.boundary, approval.recordedAt),
+      ),
     ];
     const hasPersistedApprovals =
       existingApprovalRows.length > 0 || approvals.length > 0;
@@ -107,9 +106,11 @@ export function persistWorkflowRunImport(
       if (candidate !== null) {
         approvalBoundaryCandidateValue = highestApprovalBoundaryCandidate(
           approvalBoundaryCandidateValue,
-          candidate
+          candidate,
         );
-        for (const kind of workflowStepKindsForApprovalBoundary(candidate.boundary)) {
+        for (const kind of workflowStepKindsForApprovalBoundary(
+          candidate.boundary,
+        )) {
           approvedStepKinds.add(kind);
         }
       }
@@ -117,7 +118,7 @@ export function persistWorkflowRunImport(
     const approvalBoundary = approvalBoundaryCandidateValue?.boundary ?? null;
 
     const persistedSteps = steps.map((step) =>
-      approvalAdjustedStep(step, approvedStepKinds)
+      approvalAdjustedStep(step, approvedStepKinds),
     );
     const provisionalState = hasPersistedApprovals
       ? approvalAdjustedRunState(run.state, persistedSteps)
@@ -148,7 +149,7 @@ export function persistWorkflowRunImport(
          monitor_step = excluded.monitor_step,
          monitor_last_seen_digest = excluded.monitor_last_seen_digest,
          monitor_last_emitted_digest = excluded.monitor_last_emitted_digest,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at`,
     ).run(
       run.runId,
       provisionalState,
@@ -167,7 +168,7 @@ export function persistWorkflowRunImport(
       monitor?.lastSeenDigest ?? null,
       monitor?.lastEmittedDigest ?? null,
       now,
-      now
+      now,
     );
 
     const stepStmt = db.prepare(
@@ -205,7 +206,7 @@ export function persistWorkflowRunImport(
            WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.finished_at
            ELSE excluded.finished_at
          END,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at`,
     );
     for (const step of persistedSteps) {
       runStepUpsert(stepStmt, run.runId, step, now);
@@ -225,7 +226,7 @@ export function persistWorkflowRunImport(
          recorded_at = excluded.recorded_at,
          discharged_at = excluded.discharged_at,
          updated_at = excluded.updated_at
-       WHERE excluded.recorded_at >= workflow_approvals.recorded_at`
+       WHERE excluded.recorded_at >= workflow_approvals.recorded_at`,
     );
     for (const approval of approvals) {
       const synonyms = legacyApprovalBoundarySynonyms(approval.boundary);
@@ -233,7 +234,7 @@ export function persistWorkflowRunImport(
         .prepare(
           `SELECT boundary FROM workflow_approvals
              WHERE run_id = ? AND boundary IN (${synonyms.map(() => "?").join(", ")})
-             LIMIT 1`
+             LIMIT 1`,
         )
         .get(run.runId, ...synonyms) as { boundary: string } | undefined;
       if (existingApproval && existingApproval.boundary !== approval.boundary) {
@@ -247,11 +248,12 @@ export function persistWorkflowRunImport(
       loadWorkflowStepRecords(db, run.runId),
       loadWorkflowLeaseRecords(db, run.runId),
       hasPersistedApprovals,
-      now
+      now,
     );
     if (state !== provisionalState) {
-      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
-        .run(state, now, run.runId);
+      db.prepare(
+        "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?",
+      ).run(state, now, run.runId);
     }
 
     db.exec("COMMIT");
@@ -262,7 +264,7 @@ export function persistWorkflowRunImport(
       approvalBoundary,
       inserted,
       stepCount: steps.length,
-      approvalCount: approvals.length
+      approvalCount: approvals.length,
     };
   } catch (error) {
     safeRollback(db);
@@ -272,11 +274,11 @@ export function persistWorkflowRunImport(
 
 function loadWorkflowStepRecords(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): WorkflowStepRecord[] {
   const rows = db
     .prepare(
-      "SELECT step_id, kind, state, step_order, required FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id"
+      "SELECT step_id, kind, state, step_order, required FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id",
     )
     .all(runId) as Array<{
     step_id: string;
@@ -290,7 +292,7 @@ function loadWorkflowStepRecords(
     kind: row.kind as WorkflowStepKind,
     state: row.state as WorkflowStepRecord["state"],
     order: row.step_order,
-    required: row.required === 1
+    required: row.required === 1,
   }));
 }
 
@@ -299,7 +301,7 @@ function resolvePersistedRunState(
   steps: readonly WorkflowStepRecord[],
   leases: readonly WorkflowLeaseRecord[],
   hasPersistedApprovals: boolean,
-  now: number
+  now: number,
 ): WorkflowRunState {
   const stepState = deriveWorkflowRunState(steps, { leases, now });
   if (stepState !== "pending") return stepState;
@@ -315,7 +317,7 @@ function resolvePersistedRunState(
 function constrainRunStateByLeases(
   state: WorkflowRunState,
   leases: readonly WorkflowLeaseRecord[],
-  now: number
+  now: number,
 ): WorkflowRunState {
   let anyManualRecovery = false;
   let anyOutstanding = false;
@@ -338,13 +340,13 @@ function constrainRunStateByLeases(
 
 function loadWorkflowLeaseRecords(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): WorkflowLeaseRecord[] {
   const rows = db
     .prepare(
       `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
               heartbeat_at, released_at, stale_policy
-         FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind`
+         FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind`,
     )
     .all(runId) as Array<{
     run_id: string;
@@ -364,7 +366,7 @@ function loadWorkflowLeaseRecords(
     expiresAt: row.expires_at,
     heartbeatAt: row.heartbeat_at,
     releasedAt: row.released_at,
-    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
+    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"],
   }));
 }
 
@@ -377,7 +379,7 @@ type ApprovalBoundaryCandidate = {
 
 function approvalBoundaryCandidate(
   boundary: string | null,
-  recordedAt: number | null
+  recordedAt: number | null,
 ): ApprovalBoundaryCandidate | null {
   if (boundary === null) return null;
   const canonical = canonicalWorkflowApprovalBoundary(boundary);
@@ -387,7 +389,7 @@ function approvalBoundaryCandidate(
 
 function highestApprovalBoundaryCandidate(
   current: ApprovalBoundaryCandidate | null,
-  next: ApprovalBoundaryCandidate
+  next: ApprovalBoundaryCandidate,
 ): ApprovalBoundaryCandidate {
   if (current === null) return next;
   const currentRank = workflowApprovalBoundaryRank(current.boundary);
@@ -402,7 +404,7 @@ function runStepUpsert(
   stmt: PreparedStatement,
   runId: string,
   step: WorkflowRunImportStep,
-  now: number
+  now: number,
 ): void {
   stmt.run(
     runId,
@@ -417,13 +419,13 @@ function runStepUpsert(
     step.startedAt,
     step.finishedAt,
     now,
-    now
+    now,
   );
 }
 
 function approvalAdjustedStep(
   step: WorkflowRunImportStep,
-  approvedStepKinds: ReadonlySet<WorkflowStepKind>
+  approvedStepKinds: ReadonlySet<WorkflowStepKind>,
 ): WorkflowRunImportStep {
   if (step.state !== "pending" || !approvedStepKinds.has(step.kind)) {
     return step;
@@ -433,7 +435,7 @@ function approvalAdjustedStep(
 
 function approvalAdjustedRunState(
   importedState: WorkflowRunState,
-  steps: readonly WorkflowStepRecord[]
+  steps: readonly WorkflowStepRecord[],
 ): WorkflowRunState {
   if (isTerminalRunState(importedState)) return importedState;
   const state = deriveWorkflowRunState(steps);
@@ -444,7 +446,7 @@ function runApprovalUpsert(
   stmt: PreparedStatement,
   runId: string,
   approval: WorkflowRunImportApproval,
-  now: number
+  now: number,
 ): void {
   stmt.run(
     runId,
@@ -456,7 +458,7 @@ function runApprovalUpsert(
     approval.recordedAt,
     approval.dischargedAt,
     now,
-    now
+    now,
   );
 }
 

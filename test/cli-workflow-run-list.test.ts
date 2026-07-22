@@ -37,15 +37,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -69,7 +69,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -88,7 +88,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     null,
     null,
     now,
-    input.updatedAt ?? now
+    input.updatedAt ?? now,
   );
 }
 
@@ -101,7 +101,7 @@ function seedStep(
     state: string;
     order: number;
     finishedAt?: number;
-  }
+  },
 ): void {
   const now = 1_730_000_000_000;
   db.prepare(
@@ -109,7 +109,7 @@ function seedStep(
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     runId,
     input.stepId,
@@ -123,7 +123,7 @@ function seedStep(
     null,
     input.finishedAt ?? null,
     now,
-    now
+    now,
   );
 }
 
@@ -136,7 +136,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -158,7 +158,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "run",
       "bogus",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unknown workflow run subcommand: bogus");
@@ -174,14 +174,14 @@ describe("momentum workflow run list (NGX-324)", () => {
       "weird",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run list",
-      code: "invalid_filter"
+      code: "invalid_filter",
     });
   });
 
@@ -195,14 +195,14 @@ describe("momentum workflow run list (NGX-324)", () => {
       "bogus",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run list",
-      code: "invalid_state"
+      code: "invalid_state",
     });
   });
 
@@ -239,7 +239,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "-2",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Invalid value for --limit");
@@ -255,7 +255,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "yesterday",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Invalid value for --updated-since");
@@ -271,7 +271,7 @@ describe("momentum workflow run list (NGX-324)", () => {
         approvalBoundary: "implementation",
         repoPath: "/repos/alpha",
         issueScopeJson: JSON.stringify({ identifier: "NGX-101" }),
-        updatedAt: 2_000
+        updatedAt: 2_000,
       });
       seedRun(db, {
         runId: "wrl-active002",
@@ -279,7 +279,7 @@ describe("momentum workflow run list (NGX-324)", () => {
         approvalBoundary: "through-merge-cleanup",
         repoPath: "/repos/beta",
         issueScopeJson: JSON.stringify({ identifier: "NGX-102" }),
-        updatedAt: 1_500
+        updatedAt: 1_500,
       });
       seedRun(db, {
         runId: "wrl-blocked001",
@@ -287,7 +287,7 @@ describe("momentum workflow run list (NGX-324)", () => {
         approvalBoundary: null,
         repoPath: "/repos/alpha",
         issueScopeJson: JSON.stringify({ identifier: "NGX-103" }),
-        updatedAt: 1_000
+        updatedAt: 1_000,
       });
       seedRun(db, {
         runId: "wrl-done001",
@@ -295,7 +295,7 @@ describe("momentum workflow run list (NGX-324)", () => {
         approvalBoundary: null,
         repoPath: "/repos/alpha",
         issueScopeJson: JSON.stringify({ identifier: "NGX-104" }),
-        updatedAt: 500
+        updatedAt: 500,
       });
     } finally {
       db.close();
@@ -307,7 +307,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "list",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(all.code).toBe(0);
     const allPayload = JSON.parse(all.stdout) as {
@@ -319,7 +319,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "wrl-active001",
       "wrl-active002",
       "wrl-blocked001",
-      "wrl-done001"
+      "wrl-done001",
     ]);
 
     const active = await run([
@@ -330,7 +330,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "active",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(active.code).toBe(0);
     const activePayload = JSON.parse(active.stdout) as {
@@ -338,7 +338,7 @@ describe("momentum workflow run list (NGX-324)", () => {
     };
     expect(activePayload.runs.map((r) => r.run.runId)).toEqual([
       "wrl-active001",
-      "wrl-active002"
+      "wrl-active002",
     ]);
 
     const byBoundary = await run([
@@ -349,14 +349,14 @@ describe("momentum workflow run list (NGX-324)", () => {
       "implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(byBoundary.code).toBe(0);
     const byBoundaryPayload = JSON.parse(byBoundary.stdout) as {
       runs: Array<{ run: { runId: string } }>;
     };
     expect(byBoundaryPayload.runs.map((r) => r.run.runId)).toEqual([
-      "wrl-active001"
+      "wrl-active001",
     ]);
 
     const byRepo = await run([
@@ -367,7 +367,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "/repos/alpha",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(byRepo.code).toBe(0);
     const byRepoPayload = JSON.parse(byRepo.stdout) as {
@@ -376,7 +376,7 @@ describe("momentum workflow run list (NGX-324)", () => {
     expect(byRepoPayload.runs.map((r) => r.run.runId)).toEqual([
       "wrl-active001",
       "wrl-blocked001",
-      "wrl-done001"
+      "wrl-done001",
     ]);
     for (const r of byRepoPayload.runs) {
       expect(r.run.repoPath).toBe("/repos/alpha");
@@ -390,14 +390,14 @@ describe("momentum workflow run list (NGX-324)", () => {
       "NGX-103",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(byIssueScope.code).toBe(0);
     const byIssueScopePayload = JSON.parse(byIssueScope.stdout) as {
       runs: Array<{ run: { runId: string } }>;
     };
     expect(byIssueScopePayload.runs.map((r) => r.run.runId)).toEqual([
-      "wrl-blocked001"
+      "wrl-blocked001",
     ]);
 
     const sinceWindow = await run([
@@ -408,7 +408,7 @@ describe("momentum workflow run list (NGX-324)", () => {
       "1500",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(sinceWindow.code).toBe(0);
     const sinceWindowPayload = JSON.parse(sinceWindow.stdout) as {
@@ -416,7 +416,7 @@ describe("momentum workflow run list (NGX-324)", () => {
     };
     expect(sinceWindowPayload.runs.map((r) => r.run.runId)).toEqual([
       "wrl-active001",
-      "wrl-active002"
+      "wrl-active002",
     ]);
 
     const combined = await run([
@@ -429,14 +429,14 @@ describe("momentum workflow run list (NGX-324)", () => {
       "/repos/alpha",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(combined.code).toBe(0);
     const combinedPayload = JSON.parse(combined.stdout) as {
       runs: Array<{ run: { runId: string } }>;
     };
     expect(combinedPayload.runs.map((r) => r.run.runId)).toEqual([
-      "wrl-active001"
+      "wrl-active001",
     ]);
   });
 
@@ -448,14 +448,14 @@ describe("momentum workflow run list (NGX-324)", () => {
         runId: "wrl-text001",
         state: "succeeded",
         repoPath: "/repos/alpha",
-        updatedAt: 1_000
+        updatedAt: 1_000,
       });
       seedStep(db, "wrl-text001", {
         stepId: "merge-cleanup",
         kind: "merge-cleanup",
         state: "succeeded",
         order: 0,
-        finishedAt: 999
+        finishedAt: 999,
       });
     } finally {
       db.close();
@@ -466,12 +466,12 @@ describe("momentum workflow run list (NGX-324)", () => {
       "run",
       "list",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain("Workflow runs: 1");
     expect(textResult.stdout).toContain(
-      "wrl-text001 [succeeded] repo=/repos/alpha steps=1 approvals=0 leases=0 next=no_action"
+      "wrl-text001 [succeeded] repo=/repos/alpha steps=1 approvals=0 leases=0 next=no_action",
     );
   });
 });

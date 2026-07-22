@@ -34,7 +34,7 @@ import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
 import {
   canonicalWorkflowApprovalBoundary,
   canonicalWorkflowStepKind,
-  type LegacyWorkflowApprovalBoundary
+  type LegacyWorkflowApprovalBoundary,
 } from "../definition/legacy.js";
 import {
   WORKFLOW_APPROVAL_BOUNDARIES,
@@ -43,7 +43,7 @@ import {
   type WorkflowLeaseStalePolicy,
   type WorkflowRunState,
   type WorkflowStepKind,
-  type WorkflowStepState
+  type WorkflowStepState,
 } from "./reducer.js";
 
 export const WORKFLOW_RUN_IMPORT_SOURCE = "agent-workflow" as const;
@@ -51,8 +51,7 @@ export const WORKFLOW_RUN_IMPORT_SOURCE = "agent-workflow" as const;
 export type WorkflowRunImportSource = typeof WORKFLOW_RUN_IMPORT_SOURCE;
 
 export type WorkflowRunImportDiagnosticCode =
-  | "evidence_format_unknown"
-  | "evidence_format_invalid";
+  "evidence_format_unknown" | "evidence_format_invalid";
 
 export type WorkflowRunImportDiagnostic = {
   code: WorkflowRunImportDiagnosticCode;
@@ -142,18 +141,19 @@ export type WorkflowRunImportResult =
     };
 
 const APPROVAL_BOUNDARY_INDEX: ReadonlyMap<string, number> = new Map(
-  WORKFLOW_APPROVAL_BOUNDARIES.map((boundary, index) => [boundary, index])
+  WORKFLOW_APPROVAL_BOUNDARIES.map((boundary, index) => [boundary, index]),
 );
 
 function approvalBoundaryOrder(boundary: string): number {
   const canonical = canonicalWorkflowApprovalBoundary(boundary);
   return canonical === undefined
     ? WORKFLOW_APPROVAL_BOUNDARIES.length
-    : APPROVAL_BOUNDARY_INDEX.get(canonical) ?? WORKFLOW_APPROVAL_BOUNDARIES.length;
+    : (APPROVAL_BOUNDARY_INDEX.get(canonical) ??
+        WORKFLOW_APPROVAL_BOUNDARIES.length);
 }
 
 const STEP_KIND_BY_BARE_NAME: ReadonlyMap<string, WorkflowStepKind> = new Map(
-  WORKFLOW_STEP_KINDS.map((kind) => [kind, kind])
+  WORKFLOW_STEP_KINDS.map((kind) => [kind, kind]),
 );
 
 /**
@@ -166,11 +166,11 @@ const STEP_KIND_BY_BARE_NAME: ReadonlyMap<string, WorkflowStepKind> = new Map(
 export const COMPATIBILITY_RUN_ID_PREFIXES = [
   "cwfp",
   "cwfb",
-  "overnight"
+  "overnight",
 ] as const;
 
 const RUN_ID_PATTERN = new RegExp(
-  `^(${COMPATIBILITY_RUN_ID_PREFIXES.join("|")})-[A-Za-z0-9]+$`
+  `^(${COMPATIBILITY_RUN_ID_PREFIXES.join("|")})-[A-Za-z0-9]+$`,
 );
 
 /**
@@ -182,7 +182,7 @@ const RUN_ID_PATTERN = new RegExp(
  */
 export function isReservedCompatibilityRunId(runId: string): boolean {
   return COMPATIBILITY_RUN_ID_PREFIXES.some((prefix) =>
-    runId.startsWith(`${prefix}-`)
+    runId.startsWith(`${prefix}-`),
   );
 }
 
@@ -190,13 +190,13 @@ const KNOWN_SIBLING_FILES: ReadonlySet<string> = new Set([
   "plan.json",
   "ledger.jsonl",
   "monitor.json",
-  "recovery.md"
+  "recovery.md",
 ]);
 
 const KNOWN_SIBLING_DIRECTORIES: ReadonlySet<string> = new Set(["locks"]);
 
 export function parseWorkflowRunImport(
-  artifactPath: string
+  artifactPath: string,
 ): WorkflowRunImportResult {
   const diagnostics: WorkflowRunImportDiagnostic[] = [];
   let stat: fs.Stats;
@@ -207,7 +207,7 @@ export function parseWorkflowRunImport(
       ok: false,
       errorCode: "import_path_unreadable",
       message: `Cannot read import path: ${err instanceof Error ? err.message : String(err)}`,
-      diagnostics
+      diagnostics,
     };
   }
   if (!stat.isDirectory()) {
@@ -215,7 +215,7 @@ export function parseWorkflowRunImport(
       ok: false,
       errorCode: "import_path_not_directory",
       message: `Import path must be a directory: ${artifactPath}`,
-      diagnostics
+      diagnostics,
     };
   }
 
@@ -225,15 +225,19 @@ export function parseWorkflowRunImport(
       ok: false,
       errorCode: "import_path_unreadable",
       message: `Cannot read import directory: ${artifactPath}`,
-      diagnostics
+      diagnostics,
     };
   }
 
   const planEntry = entries.find((e) => e.name === "plan.json" && e.isFile);
-  const ledgerEntry = entries.find((e) => e.name === "ledger.jsonl" && e.isFile);
-  const monitorEntry = entries.find((e) => e.name === "monitor.json" && e.isFile);
+  const ledgerEntry = entries.find(
+    (e) => e.name === "ledger.jsonl" && e.isFile,
+  );
+  const monitorEntry = entries.find(
+    (e) => e.name === "monitor.json" && e.isFile,
+  );
   const approvalEntries = entries.filter(
-    (e) => e.isFile && /^approval-.+\.json$/.test(e.name)
+    (e) => e.isFile && /^approval-.+\.json$/.test(e.name),
   );
 
   reportUnknownEntries(entries, approvalEntries, diagnostics);
@@ -246,7 +250,7 @@ export function parseWorkflowRunImport(
     ? runIdFromPlanValue(
         planResult.plan,
         planEntry ? path.join(artifactPath, planEntry.name) : artifactPath,
-        diagnostics
+        diagnostics,
       )
     : null;
   const runIdFromBasename = runIdFromBasenameValue(path.basename(artifactPath));
@@ -256,7 +260,7 @@ export function parseWorkflowRunImport(
       ok: false,
       errorCode: "import_run_id_missing",
       message: `Cannot determine runId for ${artifactPath}: no plan.json runId and directory basename does not look like a run id (e.g. cwfp-...).`,
-      diagnostics
+      diagnostics,
     };
   }
 
@@ -267,23 +271,33 @@ export function parseWorkflowRunImport(
     : null;
 
   const ledgerEvents = ledgerEntry
-    ? readLedgerFile(path.join(artifactPath, ledgerEntry.name), runId, diagnostics)
+    ? readLedgerFile(
+        path.join(artifactPath, ledgerEntry.name),
+        runId,
+        diagnostics,
+      )
     : [];
 
-  const monitor = monitorPath ? readMonitorFile(monitorPath, diagnostics) : null;
+  const monitor = monitorPath
+    ? readMonitorFile(monitorPath, diagnostics)
+    : null;
 
-  const approvalsRequired = plan ? extractApprovalsRequired(plan) : new Set<string>();
-  const stepsFromPlan = plan ? extractStepsFromPlan(plan, approvalsRequired) : [];
+  const approvalsRequired = plan
+    ? extractApprovalsRequired(plan)
+    : new Set<string>();
+  const stepsFromPlan = plan
+    ? extractStepsFromPlan(plan, approvalsRequired)
+    : [];
   const steps = mergeLedgerIntoSteps(
     stepsFromPlan,
     ledgerEvents,
     approvalsRequired,
-    diagnostics
+    diagnostics,
   );
 
   const approvals = approvalEntries
     .map((entry) =>
-      readApprovalFile(path.join(artifactPath, entry.name), runId, diagnostics)
+      readApprovalFile(path.join(artifactPath, entry.name), runId, diagnostics),
     )
     .filter((row): row is WorkflowRunImportApproval => row !== null)
     .sort((a, b) => {
@@ -301,8 +315,9 @@ export function parseWorkflowRunImport(
   const skillRevision = plan ? extractSkillRevisionDigest(plan) : null;
   const approvalBoundary =
     approvals.length > 0
-      ? canonicalWorkflowApprovalBoundary(approvals[approvals.length - 1]!.boundary) ??
-        null
+      ? (canonicalWorkflowApprovalBoundary(
+          approvals[approvals.length - 1]!.boundary,
+        ) ?? null)
       : null;
 
   const run: WorkflowRunImportRun = {
@@ -316,7 +331,7 @@ export function parseWorkflowRunImport(
     route,
     approvalBoundary,
     skillRevision,
-    state: deriveRunStateFromSteps(steps)
+    state: deriveRunStateFromSteps(steps),
   };
 
   return {
@@ -327,8 +342,8 @@ export function parseWorkflowRunImport(
       approvals,
       leases,
       monitor,
-      diagnostics
-    }
+      diagnostics,
+    },
   };
 }
 
@@ -336,7 +351,7 @@ type DirEntry = { name: string; isFile: boolean; isDirectory: boolean };
 
 function readDirectorySorted(
   dirPath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): DirEntry[] | null {
   let dirents: fs.Dirent[];
   try {
@@ -346,7 +361,7 @@ function readDirectorySorted(
       code: "evidence_format_invalid",
       path: dirPath,
       reason: "directory_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return null;
   }
@@ -354,7 +369,7 @@ function readDirectorySorted(
     .map((d) => ({
       name: d.name,
       isFile: d.isFile(),
-      isDirectory: d.isDirectory()
+      isDirectory: d.isDirectory(),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -362,7 +377,7 @@ function readDirectorySorted(
 function reportUnknownEntries(
   entries: DirEntry[],
   approvalEntries: DirEntry[],
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): void {
   const approvalNames = new Set(approvalEntries.map((e) => e.name));
   for (const entry of entries) {
@@ -371,7 +386,7 @@ function reportUnknownEntries(
       diagnostics.push({
         code: "evidence_format_unknown",
         path: entry.name,
-        reason: "unsupported_subdirectory"
+        reason: "unsupported_subdirectory",
       });
       continue;
     }
@@ -379,7 +394,7 @@ function reportUnknownEntries(
       diagnostics.push({
         code: "evidence_format_unknown",
         path: entry.name,
-        reason: "unsupported_entry_kind"
+        reason: "unsupported_entry_kind",
       });
       continue;
     }
@@ -389,13 +404,16 @@ function reportUnknownEntries(
     diagnostics.push({
       code: "evidence_format_unknown",
       path: entry.name,
-      reason: "unrecognized_filename"
+      reason: "unrecognized_filename",
     });
   }
 }
 
 function isAdvisorySibling(name: string): boolean {
-  if (name.startsWith("managed-") && (name.endsWith(".pid") || name.endsWith(".log"))) {
+  if (
+    name.startsWith("managed-") &&
+    (name.endsWith(".pid") || name.endsWith(".log"))
+  ) {
     return true;
   }
   if (name.includes(".backup-")) return true;
@@ -407,7 +425,7 @@ type ReadPlanResult = { plan: Record<string, unknown> | null };
 function runIdFromPlanValue(
   plan: Record<string, unknown>,
   filePath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): string | null {
   const runId = stringField(plan, "runId");
   if (!runId) return null;
@@ -416,14 +434,14 @@ function runIdFromPlanValue(
     code: "evidence_format_invalid",
     path: filePath,
     reason: "plan_run_id_invalid",
-    detail: "runId must be a safe path segment"
+    detail: "runId must be a safe path segment",
   });
   return null;
 }
 
 function readPlanFile(
   filePath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): ReadPlanResult {
   const parsed = readJsonFile(filePath, diagnostics);
   if (parsed === undefined) return { plan: null };
@@ -431,7 +449,7 @@ function readPlanFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "plan_not_object"
+      reason: "plan_not_object",
     });
     return { plan: null };
   }
@@ -452,7 +470,7 @@ type LedgerEvent = {
 function readLedgerFile(
   filePath: string,
   expectedRunId: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): LedgerEvent[] {
   let content: string;
   try {
@@ -462,7 +480,7 @@ function readLedgerFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "ledger_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return [];
   }
@@ -481,7 +499,7 @@ function readLedgerFile(
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
         reason: "ledger_line_not_json",
-        detail: err instanceof Error ? err.message : String(err)
+        detail: err instanceof Error ? err.message : String(err),
       });
       continue;
     }
@@ -489,7 +507,7 @@ function readLedgerFile(
       diagnostics.push({
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
-        reason: "ledger_line_not_object"
+        reason: "ledger_line_not_object",
       });
       continue;
     }
@@ -502,7 +520,7 @@ function readLedgerFile(
       diagnostics.push({
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
-        reason: "ledger_line_missing_required_fields"
+        reason: "ledger_line_missing_required_fields",
       });
       continue;
     }
@@ -511,7 +529,7 @@ function readLedgerFile(
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
         reason: "ledger_run_id_mismatch",
-        detail: `event runId=${runId}, expected ${expectedRunId}`
+        detail: `event runId=${runId}, expected ${expectedRunId}`,
       });
       continue;
     }
@@ -520,7 +538,7 @@ function readLedgerFile(
         code: "evidence_format_unknown",
         path: `${filePath}:${lineNumber}`,
         reason: "unknown_step_or_status",
-        detail: `step=${step} status=${status}`
+        detail: `step=${step} status=${status}`,
       });
       continue;
     }
@@ -530,12 +548,13 @@ function readLedgerFile(
         code: "evidence_format_invalid",
         path: `${filePath}:${lineNumber}`,
         reason: "ledger_line_invalid_timestamp",
-        detail: ts ?? "(missing)"
+        detail: ts ?? "(missing)",
       });
       continue;
     }
     const errorCode = stringField(entry, "errorCode");
-    const errorMessage = stringField(entry, "errorMessage") ?? stringField(entry, "error");
+    const errorMessage =
+      stringField(entry, "errorMessage") ?? stringField(entry, "error");
     events.push({
       runId,
       step,
@@ -544,7 +563,7 @@ function readLedgerFile(
       ledgerOffset: lineNumber,
       errorCode,
       errorMessage,
-      sourcePath: `${filePath}:${lineNumber}`
+      sourcePath: `${filePath}:${lineNumber}`,
     });
   }
   return events;
@@ -552,7 +571,7 @@ function readLedgerFile(
 
 function readMonitorFile(
   filePath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): WorkflowRunImportMonitor | null {
   const parsed = readJsonFile(filePath, diagnostics);
   if (parsed === undefined) return null;
@@ -560,7 +579,7 @@ function readMonitorFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "monitor_not_object"
+      reason: "monitor_not_object",
     });
     return null;
   }
@@ -572,14 +591,14 @@ function readMonitorFile(
     terminal: typeof terminalRaw === "boolean" ? terminalRaw : null,
     step: stringField(monitor, "step"),
     lastSeenDigest: stringField(monitor, "lastSeenDigest"),
-    lastEmittedDigest: stringField(monitor, "lastEmittedDigest")
+    lastEmittedDigest: stringField(monitor, "lastEmittedDigest"),
   };
 }
 
 function readApprovalFile(
   filePath: string,
   expectedRunId: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): WorkflowRunImportApproval | null {
   const buf = safeReadFile(filePath, diagnostics);
   if (buf === null) return null;
@@ -591,7 +610,7 @@ function readApprovalFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_not_json",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return null;
   }
@@ -599,7 +618,7 @@ function readApprovalFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "approval_not_object"
+      reason: "approval_not_object",
     });
     return null;
   }
@@ -610,7 +629,7 @@ function readApprovalFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "approval_run_id_mismatch",
-      detail: `approval runId=${runId}, expected ${expectedRunId}`
+      detail: `approval runId=${runId}, expected ${expectedRunId}`,
     });
     return null;
   }
@@ -620,7 +639,7 @@ function readApprovalFile(
     diagnostics.push({
       code: "evidence_format_invalid",
       path: filePath,
-      reason: "approval_missing_boundary"
+      reason: "approval_missing_boundary",
     });
     return null;
   }
@@ -629,7 +648,7 @@ function readApprovalFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "approval_invalid_boundary",
-      detail: boundary
+      detail: boundary,
     });
     return null;
   }
@@ -640,7 +659,7 @@ function readApprovalFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "approval_invalid_timestamp",
-      detail: approvedAt
+      detail: approvedAt,
     });
     return null;
   }
@@ -651,33 +670,32 @@ function readApprovalFile(
 
   return {
     boundary: boundary as
-      | WorkflowApprovalBoundary
-      | LegacyWorkflowApprovalBoundary,
+      WorkflowApprovalBoundary | LegacyWorkflowApprovalBoundary,
     actor,
     phrase,
     artifactPath: filePath,
     artifactDigest: digest,
     recordedAt: effectiveRecordedAt,
-    dischargedAt: null
+    dischargedAt: null,
   };
 }
 
 function deriveBoundaryFromFilename(filePath: string): string | null {
   const match = /^approval-(.+)\.json$/.exec(path.basename(filePath));
-  return match ? match[1] ?? null : null;
+  return match ? (match[1] ?? null) : null;
 }
 
-function extractApprovalsRequired(
-  plan: Record<string, unknown>
-): Set<string> {
+function extractApprovalsRequired(plan: Record<string, unknown>): Set<string> {
   const raw = plan["approvalsRequired"];
   if (!Array.isArray(raw)) return new Set();
-  return new Set(raw.filter((value): value is string => typeof value === "string"));
+  return new Set(
+    raw.filter((value): value is string => typeof value === "string"),
+  );
 }
 
 function extractStepsFromPlan(
   plan: Record<string, unknown>,
-  approvalsRequired: Set<string>
+  approvalsRequired: Set<string>,
 ): WorkflowRunImportStep[] {
   const taskFlow = plan["taskFlow"];
   if (!taskFlow || typeof taskFlow !== "object" || Array.isArray(taskFlow)) {
@@ -703,7 +721,7 @@ function extractStepsFromPlan(
       finishedAt: null,
       ledgerOffset: null,
       errorCode: null,
-      errorMessage: null
+      errorMessage: null,
     });
     order += 1;
   }
@@ -722,7 +740,7 @@ function mergeLedgerIntoSteps(
   planSteps: WorkflowRunImportStep[],
   events: LedgerEvent[],
   approvalsRequired: Set<string>,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): WorkflowRunImportStep[] {
   const byStepId = new Map<string, WorkflowRunImportStep>();
   for (const step of planSteps) byStepId.set(step.stepId, { ...step });
@@ -737,7 +755,7 @@ function mergeLedgerIntoSteps(
           code: "evidence_format_unknown",
           path: event.sourcePath,
           reason: "unknown_step_or_status",
-          detail: `step=${event.step} status=${event.status}`
+          detail: `step=${event.step} status=${event.status}`,
         });
         continue;
       }
@@ -751,7 +769,7 @@ function mergeLedgerIntoSteps(
         finishedAt: null,
         ledgerOffset: null,
         errorCode: null,
-        errorMessage: null
+        errorMessage: null,
       };
       nextOrder += 1;
       byStepId.set(event.step, step);
@@ -761,7 +779,10 @@ function mergeLedgerIntoSteps(
   return Array.from(byStepId.values()).sort((a, b) => a.order - b.order);
 }
 
-function applyLedgerEvent(step: WorkflowRunImportStep, event: LedgerEvent): void {
+function applyLedgerEvent(
+  step: WorkflowRunImportStep,
+  event: LedgerEvent,
+): void {
   // Latest event wins: terminal evidence (complete / failed) overrides any
   // earlier `started` event; a later `started` event after a terminal one
   // (e.g., a retry that has not yet finished) re-promotes to `running`.
@@ -795,7 +816,9 @@ function applyLedgerEvent(step: WorkflowRunImportStep, event: LedgerEvent): void
   step.ledgerOffset = event.ledgerOffset;
 }
 
-function deriveRunStateFromSteps(steps: WorkflowRunImportStep[]): WorkflowRunState {
+function deriveRunStateFromSteps(
+  steps: WorkflowRunImportStep[],
+): WorkflowRunState {
   if (steps.length === 0) return "pending";
   let anyRunning = false;
   let anyRequiredFailed = false;
@@ -843,13 +866,20 @@ function deriveRunStateFromSteps(steps: WorkflowRunImportStep[]): WorkflowRunSta
   // No plan-declared required steps: fall back to "all observed steps are
   // terminal-success-or-skip and at least one succeeded" — used when the run
   // directory has no plan.json and we are inferring purely from ledger events.
-  if (!hasRequired && allStepsFinalSuccessOrSkip && anySucceeded && !anyNonRequiredFailed) {
+  if (
+    !hasRequired &&
+    allStepsFinalSuccessOrSkip &&
+    anySucceeded &&
+    !anyNonRequiredFailed
+  ) {
     return "succeeded";
   }
   return "pending";
 }
 
-function extractIssueScope(plan: Record<string, unknown>): Record<string, unknown> {
+function extractIssueScope(
+  plan: Record<string, unknown>,
+): Record<string, unknown> {
   const scope = plan["resolvedScope"];
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) {
     return {};
@@ -867,13 +897,19 @@ function extractRoute(plan: Record<string, unknown>): Record<string, unknown> {
     }
   }
   const quotaPolicy = plan["quotaPolicy"];
-  if (quotaPolicy && typeof quotaPolicy === "object" && !Array.isArray(quotaPolicy)) {
+  if (
+    quotaPolicy &&
+    typeof quotaPolicy === "object" &&
+    !Array.isArray(quotaPolicy)
+  ) {
     route["quotaPolicy"] = quotaPolicy;
   }
   return route;
 }
 
-function extractSkillRevisionDigest(plan: Record<string, unknown>): string | null {
+function extractSkillRevisionDigest(
+  plan: Record<string, unknown>,
+): string | null {
   const skill = plan["skillRevision"];
   if (!skill || typeof skill !== "object" || Array.isArray(skill)) return null;
   return stringField(skill as Record<string, unknown>, "digest");
@@ -885,7 +921,7 @@ function runIdFromBasenameValue(basename: string): string | null {
 
 function readJsonFile(
   filePath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): unknown | undefined {
   let raw: string;
   try {
@@ -895,7 +931,7 @@ function readJsonFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
@@ -906,7 +942,7 @@ function readJsonFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_not_json",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return undefined;
   }
@@ -914,7 +950,7 @@ function readJsonFile(
 
 function safeReadFile(
   filePath: string,
-  diagnostics: WorkflowRunImportDiagnostic[]
+  diagnostics: WorkflowRunImportDiagnostic[],
 ): Buffer | null {
   try {
     return fs.readFileSync(filePath);
@@ -923,7 +959,7 @@ function safeReadFile(
       code: "evidence_format_invalid",
       path: filePath,
       reason: "file_unreadable",
-      detail: err instanceof Error ? err.message : String(err)
+      detail: err instanceof Error ? err.message : String(err),
     });
     return null;
   }

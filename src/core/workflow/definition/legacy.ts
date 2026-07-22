@@ -63,8 +63,7 @@ export const LEGACY_STEP_KIND_ALIASES: Readonly<
 
 /** Retired approval-boundary spellings and their canonical replacements. */
 export type LegacyWorkflowApprovalBoundary =
-  | "no-mistakes"
-  | "through-no-mistakes";
+  "no-mistakes" | "through-no-mistakes";
 
 export const LEGACY_APPROVAL_BOUNDARY_ALIASES: Readonly<
   Record<LegacyWorkflowApprovalBoundary, WorkflowApprovalBoundary>
