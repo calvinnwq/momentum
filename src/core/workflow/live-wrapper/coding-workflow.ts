@@ -2144,7 +2144,12 @@ export function parseCodingWorkflowWrapperConfig(
         };
       }
       const existing = selectedSteps.get(kind);
-      if (existing?.rawKind === kind) continue;
+      if (
+        existing !== undefined &&
+        (existing.rawKind === kind || rawKind !== kind)
+      ) {
+        continue;
+      }
       selectedSteps.set(kind, { rawKind, rawStep });
     }
     for (const [kind, selected] of selectedSteps) {

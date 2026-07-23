@@ -197,7 +197,7 @@ function definition(
     version: 1,
     steps: stepKeys.map((key, order) => ({
       key,
-      kind: tool === "gnhf" ? "implementation" : "no-mistakes",
+      kind: tool === "gnhf" ? "implementation" : "validate",
       executor: "delegate-supervisor",
       config: { tool },
       order,

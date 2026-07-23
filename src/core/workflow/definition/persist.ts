@@ -76,11 +76,16 @@ export function persistWorkflowDefinition(
   definition: unknown,
   options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary {
+  // Retained built-in versions are immutable compatibility data, not new
+  // user-authored definitions, so their legacy step kinds remain valid here.
+  const isBuiltIn = BUILT_IN_WORKFLOW_DEFINITIONS.some(
+    (builtIn) => builtIn === definition,
+  );
   return persistWorkflowDefinitionWithLegacyMode(
     db,
     definition,
     options,
-    false,
+    isBuiltIn,
   );
 }
 

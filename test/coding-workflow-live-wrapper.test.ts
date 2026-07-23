@@ -164,7 +164,10 @@ describe("coding workflow live wrapper profile", () => {
   it("uses the canonical step before validating a legacy alias", () => {
     const parsed = parseCodingWorkflowWrapperConfig({
       steps: {
-        validate: { timeout_sec: 30 },
+        validate: {
+          timeout_sec: 30,
+          runner_profile: noMistakesRunnerProfile(),
+        },
         "no-mistakes": {},
       },
     });
