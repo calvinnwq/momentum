@@ -2131,9 +2131,10 @@ export function parseCodingWorkflowWrapperConfig(
     Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>
   > = {};
   if (isRecord(rawSteps)) {
-    // Existing wrapper configs may still key steps by a retired kind spelling
-    // (e.g. `steps.no-mistakes`); the canonical key wins when both are present.
-    const canonicalKeyed = new Set<WorkflowStepKind>();
+    const selectedSteps = new Map<
+      WorkflowStepKind,
+      { rawKind: string; rawStep: unknown }
+    >();
     for (const [rawKind, rawStep] of Object.entries(rawSteps)) {
       const kind = canonicalWorkflowStepKind(rawKind);
       if (kind === undefined) {
@@ -2142,12 +2143,14 @@ export function parseCodingWorkflowWrapperConfig(
           error: `Unsupported workflow step kind ${rawKind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`,
         };
       }
-      const isLegacyKey = rawKind !== kind;
-      if (isLegacyKey && canonicalKeyed.has(kind)) continue;
-      const parsedStep = parseStepConfig(kind, rawStep, source);
+      const existing = selectedSteps.get(kind);
+      if (existing?.rawKind === kind) continue;
+      selectedSteps.set(kind, { rawKind, rawStep });
+    }
+    for (const [kind, selected] of selectedSteps) {
+      const parsedStep = parseStepConfig(kind, selected.rawStep, source);
       if (!parsedStep.ok) return parsedStep;
       steps[kind] = parsedStep.config;
-      if (!isLegacyKey) canonicalKeyed.add(kind);
     }
   }
 

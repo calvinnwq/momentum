@@ -612,6 +612,22 @@ describe("parseLiveWrapperProfile", () => {
       "/usr/bin/postflight",
     );
   });
+
+  it("uses the canonical wrapper before validating a legacy alias", () => {
+    const result = parseLiveWrapperProfile({
+      name: "openclaw-live",
+      wrappers: {
+        validate: clone(validWrapper),
+        "no-mistakes": {},
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.wrappers.get("validate")?.command).toBe(
+      "/usr/bin/gnhf-runner",
+    );
+  });
 });
 
 describe("resolveLiveWrapper", () => {

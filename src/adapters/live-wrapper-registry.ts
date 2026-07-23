@@ -256,11 +256,10 @@ export function parseLiveWrapperProfile(
     );
   }
 
-  const parsedWrappers: Array<{
-    rawKind: string;
-    kind: WorkflowStepKind;
-    config: LiveWrapperConfig;
-  }> = [];
+  const selectedWrappers = new Map<
+    WorkflowStepKind,
+    { rawKind: string; rawConfig: unknown }
+  >();
   for (const [kind, rawConfig] of entries) {
     const canonicalKind = canonicalWorkflowStepKind(kind);
     if (canonicalKind === undefined) {
@@ -268,24 +267,20 @@ export function parseLiveWrapperProfile(
         `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
       );
     }
-    const parsed = parseLiveWrapperConfig(rawConfig);
-    if (!parsed.ok) {
-      return profileInvalid(
-        `Live wrapper profile "${name}" wrapper "${kind}" is invalid: ${parsed.error}`,
-      );
-    }
-    parsedWrappers.push({
-      rawKind: kind,
-      kind: canonicalKind,
-      config: parsed.config,
-    });
+    const existing = selectedWrappers.get(canonicalKind);
+    if (existing?.rawKind === canonicalKind) continue;
+    selectedWrappers.set(canonicalKind, { rawKind: kind, rawConfig });
   }
 
   const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
-  for (const entry of parsedWrappers) {
-    if (entry.rawKind === entry.kind || !wrappers.has(entry.kind)) {
-      wrappers.set(entry.kind, entry.config);
+  for (const [kind, selected] of selectedWrappers) {
+    const parsed = parseLiveWrapperConfig(selected.rawConfig);
+    if (!parsed.ok) {
+      return profileInvalid(
+        `Live wrapper profile "${name}" wrapper "${selected.rawKind}" is invalid: ${parsed.error}`,
+      );
     }
+    wrappers.set(kind, parsed.config);
   }
 
   return { ok: true, profile: { name, wrappers } };

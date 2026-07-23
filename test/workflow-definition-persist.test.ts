@@ -177,6 +177,34 @@ describe("persistWorkflowDefinition", () => {
     }
   });
 
+  it("rejects retired step kinds on new definitions", () => {
+    const db = openTempDb();
+    try {
+      const legacy = {
+        key: "custom-legacy-workflow",
+        title: "Custom legacy workflow",
+        version: 1,
+        steps: [
+          {
+            key: "validate",
+            kind: "no-mistakes",
+            executor: "no-mistakes",
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+
+      expect(() => persistWorkflowDefinition(db, legacy, { now: 1000 })).toThrow(
+        InvalidWorkflowDefinitionError,
+      );
+      expect(countDefinitionRows(db, legacy.key)).toBe(0);
+      expect(loadWorkflowDefinition(db, legacy.key)).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("stores distinct versions of the same key and loads the latest by default", () => {
     const db = openTempDb();
     try {

@@ -10,6 +10,7 @@ import {
   CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR,
   defaultCodingWorkflowWrapperDeps,
   loadCodingWorkflowWrapperConfig,
+  parseCodingWorkflowWrapperConfig,
   runCodingWorkflowLiveWrapper,
   type CodingWorkflowWrapperDeps,
 } from "../src/core/workflow/live-wrapper/coding-workflow.js";
@@ -158,6 +159,19 @@ describe("coding workflow live wrapper profile", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(Array.from(parsed.profile.wrappers.keys())).toEqual(["validate"]);
+  });
+
+  it("uses the canonical step before validating a legacy alias", () => {
+    const parsed = parseCodingWorkflowWrapperConfig({
+      steps: {
+        validate: { timeout_sec: 30 },
+        "no-mistakes": {},
+      },
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.config.steps.validate?.timeoutSec).toBe(30);
   });
 
   it("keeps merge-cleanup executable independent of generated dist", () => {

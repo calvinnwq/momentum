@@ -169,7 +169,9 @@ export function materializeWorkflowRunStart(
 ): WorkflowRunStartResult {
   const errors: WorkflowRunStartError[] = [];
 
-  const validation = validateWorkflowDefinition(input.definition);
+  const validation = validateWorkflowDefinition(input.definition, {
+    allowLegacyStepKinds: true,
+  });
   if (!validation.ok) {
     errors.push({
       code: "definition_invalid",

@@ -87,7 +87,10 @@ import {
   type WorkflowRecoveryArtifactInput,
 } from "../recovery/artifact.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
-import { canonicalExecutorIdentity } from "../definition/legacy.js";
+import {
+  canonicalExecutorIdentity,
+  LEGACY_SUPPORTED_EXECUTORS,
+} from "../definition/legacy.js";
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
@@ -1508,6 +1511,7 @@ function isOwnedResumableSdkExecutor(
   ) {
     return false;
   }
+  if (LEGACY_SUPPORTED_EXECUTORS.has(executor)) return true;
   return NATIVE_RESUMABLE_SDK_EXECUTORS.has(
     canonicalExecutorIdentity(executor),
   );

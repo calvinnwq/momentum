@@ -151,6 +151,10 @@ export type WorkflowDefinitionValidationResult =
   | { ok: true; definition: WorkflowDefinition }
   | { ok: false; errors: WorkflowDefinitionValidationError[] };
 
+export type WorkflowDefinitionValidationOptions = {
+  allowLegacyStepKinds?: boolean;
+};
+
 // Lowercase slug: alphanumeric segments joined by single hyphens. Keeps
 // definition / step keys safe as durable identities and future artifact paths.
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -172,6 +176,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 export function validateWorkflowDefinition(
   value: unknown,
+  options: WorkflowDefinitionValidationOptions = {},
 ): WorkflowDefinitionValidationResult {
   const errors: WorkflowDefinitionValidationError[] = [];
 
@@ -222,7 +227,7 @@ export function validateWorkflowDefinition(
       path: "steps",
     });
   } else {
-    validateSteps(rawSteps, errors);
+    validateSteps(rawSteps, errors, options.allowLegacyStepKinds === true);
   }
 
   if (errors.length > 0) {
@@ -234,6 +239,7 @@ export function validateWorkflowDefinition(
 function validateSteps(
   rawSteps: readonly unknown[],
   errors: WorkflowDefinitionValidationError[],
+  allowLegacyStepKinds: boolean,
 ): void {
   const seenKeys = new Set<string>();
   const seenOrders = new Set<number>();
@@ -270,9 +276,10 @@ function validateSteps(
       typeof rawStep["kind"] !== "string" ||
       !(
         (WORKFLOW_STEP_KINDS as readonly string[]).includes(rawStep["kind"]) ||
-        (LEGACY_WORKFLOW_STEP_KINDS as readonly string[]).includes(
-          rawStep["kind"],
-        )
+        (allowLegacyStepKinds &&
+          (LEGACY_WORKFLOW_STEP_KINDS as readonly string[]).includes(
+            rawStep["kind"],
+          ))
       )
     ) {
       errors.push({

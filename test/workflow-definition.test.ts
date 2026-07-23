@@ -178,6 +178,22 @@ describe("validateWorkflowDefinition", () => {
     }
   });
 
+  it("requires explicit opt-in for retired step kinds", () => {
+    const def = baseValidDefinition();
+    def.steps[0]!.kind = "no-mistakes" as never;
+
+    const rejected = validateWorkflowDefinition(def);
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.errors.map((e) => e.code)).toContain(
+      "step_kind_invalid",
+    );
+
+    expect(
+      validateWorkflowDefinition(def, { allowLegacyStepKinds: true }).ok,
+    ).toBe(true);
+  });
+
   it("accepts registered executor names and rejects malformed identities", () => {
     const def = baseValidDefinition();
     def.steps[0]!.executor = "third-party.executor";
@@ -483,7 +499,9 @@ describe("built-in workflow definition registry", () => {
 
   it("ships only definitions that pass validation", () => {
     for (const def of BUILT_IN_WORKFLOW_DEFINITIONS) {
-      const result = validateWorkflowDefinition(def);
+      const result = validateWorkflowDefinition(def, {
+        allowLegacyStepKinds: def.version < CODING_WORKFLOW_DEFINITION.version,
+      });
       expect(result.ok, `built-in ${def.key} should validate`).toBe(true);
     }
   });

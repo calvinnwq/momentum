@@ -76,7 +76,23 @@ export function persistWorkflowDefinition(
   definition: unknown,
   options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary {
-  const validation = validateWorkflowDefinition(definition);
+  return persistWorkflowDefinitionWithLegacyMode(
+    db,
+    definition,
+    options,
+    false,
+  );
+}
+
+function persistWorkflowDefinitionWithLegacyMode(
+  db: MomentumDb,
+  definition: unknown,
+  options: PersistWorkflowDefinitionOptions,
+  allowLegacyStepKinds: boolean,
+): PersistWorkflowDefinitionSummary {
+  const validation = validateWorkflowDefinition(definition, {
+    allowLegacyStepKinds,
+  });
   if (!validation.ok) {
     throw new InvalidWorkflowDefinitionError(validation.errors);
   }
@@ -266,7 +282,7 @@ export function seedBuiltInWorkflowDefinitions(
   options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary[] {
   return BUILT_IN_WORKFLOW_DEFINITIONS.map((definition) =>
-    persistWorkflowDefinition(db, definition, options),
+    persistWorkflowDefinitionWithLegacyMode(db, definition, options, true),
   );
 }
 
