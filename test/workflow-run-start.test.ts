@@ -141,6 +141,66 @@ describe("materializeWorkflowRunStart", () => {
     },
   );
 
+  it("refuses retired step kinds in a fresh custom definition", () => {
+    const result = materializeWorkflowRunStart(
+      baseInput({
+        definition: {
+          key: "fresh-custom-definition",
+          title: "Fresh Custom Definition",
+          version: 99,
+          steps: [
+            {
+              key: "validate",
+              kind: "no-mistakes",
+              executor: "agent-loop",
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        code: "definition_invalid",
+        path: "definition",
+      }),
+    ]);
+  });
+
+  it("refuses a modified definition using a retained built-in identity", () => {
+    const result = materializeWorkflowRunStart(
+      baseInput({
+        definition: {
+          key: CODING_WORKFLOW_DEFINITION_V1.key,
+          title: "Fresh Definition Using A Retained Identity",
+          version: CODING_WORKFLOW_DEFINITION_V1.version,
+          steps: [
+            {
+              key: "validate",
+              kind: "no-mistakes",
+              executor: "agent-loop",
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        code: "definition_invalid",
+        path: "definition",
+      }),
+    ]);
+  });
+
   it("promotes steps inside the approval boundary to approved", () => {
     const result = materializeWorkflowRunStart(
       baseInput({

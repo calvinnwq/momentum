@@ -1616,9 +1616,9 @@ function workflowShouldEmitNativeRoundEvidence(
 ): boolean {
   return (
     // Replayed frozen artifacts may still surface the legacy `goal-loop`
-    // spelling. Only an unclaimed raw identity belongs to the built-in alias.
-    (round.executor === "agent-loop" ||
-      (round.executor === "goal-loop" && !round.executorIdentityClaimed)) &&
+    // spelling. Only an unclaimed identity belongs to the built-in executor.
+    !round.executorIdentityClaimed &&
+    (round.executor === "agent-loop" || round.executor === "goal-loop") &&
     (round.classification !== null || round.executorRecommendation != null)
   );
 }

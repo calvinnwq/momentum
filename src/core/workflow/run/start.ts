@@ -41,9 +41,12 @@
  *     dispatch.
  */
 
+import { isDeepStrictEqual } from "node:util";
+
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
 import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
+  BUILT_IN_WORKFLOW_DEFINITIONS,
   validateWorkflowDefinition,
   type ExecutorName,
   type WorkflowDefinition,
@@ -169,8 +172,11 @@ export function materializeWorkflowRunStart(
 ): WorkflowRunStartResult {
   const errors: WorkflowRunStartError[] = [];
 
+  const allowLegacyStepKinds = isKnownRetainedBuiltInDefinition(
+    input.definition,
+  );
   const validation = validateWorkflowDefinition(input.definition, {
-    allowLegacyStepKinds: true,
+    allowLegacyStepKinds,
   });
   if (!validation.ok) {
     errors.push({
@@ -285,6 +291,15 @@ export function materializeWorkflowRunStart(
   };
 
   return { ok: true, plan: { run, steps } };
+}
+
+function isKnownRetainedBuiltInDefinition(definition: unknown): boolean {
+  return BUILT_IN_WORKFLOW_DEFINITIONS.some(
+    (builtIn) =>
+      builtIn.steps.some(
+        (step) => canonicalWorkflowStepKind(step.kind) !== step.kind,
+      ) && isDeepStrictEqual(definition, builtIn),
+  );
 }
 
 /**

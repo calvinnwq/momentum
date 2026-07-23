@@ -995,6 +995,59 @@ describe("momentum workflow run logs", () => {
     expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
   });
 
+  it("does not emit native evidence for a custom executor claiming agent-loop", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-custom-agent-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      persistExecutorDefinition(
+        db,
+        {
+          executorKey: "agent-loop",
+          executor: "agent-loop",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          timeoutMs: null,
+          maxRounds: null,
+          policyEnvelope: null,
+        },
+        { now: 1 },
+      );
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
+      insertExecutorRound(db, makeRound(runId), { now: 1 });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
   it("does not emit native evidence for a config-only unavailable goal-loop executor", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-logs-unavailable-goal-loop";

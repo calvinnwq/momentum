@@ -132,6 +132,110 @@ describe("parseWorkflowArtifact", () => {
     ]);
   });
 
+  it.each([
+    ["validate", "no-mistakes", "validate_complete"],
+    ["no-mistakes", "validate", "no_mistakes_complete"],
+  ])(
+    "links a %s plan step to its %s ledger alias",
+    (planStep, ledgerStep, type) => {
+      const root = makeTempDir();
+      const runDir = path.join(root, "cwfp-mixed-step-alias");
+      writeJsonFile(path.join(runDir, "plan.json"), {
+        ...basePlan("cwfp-mixed-step-alias"),
+        taskFlow: {
+          childTasks: [{ stepId: planStep }],
+        },
+      });
+      writeLedger(path.join(runDir, "ledger.jsonl"), [
+        {
+          runId: "cwfp-mixed-step-alias",
+          step: ledgerStep,
+          status: "complete",
+          ts: "2026-05-17T10:00:00Z",
+        },
+      ]);
+
+      const result = parseWorkflowArtifact(runDir);
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.records[1]).toMatchObject({
+        type,
+        stepId: planStep,
+        ingestKey: `agent-workflow:cwfp-mixed-step-alias:${planStep}:complete`,
+        metadata: {
+          step: ledgerStep,
+          status: "complete",
+        },
+      });
+    },
+  );
+
+  it("uses one lifecycle identity when a ledger contains both step aliases", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-duplicate-step-alias");
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      ...basePlan("cwfp-duplicate-step-alias"),
+      taskFlow: {
+        childTasks: [{ stepId: "validate" }],
+      },
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: "cwfp-duplicate-step-alias",
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+      {
+        runId: "cwfp-duplicate-step-alias",
+        step: "validate",
+        status: "complete",
+        ts: "2026-05-17T10:01:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(runDir);
+    const lifecycleRecords = result.records.filter(
+      (record) => record.type === "validate_complete",
+    );
+
+    expect(lifecycleRecords).toHaveLength(2);
+    expect(new Set(lifecycleRecords.map((record) => record.stepId))).toEqual(
+      new Set(["validate"]),
+    );
+    expect(new Set(lifecycleRecords.map((record) => record.ingestKey))).toEqual(
+      new Set(["agent-workflow:cwfp-duplicate-step-alias:validate:complete"]),
+    );
+  });
+
+  it("does not apply plan aliases to ledger rows owned by another run", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-ledger-owner");
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      ...basePlan("cwfp-different-plan-owner"),
+      taskFlow: {
+        childTasks: [{ stepId: "validate" }],
+      },
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: "cwfp-ledger-owner",
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(runDir);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.records[1]).toMatchObject({
+      type: "no_mistakes_complete",
+      stepId: "no-mistakes",
+      ingestKey: "agent-workflow:cwfp-ledger-owner:no-mistakes:complete",
+    });
+  });
+
   it("normalizes a workflow directory into plan_created + ledger lifecycle records", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-abc123def456");

@@ -13,12 +13,14 @@
  *   - ingestKey = `agent-workflow:<runId>:<step>:<status>` (or
  *     `agent-workflow:<runId>:plan_created`, `agent-workflow:<runId>:approval:<boundary>`)
  *     so repeat ingestion of the same artifact is idempotent at the DB layer.
+ *     When a directory plan uses a retained step id and its ledger uses a known
+ *     vocabulary alias, the plan id owns this lifecycle identity.
  *   - formatVersion = 1 on every record so a future artifact format bump
  *     can coexist with historical records.
  *   - runId is set on every emitted record (the owning `.agent-workflows/<runId>/`
- *     run). stepId is set on ledger step events to the durable step id (the bare
- *     ledger step name, matching workflow_steps.step_id, including numbered
- *     postflight attempts); run-scoped plan / approval records carry null stepId.
+ *     run). stepId is set on ledger step events to the durable plan step id when
+ *     known, otherwise the bare ledger step name, including numbered postflight
+ *     attempts; run-scoped plan / approval records carry null stepId.
  *   - Unknown step / status combinations and unknown sibling files in a
  *     workflow directory are skipped with an `evidence_format_unknown`
  *     diagnostic; malformed JSON / corrupt ledger lines emit
@@ -30,6 +32,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { EvidenceRecordIngestInput } from "./records.js";
+import {
+  canonicalWorkflowStepKind,
+  LEGACY_STEP_KIND_ALIASES,
+} from "../workflow/definition/legacy.js";
 
 export const WORKFLOW_EVIDENCE_SOURCE = "agent-workflow";
 export const WORKFLOW_EVIDENCE_FORMAT_VERSION = 1;
@@ -68,6 +74,11 @@ type NormalizedStep = {
   type: string;
   /** Discriminator appended to ingestKey to keep each lifecycle event unique. */
   ingestSuffix: string;
+};
+
+type ParsedPlanIdentity = {
+  runId: string;
+  stepIdsByCanonicalKind: ReadonlyMap<string, string | null>;
 };
 
 const KNOWN_STEPS: Record<
@@ -211,11 +222,35 @@ function parseDirectory(
     }
   }
 
+  const planStepIdsByRunId = new Map<
+    string,
+    ReadonlyMap<string, string | null>
+  >();
   for (const full of planEntries) {
-    parsePlanFile(full, options, records, diagnostics, sources, safeStat(full));
+    const parsedPlan = parsePlanFile(
+      full,
+      options,
+      records,
+      diagnostics,
+      sources,
+      safeStat(full),
+    );
+    if (parsedPlan) {
+      planStepIdsByRunId.set(
+        parsedPlan.runId,
+        parsedPlan.stepIdsByCanonicalKind,
+      );
+    }
   }
   for (const full of ledgerEntries) {
-    parseLedgerFile(full, options, records, diagnostics, sources);
+    parseLedgerFile(
+      full,
+      options,
+      records,
+      diagnostics,
+      sources,
+      planStepIdsByRunId,
+    );
   }
   for (const full of approvalEntries.slice().sort()) {
     parseApprovalFile(
@@ -260,9 +295,9 @@ function parsePlanFile(
   diagnostics: WorkflowEvidenceDiagnostic[],
   sources: WorkflowEvidenceSource[],
   stat: fs.Stats | null,
-): void {
+): ParsedPlanIdentity | null {
   const parsed = readJsonFile(filePath, diagnostics);
-  if (parsed === undefined) return;
+  if (parsed === undefined) return null;
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     diagnostics.push({
@@ -270,7 +305,7 @@ function parsePlanFile(
       path: filePath,
       reason: "plan_not_object",
     });
-    return;
+    return null;
   }
 
   const plan = parsed as Record<string, unknown>;
@@ -283,7 +318,7 @@ function parsePlanFile(
       path: filePath,
       reason: "plan_missing_run_id",
     });
-    return;
+    return null;
   }
 
   sources.push({ kind: "plan", path: filePath, runId });
@@ -320,6 +355,10 @@ function parsePlanFile(
     stepId: null,
     ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:plan_created`,
   });
+  return {
+    runId,
+    stepIdsByCanonicalKind: collectPlanStepIds(plan),
+  };
 }
 
 function parseLedgerFile(
@@ -328,6 +367,10 @@ function parseLedgerFile(
   records: EvidenceRecordIngestInput[],
   diagnostics: WorkflowEvidenceDiagnostic[],
   sources: WorkflowEvidenceSource[],
+  planStepIdsByRunId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, string | null>
+  > = new Map(),
 ): void {
   let content: string;
   try {
@@ -385,7 +428,8 @@ function parseLedgerFile(
     }
     if (!runIdFromLedger) runIdFromLedger = runId;
 
-    const normalized = normalizeStep(step, status);
+    const stepId = resolvePlanStepId(step, planStepIdsByRunId.get(runId));
+    const normalized = normalizeStep(stepId, status);
     if (!normalized) {
       diagnostics.push({
         code: "evidence_format_unknown",
@@ -409,6 +453,7 @@ function parseLedgerFile(
 
     const summary = buildLedgerSummary(normalized.type, entry, runId);
     const metadata = buildLedgerMetadata(entry, step, status);
+    const legacyIngestKeys = equivalentStepIngestKeys(runId, stepId, status);
 
     records.push({
       source: WORKFLOW_EVIDENCE_SOURCE,
@@ -422,12 +467,73 @@ function parseLedgerFile(
       goalId: options.goalId ?? null,
       sourceItemId: options.sourceItemId ?? null,
       runId,
-      stepId: step,
+      stepId,
       ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`,
+      ...(legacyIngestKeys.length > 0 ? { legacyIngestKeys } : {}),
     });
   }
 
   sources.push({ kind: "ledger", path: filePath, runId: runIdFromLedger });
+}
+
+function collectPlanStepIds(
+  plan: Readonly<Record<string, unknown>>,
+): ReadonlyMap<string, string | null> {
+  const result = new Map<string, string | null>();
+  const taskFlow = plan["taskFlow"];
+  if (!taskFlow || typeof taskFlow !== "object" || Array.isArray(taskFlow)) {
+    return result;
+  }
+  const childTasks = (taskFlow as Record<string, unknown>)["childTasks"];
+  if (!Array.isArray(childTasks)) return result;
+  for (const child of childTasks) {
+    if (!child || typeof child !== "object" || Array.isArray(child)) continue;
+    const stepId = stringField(child as Record<string, unknown>, "stepId");
+    if (!stepId) continue;
+    const canonicalKind = canonicalWorkflowStepKind(stepId);
+    if (canonicalKind === undefined) continue;
+    const existing = result.get(canonicalKind);
+    result.set(
+      canonicalKind,
+      existing === undefined || existing === stepId ? stepId : null,
+    );
+  }
+  return result;
+}
+
+function resolvePlanStepId(
+  ledgerStep: string,
+  planStepIdsByCanonicalKind: ReadonlyMap<string, string | null> | undefined,
+): string {
+  const canonicalKind = canonicalWorkflowStepKind(ledgerStep);
+  if (canonicalKind === undefined) return ledgerStep;
+  return planStepIdsByCanonicalKind?.get(canonicalKind) ?? ledgerStep;
+}
+
+function equivalentStepIngestKeys(
+  runId: string,
+  stepId: string,
+  status: string,
+): string[] {
+  const canonicalKind = canonicalWorkflowStepKind(stepId);
+  if (canonicalKind === undefined) return [];
+  const spellings = [
+    canonicalKind,
+    ...Object.entries(LEGACY_STEP_KIND_ALIASES)
+      .filter(([, replacement]) => replacement === canonicalKind)
+      .map(([legacy]) => legacy),
+  ];
+  const keys: string[] = [];
+  for (const spelling of spellings) {
+    if (spelling === stepId) continue;
+    const normalized = normalizeStep(spelling, status);
+    if (normalized) {
+      keys.push(
+        `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`,
+      );
+    }
+  }
+  return keys;
 }
 
 function parseApprovalFile(

@@ -35,6 +35,7 @@ export type EvidenceRecordIngestInput = {
   runId?: string | null;
   stepId?: string | null;
   ingestKey: string;
+  legacyIngestKeys?: readonly string[];
 };
 
 export type EvidenceRecordIngestResult = {
@@ -76,7 +77,7 @@ type EvidenceRecordRow = {
 export function ingestEvidenceRecord(
   db: MomentumDb,
   input: EvidenceRecordIngestInput,
-  clock: EvidenceRecordClock = {}
+  clock: EvidenceRecordClock = {},
 ): EvidenceRecordIngestResult {
   validateNonEmpty(input.source, "source");
   validateNonEmpty(input.type, "type");
@@ -88,43 +89,54 @@ export function ingestEvidenceRecord(
 
   const now = clock.now?.() ?? Date.now();
   const metadataJson = JSON.stringify(input.metadata ?? {});
-  const row = db
-    .prepare(
-      `INSERT INTO evidence_records
+  let existing = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
+  if (!existing) {
+    for (const legacyIngestKey of input.legacyIngestKeys ?? []) {
+      validateNonEmpty(legacyIngestKey, "legacyIngestKey");
+      existing = getEvidenceRecordRowByIngestKey(db, legacyIngestKey);
+      if (existing) break;
+    }
+  }
+
+  if (!existing) {
+    const row = db
+      .prepare(
+        `INSERT INTO evidence_records
          (id, source, type, format_version, artifact_path, external_id,
           occurred_at, summary, metadata_json, goal_id, source_item_id,
           run_id, step_id, ingest_key, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(ingest_key) DO NOTHING
-       RETURNING *`
-    )
-    .get(
-      `evidence_record_${randomUUID()}`,
-      input.source,
-      input.type,
-      formatVersion,
-      input.artifactPath ?? null,
-      input.externalId ?? null,
-      input.occurredAt,
-      input.summary,
-      metadataJson,
-      input.goalId ?? null,
-      input.sourceItemId ?? null,
-      input.runId ?? null,
-      input.stepId ?? null,
-      input.ingestKey,
-      now,
-      now
-    ) as EvidenceRecordRow | undefined;
+         ON CONFLICT(ingest_key) DO NOTHING
+         RETURNING *`,
+      )
+      .get(
+        `evidence_record_${randomUUID()}`,
+        input.source,
+        input.type,
+        formatVersion,
+        input.artifactPath ?? null,
+        input.externalId ?? null,
+        input.occurredAt,
+        input.summary,
+        metadataJson,
+        input.goalId ?? null,
+        input.sourceItemId ?? null,
+        input.runId ?? null,
+        input.stepId ?? null,
+        input.ingestKey,
+        now,
+        now,
+      ) as EvidenceRecordRow | undefined;
 
-  if (row) {
-    return { record: evidenceRecordFromRow(row), created: true };
+    if (row) {
+      return { record: evidenceRecordFromRow(row), created: true };
+    }
+    existing = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
   }
 
-  const existing = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
   if (!existing) {
     throw new Error(
-      `Evidence record missing after ingest conflict for ingest key "${input.ingestKey}".`
+      `Evidence record missing after ingest conflict for ingest key "${input.ingestKey}".`,
     );
   }
 
@@ -132,11 +144,13 @@ export function ingestEvidenceRecord(
   const requestedSourceItemId = input.sourceItemId ?? null;
   const requestedRunId = input.runId ?? null;
   const requestedStepId = input.stepId ?? null;
-  const shouldAttachGoal = existing.goal_id === null && requestedGoalId !== null;
+  const shouldAttachGoal =
+    existing.goal_id === null && requestedGoalId !== null;
   const shouldAttachSourceItem =
     existing.source_item_id === null && requestedSourceItemId !== null;
   const shouldAttachRun = existing.run_id === null && requestedRunId !== null;
-  const shouldAttachStep = existing.step_id === null && requestedStepId !== null;
+  const shouldAttachStep =
+    existing.step_id === null && requestedStepId !== null;
 
   if (
     shouldAttachGoal ||
@@ -151,19 +165,19 @@ export function ingestEvidenceRecord(
               run_id = CASE WHEN run_id IS NULL THEN ? ELSE run_id END,
               step_id = CASE WHEN step_id IS NULL THEN ? ELSE step_id END,
               updated_at = ?
-        WHERE ingest_key = ?`
+        WHERE ingest_key = ?`,
     ).run(
       requestedGoalId,
       requestedSourceItemId,
       requestedRunId,
       requestedStepId,
       now,
-      input.ingestKey
+      existing.ingest_key,
     );
-    const updated = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
+    const updated = getEvidenceRecordRowByIngestKey(db, existing.ingest_key);
     if (!updated) {
       throw new Error(
-        `Evidence record missing after attaching links for ingest key "${input.ingestKey}".`
+        `Evidence record missing after attaching links for ingest key "${input.ingestKey}".`,
       );
     }
     return { record: evidenceRecordFromRow(updated), created: false };
@@ -174,7 +188,7 @@ export function ingestEvidenceRecord(
 
 export function getEvidenceRecordById(
   db: MomentumDb,
-  id: string
+  id: string,
 ): EvidenceRecord | null {
   const row = db
     .prepare("SELECT * FROM evidence_records WHERE id = ?")
@@ -184,7 +198,7 @@ export function getEvidenceRecordById(
 
 export function getEvidenceRecordByIngestKey(
   db: MomentumDb,
-  ingestKey: string
+  ingestKey: string,
 ): EvidenceRecord | null {
   const row = getEvidenceRecordRowByIngestKey(db, ingestKey);
   return row ? evidenceRecordFromRow(row) : null;
@@ -192,7 +206,7 @@ export function getEvidenceRecordByIngestKey(
 
 export function listEvidenceRecords(
   db: MomentumDb,
-  options: ListEvidenceRecordsOptions = {}
+  options: ListEvidenceRecordsOptions = {},
 ): EvidenceRecord[] {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
@@ -234,7 +248,7 @@ export function listEvidenceRecords(
          FROM evidence_records
          ${where}
         ORDER BY occurred_at ASC, created_at ASC, id ASC
-        ${limitClause}`
+        ${limitClause}`,
     )
     .all(...params) as EvidenceRecordRow[];
 
@@ -244,10 +258,12 @@ export function listEvidenceRecords(
 export function listLatestEvidenceRecordsForGoal(
   db: MomentumDb,
   goalId: string,
-  limit = 5
+  limit = 5,
 ): EvidenceRecord[] {
   if (!Number.isInteger(limit) || limit < 0) {
-    throw new Error("listLatestEvidenceRecordsForGoal limit must be a non-negative integer");
+    throw new Error(
+      "listLatestEvidenceRecordsForGoal limit must be a non-negative integer",
+    );
   }
   const rows = db
     .prepare(
@@ -255,7 +271,7 @@ export function listLatestEvidenceRecordsForGoal(
          FROM evidence_records
         WHERE goal_id = ?
         ORDER BY occurred_at DESC, created_at DESC, id DESC
-        LIMIT ?`
+        LIMIT ?`,
     )
     .all(goalId, limit) as EvidenceRecordRow[];
 
@@ -269,17 +285,23 @@ export type EvidenceRecordsSummary = {
   lastRecord: EvidenceRecord | null;
 };
 
-export function summarizeEvidenceRecords(db: MomentumDb): EvidenceRecordsSummary {
+export function summarizeEvidenceRecords(
+  db: MomentumDb,
+): EvidenceRecordsSummary {
   const counts = db
     .prepare(
       `SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN goal_id IS NULL THEN 0 ELSE 1 END) AS goal_linked,
           SUM(CASE WHEN source_item_id IS NULL THEN 0 ELSE 1 END) AS source_item_linked
-         FROM evidence_records`
+         FROM evidence_records`,
     )
     .get() as
-    | { total: number; goal_linked: number | null; source_item_linked: number | null }
+    | {
+        total: number;
+        goal_linked: number | null;
+        source_item_linked: number | null;
+      }
     | undefined;
 
   const totalRecords = counts?.total ?? 0;
@@ -291,7 +313,7 @@ export function summarizeEvidenceRecords(db: MomentumDb): EvidenceRecordsSummary
       totalRecords,
       goalLinkedRecords,
       sourceItemLinkedRecords,
-      lastRecord: null
+      lastRecord: null,
     };
   }
 
@@ -300,7 +322,7 @@ export function summarizeEvidenceRecords(db: MomentumDb): EvidenceRecordsSummary
       `SELECT *
          FROM evidence_records
         ORDER BY occurred_at DESC, created_at DESC, id DESC
-        LIMIT 1`
+        LIMIT 1`,
     )
     .get() as EvidenceRecordRow | undefined;
 
@@ -308,13 +330,13 @@ export function summarizeEvidenceRecords(db: MomentumDb): EvidenceRecordsSummary
     totalRecords,
     goalLinkedRecords,
     sourceItemLinkedRecords,
-    lastRecord: row ? evidenceRecordFromRow(row) : null
+    lastRecord: row ? evidenceRecordFromRow(row) : null,
   };
 }
 
 function getEvidenceRecordRowByIngestKey(
   db: MomentumDb,
-  ingestKey: string
+  ingestKey: string,
 ): EvidenceRecordRow | undefined {
   return db
     .prepare("SELECT * FROM evidence_records WHERE ingest_key = ?")
@@ -338,7 +360,7 @@ function evidenceRecordFromRow(row: EvidenceRecordRow): EvidenceRecord {
     stepId: row.step_id,
     ingestKey: row.ingest_key,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
