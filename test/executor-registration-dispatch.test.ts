@@ -16,8 +16,10 @@ import {
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
 import {
+  AGENT_LOOP_MECHANISM_SCHEMA,
   GoalLoopSdkExecutor,
   goalLoopDispatchBindingDetail,
+  LEGACY_GOAL_LOOP_MECHANISM_SCHEMA,
 } from "../src/core/executors/agent-loop/sdk.js";
 import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/agent-loop/mechanism.js";
 import { resolveGoalLoopRoundSelection } from "../src/core/executors/agent-loop/executor.js";
@@ -2154,6 +2156,16 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       envelope: envelope.facade,
       signal: new AbortController().signal,
     });
+    const mechanismCheckpoint = db
+      .prepare(
+        `SELECT detail
+           FROM executor_checkpoints
+          WHERE round_id = ? AND stage = 'mechanism_completed'`,
+      )
+      .get(`${attemptId}::round::0`) as { detail: string };
+    expect(JSON.parse(mechanismCheckpoint.detail).schema).toBe(
+      AGENT_LOOP_MECHANISM_SCHEMA,
+    );
     expect(mechanisms).toBe(1);
     expect(
       execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
@@ -2170,6 +2182,15 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.prepare(
       "UPDATE executor_rounds SET attempt_number = 2 WHERE attempt_id = ?",
     ).run(attemptId);
+    const legacyMechanismDetail = JSON.parse(mechanismCheckpoint.detail) as {
+      schema: string;
+    };
+    legacyMechanismDetail.schema = LEGACY_GOAL_LOOP_MECHANISM_SCHEMA;
+    db.prepare(
+      `UPDATE executor_checkpoints
+          SET detail = ?
+        WHERE round_id = ? AND stage = 'mechanism_completed'`,
+    ).run(JSON.stringify(legacyMechanismDetail), `${attemptId}::round::0`);
     const migratedHostBindings = {
       ...hostBindings,
       start: { ...hostBindings.start, attemptNumber: 2 },

@@ -3050,7 +3050,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
-  it("does not resume an unclaimed raw no-mistakes continuation", () => {
+  it("resumes a raw no-mistakes continuation through the retained built-in lane", () => {
     const db = openDb(makeTempDir());
     try {
       const runId = "stale-unclaimed-no-mistakes-continuation";
@@ -3073,10 +3073,10 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         now: () => NOW + 1,
       });
 
-      expect(result.code).toBe("idle");
-      expect(recorder.calls).toHaveLength(0);
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls).toHaveLength(1);
       expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
-        needsManualRecovery: true,
+        needsManualRecovery: false,
       });
     } finally {
       db.close();

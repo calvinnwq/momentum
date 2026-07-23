@@ -119,6 +119,12 @@ export type EffectiveExecutorOptions = {
    * runtime registration is temporarily unavailable.
    */
   isDurablyClaimed?: (name: ExecutorName) => boolean;
+  /**
+   * When provided, a legacy alias projects only to a canonical identity that
+   * is known to be Momentum's built-in. This keeps a custom registration on a
+   * canonical name from accidentally owning frozen legacy rows.
+   */
+  isCanonicalBuiltIn?: (name: ExecutorName) => boolean;
 };
 
 /**
@@ -131,7 +137,15 @@ export function effectiveStepExecutor(
   if (options.isRegistered?.(name) || options.isDurablyClaimed?.(name)) {
     return name;
   }
-  return LEGACY_EXECUTOR_ALIASES[name] ?? name;
+  const alias = LEGACY_EXECUTOR_ALIASES[name];
+  if (
+    alias !== undefined &&
+    options.isCanonicalBuiltIn !== undefined &&
+    !options.isCanonicalBuiltIn(alias)
+  ) {
+    return name;
+  }
+  return alias ?? name;
 }
 
 /**

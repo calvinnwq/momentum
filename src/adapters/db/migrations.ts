@@ -1582,7 +1582,8 @@ function migrateWorkflowVocabulary(
       const routeRows = db
         .prepare(
           `SELECT id, route_json FROM workflow_runs
-            WHERE route_json LIKE '%"no-mistakes"%'`,
+            WHERE route_json LIKE '%"no-mistakes"%'
+               OR route_json LIKE '%"linear-refresh"%'`,
         )
         .all() as Array<{ id: string; route_json: string }>;
       const updateRoute = db.prepare(
@@ -1613,16 +1614,44 @@ function migrateWorkflowVocabulary(
         }
         const stepOverrides = steps as Record<string, unknown>;
         if (
-          !Object.hasOwn(stepOverrides, "no-mistakes") ||
-          Object.hasOwn(stepOverrides, "validate")
+          !Object.hasOwn(stepOverrides, "no-mistakes") &&
+          !Object.hasOwn(stepOverrides, "linear-refresh")
         ) {
           continue;
         }
-        const rekeyed: Record<string, unknown> = {};
+        const rekeyed = new Map<
+          string,
+          { value: unknown; canonical: boolean }
+        >();
         for (const [key, value] of Object.entries(stepOverrides)) {
-          rekeyed[key === "no-mistakes" ? "validate" : key] = value;
+          const canonicalKey =
+            key === "no-mistakes"
+              ? "validate"
+              : key === "linear-refresh"
+                ? "tracker-refresh"
+                : key;
+          const canonical = canonicalKey === key;
+          const existing = rekeyed.get(canonicalKey);
+          if (existing === undefined) {
+            rekeyed.set(canonicalKey, { value, canonical });
+            continue;
+          }
+          if (canonical && !existing.canonical) {
+            rekeyed.set(canonicalKey, {
+              value: mergeRouteOverrideValues(existing.value, value),
+              canonical: true,
+            });
+          }
         }
-        updateRoute.run(JSON.stringify({ ...route, steps: rekeyed }), row.id);
+        updateRoute.run(
+          JSON.stringify({
+            ...route,
+            steps: Object.fromEntries(
+              [...rekeyed.entries()].map(([key, entry]) => [key, entry.value]),
+            ),
+          }),
+          row.id,
+        );
       }
     }
 
@@ -1789,7 +1818,10 @@ function workflowVocabularyMigrationNeeded(
     return true;
   }
 
-  if (columnHasSubstring(db, "workflow_runs", "route_json", '"no-mistakes"')) {
+  if (
+    columnHasSubstring(db, "workflow_runs", "route_json", '"no-mistakes"') ||
+    columnHasSubstring(db, "workflow_runs", "route_json", '"linear-refresh"')
+  ) {
     return true;
   }
 
@@ -1834,6 +1866,26 @@ function columnHasSubstring(
   );
 }
 
+function mergeRouteOverrideValues(
+  legacyValue: unknown,
+  canonicalValue: unknown,
+): unknown {
+  if (
+    legacyValue !== null &&
+    typeof legacyValue === "object" &&
+    !Array.isArray(legacyValue) &&
+    canonicalValue !== null &&
+    typeof canonicalValue === "object" &&
+    !Array.isArray(canonicalValue)
+  ) {
+    return {
+      ...(legacyValue as Record<string, unknown>),
+      ...(canonicalValue as Record<string, unknown>),
+    };
+  }
+  return canonicalValue;
+}
+
 function executorDefinitionHasValue(db: MomentumDb, oldValue: string): boolean {
   if (
     !columnExists(db, "executor_definitions", "executor") ||
@@ -1866,6 +1918,7 @@ function hasProvableNoMistakesMigrationCandidate(
     !columnExists(db, "executor_checkpoints", "round_id") ||
     !columnExists(db, "executor_checkpoints", "stage") ||
     !columnExists(db, "executor_checkpoints", "detail") ||
+    !tableExists(db, "executor_definitions") ||
     executorIdentityIsClaimed(db, "no-mistakes", options) ||
     executorIdentityIsClaimed(db, "delegate-supervisor", options)
   ) {

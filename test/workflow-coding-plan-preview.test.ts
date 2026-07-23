@@ -246,4 +246,28 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       ["implementation", "goal-loop"],
     ]);
   });
+
+  it("preserves retained executor identities claimed durably", () => {
+    const result = materializeWorkflowCodingPlanPreview(
+      baseInput({ definition: CODING_WORKFLOW_DEFINITION_V1 }),
+      {
+        isDurablyClaimed: (executor) =>
+          executor === "goal-loop" || executor === "one-shot",
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.preview.steps
+        .filter(
+          (step) =>
+            step.stepId === "implementation" || step.stepId === "preflight",
+        )
+        .map((step) => [step.stepId, step.executor]),
+    ).toEqual([
+      ["preflight", "one-shot"],
+      ["implementation", "goal-loop"],
+    ]);
+  });
 });

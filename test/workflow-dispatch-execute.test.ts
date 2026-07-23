@@ -357,6 +357,68 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     ).toEqual({ executor: "goal-loop" });
   });
 
+  it("does not project a frozen legacy identity onto a custom canonical executor", () => {
+    const db = openDb(makeTempDir());
+    const definition: WorkflowDefinition = {
+      key: "custom-canonical-executor",
+      title: "Custom Canonical Executor",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "goal-loop",
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistExecutorDefinition(
+      db,
+      {
+        executorKey: "agent-loop",
+        executor: "agent-loop",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        timeoutMs: null,
+        maxRounds: null,
+        policyEnvelope: null,
+      },
+      { now: NOW },
+    );
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "custom-canonical-executor-run",
+      repoPath: "/repos/momentum",
+      objective: "Keep the frozen executor owner",
+      now: NOW,
+    });
+    const claim = approveAndClaim(
+      db,
+      "preflight",
+      "custom-canonical-executor-run",
+    );
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+      isRegisteredExecutor: (name) => name === "agent-loop",
+      isCanonicalBuiltInExecutor: () => false,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(
+      db
+        .prepare(
+          "SELECT executor FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get("custom-canonical-executor-run"),
+    ).toEqual({ executor: "goal-loop" });
+  });
+
   it("applies canonical route overrides to a retained legacy step id", () => {
     const db = openDb(makeTempDir());
     const runId = "native-retained-route-v1";
@@ -389,6 +451,42 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         agentProvider: "codex",
         model: "gpt-5.1",
         effort: "high",
+      },
+    });
+  });
+
+  it("applies a retained linear-refresh route override through tracker-refresh", () => {
+    const db = openDb(makeTempDir());
+    const runId = "native-retained-tracker-route-v1";
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION_V1,
+      runId,
+      repoPath: "/repos/momentum",
+      objective: "Route a retained tracker step",
+      now: NOW,
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      route: {
+        steps: {
+          "linear-refresh": {
+            harness: "codex",
+            model: "gpt-5.1",
+            effort: "low",
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveWorkflowStepDispatchRouteSelection(db, {
+        runId,
+        stepId: "linear-refresh",
+      }),
+    ).toEqual({
+      ok: true,
+      selection: {
+        agentProvider: "codex",
+        model: "gpt-5.1",
+        effort: "low",
       },
     });
   });

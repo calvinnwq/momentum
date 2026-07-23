@@ -3611,6 +3611,126 @@ VALUES
     }
   });
 
+  it("does not query missing executor_definitions during a read-only probe", () => {
+    const dataDir = makeTempDir("momentum-nam02-missing-executor-definitions-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE executor_attempts (
+          attempt_id TEXT,
+          executor TEXT,
+          state TEXT,
+          legacy_provenance TEXT
+        );
+        CREATE TABLE executor_rounds (
+          round_id TEXT,
+          attempt_id TEXT,
+          executor TEXT
+        );
+        CREATE TABLE executor_checkpoints (
+          round_id TEXT,
+          stage TEXT,
+          detail TEXT
+        );
+        INSERT INTO executor_attempts
+          (attempt_id, executor, state, legacy_provenance)
+        VALUES ('partial-attempt', 'no-mistakes', 'succeeded', NULL);
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    db?.close();
+  });
+
+  it("rekeys both retained route aliases with canonical-key precedence", () => {
+    const dataDir = makeTempDir("momentum-nam02-route-aliases-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          route_json TEXT NOT NULL DEFAULT '{}'
+        ) STRICT;
+        INSERT INTO workflow_runs (id, route_json) VALUES
+          (
+            'route-collision',
+            '{"steps":{"no-mistakes":{"model":"legacy","effort":"low"},"validate":{"model":"canonical"}}}'
+          ),
+          (
+            'route-linear-refresh',
+            '{"steps":{"linear-refresh":{"model":"tracker"}}}'
+          );
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        db
+          ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
+          .get("route-collision"),
+      ).toEqual({
+        route_json:
+          '{"steps":{"validate":{"model":"canonical","effort":"low"}}}',
+      });
+      expect(
+        db
+          ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
+          .get("route-linear-refresh"),
+      ).toEqual({
+        route_json: '{"steps":{"tracker-refresh":{"model":"tracker"}}}',
+      });
+    } finally {
+      db?.close();
+    }
+  });
+
+  it("returns a read-only handle immediately when a legacy vocabulary writer holds the lock", () => {
+    const dataDir = makeTempDir("momentum-nam02-readonly-lock-");
+    const initial = openDb(dataDir);
+    initial
+      .prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, route_json, created_at, updated_at)
+         VALUES ('locked-legacy-run', 'running', 'test', '{}', '{}', 1, 1)`,
+      )
+      .run();
+    initial
+      .prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+         VALUES ('locked-legacy-run', 'no-mistakes', 'no-mistakes', 'running', 0, 1, 1, 1)`,
+      )
+      .run();
+    initial.close();
+
+    const writer = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    writer.exec("BEGIN IMMEDIATE");
+    try {
+      const startedAt = Date.now();
+      const db = openExistingDbMigratedReadOnly(dataDir);
+      expect(db).toBeDefined();
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      expect(
+        db
+          ?.prepare(
+            "SELECT kind FROM workflow_steps WHERE run_id = 'locked-legacy-run'",
+          )
+          .get(),
+      ).toEqual({ kind: "no-mistakes" });
+      db?.close();
+    } finally {
+      writer.exec("ROLLBACK");
+      writer.close();
+    }
+  });
+
   it("does not take a write lock when opening a current database read-only", () => {
     const dataDir = makeTempDir("momentum-nam02-current-readonly-lock-");
     const writer = openDb(dataDir);

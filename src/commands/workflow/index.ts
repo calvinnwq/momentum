@@ -8,6 +8,7 @@ import {
 } from "../../renderers/cli-output.js";
 import {
   configuredExecutorNames,
+  hasDurableExecutorDefinition,
   isUniqueViolation,
   openDb,
   openExistingDbMigratedReadOnly,
@@ -820,10 +821,19 @@ async function runWorkflowStartCommand(
   if (options.preview === true) {
     const input = preflightedCodingInput;
     if (input === undefined) throw new Error("Missing coding preflight input.");
-    const previewResult = materializeWorkflowCodingPlanPreview(input, {
-      isRegistered: (executorName) =>
-        configuredExecutorRegistry.has(executorName),
-    });
+    const durablePreviewDb = openExistingDbReadOnly(dataDir);
+    let previewResult;
+    try {
+      previewResult = materializeWorkflowCodingPlanPreview(input, {
+        isRegistered: (executorName) =>
+          configuredExecutorRegistry.has(executorName),
+        isDurablyClaimed: (executorName) =>
+          durablePreviewDb !== undefined &&
+          hasDurableExecutorDefinition(durablePreviewDb, executorName),
+      });
+    } finally {
+      durablePreviewDb?.close();
+    }
     if (!previewResult.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,

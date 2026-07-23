@@ -1183,6 +1183,7 @@ export type WorkflowStepDispatchContext = {
    */
   isRegisteredExecutor?: (executorName: string) => boolean;
   isDurablyClaimedExecutor?: (executorName: string) => boolean;
+  isCanonicalBuiltInExecutor?: (executorName: string) => boolean;
   /** Optional SDK hook that binds the attempt and first round atomically. */
   materializeOwnedRound?: (input: {
     attempt: ExecutorAttemptRecord;
@@ -1505,13 +1506,13 @@ function isOwnedResumableSdkExecutor(
   claimedExecutorNames?: ReadonlySet<string>,
 ): boolean {
   if (NATIVE_RESUMABLE_SDK_EXECUTORS.has(executor)) return true;
+  if (LEGACY_SUPPORTED_EXECUTORS.has(executor)) return true;
   if (
     claimedExecutorNames?.has(executor) !== true &&
     !hasExecutorDefinition(db, executor)
   ) {
     return false;
   }
-  if (LEGACY_SUPPORTED_EXECUTORS.has(executor)) return true;
   return NATIVE_RESUMABLE_SDK_EXECUTORS.has(
     canonicalExecutorIdentity(executor),
   );

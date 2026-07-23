@@ -58,6 +58,7 @@ export type RegisteredExecutorHostBindingsResolver = (input: {
 
 export type RegisteredExecutorWorkflowDispatchOptions = {
   registry: ExecutorRegistry;
+  canonicalBuiltInExecutorNames?: ReadonlySet<string>;
   unavailableReasons?: ReadonlyMap<string, string>;
   resolveHostBindings?: RegisteredExecutorHostBindingsResolver;
   resolveOwnedRoundMaterializer?: (input: {
@@ -135,11 +136,14 @@ export function createRegisteredExecutorWorkflowDispatch(
     const isDurablyClaimedExecutor = (name: string): boolean =>
       hasExecutorDefinition(context.db, name) ||
       options.unavailableReasons?.has(name) === true;
+    const isCanonicalBuiltInExecutor = (name: string): boolean =>
+      options.canonicalBuiltInExecutorNames?.has(name) === true;
     runtime = {
       ...runtime,
       executorName: effectiveStepExecutor(runtime.executorName, {
         isRegistered: isRegisteredExecutor,
         isDurablyClaimed: isDurablyClaimedExecutor,
+        isCanonicalBuiltIn: isCanonicalBuiltInExecutor,
       }),
     };
 
@@ -201,6 +205,7 @@ export function createRegisteredExecutorWorkflowDispatch(
         executorOwnsRounds: true,
         isRegisteredExecutor,
         isDurablyClaimedExecutor,
+        isCanonicalBuiltInExecutor,
         ...(materializeOwnedRound === undefined
           ? {}
           : { materializeOwnedRound }),
@@ -220,6 +225,7 @@ export function createRegisteredExecutorWorkflowDispatch(
         executorOwnsRounds: true,
         isRegisteredExecutor,
         isDurablyClaimedExecutor,
+        isCanonicalBuiltInExecutor,
         materializeOwnedRound: ({
           attempt,
           now,

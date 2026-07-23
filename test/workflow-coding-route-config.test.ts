@@ -323,6 +323,27 @@ describe("readCodingStepRouteOverrides — persisted read-back", () => {
     expect(result.overrides).toEqual({ implementation: { model: "opus" } });
   });
 
+  it("projects retained legacy step aliases before validating persisted routes", () => {
+    const result = readCodingStepRouteOverrides({
+      [CODING_ROUTE_STEPS_KEY]: {
+        "linear-refresh": { model: "opus" },
+      },
+    });
+    expect(result).toEqual({
+      ok: true,
+      overrides: { "tracker-refresh": { model: "opus" } },
+    });
+  });
+
+  it("keeps fresh tracker-refresh route configuration unsupported", () => {
+    const result = validateCodingStepRouteOverrides({
+      "tracker-refresh": { model: "opus" },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected refusal");
+    expect(result.refusal).toBe("step_unsupported");
+  });
+
   it("fails closed when the persisted steps namespace is corrupt", () => {
     const result = readCodingStepRouteOverrides({
       [CODING_ROUTE_STEPS_KEY]: { preflight: { model: "opus" } },

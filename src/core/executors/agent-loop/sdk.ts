@@ -56,6 +56,11 @@ export type GoalLoopExecutorHostBindings = {
   settleRepoOwnership?: (completionDurable: boolean) => void;
 };
 
+export const AGENT_LOOP_MECHANISM_SCHEMA =
+  "momentum.agent-loop.sdk-mechanism.v1";
+export const LEGACY_GOAL_LOOP_MECHANISM_SCHEMA =
+  "momentum.goal-loop.sdk-mechanism.v1";
+
 const AGENT_CONFIG_SCHEMA = {
   type: "object",
   properties: {
@@ -430,7 +435,7 @@ function durableDecisionDetail(
   mechanism: GoalLoopRoundMechanismResult,
 ): string {
   return JSON.stringify({
-    schema: "momentum.goal-loop.sdk-mechanism.v1",
+    schema: AGENT_LOOP_MECHANISM_SCHEMA,
     finalizeOutcome: mechanism.finalize.outcome,
     decision,
   });
@@ -453,7 +458,8 @@ function resumeCompletedRound(
     decision?: unknown;
   };
   if (
-    parsed.schema !== "momentum.goal-loop.sdk-mechanism.v1" ||
+    (parsed.schema !== AGENT_LOOP_MECHANISM_SCHEMA &&
+      parsed.schema !== LEGACY_GOAL_LOOP_MECHANISM_SCHEMA) ||
     parsed.decision === null ||
     typeof parsed.decision !== "object"
   ) {

@@ -134,7 +134,11 @@ export function openExistingDbMigratedReadOnly(
   // preserving compatibility with intentionally partial historical event
   // databases that do not carry executor runtime tables.
   const migrationDb = new DatabaseSync(dbPath, {
-    timeout: SQLITE_BUSY_TIMEOUT_MS,
+    // A read-only command must not wait behind an unrelated writer while
+    // attempting an optional legacy vocabulary upgrade. If the upgrade cannot
+    // acquire the lock immediately, the read path below serves the immutable
+    // legacy rows through its compatibility projections.
+    timeout: 0,
   });
   let requiresFullMigration = false;
   try {
@@ -146,10 +150,14 @@ export function openExistingDbMigratedReadOnly(
       const executorClaims = configuredExecutorClaims(
         options.env ?? process.env,
       );
-      applyWorkflowVocabularyMigration(migrationDb, {
-        claimedExecutorNames: executorClaims.names,
-        executorClaimsKnown: executorClaims.known,
-      });
+      try {
+        applyWorkflowVocabularyMigration(migrationDb, {
+          claimedExecutorNames: executorClaims.names,
+          executorClaimsKnown: executorClaims.known,
+        });
+      } catch (error) {
+        if (!isSqliteBusyError(error)) throw error;
+      }
     }
   } finally {
     migrationDb.close();
@@ -164,6 +172,21 @@ export function openExistingDbMigratedReadOnly(
   });
 }
 
+/** Whether a current-schema database durably claims an executor identity. */
+export function hasDurableExecutorDefinition(
+  db: MomentumDb,
+  executorKey: string,
+): boolean {
+  if (!databaseTableExists(db, "executor_definitions")) return false;
+  return (
+    db
+      .prepare(
+        "SELECT 1 FROM executor_definitions WHERE executor_key = ? LIMIT 1",
+      )
+      .get(executorKey) !== undefined
+  );
+}
+
 function databaseTableExists(db: MomentumDb, table: string): boolean {
   return (
     db
@@ -171,6 +194,18 @@ function databaseTableExists(db: MomentumDb, table: string): boolean {
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
       )
       .get(table) !== undefined
+  );
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const errcode = (error as Error & { errcode?: number }).errcode;
+  return (
+    errcode === 5 ||
+    errcode === 6 ||
+    /database is locked|database table is locked|SQLITE_BUSY/i.test(
+      error.message,
+    )
   );
 }
 

@@ -197,6 +197,9 @@ export function executeWorkflowStepDispatch(
     isDurablyClaimed:
       context.isDurablyClaimedExecutor ??
       ((executor) => hasExecutorDefinition(db, executor)),
+    ...(context.isCanonicalBuiltInExecutor === undefined
+      ? {}
+      : { isCanonicalBuiltIn: context.isCanonicalBuiltInExecutor }),
   });
   return dispatchExecutorScaffold(
     db,

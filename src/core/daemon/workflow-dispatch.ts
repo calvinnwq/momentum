@@ -255,6 +255,16 @@ export function resolveDaemonWorkflowStepDispatch(
     };
   }
 
+  const canonicalBuiltInExecutorNames = new Set(
+    builtIns
+      .map((executor) => executor.name)
+      .filter(
+        (name) =>
+          executorConfig.status !== "configured" ||
+          !executorConfig.configuredNames.has(name),
+      ),
+  );
+
   let legacy: DaemonWorkflowDispatchResolution;
   if (profile.status === "not_configured") {
     legacy = {
@@ -287,6 +297,7 @@ export function resolveDaemonWorkflowStepDispatch(
         withExternalApplyDispatch(
           createRegisteredExecutorWorkflowDispatch(baseDispatch, {
             registry,
+            canonicalBuiltInExecutorNames,
             resolveHostBindings,
             resolveOwnedRoundMaterializer,
             // A delegated handoff is one durable SDK round; allow only that
@@ -318,7 +329,10 @@ export function resolveDaemonWorkflowStepDispatch(
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
       baseDispatch,
-      { registry: new Map() },
+      {
+        registry: new Map(),
+        canonicalBuiltInExecutorNames,
+      },
     );
     return {
       ok: true,
@@ -392,6 +406,7 @@ export function resolveDaemonWorkflowStepDispatch(
             baseDispatch,
             {
               registry: loaded.registry,
+              canonicalBuiltInExecutorNames,
               unavailableReasons,
               ...(profileHostBindings !== undefined
                 ? { resolveHostBindings: profileHostBindings }
@@ -434,6 +449,7 @@ function createMissingProfileNativeDispatch(
   );
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
+    canonicalBuiltInExecutorNames: new Set(NATIVE_PROFILE_EXECUTORS),
     resolveHostBindings: ({ claim, context, executorName }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
