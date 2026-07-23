@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb } from "../src/adapters/db.js";
+import { openDb, openExistingDbMigratedReadOnly } from "../src/adapters/db.js";
 import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
 import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
 import { selectRunnableWorkflowWork } from "../src/core/workflow/dispatch/scheduler.js";
@@ -3477,6 +3477,26 @@ VALUES
     }
   });
 
+  it("migrates a pre-rename database before returning a read-only handle", () => {
+    const dataDir = seedPreRenameDataDir();
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        getColumns(db!, "executor_attempts").map((row) => row.name),
+      ).toContain("executor");
+      expect(
+        db!
+          .prepare(
+            "SELECT executor FROM executor_attempts WHERE attempt_id = 'vocab-impl'",
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+    } finally {
+      db?.close();
+    }
+  });
+
   it("does not convert a provable no-mistakes row when durable configuration claims that identity", () => {
     const dataDir = seedPreRenameDataDir({
       claimNoMistakesDefinition: true,
@@ -3574,11 +3594,12 @@ VALUES
         )
         .get() as Record<string, unknown>;
       expect(converted.executor).toBe("delegate-supervisor");
-      // The conversion merges into the recorded provenance instead of
-      // clobbering it.
+      // The conversion records its authoritative origin while preserving a
+      // conflicting recorded value under a migration-specific key.
       expect(JSON.parse(String(converted.legacy_provenance))).toEqual({
         source: "legacy_invocation_row",
-        legacyExecutor: "recorded-value",
+        legacyExecutor: "no-mistakes",
+        legacyExecutorBeforeNam02VocabularyMigration: "recorded-value",
       });
       expect(
         db

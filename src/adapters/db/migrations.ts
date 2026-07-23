@@ -1474,6 +1474,27 @@ function isNoMistakesExternalIdentityDetail(detail: string | null): boolean {
   );
 }
 
+function withNoMistakesMigrationProvenance(
+  provenance: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const merged = { ...provenance };
+  if (
+    Object.hasOwn(provenance, "legacyExecutor") &&
+    provenance["legacyExecutor"] !== "no-mistakes"
+  ) {
+    const keyRoot = "legacyExecutorBeforeNam02VocabularyMigration";
+    let key = keyRoot;
+    let suffix = 2;
+    while (Object.hasOwn(merged, key)) {
+      key = `${keyRoot}${suffix}`;
+      suffix += 1;
+    }
+    merged[key] = provenance["legacyExecutor"];
+  }
+  merged["legacyExecutor"] = "no-mistakes";
+  return merged;
+}
+
 /**
  * Migrate durable rows onto the renamed executor and step-kind vocabulary, in
  * place and idempotently.
@@ -1501,9 +1522,10 @@ function isNoMistakesExternalIdentityDetail(detail: string | null): boolean {
  *   - A legacy `no-mistakes` executor attempt converts to
  *     `delegate-supervisor` only when it is terminal *and* its rounds hold a
  *     durable no-mistakes mirror checkpoint proving the external tool; the
- *     conversion merges `{"legacyExecutor":"no-mistakes"}` into the attempt's
- *     `legacy_provenance` without clobbering recorded keys. Anything short of
- *     that proof stays `no-mistakes` for the classified legacy reader.
+ *     conversion records `{"legacyExecutor":"no-mistakes"}` in the attempt's
+ *     `legacy_provenance`, preserving any conflicting prior value under a
+ *     collision-free migration key. Anything short of that proof stays
+ *     `no-mistakes` for the classified legacy reader.
  */
 function migrateWorkflowVocabulary(
   db: MomentumDb,
@@ -1663,7 +1685,7 @@ function migrateWorkflowVocabulary(
         provenance = parsed as Record<string, unknown>;
       }
       convertAttempt.run(
-        JSON.stringify({ legacyExecutor: "no-mistakes", ...provenance }),
+        JSON.stringify(withNoMistakesMigrationProvenance(provenance)),
         candidate.attempt_id,
       );
       convertRounds.run(candidate.attempt_id);
@@ -1674,6 +1696,13 @@ function migrateWorkflowVocabulary(
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+export function applyWorkflowVocabularyMigration(
+  db: MomentumDb,
+  options: QueueMigrationOptions = {},
+): void {
+  migrateWorkflowVocabulary(db, options);
 }
 
 function columnExists(db: MomentumDb, table: string, column: string): boolean {

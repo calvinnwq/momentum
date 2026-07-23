@@ -2786,6 +2786,101 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("does not resume a custom goal-loop through the native continuation lane", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-custom-goal-loop-continuation";
+      const stepId = "implementation";
+      seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+      seedStep(db, {
+        runId,
+        stepId,
+        kind: "implementation",
+        state: "running",
+        order: 0,
+      });
+      const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executor: "goal-loop",
+          state: "running",
+          attemptNumber: 1,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      const envelope = createDurableExecutorEnvelope({
+        db,
+        attemptId,
+        now: () => NOW,
+      });
+      const roundId = `${attemptId}::round-1`;
+      envelope.facade.startRound({
+        roundId,
+        attemptId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executor: "goal-loop",
+        attemptNumber: 1,
+        roundIndex: 0,
+        state: "running",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "custom goal-loop continuation",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      envelope.facade.recordCheckpoint(roundId, {
+        checkpointId: `${roundId}-mechanism-completed`,
+        sequence: 0,
+        stage: "mechanism_completed",
+        detail: JSON.stringify({ recommendation: "continue" }),
+      });
+      updateExecutorRound(db, roundId, { toState: "capturing_result" });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("idle");
+      expect(recorder.calls).toHaveLength(0);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("resumes an unclassified delegate gate observation", () => {
     const db = openDb(makeTempDir());
     try {

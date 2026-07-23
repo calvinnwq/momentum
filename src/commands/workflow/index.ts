@@ -7,8 +7,10 @@ import {
   type CliIo,
 } from "../../renderers/cli-output.js";
 import {
+  configuredExecutorNames,
   isUniqueViolation,
   openDb,
+  openExistingDbMigratedReadOnly,
   openExistingDbReadOnly,
   type MomentumDb,
 } from "../../adapters/db.js";
@@ -362,7 +364,10 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openExistingDbReadOnly(dataDir);
+  const db = openExistingDbMigratedReadOnly(
+    dataDir,
+    io.env === undefined ? {} : { env: io.env },
+  );
   if (db === undefined) {
     return emitWorkflowRunEventsFailure(parsed, io, {
       code: "run_not_found",
@@ -2567,7 +2572,10 @@ async function workflowRunWatchStream(
 
   let db: MomentumDb | undefined;
   try {
-    db = openExistingDbReadOnly(dataDir);
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
     if (db === undefined) {
       return emitStreamFailure({
         code: "run_not_found",
@@ -2841,8 +2849,10 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
   let envelope: WorkflowRunLogsEnvelope | null;
   let db: MomentumDb | undefined;
   try {
-    db = openDb(dataDir);
-    envelope = loadWorkflowRunLogs(db, runId);
+    db = openDb(dataDir, io.env === undefined ? {} : { env: io.env });
+    envelope = loadWorkflowRunLogs(db, runId, {
+      claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
+    });
   } catch (err) {
     return emitWorkflowRunLogsFailure(parsed, io, {
       code: "data_dir_failed",

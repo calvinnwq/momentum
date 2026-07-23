@@ -44,10 +44,11 @@ export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 3;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
+  claimedExecutorNames?: ReadonlySet<string>;
 };
 
 export type WorkflowRunLogRound = ExecutorRoundRecord & {
-  executorIdentityDurablyClaimed: boolean;
+  executorIdentityClaimed: boolean;
   artifacts: ExecutorArtifactRecord[];
   checkpoints: ExecutorCheckpointRecord[];
   findings: ExecutorFindingRecord[];
@@ -73,7 +74,9 @@ export function loadWorkflowRunLogs(
   const attempts = listExecutorAttemptsForRun(db, runId);
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
-    executorIdentityDurablyClaimed: hasExecutorDefinition(db, round.executor),
+    executorIdentityClaimed:
+      hasExecutorDefinition(db, round.executor) ||
+      options.claimedExecutorNames?.has(round.executor) === true,
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
     checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
     findings: listExecutorFindingsForRound(db, round.roundId),

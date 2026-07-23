@@ -2,9 +2,16 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
-import { applyQueueMigrations } from "./db/migrations.js";
+import {
+  applyQueueMigrations,
+  applyWorkflowVocabularyMigration,
+} from "./db/migrations.js";
 
 export type MomentumDb = DatabaseSync;
+
+export type OpenDbOptions = {
+  env?: Record<string, string | undefined>;
+};
 
 const EXECUTOR_CONFIG_ENV_VAR = "MOMENTUM_EXECUTOR_CONFIG";
 
@@ -49,18 +56,21 @@ CREATE TABLE IF NOT EXISTS events (
 ) STRICT;
 `;
 
-export function openDb(dataDir: string): MomentumDb {
+export function openDb(
+  dataDir: string,
+  options: OpenDbOptions = {},
+): MomentumDb {
   fs.mkdirSync(dataDir, { recursive: true });
   const dbPath = path.join(dataDir, "momentum.db");
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
   applyQueueMigrations(db, {
-    claimedExecutorNames: configuredExecutorNames(process.env),
+    claimedExecutorNames: configuredExecutorNames(options.env ?? process.env),
   });
   return db;
 }
 
-function configuredExecutorNames(
+export function configuredExecutorNames(
   env: Record<string, string | undefined>,
 ): ReadonlySet<string> {
   // Migrations run before daemon module loading, so read only the configured
@@ -99,6 +109,49 @@ export function openExistingDbReadOnly(
     return undefined;
   }
   return new DatabaseSync(dbPath, { readOnly: true });
+}
+
+export function openExistingDbMigratedReadOnly(
+  dataDir: string,
+  options: OpenDbOptions = {},
+): MomentumDb | undefined {
+  const dbPath = path.join(dataDir, "momentum.db");
+  if (!fs.existsSync(dbPath)) {
+    return undefined;
+  }
+  // Current executor readers query the renamed columns. Apply only the
+  // vocabulary migration when those legacy columns are present, preserving
+  // compatibility with intentionally partial historical event databases.
+  const migrationDb = new DatabaseSync(dbPath);
+  try {
+    if (
+      databaseColumnExists(
+        migrationDb,
+        "executor_attempts",
+        "executor_family",
+      ) ||
+      databaseColumnExists(migrationDb, "executor_rounds", "executor_family")
+    ) {
+      applyWorkflowVocabularyMigration(migrationDb, {
+        claimedExecutorNames: configuredExecutorNames(
+          options.env ?? process.env,
+        ),
+      });
+    }
+  } finally {
+    migrationDb.close();
+  }
+  return new DatabaseSync(dbPath, { readOnly: true });
+}
+
+function databaseColumnExists(
+  db: MomentumDb,
+  table: string,
+  column: string,
+): boolean {
+  return (
+    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  ).some((row) => row.name === column);
 }
 
 const SQLITE_CONSTRAINT_UNIQUE = 2067;

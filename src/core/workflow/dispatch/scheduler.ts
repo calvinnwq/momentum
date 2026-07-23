@@ -85,7 +85,6 @@ import {
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryArtifactInput,
 } from "../recovery/artifact.js";
-import { canonicalExecutorIdentity } from "../definition/legacy.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
 import {
   classifyWorkflowLease,
@@ -1425,9 +1424,7 @@ function isResumableRegisteredSdkTick(
   // Only an SDK-owned dispatch can durably expose a roundless attempt.
   if (
     (attempt.executor === "delegate-supervisor" ||
-      NATIVE_RESUMABLE_SDK_EXECUTORS.has(
-        canonicalExecutorIdentity(attempt.executor),
-      )) &&
+      NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executor)) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1449,9 +1446,7 @@ function isResumableRegisteredSdkTick(
   }
   if (round.classification === "continue") return true;
   if (
-    NATIVE_RESUMABLE_SDK_EXECUTORS.has(
-      canonicalExecutorIdentity(attempt.executor),
-    ) &&
+    NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executor) &&
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(

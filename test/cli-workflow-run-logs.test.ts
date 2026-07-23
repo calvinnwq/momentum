@@ -46,7 +46,10 @@ function makeTempDir(prefix = "momentum-cli-workflow-run-logs-"): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: Record<string, string | undefined> = {},
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
@@ -62,7 +65,7 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       },
     },
-    env: {},
+    env,
   });
   return { code, stdout, stderr };
 }
@@ -990,6 +993,61 @@ describe("momentum workflow run logs", () => {
       rounds: Array<{ nativeRoundEvidence: unknown }>;
     };
     expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
+  it("does not emit native evidence for a config-only unavailable goal-loop executor", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-unavailable-goal-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      insertExecutorAttempt(
+        db,
+        { ...makeAttempt(runId), executor: "goal-loop" },
+        { now: 1 },
+      );
+      insertExecutorRound(
+        db,
+        makeRound(runId, {
+          executor: "goal-loop",
+          state: "manual_recovery_required",
+          classification: "operator_decision_required",
+          recoveryCode: "runtime_unavailable",
+        }),
+        { now: 1 },
+      );
+    } finally {
+      db.close();
+    }
+    const configPath = path.join(dataDir, "executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ executors: { "goal-loop": "./missing.mjs" } }),
+    );
+
+    const result = await run(
+      ["workflow", "run", "logs", runId, "--data-dir", dataDir, "--json"],
+      { MOMENTUM_EXECUTOR_CONFIG: configPath },
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ executor: string; nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]).toMatchObject({
+      executor: "goal-loop",
+      nativeRoundEvidence: null,
+    });
   });
 
   it("renders text output with schema version and round log lines", async () => {
