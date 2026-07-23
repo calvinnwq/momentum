@@ -103,6 +103,9 @@ describe("agent-loop contract docs", () => {
 
   it("freezes the post-finalization round evidence JSON fixture", () => {
     const fixture = JSON.parse(
+      readRepoFile("test/fixtures/native-agent-loop-round-evidence.json"),
+    ) as Record<string, unknown>;
+    const legacyFixture = JSON.parse(
       readRepoFile("test/fixtures/native-goal-loop-round-evidence.json"),
     ) as Record<string, unknown>;
 
@@ -122,7 +125,7 @@ describe("agent-loop contract docs", () => {
       "remainingWork",
     ]);
     expect(fixture).toMatchObject({
-      schema: "momentum.native-goal-loop.round-result.v1",
+      schema: "momentum.native-agent-loop.round-result.v1",
       completionRecommendation: "continue",
       daemonClassification: "continue",
       verificationResult: {
@@ -137,8 +140,14 @@ describe("agent-loop contract docs", () => {
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       recoveryReason: null,
     });
+    expect(legacyFixture.schema).toBe(
+      "momentum.native-goal-loop.round-result.v1",
+    );
     expect(spec).toContain(
-      "The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection",
+      "The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection",
+    );
+    expect(spec).toContain(
+      "The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts",
     );
     expect(spec).toContain(
       "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.",

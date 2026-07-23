@@ -2394,6 +2394,7 @@ Post-finalization native round evidence exposes the executor's `completionRecomm
 It exposes Momentum's post-policy daemon decision separately as `daemonClassification`, so quota, recovery, and operator gates do not overwrite what the executor recommended.
 When the native agent-loop mechanism receives a usable absolute verification log path, it writes `commit_or_reset_evidence` at `<verification-log>.finalization.json` with a content digest and stable `momentum.goal-loop.finalization-evidence.v1` outcome metadata.
 For `agent-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
+Retained unclaimed `goal-loop` rounds may keep the legacy `momentum.native-goal-loop.round-result.v1` schema so frozen artifacts remain readable.
 For non-`agent-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
 The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while retained legacy definitions follow the raw-identity compatibility rule in [SPEC.md](../SPEC.md) when running beneath the legacy `goal-loop` spelling.
@@ -2508,7 +2509,7 @@ Rounds are returned across every attempt in the run, ordered by step key, then a
       "keyLearnings": ["use durable round state for follow-up input"],
       "learnings": ["use durable round state for follow-up input"],
       "nativeRoundEvidence": {
-        "schema": "momentum.native-goal-loop.round-result.v1",
+        "schema": "momentum.native-agent-loop.round-result.v1",
         "summary": "implemented the slice",
         "keyChanges": ["added reader"],
         "learnings": ["use durable round state for follow-up input"],

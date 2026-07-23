@@ -566,7 +566,7 @@ describe("momentum workflow run logs", () => {
       "operator readback needs durable learnings",
     ]);
     expect(round.nativeRoundEvidence).toEqual({
-      schema: "momentum.native-goal-loop.round-result.v1",
+      schema: "momentum.native-agent-loop.round-result.v1",
       summary: "implemented the slice",
       keyChanges: ["added reader"],
       learnings: ["operator readback needs durable learnings"],

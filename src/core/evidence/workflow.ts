@@ -34,6 +34,7 @@ import path from "node:path";
 import type { EvidenceRecordIngestInput } from "./records.js";
 import {
   canonicalWorkflowStepKind,
+  legacyApprovalBoundarySynonyms,
   LEGACY_STEP_KIND_ALIASES,
 } from "../workflow/definition/legacy.js";
 
@@ -591,6 +592,8 @@ function parseApprovalFile(
   }
   const effectiveOccurredAt =
     occurredAt ?? (stat ? Math.floor(stat.mtimeMs) : 0);
+  const boundarySynonyms = legacyApprovalBoundarySynonyms(boundary);
+  const identityBoundary = boundarySynonyms[0] ?? boundary;
 
   sources.push({ kind: "approval", path: filePath, runId });
 
@@ -617,7 +620,12 @@ function parseApprovalFile(
     sourceItemId: options.sourceItemId ?? null,
     runId,
     stepId: null,
-    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${boundary}`,
+    ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${identityBoundary}`,
+    legacyIngestKeys: boundarySynonyms
+      .slice(1)
+      .map(
+        (synonym) => `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${synonym}`,
+      ),
   });
 }
 

@@ -222,4 +222,28 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       expect(JSON.stringify(definition)).toBe(frozen);
     },
   );
+
+  it("preserves retained executor identities claimed by the registry", () => {
+    const result = materializeWorkflowCodingPlanPreview(
+      baseInput({ definition: CODING_WORKFLOW_DEFINITION_V1 }),
+      {
+        isRegistered: (executor) =>
+          executor === "goal-loop" || executor === "one-shot",
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.preview.steps
+        .filter(
+          (step) =>
+            step.stepId === "implementation" || step.stepId === "preflight",
+        )
+        .map((step) => [step.stepId, step.executor]),
+    ).toEqual([
+      ["preflight", "one-shot"],
+      ["implementation", "goal-loop"],
+    ]);
+  });
 });

@@ -234,6 +234,7 @@ function dispatchExecutorScaffold(
       claim,
       now,
       selection,
+      executor,
       executorOwnsRounds,
       materializeOwnedRound,
     );
@@ -303,6 +304,7 @@ function dispatchRetryScaffold(
   claim: ClaimedWorkflowStep,
   now: number,
   selection: CodingStepExecutorSelection,
+  executor: ExecutorName,
   executorOwnsRounds: boolean,
   materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): ReturnType<typeof startRetryableDispatchAttempt> {
@@ -323,6 +325,7 @@ function dispatchRetryScaffold(
       now,
       stepState: "running",
       selection,
+      executor,
       executorOwnsRounds,
     });
     if (!retried.started) {

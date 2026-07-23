@@ -211,6 +211,8 @@ export function startRetryableDispatchAttempt(
     now: number;
     stepState?: RetryableStepState;
     selection?: RetryRoundSelection;
+    /** Current dispatch resolution, which may differ from the prior attempt. */
+    executor?: ExecutorName;
     executorOwnsRounds?: boolean;
   },
 ): StartRetryableDispatchAttemptResult {
@@ -251,7 +253,7 @@ export function startRetryableDispatchAttempt(
             workflowRunId: retryable.runId,
             stepRunId: retryable.stepId,
             stepKey: retryable.stepId,
-            executor: retryable.executor,
+            executor: input.executor ?? retryable.executor,
             state: "running",
             attemptNumber: nextAttemptNumber,
             startedAt: input.now,
@@ -288,6 +290,7 @@ export function startRetryableDispatchAttempt(
         nextAttemptNumber,
         nextRoundIndex,
         input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
+        input.executor ?? retryable.executor,
       );
       let nextRoundId = canonicalRound.roundId;
       let roundAllocationSuffix = 0;
@@ -397,6 +400,7 @@ function buildRetryRound(
   attemptNumber: number,
   roundIndex: number,
   selection: RetryRoundSelection,
+  executor: ExecutorName,
 ): ExecutorRoundRecord {
   return {
     roundId: `${attemptId}::round-${roundIndex}`,
@@ -404,7 +408,7 @@ function buildRetryRound(
     workflowRunId: retryable.runId,
     stepRunId: retryable.stepId,
     stepKey: retryable.stepId,
-    executor: retryable.executor,
+    executor,
     attemptNumber,
     roundIndex,
     state: "pending",

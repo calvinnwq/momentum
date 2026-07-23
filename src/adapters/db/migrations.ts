@@ -1753,7 +1753,152 @@ export function applyWorkflowVocabularyMigration(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
 ): void {
+  if (!workflowVocabularyMigrationNeeded(db, options)) return;
   migrateWorkflowVocabulary(db, options);
+}
+
+/**
+ * Avoid taking a write lock for current-schema read-only database opens.
+ * Legacy rows still opt into the existing in-place migration, while a current
+ * database with no mutable legacy vocabulary can be opened without a
+ * `BEGIN IMMEDIATE` side effect.
+ */
+function workflowVocabularyMigrationNeeded(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): boolean {
+  for (const [table, column] of [
+    ["executor_attempts", "executor_family"],
+    ["executor_rounds", "executor_family"],
+    ["executor_definitions", "family"],
+  ] as const) {
+    if (columnExists(db, table, column)) return true;
+  }
+
+  if (
+    columnHasValue(db, "workflow_steps", "kind", "no-mistakes") ||
+    columnHasValue(db, "workflow_steps", "kind", "linear-refresh") ||
+    columnHasValue(db, "workflow_runs", "approval_boundary", "no-mistakes") ||
+    columnHasValue(
+      db,
+      "workflow_runs",
+      "approval_boundary",
+      "through-no-mistakes",
+    )
+  ) {
+    return true;
+  }
+
+  if (columnHasSubstring(db, "workflow_runs", "route_json", '"no-mistakes"')) {
+    return true;
+  }
+
+  for (const oldValue of renameableLegacyExecutorValues(db, options).keys()) {
+    if (
+      columnHasValue(db, "executor_attempts", "executor", oldValue) ||
+      columnHasValue(db, "executor_rounds", "executor", oldValue) ||
+      executorDefinitionHasValue(db, oldValue)
+    ) {
+      return true;
+    }
+  }
+
+  return hasProvableNoMistakesMigrationCandidate(db, options);
+}
+
+function columnHasValue(
+  db: MomentumDb,
+  table: string,
+  column: string,
+  value: string,
+): boolean {
+  if (!columnExists(db, table, column)) return false;
+  return (
+    db
+      .prepare(`SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`)
+      .get(value) !== undefined
+  );
+}
+
+function columnHasSubstring(
+  db: MomentumDb,
+  table: string,
+  column: string,
+  value: string,
+): boolean {
+  if (!columnExists(db, table, column)) return false;
+  return (
+    db
+      .prepare(`SELECT 1 FROM ${table} WHERE ${column} LIKE ? LIMIT 1`)
+      .get(`%${value}%`) !== undefined
+  );
+}
+
+function executorDefinitionHasValue(db: MomentumDb, oldValue: string): boolean {
+  if (
+    !columnExists(db, "executor_definitions", "executor") ||
+    !columnExists(db, "executor_definitions", "executor_key")
+  ) {
+    return false;
+  }
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM executor_definitions
+          WHERE executor = ? AND executor_key <> ? LIMIT 1`,
+      )
+      .get(oldValue, oldValue) !== undefined
+  );
+}
+
+function hasProvableNoMistakesMigrationCandidate(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): boolean {
+  if (
+    !columnExists(db, "executor_attempts", "attempt_id") ||
+    !columnExists(db, "executor_attempts", "executor") ||
+    !columnExists(db, "executor_attempts", "state") ||
+    !columnExists(db, "executor_attempts", "legacy_provenance") ||
+    !columnExists(db, "executor_rounds", "round_id") ||
+    !columnExists(db, "executor_rounds", "attempt_id") ||
+    !columnExists(db, "executor_rounds", "executor") ||
+    !columnExists(db, "executor_checkpoints", "round_id") ||
+    !columnExists(db, "executor_checkpoints", "stage") ||
+    !columnExists(db, "executor_checkpoints", "detail") ||
+    executorIdentityIsClaimed(db, "no-mistakes", options) ||
+    executorIdentityIsClaimed(db, "delegate-supervisor", options)
+  ) {
+    return false;
+  }
+
+  const terminalStates = [...LEGACY_TERMINAL_ATTEMPT_STATES];
+  const candidates = db
+    .prepare(
+      `SELECT attempt_id FROM executor_attempts
+        WHERE executor = 'no-mistakes'
+          AND NOT EXISTS (
+            SELECT 1 FROM executor_definitions
+             WHERE executor_key = 'no-mistakes'
+          )
+          AND state IN (${terminalStates.map(() => "?").join(", ")})`,
+    )
+    .all(...terminalStates) as Array<{ attempt_id: string }>;
+  const stageList = NO_MISTAKES_MIRROR_CHECKPOINT_STAGES.map(
+    (stage) => `'${stage}'`,
+  ).join(", ");
+  const markers = db.prepare(
+    `SELECT c.detail
+       FROM executor_checkpoints AS c
+       JOIN executor_rounds AS r ON r.round_id = c.round_id
+      WHERE r.attempt_id = ?
+        AND c.stage IN (${stageList})`,
+  );
+  return candidates.some((candidate) =>
+    (
+      markers.all(candidate.attempt_id) as Array<{ detail: string | null }>
+    ).some((marker) => isNoMistakesExternalIdentityDetail(marker.detail)),
+  );
 }
 
 function columnExists(db: MomentumDb, table: string, column: string): boolean {

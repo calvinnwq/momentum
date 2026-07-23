@@ -369,6 +369,50 @@ describe("momentum evidence ingest", () => {
     }
   });
 
+  it("deduplicates mixed legacy and canonical approval boundary spellings", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runId = "cwfp-approval-alias-idem";
+    const runDir = path.join(workflowRoot, runId);
+    writeJsonFile(path.join(runDir, "approval-no-mistakes.json"), {
+      runId,
+      boundary: "no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z",
+    });
+    writeJsonFile(path.join(runDir, "approval-validate.json"), {
+      runId,
+      boundary: "validate",
+      approvedAt: "2026-05-17T09:01:00Z",
+    });
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      counts: { observed: 2, created: 1, skipped: 1 },
+    });
+
+    const db = openDb(dataDir);
+    try {
+      expect(listEvidenceRecords(db, {})).toMatchObject([
+        {
+          type: "step_approved",
+          ingestKey: `agent-workflow:${runId}:approval:validate`,
+          metadata: { boundary: "no-mistakes" },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it.each([
     ["validate", "no-mistakes", "validate_complete"],
     ["no-mistakes", "validate", "no_mistakes_complete"],

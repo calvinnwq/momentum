@@ -54,6 +54,7 @@ import {
 import {
   canonicalWorkflowStepKind,
   effectiveStepExecutor,
+  type EffectiveExecutorOptions,
 } from "../definition/legacy.js";
 import {
   deriveWorkflowRunState,
@@ -370,6 +371,7 @@ function readImplementationEngine(
  */
 export function materializeWorkflowCodingPlanPreview(
   input: WorkflowRunStartInput,
+  executorOptions: EffectiveExecutorOptions = {},
 ): WorkflowCodingPlanPreviewResult {
   const result = materializeWorkflowRunStart(input);
   if (!result.ok) {
@@ -389,7 +391,10 @@ export function materializeWorkflowCodingPlanPreview(
     return {
       stepId: step.stepId,
       kind: step.kind,
-      executor: effectiveStepExecutor(definitionStep?.executor as ExecutorName),
+      executor: effectiveStepExecutor(
+        definitionStep?.executor as ExecutorName,
+        executorOptions,
+      ),
       ...(definitionStep?.config === undefined
         ? {}
         : { config: { ...definitionStep.config } }),

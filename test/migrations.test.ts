@@ -2663,6 +2663,12 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
            SET round_index = 8
          WHERE round_id = 'run-1::implementation::dispatch::round-1';
         UPDATE executor_attempts
+           SET executor = 'goal-loop'
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_rounds
+           SET executor = 'goal-loop'
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_attempts
            SET state = 'manual_recovery_required', finished_at = 2600
          WHERE attempt_id = 'run-1::implementation::dispatch';
         UPDATE executor_rounds
@@ -2676,6 +2682,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         stepId: "implementation",
         now: 3000,
         stepState: "running",
+        executor: "agent-loop",
       });
       expect(started).toMatchObject({
         started: true,
@@ -2683,6 +2690,19 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         attemptNumber: 3,
         roundIndex: 9,
       });
+      if (!started.started) throw new Error("expected retry attempt to start");
+      expect(
+        db
+          .prepare(
+            "SELECT executor FROM executor_attempts WHERE attempt_id = ?",
+          )
+          .get(started.attemptId),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        db
+          .prepare("SELECT executor FROM executor_rounds WHERE attempt_id = ?")
+          .get(started.attemptId),
+      ).toEqual({ executor: "agent-loop" });
       const attempts = db
         .prepare(
           `SELECT attempt_id, state, attempt_number FROM executor_attempts
@@ -3588,6 +3608,26 @@ VALUES
       ).toEqual({ step_id: "no-mistakes", kind: "validate" });
     } finally {
       db?.close();
+    }
+  });
+
+  it("does not take a write lock when opening a current database read-only", () => {
+    const dataDir = makeTempDir("momentum-nam02-current-readonly-lock-");
+    const writer = openDb(dataDir);
+    writer.exec("BEGIN IMMEDIATE");
+    let readOnly: ReturnType<typeof openExistingDbMigratedReadOnly>;
+    try {
+      readOnly = openExistingDbMigratedReadOnly(dataDir);
+      expect(readOnly).toBeDefined();
+      expect(
+        readOnly!
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .get(),
+      ).toBeDefined();
+    } finally {
+      readOnly?.close();
+      writer.exec("ROLLBACK");
+      writer.close();
     }
   });
 

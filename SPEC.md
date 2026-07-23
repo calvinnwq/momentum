@@ -316,7 +316,8 @@ Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaki
 
 After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
 Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
-The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts and is not emitted for current canonical rounds.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 `daemonClassification` is Momentum's persisted daemon classification after budget, recovery, and operator-gate policy are applied.

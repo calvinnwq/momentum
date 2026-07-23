@@ -1580,7 +1580,10 @@ function workflowNativeRoundEvidence(
   round: WorkflowRunLogRound,
 ): Record<string, unknown> {
   return {
-    schema: "momentum.native-goal-loop.round-result.v1",
+    schema:
+      round.executor === "goal-loop"
+        ? "momentum.native-goal-loop.round-result.v1"
+        : "momentum.native-agent-loop.round-result.v1",
     summary: round.summary,
     keyChanges: round.keyChanges,
     learnings: round.keyLearnings,
