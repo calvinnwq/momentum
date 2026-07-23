@@ -96,7 +96,7 @@ The native `agent-loop` executor renders deterministic per-round prompts through
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_attempts` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 The concrete agent-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
-The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while retained legacy definitions may still run it beneath the legacy `goal-loop` spelling (projected to `agent-loop`).
+The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while retained legacy definitions follow the raw-identity compatibility rule in `SPEC.md` when running beneath the legacy `goal-loop` spelling.
 In both cases it must report through Momentum attempt and round evidence rather than become an executor identity or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization

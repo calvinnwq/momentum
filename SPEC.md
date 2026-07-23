@@ -30,7 +30,8 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 - The goal-first CLI lane and its goal-iteration execution mechanism are
   retired. `Goal`, `Iteration`, and `Job` rows remain durable compatibility
   data served by `recovery clear`, daemon status/startup recovery, and doctor.
-  `agent-loop` (recorded pre-rename as `goal-loop`) remains an executor.
+  `agent-loop` (recorded pre-rename as `goal-loop`) remains an executor when
+  the raw legacy identity is not claimed.
 
 Built-in executor identities currently include `agent-loop`, `agent-once`,
 `script`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
@@ -38,12 +39,15 @@ Profile-backed registration and native binding details are owned by [Executor SD
 Step definitions may also name arbitrary valid permanent identities supplied by
 the configured executor registry.
 Recorded definitions stay byte-for-byte immutable, so retired spellings remain
-readable through one shared non-mutating legacy projection: `goal-loop` and
-`one-shot` executors project to `agent-loop` and `agent-once`, the
+readable through one shared non-mutating legacy projection: `goal-loop` projects
+to `agent-loop` and `one-shot` projects to `agent-once`, the
 `no-mistakes` and `linear-refresh` step kinds project to `validate` and
 `tracker-refresh`, and the legacy `no-mistakes` executor identity stays
 dispatchable as-is for retained definitions. A registered executor's raw name
-always wins over an alias, so user-defined identities are never rewritten.
+always wins over an alias, and durable executor definitions claim their raw
+identity for safe stale reattachment as well. Unclaimed legacy aliases are
+compatibility projections only; they do not become native executor
+registrations.
 The current `coding-workflow` definition (version 3) classifies the
 implementation and validate steps as `delegate-supervisor`, with
 `{ "tool": "gnhf" }` and `{ "tool": "no-mistakes" }` stored as portable step
@@ -335,12 +339,12 @@ The loop must preserve no duplicate completed rounds and no duplicate commits by
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
 If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
 
-GNHF is source material, a compatibility reference, or an optional runner below the legacy `goal-loop` spelling for retained definitions; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
+GNHF is source material, a compatibility reference, or an optional runner below the legacy `goal-loop` spelling for retained definitions when that raw identity is unclaimed; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
 GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native agent-loop runner mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
 Momentum's durable source of truth is the workflow run, step, executor attempt, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
 `gnhf` must not become a first-class executor merely to reuse behavior.
-Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum attempt and round records instead of making `.gnhf/runs` authoritative.
+Whether delegated through `delegate-supervisor` or used beneath an unclaimed legacy `goal-loop` identity, GNHF must report into Momentum attempt and round records instead of making `.gnhf/runs` authoritative.
 
 ## Workflow Safety
 

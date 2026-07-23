@@ -41,6 +41,7 @@ preflight and daemon dispatch resolve the same implementation.
 
 Executor names are permanent durable identities.
 Status, recovery, and historical-run reads use recorded rows and never import the module that originally produced them.
+Compatibility migration applies the raw-identity claim rule in [SPEC.md](../SPEC.md), preserving claimed legacy names for safe stale reattachment without registering unclaimed aliases as native executors.
 At dispatch, a missing registration settles the attempt as `manual_recovery_required` with `runtime_unavailable`.
 Workflow reconciliation then parks the run behind its standard `manual_recovery_required` step gate.
 After the executor is installed or repaired, `workflow run clear-recovery` prepares the step for a new attempt; the next scheduler pass inserts a fresh immutable attempt with the next attempt number without discarding the refused attempt or its round.

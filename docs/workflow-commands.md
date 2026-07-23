@@ -22,12 +22,15 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
   `--once` emits a one-shot supervisor envelope for a Momentum-native coding run: it safely runs at most one run-scoped dispatcher tick when the target run has one approved non-tail next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
   Approved `merge-cleanup` and `tracker-refresh` tail steps are surfaced as operator decisions instead of being started by the poller.
   `--stream --jsonl` instead opens a read-only, long-lived JSONL event stream over the durable event cursor API for a TUI, GUI, or sidecar, resumable from a `--since` cursor and bounded in memory.
+  On an older database, it applies the required in-place prerequisite migrations before opening the read-only handle.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
   It is the catch-up substrate for stream mode and discrete pollers, not a replacement for live polling by itself.
+  On an older database, it applies the required in-place prerequisite migrations before opening the read-only handle.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor attempts, executor rounds, and their child artifacts, checkpoints, findings, and decisions.
 
-`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
+`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only command surfaces: they do not mutate workflow, event, monitor, or artifact state.
+Opening an existing older database may still apply required in-place schema or vocabulary migrations; `workflow run events` and `workflow run watch --stream --jsonl` complete those prerequisites before taking their read-only handles.
 When `MOMENTUM_EXECUTOR_CONFIG` is set, preview imports its configured trusted
 modules for contract and schema preflight; the no-write guarantee covers
 Momentum state, not arbitrary module-initialization behavior.
@@ -614,7 +617,12 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
-- **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
+- **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged.
+  Retired `no-mistakes` and `through-no-mistakes` spellings are treated as synonyms of `validate` and `through-validate` for boundary ranking and gate coverage.
+  The run stores the canonical boundary, while frozen `workflow_approvals` rows retain their recorded spelling and digest.
+  The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval.
+  Stale same-boundary artifacts do not overwrite newer durable approval rows.
+  On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
 - **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view.
   When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
   The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
@@ -775,7 +783,7 @@ Boundary coverage:
 | `merge-cleanup`, `through-merge-cleanup` | `preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup` |
 | `full`, `final-cleanup`, `full-batch` | `preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh` |
 
-The command is idempotent by `(run-id, boundary)`; approving the same pair twice returns a stable duplicate refusal instead of creating duplicate rows.
+The command is idempotent by `(run-id, logical boundary)`; a canonical boundary and its retained legacy synonym return a stable duplicate refusal instead of creating duplicate rows.
 
 ### JSON envelope
 
@@ -813,7 +821,7 @@ When `--actor` is omitted, the `Actor:` line prints `(unset)`. When `--artifact-
 
 ### Error codes
 
-After the run, boundary, and phrase resolve, duplicate approvals short-circuit mutable validations: an existing `(run-id, boundary)` row returns `duplicate_approval` before terminal-state, manual-recovery, or artifact-digest checks.
+After the run, boundary, and phrase resolve, duplicate approvals short-circuit mutable validations: an existing `(run-id, logical boundary)` row, including a row stored under a retained legacy synonym, returns `duplicate_approval` before terminal-state, manual-recovery, or artifact-digest checks.
 
 | Code | Meaning |
 |------|---------|
@@ -2388,7 +2396,7 @@ When the native agent-loop mechanism receives a usable absolute verification log
 For `agent-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
 For non-`agent-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
-The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while retained legacy definitions may still run it beneath the legacy `goal-loop` spelling.
+The current coding workflow runs GNHF as portable tool config on a `delegate-supervisor` step, while retained legacy definitions follow the raw-identity compatibility rule in [SPEC.md](../SPEC.md) when running beneath the legacy `goal-loop` spelling.
 In both cases `gnhf` is not a workflow executor, and its work must remain represented by Momentum attempt and round evidence.
 Successful rounds show the single commit SHA Momentum recorded for that round.
 Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
