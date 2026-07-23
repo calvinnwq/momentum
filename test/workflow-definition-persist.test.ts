@@ -195,9 +195,9 @@ describe("persistWorkflowDefinition", () => {
         ],
       };
 
-      expect(() => persistWorkflowDefinition(db, legacy, { now: 1000 })).toThrow(
-        InvalidWorkflowDefinitionError,
-      );
+      expect(() =>
+        persistWorkflowDefinition(db, legacy, { now: 1000 }),
+      ).toThrow(InvalidWorkflowDefinitionError);
       expect(countDefinitionRows(db, legacy.key)).toBe(0);
       expect(loadWorkflowDefinition(db, legacy.key)).toBeUndefined();
     } finally {

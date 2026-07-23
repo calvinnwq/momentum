@@ -185,9 +185,7 @@ describe("validateWorkflowDefinition", () => {
     const rejected = validateWorkflowDefinition(def);
     expect(rejected.ok).toBe(false);
     if (rejected.ok) return;
-    expect(rejected.errors.map((e) => e.code)).toContain(
-      "step_kind_invalid",
-    );
+    expect(rejected.errors.map((e) => e.code)).toContain("step_kind_invalid");
 
     expect(
       validateWorkflowDefinition(def, { allowLegacyStepKinds: true }).ok,
