@@ -133,7 +133,8 @@ export function createRegisteredExecutorWorkflowDispatch(
     const isRegisteredExecutor = (name: string): boolean =>
       resolveRegisteredExecutor(options.registry, name) !== undefined;
     const isDurablyClaimedExecutor = (name: string): boolean =>
-      hasExecutorDefinition(context.db, name);
+      hasExecutorDefinition(context.db, name) ||
+      options.unavailableReasons?.has(name) === true;
     runtime = {
       ...runtime,
       executorName: effectiveStepExecutor(runtime.executorName, {

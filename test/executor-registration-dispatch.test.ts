@@ -4675,6 +4675,67 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
+  it("does not alias an unavailable configured executor with a retired built-in name", async () => {
+    const fixture = fixtureDefinition({ message: "must not run built-in" });
+    const definition: WorkflowDefinition = {
+      ...fixture,
+      key: "unavailable-retired-name-workflow",
+      steps: fixture.steps.map((step) => ({
+        ...step,
+        executor: "goal-loop",
+      })),
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "unavailable-retired-name-run",
+      repoPath: "/repos/fixture",
+      objective: "Refuse the unavailable configured executor honestly",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("unavailable-retired-name-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "unavailable-retired-name-run",
+      stepId: "preflight",
+      holder: "fixture-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const configPath = path.join(tempDir(), "unavailable-executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ executors: { "goal-loop": "./missing.mjs" } }),
+    );
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_EXECUTOR_CONFIG_ENV_VAR]: configPath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "fixture-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT executor, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("unavailable-retired-name-run"),
+    ).toEqual({
+      executor: "goal-loop",
+      recovery_code: "runtime_unavailable",
+    });
+    db.close();
+  });
+
   it.each([
     {
       classification: "approval_required" as const,

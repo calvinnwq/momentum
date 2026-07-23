@@ -2,6 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 
 type MomentumDb = DatabaseSync;
 
+export type QueueMigrationOptions = {
+  claimedExecutorNames?: ReadonlySet<string>;
+};
+
 type ColumnSpec = { name: string; type: string };
 
 const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
@@ -809,10 +813,11 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
 ]);
 
 // Canonical spellings for renamed built-in executor values. An old spelling is
-// only rewritten when no executor registration claims it as its own
-// `executor_key`: before the rename the registry refused duplicate built-in
-// names, so a registration under the old spelling can only be a third-party
-// identity that must keep its recorded value everywhere.
+// only rewritten when neither durable definitions nor the configured executor
+// registry claim the old spelling. Before the rename the registry refused
+// duplicate built-in names, so an explicit registration under the old spelling
+// can only be a third-party identity that must keep its recorded value
+// everywhere.
 const LEGACY_EXECUTOR_VALUE_RENAMES: ReadonlyArray<[string, string]> = [
   ["goal-loop", "agent-loop"],
   ["one-shot", "agent-once"],
@@ -827,12 +832,24 @@ function executorDefinitionClaimsKey(db: MomentumDb, key: string): boolean {
   );
 }
 
+function executorIdentityIsClaimed(
+  db: MomentumDb,
+  key: string,
+  options: QueueMigrationOptions,
+): boolean {
+  return (
+    executorDefinitionClaimsKey(db, key) ||
+    options.claimedExecutorNames?.has(key) === true
+  );
+}
+
 function renameableLegacyExecutorValues(
   db: MomentumDb,
+  options: QueueMigrationOptions,
 ): ReadonlyMap<string, string> {
   const renames = new Map<string, string>();
   for (const [oldValue, newValue] of LEGACY_EXECUTOR_VALUE_RENAMES) {
-    if (executorDefinitionClaimsKey(db, oldValue)) continue;
+    if (executorIdentityIsClaimed(db, oldValue, options)) continue;
     renames.set(oldValue, newValue);
   }
   return renames;
@@ -913,7 +930,10 @@ function compareLegacyAttemptGroups(
  * which SQLite ignores inside a transaction; a `foreign_key_check` over the
  * rebuilt tables guards the swap before commit.
  */
-function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
+function migrateLegacyExecutorInvocationSchema(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): void {
   if (!tableExists(db, "executor_invocations")) return;
   db.exec("PRAGMA foreign_keys = OFF");
   try {
@@ -930,7 +950,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       // when read; the rebuilt tables write the renamed `executor` column, and
       // renamed built-in executor values are mapped in the same pass so one
       // upgrade from the oldest schema lands directly on the new vocabulary.
-      const executorRenames = renameableLegacyExecutorValues(db);
+      const executorRenames = renameableLegacyExecutorValues(db, options);
       const canonicalExecutorValue = (value: string): string =>
         executorRenames.get(value) ?? value;
 
@@ -1475,8 +1495,9 @@ function isNoMistakesExternalIdentityDetail(detail: string | null): boolean {
  *   - Renamed built-in executor values are rewritten in `executor_attempts`,
  *     `executor_rounds`, and the `executor_definitions.executor` identity
  *     column, skipped entirely when a registration claims the old spelling as
- *     its own `executor_key` (a third-party identity keeps its value
- *     everywhere, including its own row).
+ *     its own `executor_key` or the daemon config explicitly owns the old name
+ *     (a third-party identity keeps its value everywhere, including its own
+ *     row).
  *   - A legacy `no-mistakes` executor attempt converts to
  *     `delegate-supervisor` only when it is terminal *and* its rounds hold a
  *     durable no-mistakes mirror checkpoint proving the external tool; the
@@ -1484,7 +1505,10 @@ function isNoMistakesExternalIdentityDetail(detail: string | null): boolean {
  *     `legacy_provenance` without clobbering recorded keys. Anything short of
  *     that proof stays `no-mistakes` for the classified legacy reader.
  */
-function migrateWorkflowVocabulary(db: MomentumDb): void {
+function migrateWorkflowVocabulary(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): void {
   db.exec("BEGIN IMMEDIATE");
   try {
     if (columnExists(db, "executor_attempts", "executor_family")) {
@@ -1559,7 +1583,10 @@ function migrateWorkflowVocabulary(db: MomentumDb): void {
       updateRoute.run(JSON.stringify({ ...route, steps: rekeyed }), row.id);
     }
 
-    for (const [oldValue, newValue] of renameableLegacyExecutorValues(db)) {
+    for (const [oldValue, newValue] of renameableLegacyExecutorValues(
+      db,
+      options,
+    )) {
       db.prepare(
         "UPDATE executor_attempts SET executor = ? WHERE executor = ?",
       ).run(newValue, oldValue);
@@ -1573,20 +1600,22 @@ function migrateWorkflowVocabulary(db: MomentumDb): void {
     }
 
     const terminalStates = [...LEGACY_TERMINAL_ATTEMPT_STATES];
-    const candidates = db
-      .prepare(
-        `SELECT attempt_id, legacy_provenance FROM executor_attempts
+    const candidates = executorIdentityIsClaimed(db, "no-mistakes", options)
+      ? []
+      : (db
+          .prepare(
+            `SELECT attempt_id, legacy_provenance FROM executor_attempts
           WHERE executor = 'no-mistakes'
             AND NOT EXISTS (
               SELECT 1 FROM executor_definitions
                WHERE executor_key = 'no-mistakes'
             )
             AND state IN (${terminalStates.map(() => "?").join(", ")})`,
-      )
-      .all(...terminalStates) as Array<{
-      attempt_id: string;
-      legacy_provenance: string | null;
-    }>;
+          )
+          .all(...terminalStates) as Array<{
+          attempt_id: string;
+          legacy_provenance: string | null;
+        }>);
     const selectMirrorMarkers = db.prepare(
       `SELECT c.detail
          FROM executor_checkpoints AS c
@@ -1654,10 +1683,13 @@ function columnExists(db: MomentumDb, table: string, column: string): boolean {
   return rows.some((row) => row.name === column);
 }
 
-export function applyQueueMigrations(db: MomentumDb): void {
+export function applyQueueMigrations(
+  db: MomentumDb,
+  options: QueueMigrationOptions = {},
+): void {
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
-  migrateLegacyExecutorInvocationSchema(db);
+  migrateLegacyExecutorInvocationSchema(db, options);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
@@ -1737,7 +1769,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
   }
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
-  migrateWorkflowVocabulary(db);
+  migrateWorkflowVocabulary(db, options);
 }
 
 type PragmaColumnRow = { name: string };

@@ -3509,6 +3509,60 @@ VALUES
     }
   });
 
+  it("preserves legacy executor identities claimed only by daemon config", () => {
+    const dataDir = seedPreRenameDataDir();
+    const configPath = path.join(dataDir, "executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        executors: {
+          "goal-loop": "./goal-loop.mjs",
+          "one-shot": "./one-shot.mjs",
+          "no-mistakes": "./no-mistakes.mjs",
+        },
+      }),
+    );
+    const previousConfig = process.env.MOMENTUM_EXECUTOR_CONFIG;
+    process.env.MOMENTUM_EXECUTOR_CONFIG = configPath;
+    let db: DatabaseSync | undefined;
+    try {
+      db = openDb(dataDir);
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, executor FROM executor_attempts
+              WHERE attempt_id IN ('vocab-impl', 'vocab-refresh', 'vocab-nm-provable')
+              ORDER BY attempt_id`,
+          )
+          .all(),
+      ).toEqual([
+        { attempt_id: "vocab-impl", executor: "goal-loop" },
+        { attempt_id: "vocab-nm-provable", executor: "no-mistakes" },
+        { attempt_id: "vocab-refresh", executor: "one-shot" },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT round_id, executor FROM executor_rounds
+              WHERE round_id IN ('vocab-impl-r0', 'vocab-refresh-r0', 'vocab-nm-provable-r0')
+              ORDER BY round_id`,
+          )
+          .all(),
+      ).toEqual([
+        { round_id: "vocab-impl-r0", executor: "goal-loop" },
+        { round_id: "vocab-nm-provable-r0", executor: "no-mistakes" },
+        { round_id: "vocab-refresh-r0", executor: "one-shot" },
+      ]);
+    } finally {
+      db?.close();
+      if (previousConfig === undefined) {
+        delete process.env.MOMENTUM_EXECUTOR_CONFIG;
+      } else {
+        process.env.MOMENTUM_EXECUTOR_CONFIG = previousConfig;
+      }
+    }
+  });
+
   it("converts only provably mirrored terminal no-mistakes attempts to delegate-supervisor", () => {
     const dataDir = seedPreRenameDataDir();
     const db = openDb(dataDir);

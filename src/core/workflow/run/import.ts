@@ -743,7 +743,21 @@ function mergeLedgerIntoSteps(
   diagnostics: WorkflowRunImportDiagnostic[],
 ): WorkflowRunImportStep[] {
   const byStepId = new Map<string, WorkflowRunImportStep>();
-  for (const step of planSteps) byStepId.set(step.stepId, { ...step });
+  const byCanonicalKind = new Map<
+    WorkflowStepKind,
+    WorkflowRunImportStep | null
+  >();
+  const registerCanonicalKind = (step: WorkflowRunImportStep): void => {
+    const kind = canonicalWorkflowStepKind(step.stepId);
+    if (kind === undefined) return;
+    const existing = byCanonicalKind.get(kind);
+    byCanonicalKind.set(kind, existing === undefined ? step : null);
+  };
+  for (const planStep of planSteps) {
+    const step = { ...planStep };
+    byStepId.set(step.stepId, step);
+    registerCanonicalKind(step);
+  }
 
   let nextOrder = planSteps.length;
   for (const event of events) {
@@ -755,6 +769,9 @@ function mergeLedgerIntoSteps(
       canonicalStepId !== event.step
     ) {
       step = byStepId.get(canonicalStepId);
+    }
+    if (!step && canonicalStepId !== undefined) {
+      step = byCanonicalKind.get(canonicalStepId) ?? undefined;
     }
     if (!step) {
       const kind = classifyStepKind(event.step);
@@ -781,6 +798,7 @@ function mergeLedgerIntoSteps(
       };
       nextOrder += 1;
       byStepId.set(event.step, step);
+      registerCanonicalKind(step);
     }
     applyLedgerEvent(step, event);
   }

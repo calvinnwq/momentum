@@ -6,6 +6,8 @@ import { applyQueueMigrations } from "./db/migrations.js";
 
 export type MomentumDb = DatabaseSync;
 
+const EXECUTOR_CONFIG_ENV_VAR = "MOMENTUM_EXECUTOR_CONFIG";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,
@@ -52,11 +54,46 @@ export function openDb(dataDir: string): MomentumDb {
   const dbPath = path.join(dataDir, "momentum.db");
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
-  applyQueueMigrations(db);
+  applyQueueMigrations(db, {
+    claimedExecutorNames: configuredExecutorNames(process.env),
+  });
   return db;
 }
 
-export function openExistingDbReadOnly(dataDir: string): MomentumDb | undefined {
+function configuredExecutorNames(
+  env: Record<string, string | undefined>,
+): ReadonlySet<string> {
+  // Migrations run before daemon module loading, so read only the configured
+  // identity keys here. A missing or invalid module still owns its explicit
+  // name and must fail as unavailable later instead of losing historical data.
+  const source = (env[EXECUTOR_CONFIG_ENV_VAR] ?? "").trim();
+  if (source.length === 0) return new Set();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(source, "utf8")) as unknown;
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return new Set();
+    }
+    const executors = (parsed as Record<string, unknown>)["executors"];
+    if (
+      executors === null ||
+      typeof executors !== "object" ||
+      Array.isArray(executors)
+    ) {
+      return new Set();
+    }
+    return new Set(Object.keys(executors));
+  } catch {
+    return new Set();
+  }
+}
+
+export function openExistingDbReadOnly(
+  dataDir: string,
+): MomentumDb | undefined {
   const dbPath = path.join(dataDir, "momentum.db");
   if (!fs.existsSync(dbPath)) {
     return undefined;
