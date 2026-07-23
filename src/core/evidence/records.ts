@@ -87,6 +87,29 @@ export function ingestEvidenceRecord(
   const formatVersion = input.formatVersion ?? 1;
   validateFormatVersion(formatVersion);
 
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = ingestEvidenceRecordInTransaction(
+      db,
+      input,
+      clock,
+      formatVersion,
+    );
+    if (ownsTransaction) db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    if (ownsTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function ingestEvidenceRecordInTransaction(
+  db: MomentumDb,
+  input: EvidenceRecordIngestInput,
+  clock: EvidenceRecordClock,
+  formatVersion: number,
+): EvidenceRecordIngestResult {
   const now = clock.now?.() ?? Date.now();
   const metadataJson = JSON.stringify(input.metadata ?? {});
   let existing = getEvidenceRecordRowByIngestKey(db, input.ingestKey);

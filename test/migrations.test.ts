@@ -3535,6 +3535,62 @@ VALUES
     }
   });
 
+  it("migrates workflow vocabulary in a partial read-only database", () => {
+    const dataDir = makeTempDir("momentum-nam02-partial-readonly-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          route_json TEXT NOT NULL DEFAULT '{}',
+          approval_boundary TEXT
+        ) STRICT;
+        CREATE TABLE workflow_steps (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        ) STRICT;
+        INSERT INTO workflow_runs (id, route_json, approval_boundary)
+        VALUES (
+          'partial-vocab-run',
+          '{"steps":{"no-mistakes":{"runner_profile":"careful"}}}',
+          'through-no-mistakes'
+        );
+        INSERT INTO workflow_steps (run_id, step_id, kind)
+        VALUES ('partial-vocab-run', 'no-mistakes', 'no-mistakes');
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        db!
+          .prepare(
+            `SELECT approval_boundary, route_json
+               FROM workflow_runs WHERE id = 'partial-vocab-run'`,
+          )
+          .get(),
+      ).toEqual({
+        approval_boundary: "through-validate",
+        route_json: '{"steps":{"validate":{"runner_profile":"careful"}}}',
+      });
+      expect(
+        db!
+          .prepare(
+            `SELECT step_id, kind
+               FROM workflow_steps WHERE run_id = 'partial-vocab-run'`,
+          )
+          .get(),
+      ).toEqual({ step_id: "no-mistakes", kind: "validate" });
+    } finally {
+      db?.close();
+    }
+  });
+
   it("does not convert a provable no-mistakes row when durable configuration claims that identity", () => {
     const dataDir = seedPreRenameDataDir({
       claimNoMistakesDefinition: true,
@@ -3618,6 +3674,118 @@ VALUES
       } else {
         process.env.MOMENTUM_EXECUTOR_CONFIG = previousConfig;
       }
+    }
+  });
+
+  it.each(["missing", "malformed"])(
+    "preserves ambiguous legacy executor identities when config is %s",
+    (configState) => {
+      const dataDir = seedPreRenameDataDir();
+      const configPath = path.join(dataDir, "executors.json");
+      if (configState === "malformed") {
+        fs.writeFileSync(configPath, "{not-json");
+      }
+
+      const db = openDb(dataDir, {
+        env: { MOMENTUM_EXECUTOR_CONFIG: configPath },
+      });
+      try {
+        expect(
+          db
+            .prepare(
+              `SELECT attempt_id, executor FROM executor_attempts
+                WHERE attempt_id IN ('vocab-impl', 'vocab-refresh', 'vocab-nm-provable')
+                ORDER BY attempt_id`,
+            )
+            .all(),
+        ).toEqual([
+          { attempt_id: "vocab-impl", executor: "goal-loop" },
+          { attempt_id: "vocab-nm-provable", executor: "no-mistakes" },
+          { attempt_id: "vocab-refresh", executor: "one-shot" },
+        ]);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("preserves a legacy executor value when its canonical identity is claimed", () => {
+    const dataDir = seedPreRenameDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('agent-loop', 'agent-loop', 1, 1)`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'vocab-impl'`,
+          )
+          .get(),
+      ).toEqual({ executor: "goal-loop" });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-impl-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "goal-loop" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves no-mistakes when delegate-supervisor is claimed", () => {
+    const dataDir = seedPreRenameDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('delegate-supervisor', 'delegate-supervisor', 1, 1)`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor, legacy_provenance FROM executor_attempts
+              WHERE attempt_id = 'vocab-nm-provable'`,
+          )
+          .get(),
+      ).toEqual({
+        executor: "no-mistakes",
+        legacy_provenance:
+          '{"source":"legacy_invocation_row","legacyExecutor":"recorded-value"}',
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-nm-provable-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "no-mistakes" });
+    } finally {
+      db.close();
     }
   });
 

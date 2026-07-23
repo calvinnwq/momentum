@@ -14,6 +14,7 @@ export type OpenDbOptions = {
 };
 
 const EXECUTOR_CONFIG_ENV_VAR = "MOMENTUM_EXECUTOR_CONFIG";
+const SQLITE_BUSY_TIMEOUT_MS = 5000;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS goals (
@@ -62,10 +63,12 @@ export function openDb(
 ): MomentumDb {
   fs.mkdirSync(dataDir, { recursive: true });
   const dbPath = path.join(dataDir, "momentum.db");
-  const db = new DatabaseSync(dbPath);
+  const db = new DatabaseSync(dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
   db.exec(SCHEMA);
+  const executorClaims = configuredExecutorClaims(options.env ?? process.env);
   applyQueueMigrations(db, {
-    claimedExecutorNames: configuredExecutorNames(options.env ?? process.env),
+    claimedExecutorNames: executorClaims.names,
+    executorClaimsKnown: executorClaims.known,
   });
   return db;
 }
@@ -73,11 +76,18 @@ export function openDb(
 export function configuredExecutorNames(
   env: Record<string, string | undefined>,
 ): ReadonlySet<string> {
+  return configuredExecutorClaims(env).names;
+}
+
+function configuredExecutorClaims(env: Record<string, string | undefined>): {
+  names: ReadonlySet<string>;
+  known: boolean;
+} {
   // Migrations run before daemon module loading, so read only the configured
-  // identity keys here. A missing or invalid module still owns its explicit
-  // name and must fail as unavailable later instead of losing historical data.
+  // identity keys here. If the registry file cannot be read reliably, preserve
+  // ambiguous legacy identities until ownership can be established.
   const source = (env[EXECUTOR_CONFIG_ENV_VAR] ?? "").trim();
-  if (source.length === 0) return new Set();
+  if (source.length === 0) return { names: new Set(), known: true };
   try {
     const parsed = JSON.parse(fs.readFileSync(source, "utf8")) as unknown;
     if (
@@ -85,7 +95,7 @@ export function configuredExecutorNames(
       typeof parsed !== "object" ||
       Array.isArray(parsed)
     ) {
-      return new Set();
+      return { names: new Set(), known: false };
     }
     const executors = (parsed as Record<string, unknown>)["executors"];
     if (
@@ -93,11 +103,11 @@ export function configuredExecutorNames(
       typeof executors !== "object" ||
       Array.isArray(executors)
     ) {
-      return new Set();
+      return { names: new Set(), known: false };
     }
-    return new Set(Object.keys(executors));
+    return { names: new Set(Object.keys(executors)), known: true };
   } catch {
-    return new Set();
+    return { names: new Set(), known: false };
   }
 }
 
@@ -123,26 +133,22 @@ export function openExistingDbMigratedReadOnly(
   // vocabulary pass. Near-current databases need only the vocabulary pass,
   // preserving compatibility with intentionally partial historical event
   // databases that do not carry executor runtime tables.
-  const migrationDb = new DatabaseSync(dbPath);
+  const migrationDb = new DatabaseSync(dbPath, {
+    timeout: SQLITE_BUSY_TIMEOUT_MS,
+  });
   let requiresFullMigration = false;
   try {
     requiresFullMigration = databaseTableExists(
       migrationDb,
       "executor_invocations",
     );
-    if (
-      !requiresFullMigration &&
-      (databaseColumnExists(
-        migrationDb,
-        "executor_attempts",
-        "executor_family",
-      ) ||
-        databaseColumnExists(migrationDb, "executor_rounds", "executor_family"))
-    ) {
+    if (!requiresFullMigration) {
+      const executorClaims = configuredExecutorClaims(
+        options.env ?? process.env,
+      );
       applyWorkflowVocabularyMigration(migrationDb, {
-        claimedExecutorNames: configuredExecutorNames(
-          options.env ?? process.env,
-        ),
+        claimedExecutorNames: executorClaims.names,
+        executorClaimsKnown: executorClaims.known,
       });
     }
   } finally {
@@ -152,7 +158,10 @@ export function openExistingDbMigratedReadOnly(
     const upgraded = openDb(dataDir, options);
     upgraded.close();
   }
-  return new DatabaseSync(dbPath, { readOnly: true });
+  return new DatabaseSync(dbPath, {
+    readOnly: true,
+    timeout: SQLITE_BUSY_TIMEOUT_MS,
+  });
 }
 
 function databaseTableExists(db: MomentumDb, table: string): boolean {
@@ -163,16 +172,6 @@ function databaseTableExists(db: MomentumDb, table: string): boolean {
       )
       .get(table) !== undefined
   );
-}
-
-function databaseColumnExists(
-  db: MomentumDb,
-  table: string,
-  column: string,
-): boolean {
-  return (
-    db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
-  ).some((row) => row.name === column);
 }
 
 const SQLITE_CONSTRAINT_UNIQUE = 2067;

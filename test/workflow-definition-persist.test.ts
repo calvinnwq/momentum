@@ -65,6 +65,36 @@ describe("persistWorkflowDefinition", () => {
     }
   });
 
+  it("re-persists a loaded retained built-in definition", () => {
+    const db = openTempDb();
+    try {
+      seedBuiltInWorkflowDefinitions(db, { now: 1000 });
+      const loaded = loadWorkflowDefinition(
+        db,
+        CODING_WORKFLOW_DEFINITION_V1.key,
+        CODING_WORKFLOW_DEFINITION_V1.version,
+      );
+
+      expect(loaded).toEqual(CODING_WORKFLOW_DEFINITION_V1);
+      expect(
+        persistWorkflowDefinition(db, loaded, { now: 2000 }),
+      ).toMatchObject({
+        key: CODING_WORKFLOW_DEFINITION_V1.key,
+        version: CODING_WORKFLOW_DEFINITION_V1.version,
+        inserted: false,
+      });
+      expect(
+        loadWorkflowDefinition(
+          db,
+          CODING_WORKFLOW_DEFINITION_V1.key,
+          CODING_WORKFLOW_DEFINITION_V1.version,
+        ),
+      ).toEqual(CODING_WORKFLOW_DEFINITION_V1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("reports inserted=true on first persist and inserted=false on re-persist", () => {
     const db = openTempDb();
     try {

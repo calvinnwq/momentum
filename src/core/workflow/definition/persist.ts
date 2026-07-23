@@ -25,6 +25,8 @@
  *     loaded definition always round-trips to what was last persisted.
  */
 
+import { isDeepStrictEqual } from "node:util";
+
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
@@ -78,8 +80,8 @@ export function persistWorkflowDefinition(
 ): PersistWorkflowDefinitionSummary {
   // Retained built-in versions are immutable compatibility data, not new
   // user-authored definitions, so their legacy step kinds remain valid here.
-  const isBuiltIn = BUILT_IN_WORKFLOW_DEFINITIONS.some(
-    (builtIn) => builtIn === definition,
+  const isBuiltIn = BUILT_IN_WORKFLOW_DEFINITIONS.some((builtIn) =>
+    isDeepStrictEqual(builtIn, definition),
   );
   return persistWorkflowDefinitionWithLegacyMode(
     db,

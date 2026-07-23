@@ -4,6 +4,7 @@ type MomentumDb = DatabaseSync;
 
 export type QueueMigrationOptions = {
   claimedExecutorNames?: ReadonlySet<string>;
+  executorClaimsKnown?: boolean;
 };
 
 type ColumnSpec = { name: string; type: string };
@@ -813,11 +814,12 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
 ]);
 
 // Canonical spellings for renamed built-in executor values. An old spelling is
-// only rewritten when neither durable definitions nor the configured executor
-// registry claim the old spelling. Before the rename the registry refused
+// only rewritten when durable definitions and the configured executor registry
+// are known to claim neither spelling. Before the rename the registry refused
 // duplicate built-in names, so an explicit registration under the old spelling
 // can only be a third-party identity that must keep its recorded value
-// everywhere.
+// everywhere. A claim on the replacement spelling also reserves that identity
+// against receiving historical rows from a different owner.
 const LEGACY_EXECUTOR_VALUE_RENAMES: ReadonlyArray<[string, string]> = [
   ["goal-loop", "agent-loop"],
   ["one-shot", "agent-once"],
@@ -838,6 +840,7 @@ function executorIdentityIsClaimed(
   options: QueueMigrationOptions,
 ): boolean {
   return (
+    options.executorClaimsKnown === false ||
     executorDefinitionClaimsKey(db, key) ||
     options.claimedExecutorNames?.has(key) === true
   );
@@ -849,7 +852,12 @@ function renameableLegacyExecutorValues(
 ): ReadonlyMap<string, string> {
   const renames = new Map<string, string>();
   for (const [oldValue, newValue] of LEGACY_EXECUTOR_VALUE_RENAMES) {
-    if (executorIdentityIsClaimed(db, oldValue, options)) continue;
+    if (
+      executorIdentityIsClaimed(db, oldValue, options) ||
+      executorIdentityIsClaimed(db, newValue, options)
+    ) {
+      continue;
+    }
     renames.set(oldValue, newValue);
   }
   return renames;
@@ -1549,115 +1557,158 @@ function migrateWorkflowVocabulary(
       );
     }
 
-    const updateStepKind = db.prepare(
-      "UPDATE workflow_steps SET kind = ? WHERE kind = ?",
-    );
-    for (const [oldValue, newValue] of WORKFLOW_STEP_KIND_RENAMES) {
-      updateStepKind.run(newValue, oldValue);
+    if (columnExists(db, "workflow_steps", "kind")) {
+      const updateStepKind = db.prepare(
+        "UPDATE workflow_steps SET kind = ? WHERE kind = ?",
+      );
+      for (const [oldValue, newValue] of WORKFLOW_STEP_KIND_RENAMES) {
+        updateStepKind.run(newValue, oldValue);
+      }
     }
 
-    const updateBoundary = db.prepare(
-      "UPDATE workflow_runs SET approval_boundary = ? WHERE approval_boundary = ?",
-    );
-    for (const [oldValue, newValue] of WORKFLOW_APPROVAL_BOUNDARY_RENAMES) {
-      updateBoundary.run(newValue, oldValue);
+    if (columnExists(db, "workflow_runs", "approval_boundary")) {
+      const updateBoundary = db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ? WHERE approval_boundary = ?",
+      );
+      for (const [oldValue, newValue] of WORKFLOW_APPROVAL_BOUNDARY_RENAMES) {
+        updateBoundary.run(newValue, oldValue);
+      }
     }
 
-    const routeRows = db
-      .prepare(
-        `SELECT id, route_json FROM workflow_runs
-          WHERE route_json LIKE '%"no-mistakes"%'`,
-      )
-      .all() as Array<{ id: string; route_json: string }>;
-    const updateRoute = db.prepare(
-      "UPDATE workflow_runs SET route_json = ? WHERE id = ?",
-    );
-    for (const row of routeRows) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(row.route_json);
-      } catch {
-        continue;
+    if (
+      columnExists(db, "workflow_runs", "id") &&
+      columnExists(db, "workflow_runs", "route_json")
+    ) {
+      const routeRows = db
+        .prepare(
+          `SELECT id, route_json FROM workflow_runs
+            WHERE route_json LIKE '%"no-mistakes"%'`,
+        )
+        .all() as Array<{ id: string; route_json: string }>;
+      const updateRoute = db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = ?",
+      );
+      for (const row of routeRows) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(row.route_json);
+        } catch {
+          continue;
+        }
+        if (
+          parsed === null ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed)
+        ) {
+          continue;
+        }
+        const route = parsed as Record<string, unknown>;
+        const steps = route.steps;
+        if (
+          steps === null ||
+          typeof steps !== "object" ||
+          Array.isArray(steps)
+        ) {
+          continue;
+        }
+        const stepOverrides = steps as Record<string, unknown>;
+        if (
+          !Object.hasOwn(stepOverrides, "no-mistakes") ||
+          Object.hasOwn(stepOverrides, "validate")
+        ) {
+          continue;
+        }
+        const rekeyed: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(stepOverrides)) {
+          rekeyed[key === "no-mistakes" ? "validate" : key] = value;
+        }
+        updateRoute.run(JSON.stringify({ ...route, steps: rekeyed }), row.id);
       }
-      if (
-        parsed === null ||
-        typeof parsed !== "object" ||
-        Array.isArray(parsed)
-      ) {
-        continue;
-      }
-      const route = parsed as Record<string, unknown>;
-      const steps = route.steps;
-      if (steps === null || typeof steps !== "object" || Array.isArray(steps)) {
-        continue;
-      }
-      const stepOverrides = steps as Record<string, unknown>;
-      if (
-        !Object.hasOwn(stepOverrides, "no-mistakes") ||
-        Object.hasOwn(stepOverrides, "validate")
-      ) {
-        continue;
-      }
-      const rekeyed: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(stepOverrides)) {
-        rekeyed[key === "no-mistakes" ? "validate" : key] = value;
-      }
-      updateRoute.run(JSON.stringify({ ...route, steps: rekeyed }), row.id);
     }
 
     for (const [oldValue, newValue] of renameableLegacyExecutorValues(
       db,
       options,
     )) {
-      db.prepare(
-        "UPDATE executor_attempts SET executor = ? WHERE executor = ?",
-      ).run(newValue, oldValue);
-      db.prepare(
-        "UPDATE executor_rounds SET executor = ? WHERE executor = ?",
-      ).run(newValue, oldValue);
-      db.prepare(
-        `UPDATE executor_definitions SET executor = ?
-          WHERE executor = ? AND executor_key <> ?`,
-      ).run(newValue, oldValue, oldValue);
+      if (columnExists(db, "executor_attempts", "executor")) {
+        db.prepare(
+          "UPDATE executor_attempts SET executor = ? WHERE executor = ?",
+        ).run(newValue, oldValue);
+      }
+      if (columnExists(db, "executor_rounds", "executor")) {
+        db.prepare(
+          "UPDATE executor_rounds SET executor = ? WHERE executor = ?",
+        ).run(newValue, oldValue);
+      }
+      if (
+        columnExists(db, "executor_definitions", "executor") &&
+        columnExists(db, "executor_definitions", "executor_key")
+      ) {
+        db.prepare(
+          `UPDATE executor_definitions SET executor = ?
+            WHERE executor = ? AND executor_key <> ?`,
+        ).run(newValue, oldValue, oldValue);
+      }
     }
 
     const terminalStates = [...LEGACY_TERMINAL_ATTEMPT_STATES];
-    const candidates = executorIdentityIsClaimed(db, "no-mistakes", options)
-      ? []
-      : (db
-          .prepare(
-            `SELECT attempt_id, legacy_provenance FROM executor_attempts
+    const canClassifyNoMistakes =
+      columnExists(db, "executor_attempts", "attempt_id") &&
+      columnExists(db, "executor_attempts", "executor") &&
+      columnExists(db, "executor_attempts", "state") &&
+      columnExists(db, "executor_attempts", "legacy_provenance") &&
+      columnExists(db, "executor_rounds", "round_id") &&
+      columnExists(db, "executor_rounds", "attempt_id") &&
+      columnExists(db, "executor_rounds", "executor") &&
+      columnExists(db, "executor_definitions", "executor_key") &&
+      columnExists(db, "executor_checkpoints", "round_id") &&
+      columnExists(db, "executor_checkpoints", "stage") &&
+      columnExists(db, "executor_checkpoints", "detail");
+    const candidates =
+      !canClassifyNoMistakes ||
+      executorIdentityIsClaimed(db, "no-mistakes", options) ||
+      executorIdentityIsClaimed(db, "delegate-supervisor", options)
+        ? []
+        : (db
+            .prepare(
+              `SELECT attempt_id, legacy_provenance FROM executor_attempts
           WHERE executor = 'no-mistakes'
             AND NOT EXISTS (
               SELECT 1 FROM executor_definitions
                WHERE executor_key = 'no-mistakes'
             )
             AND state IN (${terminalStates.map(() => "?").join(", ")})`,
-          )
-          .all(...terminalStates) as Array<{
-          attempt_id: string;
-          legacy_provenance: string | null;
-        }>);
-    const selectMirrorMarkers = db.prepare(
-      `SELECT c.detail
+            )
+            .all(...terminalStates) as Array<{
+            attempt_id: string;
+            legacy_provenance: string | null;
+          }>);
+    const selectMirrorMarkers = canClassifyNoMistakes
+      ? db.prepare(
+          `SELECT c.detail
          FROM executor_checkpoints AS c
          JOIN executor_rounds AS r ON r.round_id = c.round_id
         WHERE r.attempt_id = ?
           AND c.stage IN (${NO_MISTAKES_MIRROR_CHECKPOINT_STAGES.map(
             (stage) => `'${stage}'`,
           ).join(", ")})`,
-    );
-    const convertAttempt = db.prepare(
-      `UPDATE executor_attempts
+        )
+      : undefined;
+    const convertAttempt = canClassifyNoMistakes
+      ? db.prepare(
+          `UPDATE executor_attempts
           SET executor = 'delegate-supervisor', legacy_provenance = ?
         WHERE attempt_id = ?`,
-    );
-    const convertRounds = db.prepare(
-      `UPDATE executor_rounds SET executor = 'delegate-supervisor'
+        )
+      : undefined;
+    const convertRounds = canClassifyNoMistakes
+      ? db.prepare(
+          `UPDATE executor_rounds SET executor = 'delegate-supervisor'
         WHERE attempt_id = ? AND executor = 'no-mistakes'`,
-    );
+        )
+      : undefined;
     for (const candidate of candidates) {
-      const markers = selectMirrorMarkers.all(candidate.attempt_id) as Array<{
+      const markers = selectMirrorMarkers!.all(candidate.attempt_id) as Array<{
         detail: string | null;
       }>;
       if (
@@ -1684,11 +1735,11 @@ function migrateWorkflowVocabulary(
         }
         provenance = parsed as Record<string, unknown>;
       }
-      convertAttempt.run(
+      convertAttempt!.run(
         JSON.stringify(withNoMistakesMigrationProvenance(provenance)),
         candidate.attempt_id,
       );
-      convertRounds.run(candidate.attempt_id);
+      convertRounds!.run(candidate.attempt_id);
     }
 
     db.exec("COMMIT");
