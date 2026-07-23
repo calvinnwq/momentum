@@ -67,6 +67,7 @@ import {
   listExecutorDecisionsForRound,
   listExecutorRoundsForAttempt,
   listExecutorRoundsForStep,
+  hasExecutorDefinition,
   loadExecutorAttempt,
   loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
@@ -86,6 +87,7 @@ import {
   type WorkflowRecoveryArtifactInput,
 } from "../recovery/artifact.js";
 import { markWorkflowRunNeedsManualRecovery } from "../run/recovery.js";
+import { canonicalExecutorIdentity } from "../definition/legacy.js";
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
@@ -414,6 +416,8 @@ export type RecoverStaleWorkflowLeasesInput = {
   runId?: string;
   /** Clock-skew tolerance forwarded to `classifyWorkflowLease`. Defaults to 0. */
   graceMs?: number;
+  /** Explicit runtime registrations that own their raw executor identities. */
+  claimedExecutorNames?: ReadonlySet<string>;
 };
 
 /**
@@ -485,6 +489,7 @@ export function recoverStaleWorkflowLeases(
       candidate,
       now,
       graceMs,
+      input.claimedExecutorNames,
     );
     if (parkedDispatch !== undefined) {
       recovered.push(parkedDispatch);
@@ -729,6 +734,7 @@ function tryParkStaleRunningDispatchLease(
   candidate: StaleWorkflowLease,
   now: number,
   graceMs: number,
+  claimedExecutorNames?: ReadonlySet<string>,
 ): RecoveredStaleWorkflowLease | undefined {
   if (
     candidate.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND ||
@@ -781,7 +787,12 @@ function tryParkStaleRunningDispatchLease(
     }
     if (
       attempt !== undefined &&
-      isResumableRegisteredSdkTick(db, attempt, attemptRounds)
+      isResumableRegisteredSdkTick(
+        db,
+        attempt,
+        attemptRounds,
+        claimedExecutorNames,
+      )
     ) {
       db.exec("ROLLBACK");
       return undefined;
@@ -1249,6 +1260,8 @@ export type RunWorkflowSchedulerOnceInput = {
   continuationPollIntervalMs?: number;
   /** Stale policy stamped on the dispatch lease. Defaults to `auto-release`. */
   stalePolicy?: WorkflowLeaseStalePolicy;
+  /** Explicit runtime registrations that own their raw executor identities. */
+  claimedExecutorNames?: ReadonlySet<string>;
   /** Overridable durable primitives (testing seam). */
   deps?: Partial<WorkflowSchedulerDeps>;
 };
@@ -1297,6 +1310,7 @@ function selectActiveSubworkflowDispatchRecheck(
     leaseDurationMs: number;
     continuationPollIntervalMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
+    claimedExecutorNames?: ReadonlySet<string>;
     runId?: string;
   },
 ): {
@@ -1360,7 +1374,10 @@ function selectActiveSubworkflowDispatchRecheck(
       if (claim !== undefined && isActiveSubworkflowRecheckDue(lease, input)) {
         return { claim, continuationPending };
       }
-      if (claim !== undefined && isRegisteredSdkContinuation(db, claim)) {
+      if (
+        claim !== undefined &&
+        isRegisteredSdkContinuation(db, claim, input.claimedExecutorNames)
+      ) {
         continuationPending = true;
       }
       continue;
@@ -1384,6 +1401,7 @@ function selectActiveSubworkflowDispatchRecheck(
 function isRegisteredSdkContinuation(
   db: MomentumDb,
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
+  claimedExecutorNames?: ReadonlySet<string>,
 ): boolean {
   const attempt = loadLatestExecutorAttemptForStep(
     db,
@@ -1400,7 +1418,7 @@ function isRegisteredSdkContinuation(
     // executor, whose sequential envelope starts at roundIndex 0. The legacy
     // scaffold starts at 1, so a shared `continue` classification alone never
     // opts an older adapter into immediate redispatch.
-    isResumableRegisteredSdkTick(db, attempt, rounds)
+    isResumableRegisteredSdkTick(db, attempt, rounds, claimedExecutorNames)
   );
 }
 
@@ -1408,6 +1426,7 @@ function isResumableRegisteredSdkTick(
   db: MomentumDb,
   attempt: NonNullable<ReturnType<typeof loadExecutorAttempt>>,
   rounds: ReturnType<typeof listExecutorRoundsForAttempt>,
+  claimedExecutorNames?: ReadonlySet<string>,
 ): boolean {
   if (attempt.state !== "running") return false;
   const currentAttemptRounds = rounds.filter(
@@ -1424,7 +1443,11 @@ function isResumableRegisteredSdkTick(
   // Only an SDK-owned dispatch can durably expose a roundless attempt.
   if (
     (attempt.executor === "delegate-supervisor" ||
-      NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executor)) &&
+      isOwnedResumableSdkExecutor(
+        db,
+        attempt.executor,
+        claimedExecutorNames,
+      )) &&
     currentAttemptRounds.length === 0
   ) {
     return true;
@@ -1446,7 +1469,7 @@ function isResumableRegisteredSdkTick(
   }
   if (round.classification === "continue") return true;
   if (
-    NATIVE_RESUMABLE_SDK_EXECUTORS.has(attempt.executor) &&
+    isOwnedResumableSdkExecutor(db, attempt.executor, claimedExecutorNames) &&
     round.classification === null &&
     (round.state === "running" || round.state === "capturing_result") &&
     listExecutorCheckpointsForRound(db, round.roundId).some(
@@ -1470,6 +1493,23 @@ function isResumableRegisteredSdkTick(
       ((round.state === "succeeded" || round.state === "failed") &&
         (round.classification === "approval_required" ||
           round.classification === "operator_decision_required")))
+  );
+}
+
+function isOwnedResumableSdkExecutor(
+  db: MomentumDb,
+  executor: string,
+  claimedExecutorNames?: ReadonlySet<string>,
+): boolean {
+  if (NATIVE_RESUMABLE_SDK_EXECUTORS.has(executor)) return true;
+  if (
+    claimedExecutorNames?.has(executor) !== true &&
+    !hasExecutorDefinition(db, executor)
+  ) {
+    return false;
+  }
+  return NATIVE_RESUMABLE_SDK_EXECUTORS.has(
+    canonicalExecutorIdentity(executor),
   );
 }
 
@@ -1634,7 +1674,11 @@ function buildActiveSubworkflowClaim(
   db: MomentumDb,
   run: WorkflowRunScanRow,
   lease: WorkflowLeaseRecord,
-  input: { now: number; graceMs: number },
+  input: {
+    now: number;
+    graceMs: number;
+    claimedExecutorNames?: ReadonlySet<string>;
+  },
 ): ClaimedWorkflowStep | undefined {
   const steps = loadStepRecords(db, run.id);
   const runningStep = steps.find((step) => step.state === "running");
@@ -1651,7 +1695,12 @@ function buildActiveSubworkflowClaim(
       : listExecutorRoundsForStep(db, attempt.workflowRunId, attempt.stepRunId);
   const resumableSdkTick =
     attempt !== undefined &&
-    isResumableRegisteredSdkTick(db, attempt, attemptRounds);
+    isResumableRegisteredSdkTick(
+      db,
+      attempt,
+      attemptRounds,
+      input.claimedExecutorNames,
+    );
   if (
     attempt === undefined ||
     (attempt.executor !== "subworkflow" && !resumableSdkTick) ||
@@ -1686,6 +1735,7 @@ function acquireActiveSubworkflowDispatchClaim(
     holder: string;
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
+    claimedExecutorNames?: ReadonlySet<string>;
   },
 ):
   | {
@@ -2053,6 +2103,9 @@ function runWorkflowSchedulerOnceCore(
   const recovery = recoverStaleLeases(db, {
     now: tickNow,
     graceMs,
+    ...(input.claimedExecutorNames === undefined
+      ? {}
+      : { claimedExecutorNames: input.claimedExecutorNames }),
     ...runScope,
   });
   const recoveredDispatchLeases = new Map<string, WorkflowLeaseRecord>();
@@ -2080,6 +2133,9 @@ function runWorkflowSchedulerOnceCore(
     leaseDurationMs,
     continuationPollIntervalMs,
     stalePolicy,
+    ...(input.claimedExecutorNames === undefined
+      ? {}
+      : { claimedExecutorNames: input.claimedExecutorNames }),
     ...runScope,
   });
   const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });

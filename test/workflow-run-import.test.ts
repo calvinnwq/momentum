@@ -323,6 +323,40 @@ describe("parseWorkflowRunImport", () => {
     });
   });
 
+  it("matches legacy approval requirements to a canonical plan step", () => {
+    const root = makeTempDir();
+    const runId = "cwfp-legacy-approval-canonical-plan";
+    const runDir = path.join(root, runId);
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        approvalsRequired: ["no-mistakes"],
+        taskFlow: { childTasks: [{ stepId: "validate" }] },
+      }),
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "validate",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowRunImport(runDir);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.import.diagnostics).toEqual([]);
+    expect(result.import.steps).toHaveLength(1);
+    expect(result.import.steps[0]).toMatchObject({
+      stepId: "validate",
+      kind: "validate",
+      state: "succeeded",
+      required: true,
+    });
+  });
+
   it("joins a canonical ledger step to its retained legacy plan step", () => {
     const root = makeTempDir();
     const runId = "cwfp-legacy-plan-canonical-ledger";

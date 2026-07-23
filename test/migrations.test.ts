@@ -2132,6 +2132,44 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
     }
   });
 
+  it("applies prerequisite migrations before opening an SDK-05 database read-only", () => {
+    const dataDir = seedLegacyDataDir();
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(tableNames(db!)).not.toContain("executor_invocations");
+      expect(
+        db!
+          .prepare(
+            `SELECT attempt_id, executor
+               FROM executor_attempts
+              WHERE workflow_run_id = 'run-1'
+              ORDER BY step_run_id, attempt_number`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          attempt_id: "run-1::implementation::dispatch::attempt-1",
+          executor: "delegate-supervisor",
+        },
+        {
+          attempt_id: "run-1::implementation::dispatch",
+          executor: "delegate-supervisor",
+        },
+        {
+          attempt_id: "run-1::preflight::dispatch",
+          executor: "agent-once",
+        },
+        {
+          attempt_id: "no-mistakes::run-1::preflight::mirror",
+          executor: "no-mistakes",
+        },
+      ]);
+    } finally {
+      db?.close();
+    }
+  });
+
   it("orders colliding groups by lifecycle while preserving invocation order", () => {
     const dataDir = seedLegacyDataDir();
     const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));

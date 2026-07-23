@@ -788,6 +788,69 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
+  it("releases a stale roundless attempt owned by a configured raw legacy executor", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-configured-goal-loop";
+      const stepId = "preflight";
+      seedRun(db, { runId, state: "running", repoPath: "/repos/a" });
+      seedStep(db, {
+        runId,
+        stepId,
+        kind: "preflight",
+        state: "running",
+        order: 0,
+      });
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: deriveDispatchAttemptId(runId, stepId, 1),
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executor: "goal-loop",
+          state: "running",
+          attemptNumber: 1,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 60_000,
+        heartbeatAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+
+      const result = recoverStaleWorkflowLeases(db, {
+        now: NOW + 1,
+        claimedExecutorNames: new Set(["goal-loop"]),
+      });
+
+      expect(result.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(result.skipped).toEqual([]);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBe(NOW + 1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("releases a stale auto-release lease so the run becomes runnable again", () => {
     const db = openDb(makeTempDir());
     try {

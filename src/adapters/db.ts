@@ -119,18 +119,25 @@ export function openExistingDbMigratedReadOnly(
   if (!fs.existsSync(dbPath)) {
     return undefined;
   }
-  // Current executor readers query the renamed columns. Apply only the
-  // vocabulary migration when those legacy columns are present, preserving
-  // compatibility with intentionally partial historical event databases.
+  // SDK-05 databases need the full prerequisite migration chain before the
+  // vocabulary pass. Near-current databases need only the vocabulary pass,
+  // preserving compatibility with intentionally partial historical event
+  // databases that do not carry executor runtime tables.
   const migrationDb = new DatabaseSync(dbPath);
+  let requiresFullMigration = false;
   try {
+    requiresFullMigration = databaseTableExists(
+      migrationDb,
+      "executor_invocations",
+    );
     if (
-      databaseColumnExists(
+      !requiresFullMigration &&
+      (databaseColumnExists(
         migrationDb,
         "executor_attempts",
         "executor_family",
       ) ||
-      databaseColumnExists(migrationDb, "executor_rounds", "executor_family")
+        databaseColumnExists(migrationDb, "executor_rounds", "executor_family"))
     ) {
       applyWorkflowVocabularyMigration(migrationDb, {
         claimedExecutorNames: configuredExecutorNames(
@@ -141,7 +148,21 @@ export function openExistingDbMigratedReadOnly(
   } finally {
     migrationDb.close();
   }
+  if (requiresFullMigration) {
+    const upgraded = openDb(dataDir, options);
+    upgraded.close();
+  }
   return new DatabaseSync(dbPath, { readOnly: true });
+}
+
+function databaseTableExists(db: MomentumDb, table: string): boolean {
+  return (
+    db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+      )
+      .get(table) !== undefined
+  );
 }
 
 function databaseColumnExists(

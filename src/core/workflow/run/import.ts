@@ -693,6 +693,19 @@ function extractApprovalsRequired(plan: Record<string, unknown>): Set<string> {
   );
 }
 
+function isApprovalRequired(
+  approvalsRequired: ReadonlySet<string>,
+  stepId: string,
+): boolean {
+  if (approvalsRequired.has(stepId)) return true;
+  const canonicalStepId = canonicalWorkflowStepKind(stepId);
+  if (canonicalStepId === undefined) return false;
+  return Array.from(approvalsRequired).some(
+    (requiredStepId) =>
+      canonicalWorkflowStepKind(requiredStepId) === canonicalStepId,
+  );
+}
+
 function extractStepsFromPlan(
   plan: Record<string, unknown>,
   approvalsRequired: Set<string>,
@@ -716,7 +729,7 @@ function extractStepsFromPlan(
       kind,
       state: "pending",
       order,
-      required: approvalsRequired.has(stepId),
+      required: isApprovalRequired(approvalsRequired, stepId),
       startedAt: null,
       finishedAt: null,
       ledgerOffset: null,
@@ -789,7 +802,7 @@ function mergeLedgerIntoSteps(
         kind,
         state: "pending",
         order: nextOrder,
-        required: approvalsRequired.has(event.step),
+        required: isApprovalRequired(approvalsRequired, event.step),
         startedAt: null,
         finishedAt: null,
         ledgerOffset: null,

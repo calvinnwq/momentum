@@ -2797,6 +2797,7 @@ async function runWorkflowWatchDispatcherTick(
         return dispatchResolution.dispatch(claim, context);
       },
       now: () => now,
+      claimedExecutorNames: configuredExecutorNames(env),
       ...(dispatchResolution?.ok &&
       dispatchResolution.leaseDurationMs !== undefined
         ? { leaseDurationMs: dispatchResolution.leaseDurationMs }

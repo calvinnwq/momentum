@@ -53,6 +53,8 @@ export type DaemonWorkflowLaneConfig = {
   leaseDurationMs?: number;
   /** Stale policy stamped on dispatch leases. Defaults to `auto-release`. */
   stalePolicy?: WorkflowLeaseStalePolicy;
+  /** Explicit runtime registrations that own their raw executor identities. */
+  claimedExecutorNames?: ReadonlySet<string>;
 };
 
 export type DaemonLoopInput = {
@@ -311,6 +313,10 @@ export async function runDaemonLoop(
         }
         if (workflowLane.stalePolicy !== undefined) {
           schedulerInput.stalePolicy = workflowLane.stalePolicy;
+        }
+        if (workflowLane.claimedExecutorNames !== undefined) {
+          schedulerInput.claimedExecutorNames =
+            workflowLane.claimedExecutorNames;
         }
         workflowResult = await runWorkflowSchedulerOnceAsync(schedulerInput);
         lastWorkflowCode = workflowResult.code;
