@@ -7,6 +7,7 @@ import {
   type CliIo,
 } from "../../renderers/cli-output.js";
 import {
+  configuredExecutorClaims,
   configuredExecutorNames,
   hasDurableExecutorDefinition,
   isSqliteBusyError,
@@ -1226,12 +1227,24 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
   }
 
   if (runId !== undefined) {
-    const db = openDb(dataDir);
+    let db: MomentumDb | undefined;
     let detail: WorkflowRunDetail | null;
     try {
-      detail = loadWorkflowRunDetail(db, runId);
+      db = openExistingDbMigratedReadOnly(
+        dataDir,
+        io.env === undefined ? {} : { env: io.env },
+      );
+      detail = db === undefined ? null : loadWorkflowRunDetail(db, runId);
+    } catch (err) {
+      return emitWorkflowStatusFailure(parsed, io, {
+        command: "workflow status",
+        code: "data_dir_failed",
+        message: err instanceof Error ? err.message : String(err),
+        dataDir,
+        runId,
+      });
     } finally {
-      db.close();
+      db?.close();
     }
     if (detail === null) {
       return emitWorkflowStatusFailure(parsed, io, {
@@ -1245,22 +1258,37 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     return emitWorkflowStatusDetail(parsed, io, dataDir, detail);
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb | undefined;
   let summaries: WorkflowRunSummary[];
   try {
-    const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
-    if (parsed.state !== undefined) {
-      options.state = parsed.state as WorkflowRunState;
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    if (db === undefined) {
+      summaries = [];
+    } else {
+      const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
+      if (parsed.state !== undefined) {
+        options.state = parsed.state as WorkflowRunState;
+      }
+      if (parsed.filter !== undefined) {
+        options.filter = parsed.filter as WorkflowStatusFilterKey;
+      }
+      if (parsed.limit !== undefined) {
+        options.limit = parsed.limit;
+      }
+      summaries = listWorkflowRunSummaries(db, options);
     }
-    if (parsed.filter !== undefined) {
-      options.filter = parsed.filter as WorkflowStatusFilterKey;
-    }
-    if (parsed.limit !== undefined) {
-      options.limit = parsed.limit;
-    }
-    summaries = listWorkflowRunSummaries(db, options);
+  } catch (err) {
+    return emitWorkflowStatusFailure(parsed, io, {
+      command: "workflow status",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 
   return emitWorkflowStatusList(parsed, io, dataDir, summaries);
@@ -1331,37 +1359,52 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb | undefined;
   let summaries: WorkflowRunSummary[];
   try {
-    const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
-    if (parsed.state !== undefined) {
-      options.state = parsed.state as WorkflowRunState;
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    if (db === undefined) {
+      summaries = [];
+    } else {
+      const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
+      if (parsed.state !== undefined) {
+        options.state = parsed.state as WorkflowRunState;
+      }
+      if (parsed.filter !== undefined) {
+        options.filter = parsed.filter as WorkflowStatusFilterKey;
+      }
+      if (parsed.limit !== undefined) {
+        options.limit = parsed.limit;
+      }
+      if (parsed.approvalBoundary !== undefined) {
+        options.approvalBoundary = parsed.approvalBoundary;
+      }
+      if (parsed.repo !== undefined) {
+        options.repoPath = parsed.repo;
+      }
+      if (parsed.issueScope !== undefined) {
+        options.issueScope = parsed.issueScope;
+      }
+      if (parsed.updatedSince !== undefined) {
+        options.updatedSince = parsed.updatedSince;
+      }
+      if (parsed.updatedUntil !== undefined) {
+        options.updatedUntil = parsed.updatedUntil;
+      }
+      summaries = listWorkflowRunSummaries(db, options);
     }
-    if (parsed.filter !== undefined) {
-      options.filter = parsed.filter as WorkflowStatusFilterKey;
-    }
-    if (parsed.limit !== undefined) {
-      options.limit = parsed.limit;
-    }
-    if (parsed.approvalBoundary !== undefined) {
-      options.approvalBoundary = parsed.approvalBoundary;
-    }
-    if (parsed.repo !== undefined) {
-      options.repoPath = parsed.repo;
-    }
-    if (parsed.issueScope !== undefined) {
-      options.issueScope = parsed.issueScope;
-    }
-    if (parsed.updatedSince !== undefined) {
-      options.updatedSince = parsed.updatedSince;
-    }
-    if (parsed.updatedUntil !== undefined) {
-      options.updatedUntil = parsed.updatedUntil;
-    }
-    summaries = listWorkflowRunSummaries(db, options);
+  } catch (err) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 
   return emitWorkflowRunList(parsed, io, dataDir, summaries);
@@ -2267,8 +2310,11 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   let envelope: WorkflowMonitorEnvelope | null;
   let db: MomentumDb | undefined;
   try {
-    db = openDb(dataDir);
-    envelope = loadWorkflowMonitorEnvelope(db, runId);
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    envelope = db === undefined ? null : loadWorkflowMonitorEnvelope(db, runId);
   } catch (err) {
     return emitWorkflowRunMonitorFailure(parsed, io, {
       code: "data_dir_failed",
@@ -2902,20 +2948,17 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
   let envelope: WorkflowRunLogsEnvelope | null;
   let db: MomentumDb | undefined;
   try {
-    if (fs.existsSync(dataDir) && !fs.statSync(dataDir).isDirectory()) {
-      throw new Error(`Data directory is not a directory: ${dataDir}`);
-    }
     db = openExistingDbMigratedReadOnly(
       dataDir,
       io.env === undefined ? {} : { env: io.env },
     );
+    const executorClaims = configuredExecutorClaims(io.env ?? process.env);
     envelope =
       db === undefined
         ? null
         : loadWorkflowRunLogs(db, runId, {
-            claimedExecutorNames: configuredExecutorNames(
-              io.env ?? process.env,
-            ),
+            claimedExecutorNames: executorClaims.names,
+            executorClaimsKnown: executorClaims.known,
           });
   } catch (err) {
     return emitWorkflowRunLogsFailure(parsed, io, {
@@ -3088,12 +3131,24 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb | undefined;
   let envelope: WorkflowHandoffEnvelope | null;
   try {
-    envelope = loadWorkflowHandoff(db, runId);
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    envelope = db === undefined ? null : loadWorkflowHandoff(db, runId);
+  } catch (err) {
+    return emitWorkflowHandoffFailure(parsed, io, {
+      command: "workflow handoff",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId,
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 
   if (envelope === null) {

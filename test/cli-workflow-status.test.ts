@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,58 @@ function makeTempDir(prefix = "momentum-cli-workflow-status-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+async function holdWriterLock(dbPath: string): Promise<() => Promise<void>> {
+  const readyPath = `${dbPath}.writer-ready`;
+  const releasePath = `${dbPath}.writer-release`;
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec("BEGIN IMMEDIATE");
+fs.writeFileSync(process.argv[2], "ready");
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[3])) return;
+  db.exec("ROLLBACK");
+  db.close();
+  clearInterval(timer);
+}, 5);`,
+      dbPath,
+      readyPath,
+      releasePath,
+    ],
+    { stdio: "ignore" },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 5);
+    child.once("error", (error) => {
+      clearInterval(poll);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (fs.existsSync(readyPath)) return;
+      clearInterval(poll);
+      reject(new Error(`writer lock process exited before locking: ${code}`));
+    });
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    fs.writeFileSync(releasePath, "release");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  };
 }
 
 async function run(argv: string[]): Promise<RunResult> {
@@ -237,6 +290,51 @@ describe("momentum workflow status", () => {
     expect(payload.schemaVersion).toBe(3);
     expect(payload.count).toBe(0);
     expect(payload.runs).toEqual([]);
+  });
+
+  it("returns a migrated status envelope while another process holds a writer lock", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "status-legacy-lock",
+        state: "running",
+      });
+      seedStep(db, "status-legacy-lock", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "running",
+        order: 0,
+      });
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run([
+        "workflow",
+        "status",
+        "status-legacy-lock",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        command: string;
+        run: { runId: string };
+        steps: Array<{ kind: string }>;
+      };
+      expect(payload.command).toBe("workflow status");
+      expect(payload.run.runId).toBe("status-legacy-lock");
+      expect(payload.steps[0]?.kind).toBe("validate");
+    } finally {
+      await releaseWriter();
+    }
   });
 
   it("rejects an invalid --state with a stable error code", async () => {

@@ -15,6 +15,11 @@ export type OpenDbOptions = {
   timeoutMs?: number;
 };
 
+export type ConfiguredExecutorClaims = {
+  names: ReadonlySet<string>;
+  known: boolean;
+};
+
 const EXECUTOR_CONFIG_ENV_VAR = "MOMENTUM_EXECUTOR_CONFIG";
 const SQLITE_BUSY_TIMEOUT_MS = 5000;
 
@@ -88,10 +93,9 @@ export function configuredExecutorNames(
   return configuredExecutorClaims(env).names;
 }
 
-function configuredExecutorClaims(env: Record<string, string | undefined>): {
-  names: ReadonlySet<string>;
-  known: boolean;
-} {
+export function configuredExecutorClaims(
+  env: Record<string, string | undefined>,
+): ConfiguredExecutorClaims {
   // Migrations run before daemon module loading, so read only the configured
   // identity keys here. If the registry file cannot be read reliably, preserve
   // ambiguous legacy identities until ownership can be established.
@@ -134,6 +138,9 @@ export function openExistingDbMigratedReadOnly(
   dataDir: string,
   options: OpenDbOptions = {},
 ): MomentumDb | undefined {
+  if (fs.existsSync(dataDir) && !fs.statSync(dataDir).isDirectory()) {
+    throw new Error(`Data directory is not a directory: ${dataDir}`);
+  }
   const dbPath = path.join(dataDir, "momentum.db");
   if (!fs.existsSync(dbPath)) {
     return undefined;

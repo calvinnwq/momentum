@@ -3555,6 +3555,172 @@ VALUES
     }
   });
 
+  it("preserves canonical executor values when mixed legacy columns are present", () => {
+    const dataDir = makeTempDir("momentum-nam02-mixed-executor-columns-");
+    const current = openDb(dataDir);
+    try {
+      current
+        .prepare(
+          `INSERT INTO workflow_runs
+             (id, state, source, plan_json, route_json, created_at, updated_at)
+           VALUES ('mixed-columns-run', 'running', 'test', '{}', '{}', 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO workflow_steps
+             (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES ('mixed-columns-run', 'implementation', 'implementation', 'running', 0, 1, 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, executor, created_at, updated_at)
+           VALUES ('mixed-definition', 'agent-loop', 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_attempts
+             (attempt_id, workflow_run_id, step_run_id, step_key, executor,
+              state, attempt_number, created_at, updated_at)
+           VALUES ('mixed-attempt', 'mixed-columns-run', 'implementation',
+                   'implementation', 'agent-loop', 'running', 1, 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_rounds
+             (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+              executor, attempt_number, round_index, state, created_at, updated_at)
+           VALUES ('mixed-round', 'mixed-attempt', 'mixed-columns-run',
+                   'implementation', 'implementation', 'agent-loop', 1, 0,
+                   'running', 1, 1)`,
+        )
+        .run();
+    } finally {
+      current.close();
+    }
+
+    const mixed = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      mixed.exec(`
+        ALTER TABLE executor_attempts ADD COLUMN executor_family TEXT;
+        ALTER TABLE executor_rounds ADD COLUMN executor_family TEXT;
+        ALTER TABLE executor_definitions ADD COLUMN family TEXT;
+        UPDATE executor_attempts SET executor_family = 'goal-loop';
+        UPDATE executor_rounds SET executor_family = 'goal-loop';
+        UPDATE executor_definitions SET family = 'goal-loop';
+      `);
+    } finally {
+      mixed.close();
+    }
+
+    const upgraded = openDb(dataDir);
+    try {
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'mixed-attempt'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'mixed-round'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_definitions
+              WHERE executor_key = 'mixed-definition'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("opens a partial SDK-05 database without a legacy rounds table", () => {
+    const dataDir = makeTempDir("momentum-sdk05-partial-rounds-");
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          state TEXT NOT NULL,
+          goal_id TEXT,
+          source TEXT NOT NULL,
+          plan_json TEXT NOT NULL DEFAULT '{}',
+          batch_group TEXT,
+          batch_role TEXT,
+          needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE workflow_steps (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          state TEXT NOT NULL,
+          step_order INTEGER NOT NULL,
+          required INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        ) STRICT;
+        CREATE TABLE executor_invocations (
+          invocation_id TEXT PRIMARY KEY,
+          workflow_run_id TEXT NOT NULL,
+          step_run_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          executor_family TEXT NOT NULL,
+          state TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        INSERT INTO workflow_runs
+          (id, state, source, plan_json, created_at, updated_at)
+        VALUES ('partial-sdk05-run', 'running', 'test', '{}', 1, 1);
+        INSERT INTO workflow_steps
+          (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+        VALUES ('partial-sdk05-run', 'implementation', 'implementation',
+                'running', 0, 1, 1, 1);
+        INSERT INTO executor_invocations
+          (invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, state, attempt, created_at, updated_at)
+        VALUES ('partial-invocation', 'partial-sdk05-run', 'implementation',
+                'implementation', 'goal-loop', 'running', 1, 1, 1);
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(tableNames(db!)).toContain("executor_invocations");
+      expect(tableNames(db!)).toContain("executor_rounds");
+      expect(
+        db!
+          .prepare(
+            "SELECT id FROM workflow_runs WHERE id = 'partial-sdk05-run'",
+          )
+          .get(),
+      ).toEqual({ id: "partial-sdk05-run" });
+    } finally {
+      db?.close();
+    }
+  });
+
   it("migrates workflow vocabulary in a partial read-only database", () => {
     const dataDir = makeTempDir("momentum-nam02-partial-readonly-");
     const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));

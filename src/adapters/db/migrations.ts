@@ -943,6 +943,11 @@ function migrateLegacyExecutorInvocationSchema(
   options: QueueMigrationOptions,
 ): void {
   if (!tableExists(db, "executor_invocations")) return;
+  // A partially upgraded SDK-05 database may have persisted invocations before
+  // the legacy round table was created. The additive migration below creates
+  // the current attempt/round tables; do not run the legacy rebuild against a
+  // missing source table.
+  if (!tableExists(db, "executor_rounds")) return;
   db.exec("PRAGMA foreign_keys = OFF");
   try {
     db.exec("BEGIN IMMEDIATE");
@@ -1541,21 +1546,9 @@ function migrateWorkflowVocabulary(
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (columnExists(db, "executor_attempts", "executor_family")) {
-      db.exec(
-        "ALTER TABLE executor_attempts RENAME COLUMN executor_family TO executor",
-      );
-    }
-    if (columnExists(db, "executor_rounds", "executor_family")) {
-      db.exec(
-        "ALTER TABLE executor_rounds RENAME COLUMN executor_family TO executor",
-      );
-    }
-    if (columnExists(db, "executor_definitions", "family")) {
-      db.exec(
-        "ALTER TABLE executor_definitions RENAME COLUMN family TO executor",
-      );
-    }
+    mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
+    mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
+    mergeOrRenameExecutorColumn(db, "executor_definitions", "family");
 
     if (columnExists(db, "workflow_steps", "kind")) {
       const updateStepKind = db.prepare(
@@ -1959,6 +1952,30 @@ function columnExists(db: MomentumDb, table: string, column: string): boolean {
     .prepare(`PRAGMA table_info(${table})`)
     .all() as PragmaColumnRow[];
   return rows.some((row) => row.name === column);
+}
+
+function mergeOrRenameExecutorColumn(
+  db: MomentumDb,
+  table: string,
+  legacyColumn: string,
+): void {
+  const hasLegacyColumn = columnExists(db, table, legacyColumn);
+  if (!hasLegacyColumn) return;
+  if (!columnExists(db, table, "executor")) {
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN ${legacyColumn} TO executor`);
+    return;
+  }
+
+  // Mixed-version schemas already have the canonical column. Preserve its
+  // non-empty value and only recover an empty canonical cell from the legacy
+  // column; leave the legacy column in place as compatibility provenance.
+  db.exec(
+    `UPDATE ${table}
+        SET executor = ${legacyColumn}
+      WHERE (executor IS NULL OR trim(executor) = '')
+        AND ${legacyColumn} IS NOT NULL
+        AND trim(${legacyColumn}) <> ''`,
+  );
 }
 
 export function applyQueueMigrations(

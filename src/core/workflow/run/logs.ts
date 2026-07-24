@@ -45,6 +45,7 @@ export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 3;
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
   claimedExecutorNames?: ReadonlySet<string>;
+  executorClaimsKnown?: boolean;
 };
 
 export type WorkflowRunLogRound = ExecutorRoundRecord & {
@@ -75,6 +76,7 @@ export function loadWorkflowRunLogs(
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
     executorIdentityClaimed:
+      options.executorClaimsKnown === false ||
       hasExecutorDefinition(db, round.executor) ||
       options.claimedExecutorNames?.has(round.executor) === true,
     artifacts: listExecutorArtifactsForRound(db, round.roundId),

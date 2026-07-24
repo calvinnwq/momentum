@@ -356,6 +356,46 @@ describe("momentum workflow run logs", () => {
     });
   });
 
+  it("does not emit native evidence when executor ownership is unknown", async () => {
+    const dataDir = makeTempDir();
+    const executorConfigPath = path.join(dataDir, "malformed-executors.json");
+    fs.writeFileSync(executorConfigPath, "{ malformed", "utf8");
+    const db = openDb(dataDir, {
+      env: { MOMENTUM_EXECUTOR_CONFIG: executorConfigPath },
+    });
+    try {
+      seedRunWithRound(db, "cwfp-logs-unknown-ownership");
+      db.prepare(
+        "UPDATE executor_attempts SET executor = 'goal-loop' WHERE attempt_id = 'inv-1'",
+      ).run();
+      db.prepare(
+        "UPDATE executor_rounds SET executor = 'goal-loop' WHERE round_id = 'round-1'",
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "logs",
+        "cwfp-logs-unknown-ownership",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_EXECUTOR_CONFIG: executorConfigPath },
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ executor: string; nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.executor).toBe("goal-loop");
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
   it("reads a near-current legacy database through a snapshot while another process holds a writer lock", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
