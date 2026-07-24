@@ -3648,7 +3648,7 @@ VALUES
     }
   });
 
-  it("opens a partial SDK-05 database without a legacy rounds table", () => {
+  it("migrates a partial SDK-05 database without a legacy rounds table", () => {
     const dataDir = makeTempDir("momentum-sdk05-partial-rounds-");
     const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
@@ -3707,8 +3707,24 @@ VALUES
     const db = openExistingDbMigratedReadOnly(dataDir);
     expect(db).toBeDefined();
     try {
-      expect(tableNames(db!)).toContain("executor_invocations");
+      expect(tableNames(db!)).not.toContain("executor_invocations");
       expect(tableNames(db!)).toContain("executor_rounds");
+      expect(
+        db!
+          .prepare(
+            `SELECT attempt_id, executor, state, attempt_number,
+                    legacy_invocation_id
+               FROM executor_attempts
+              WHERE attempt_id = 'partial-invocation'`,
+          )
+          .get(),
+      ).toEqual({
+        attempt_id: "partial-invocation",
+        executor: "agent-loop",
+        state: "running",
+        attempt_number: 1,
+        legacy_invocation_id: "partial-invocation",
+      });
       expect(
         db!
           .prepare(
@@ -3718,6 +3734,20 @@ VALUES
       ).toEqual({ id: "partial-sdk05-run" });
     } finally {
       db?.close();
+    }
+
+    const reopened = openExistingDbMigratedReadOnly(dataDir);
+    expect(reopened).toBeDefined();
+    try {
+      expect(
+        reopened!
+          .prepare(
+            "SELECT attempt_id FROM executor_attempts WHERE attempt_id = 'partial-invocation'",
+          )
+          .get(),
+      ).toEqual({ attempt_id: "partial-invocation" });
+    } finally {
+      reopened?.close();
     }
   });
 

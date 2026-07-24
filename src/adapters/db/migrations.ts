@@ -945,9 +945,13 @@ function migrateLegacyExecutorInvocationSchema(
   if (!tableExists(db, "executor_invocations")) return;
   // A partially upgraded SDK-05 database may have persisted invocations before
   // the legacy round table was created. The additive migration below creates
-  // the current attempt/round tables; do not run the legacy rebuild against a
-  // missing source table.
+  // the current attempt/round tables; do not run the legacy rebuild against
+  // a missing source table.
   if (!tableExists(db, "executor_rounds")) return;
+  // A subsequent open of that partial database sees the additive current-shaped
+  // round table. It is not a legacy source merely because the table exists;
+  // the legacy rebuild requires its `invocation_id` parent column.
+  if (!columnExists(db, "executor_rounds", "invocation_id")) return;
   db.exec("PRAGMA foreign_keys = OFF");
   try {
     db.exec("BEGIN IMMEDIATE");
@@ -1427,6 +1431,187 @@ function migrateLegacyExecutorInvocationSchema(
       if (violations.length > 0 || attemptViolations.length > 0) {
         throw new Error(
           "executor attempt migration produced foreign-key violations; rolling back",
+        );
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+/**
+ * Complete the interrupted SDK-05 migration shape where invocations were
+ * persisted but no legacy rounds were ever written. The normal rebuild cannot
+ * reconstruct round evidence in this case, but the invocation itself still
+ * represents a durable executor attempt and must not be hidden or discarded.
+ *
+ * This runs after the additive current-schema pass, so the invocation becomes a
+ * current attempt with no fabricated round. The legacy table is dropped only in
+ * the same transaction that inserts every source row, making repeated opens
+ * idempotent and preventing the next open from mistaking a current round table
+ * for a legacy source.
+ */
+function migratePartialLegacyExecutorInvocationSchema(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): void {
+  if (!tableExists(db, "executor_invocations")) return;
+  if (
+    tableExists(db, "executor_rounds") &&
+    columnExists(db, "executor_rounds", "invocation_id")
+  ) {
+    return;
+  }
+
+  const requiredColumns = [
+    "invocation_id",
+    "workflow_run_id",
+    "step_run_id",
+    "step_key",
+    "executor_family",
+    "state",
+    "attempt",
+    "created_at",
+    "updated_at",
+  ];
+  const missingColumn = requiredColumns.find(
+    (column) => !columnExists(db, "executor_invocations", column),
+  );
+  if (missingColumn !== undefined) {
+    throw new Error(
+      `partial SDK-05 invocation migration is missing required column ${missingColumn}`,
+    );
+  }
+
+  const optionalColumns = ["started_at", "heartbeat_at", "finished_at"].filter(
+    (column) => columnExists(db, "executor_invocations", column),
+  );
+  const selectedColumns = [...requiredColumns, ...optionalColumns];
+  const invocations = db
+    .prepare(
+      `SELECT ${selectedColumns.join(", ")}
+         FROM executor_invocations
+        ORDER BY workflow_run_id, step_run_id, created_at, invocation_id`,
+    )
+    .all() as Array<Record<string, unknown>>;
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const executorRenames = renameableLegacyExecutorValues(db, options);
+      const canonicalExecutorValue = (value: string): string =>
+        executorRenames.get(value) ?? value;
+      const existingAttempt = db.prepare(
+        `SELECT attempt_id, legacy_invocation_id
+           FROM executor_attempts
+          WHERE attempt_id = ?`,
+      );
+      const insertAttempt = db.prepare(
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key, executor,
+           state, attempt_number, started_at, heartbeat_at, finished_at,
+           legacy_invocation_id, legacy_provenance, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const attemptNumbersByStep = new Map<string, Set<number>>();
+
+      for (const invocation of invocations) {
+        const invocationId = String(invocation.invocation_id);
+        const existing = existingAttempt.get(invocationId) as
+          | { attempt_id: string; legacy_invocation_id: string | null }
+          | undefined;
+        if (existing !== undefined) {
+          if (existing.legacy_invocation_id === invocationId) continue;
+          throw new Error(
+            `partial SDK-05 invocation migration collides with current attempt ${invocationId}`,
+          );
+        }
+
+        const workflowRunId = String(invocation.workflow_run_id);
+        const stepRunId = String(invocation.step_run_id);
+        const stepIdentity = JSON.stringify([workflowRunId, stepRunId]);
+        const usedAttemptNumbers =
+          attemptNumbersByStep.get(stepIdentity) ?? new Set<number>();
+        if (!attemptNumbersByStep.has(stepIdentity)) {
+          const existingNumbers = db
+            .prepare(
+              `SELECT attempt_number
+                 FROM executor_attempts
+                WHERE workflow_run_id = ? AND step_run_id = ?`,
+            )
+            .all(workflowRunId, stepRunId) as Array<{
+            attempt_number: number;
+          }>;
+          for (const row of existingNumbers) {
+            usedAttemptNumbers.add(row.attempt_number);
+          }
+          attemptNumbersByStep.set(stepIdentity, usedAttemptNumbers);
+        }
+
+        const originalAttemptNumber = Math.max(1, Number(invocation.attempt));
+        let attemptNumber = originalAttemptNumber;
+        while (usedAttemptNumbers.has(attemptNumber)) attemptNumber += 1;
+        usedAttemptNumbers.add(attemptNumber);
+
+        const provenance: Record<string, unknown> = {
+          legacyInvocationId: invocationId,
+          source: "reconstructed_without_round_evidence",
+        };
+        if (attemptNumber !== originalAttemptNumber) {
+          provenance.legacyAttemptNumber = originalAttemptNumber;
+        }
+
+        const nullableNumber = (column: string): number | null => {
+          const value = invocation[column];
+          return value === undefined || value === null ? null : Number(value);
+        };
+        insertAttempt.run(
+          invocationId,
+          workflowRunId,
+          stepRunId,
+          String(invocation.step_key),
+          canonicalExecutorValue(String(invocation.executor_family)),
+          String(invocation.state),
+          attemptNumber,
+          nullableNumber("started_at"),
+          nullableNumber("heartbeat_at"),
+          nullableNumber("finished_at"),
+          invocationId,
+          JSON.stringify(provenance),
+          Number(invocation.created_at),
+          Number(invocation.updated_at),
+        );
+      }
+
+      if (
+        tableExists(db, "workflow_gates") &&
+        columnExists(db, "workflow_gates", "invocation_id")
+      ) {
+        if (!columnExists(db, "workflow_gates", "attempt_id")) {
+          db.exec(
+            "ALTER TABLE workflow_gates RENAME COLUMN invocation_id TO attempt_id",
+          );
+        } else {
+          db.exec(
+            `UPDATE workflow_gates
+                SET attempt_id = COALESCE(attempt_id, invocation_id)
+              WHERE invocation_id IS NOT NULL`,
+          );
+        }
+      }
+
+      db.exec("DROP TABLE executor_invocations");
+      const violations = db
+        .prepare("PRAGMA foreign_key_check(executor_attempts)")
+        .all();
+      if (violations.length > 0) {
+        throw new Error(
+          "partial SDK-05 invocation migration produced foreign-key violations; rolling back",
         );
       }
       db.exec("COMMIT");
@@ -2064,6 +2249,7 @@ export function applyQueueMigrations(
   }
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
+  migratePartialLegacyExecutorInvocationSchema(db, options);
   migrateWorkflowVocabulary(db, options);
 }
 
