@@ -1054,6 +1054,31 @@ describe("workflow run events", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("returns data_dir_failed when the data directory path is a regular file", async () => {
+    const dataDir = path.join(makeTempDir(), "not-a-directory");
+    fs.writeFileSync(dataDir, "not a directory");
+
+    const result = await run([
+      "workflow",
+      "run",
+      "events",
+      "cwfp-events-data-dir-failed",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run events",
+      code: "data_dir_failed",
+      dataDir,
+      runId: "cwfp-events-data-dir-failed",
+    });
+    expect(result.stdout).toBe("");
+  });
+
   it("does not create a missing data directory on read-only misses", async () => {
     const root = makeTempDir();
     const dataDir = path.join(root, "missing-data-dir");

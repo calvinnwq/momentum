@@ -368,19 +368,20 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openExistingDbMigratedReadOnly(
-    dataDir,
-    io.env === undefined ? {} : { env: io.env },
-  );
-  if (db === undefined) {
-    return emitWorkflowRunEventsFailure(parsed, io, {
-      code: "run_not_found",
-      message: `Workflow run not found: ${runId}`,
-      dataDir,
-      runId,
-    });
-  }
+  let db: MomentumDb | undefined;
   try {
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    if (db === undefined) {
+      return emitWorkflowRunEventsFailure(parsed, io, {
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId,
+      });
+    }
     const envelope = loadWorkflowRunEvents(db, runId, {
       since: parsed.since,
     });
@@ -402,9 +403,14 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
         runId,
       });
     }
-    throw error;
+    return emitWorkflowRunEventsFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: error instanceof Error ? error.message : String(error),
+      dataDir,
+      runId,
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
