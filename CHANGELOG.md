@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/calvinnwq/momentum/compare/v0.21.0...v0.22.0) (2026-07-24)
+
+
+### Features
+
+* **executors:** adopt immutable attempt and round model ([#236](https://github.com/calvinnwq/momentum/issues/236)) ([a348ad2](https://github.com/calvinnwq/momentum/commit/a348ad2370c4090218b9fe7e2a5443cde66ce808))
+
+
+### Bug Fixes
+
+* **workflow:** preserve legacy identities during vocabulary migration ([#238](https://github.com/calvinnwq/momentum/issues/238)) ([2cc5359](https://github.com/calvinnwq/momentum/commit/2cc5359061ca4ff039e275c4db050f66f487c4d8))
+
 ## [0.21.0](https://github.com/calvinnwq/momentum/compare/v0.20.0...v0.21.0) (2026-07-20)
 
 
