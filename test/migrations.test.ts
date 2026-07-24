@@ -3723,7 +3723,7 @@ VALUES
             "SELECT kind FROM workflow_steps WHERE run_id = 'locked-legacy-run'",
           )
           .get(),
-      ).toEqual({ kind: "no-mistakes" });
+      ).toEqual({ kind: "validate" });
       db?.close();
     } finally {
       writer.exec("ROLLBACK");

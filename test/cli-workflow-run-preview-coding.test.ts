@@ -40,7 +40,10 @@ function makeTempDir(prefix = "momentum-cli-preview-coding-"): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: Record<string, string | undefined> = {},
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
@@ -56,7 +59,7 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       },
     },
-    env: {},
+    env,
   });
   return { code, stdout, stderr };
 }
@@ -162,6 +165,52 @@ describe("momentum workflow run preview-coding", () => {
         state: "pending",
       },
     ]);
+  });
+
+  it("keeps a retained legacy executor when its canonical name is custom", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const executorModulePath = path.join(dataDir, "custom-agent-loop.mjs");
+    fs.writeFileSync(
+      executorModulePath,
+      `export default {
+  name: "agent-loop",
+  configSchema: { type: "object", properties: {}, additionalProperties: false },
+  tick() { throw new Error("not used in preview"); },
+};
+`,
+      "utf8",
+    );
+    const executorConfigPath = path.join(dataDir, "executors.json");
+    fs.writeFileSync(
+      executorConfigPath,
+      JSON.stringify({ executors: { "agent-loop": executorModulePath } }),
+      "utf8",
+    );
+
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-custom-canonical-agent-loop",
+        objective: "Preserve the retained executor identity",
+        extra: ["--definition-version", "1"],
+      }),
+      { MOMENTUM_EXECUTOR_CONFIG: executorConfigPath },
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      steps: Array<{ stepId: string; executor: string }>;
+    };
+    expect(payload.steps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: "implementation",
+          executor: "goal-loop",
+        }),
+      ]),
+    );
   });
 
   it("previews the current GNHF/CWFP implementation engine as an explicit route choice", async () => {

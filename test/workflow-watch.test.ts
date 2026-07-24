@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -86,6 +87,58 @@ async function run(
     env,
   });
   return { code, stdout, stderr };
+}
+
+async function holdWriterLock(dbPath: string): Promise<() => Promise<void>> {
+  const readyPath = `${dbPath}.writer-ready`;
+  const releasePath = `${dbPath}.writer-release`;
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec("BEGIN IMMEDIATE");
+fs.writeFileSync(process.argv[2], "ready");
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[3])) return;
+  db.exec("ROLLBACK");
+  db.close();
+  clearInterval(timer);
+}, 5);`,
+      dbPath,
+      readyPath,
+      releasePath,
+    ],
+    { stdio: "ignore" },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 5);
+    child.once("error", (error) => {
+      clearInterval(poll);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (fs.existsSync(readyPath)) return;
+      clearInterval(poll);
+      reject(new Error(`writer lock process exited before locking: ${code}`));
+    });
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    fs.writeFileSync(releasePath, "release");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  };
 }
 
 const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
@@ -226,6 +279,50 @@ function seedLease(
 }
 
 describe("momentum workflow run watch", () => {
+  it("returns a migrated watch envelope from a snapshot while another process holds a writer lock", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-locked-legacy";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "running",
+        order: 0,
+      });
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run([
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        command: "workflow run watch",
+        runId,
+        emit: true,
+        activeStep: { stepId: "no-mistakes", state: "running" },
+      });
+    } finally {
+      await releaseWriter();
+    }
+  });
+
   it("returns a agent-once JSON supervisor envelope for a running native workflow", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-watch-running";

@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import {
@@ -11,6 +12,7 @@ export type MomentumDb = DatabaseSync;
 
 export type OpenDbOptions = {
   env?: Record<string, string | undefined>;
+  timeoutMs?: number;
 };
 
 const EXECUTOR_CONFIG_ENV_VAR = "MOMENTUM_EXECUTOR_CONFIG";
@@ -63,14 +65,21 @@ export function openDb(
 ): MomentumDb {
   fs.mkdirSync(dataDir, { recursive: true });
   const dbPath = path.join(dataDir, "momentum.db");
-  const db = new DatabaseSync(dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
-  db.exec(SCHEMA);
-  const executorClaims = configuredExecutorClaims(options.env ?? process.env);
-  applyQueueMigrations(db, {
-    claimedExecutorNames: executorClaims.names,
-    executorClaimsKnown: executorClaims.known,
+  const db = new DatabaseSync(dbPath, {
+    timeout: options.timeoutMs ?? SQLITE_BUSY_TIMEOUT_MS,
   });
-  return db;
+  try {
+    db.exec(SCHEMA);
+    const executorClaims = configuredExecutorClaims(options.env ?? process.env);
+    applyQueueMigrations(db, {
+      claimedExecutorNames: executorClaims.names,
+      executorClaimsKnown: executorClaims.known,
+    });
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function configuredExecutorNames(
@@ -136,11 +145,12 @@ export function openExistingDbMigratedReadOnly(
   const migrationDb = new DatabaseSync(dbPath, {
     // A read-only command must not wait behind an unrelated writer while
     // attempting an optional legacy vocabulary upgrade. If the upgrade cannot
-    // acquire the lock immediately, the read path below serves the immutable
-    // legacy rows through its compatibility projections.
+    // acquire the lock immediately, the read path below serves a consistent
+    // migrated snapshot instead.
     timeout: 0,
   });
   let requiresFullMigration = false;
+  let migrationBusy = false;
   try {
     requiresFullMigration = databaseTableExists(
       migrationDb,
@@ -157,19 +167,90 @@ export function openExistingDbMigratedReadOnly(
         });
       } catch (error) {
         if (!isSqliteBusyError(error)) throw error;
+        migrationBusy = true;
       }
     }
   } finally {
     migrationDb.close();
   }
+  if (migrationBusy) {
+    return openMigratedReadOnlySnapshot(
+      dataDir,
+      options,
+      requiresFullMigration,
+    );
+  }
   if (requiresFullMigration) {
-    const upgraded = openDb(dataDir, options);
-    upgraded.close();
+    try {
+      const upgraded = openDb(dataDir, { ...options, timeoutMs: 0 });
+      upgraded.close();
+    } catch (error) {
+      if (!isSqliteBusyError(error)) throw error;
+      return openMigratedReadOnlySnapshot(dataDir, options, true);
+    }
   }
   return new DatabaseSync(dbPath, {
     readOnly: true,
     timeout: SQLITE_BUSY_TIMEOUT_MS,
   });
+}
+
+function openMigratedReadOnlySnapshot(
+  dataDir: string,
+  options: OpenDbOptions,
+  requiresFullMigration: boolean,
+): MomentumDb {
+  const snapshotDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-readonly-snapshot-"),
+  );
+  const snapshotPath = path.join(snapshotDir, "momentum.db");
+  let snapshotDb: MomentumDb | undefined;
+  let readOnlySnapshot: MomentumDb | undefined;
+  try {
+    const sourceDb = new DatabaseSync(path.join(dataDir, "momentum.db"), {
+      readOnly: true,
+      timeout: 0,
+    });
+    try {
+      sourceDb.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
+    } finally {
+      sourceDb.close();
+    }
+
+    snapshotDb = new DatabaseSync(snapshotPath, {
+      timeout: SQLITE_BUSY_TIMEOUT_MS,
+    });
+    const executorClaims = configuredExecutorClaims(options.env ?? process.env);
+    if (requiresFullMigration) {
+      snapshotDb.exec(SCHEMA);
+      applyQueueMigrations(snapshotDb, {
+        claimedExecutorNames: executorClaims.names,
+        executorClaimsKnown: executorClaims.known,
+      });
+    } else {
+      applyWorkflowVocabularyMigration(snapshotDb, {
+        claimedExecutorNames: executorClaims.names,
+        executorClaimsKnown: executorClaims.known,
+      });
+    }
+    snapshotDb.close();
+    snapshotDb = undefined;
+
+    readOnlySnapshot = new DatabaseSync(snapshotPath, {
+      readOnly: true,
+      timeout: SQLITE_BUSY_TIMEOUT_MS,
+    });
+    // The open handle keeps the unlinked snapshot alive for the caller while
+    // avoiding stale files after a read-only command exits.
+    fs.unlinkSync(snapshotPath);
+    fs.rmdirSync(snapshotDir);
+    return readOnlySnapshot;
+  } catch (error) {
+    snapshotDb?.close();
+    readOnlySnapshot?.close();
+    fs.rmSync(snapshotDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /** Whether a current-schema database durably claims an executor identity. */
@@ -197,7 +278,7 @@ function databaseTableExists(db: MomentumDb, table: string): boolean {
   );
 }
 
-function isSqliteBusyError(error: unknown): boolean {
+export function isSqliteBusyError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const errcode = (error as Error & { errcode?: number }).errcode;
   return (

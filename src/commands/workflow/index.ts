@@ -9,6 +9,7 @@ import {
 import {
   configuredExecutorNames,
   hasDurableExecutorDefinition,
+  isSqliteBusyError,
   isUniqueViolation,
   openDb,
   openExistingDbMigratedReadOnly,
@@ -107,6 +108,7 @@ import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
+  isWorkflowExecutor,
   type WorkflowDefinition,
 } from "../../core/workflow/definition/definition.js";
 import {
@@ -830,6 +832,9 @@ async function runWorkflowStartCommand(
         isDurablyClaimed: (executorName) =>
           durablePreviewDb !== undefined &&
           hasDurableExecutorDefinition(durablePreviewDb, executorName),
+        isCanonicalBuiltIn: (executorName) =>
+          isWorkflowExecutor(executorName) &&
+          !configuredExecutorRegistry.has(executorName),
       });
     } finally {
       durablePreviewDb?.close();
@@ -2416,8 +2421,9 @@ async function workflowRunWatch(
 
   let envelope: WorkflowMonitorEnvelope | null;
   let db: MomentumDb | undefined;
+  let readOnlyFallback = false;
   try {
-    db = openDb(dataDir);
+    db = openDb(dataDir, { timeoutMs: 0 });
     envelope = loadWorkflowMonitorEnvelope(db, runId);
     if (envelope !== null) {
       const tickFailure = await runWorkflowWatchDispatcherTick(
@@ -2436,12 +2442,33 @@ async function workflowRunWatch(
       envelope = loadWorkflowMonitorEnvelope(db, runId);
     }
   } catch (err) {
-    return emitWorkflowRunWatchFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
-      dataDir,
-      runId,
-    });
+    if (!isSqliteBusyError(err)) {
+      return emitWorkflowRunWatchFailure(parsed, io, {
+        code: "data_dir_failed",
+        message: err instanceof Error ? err.message : String(err),
+        dataDir,
+        runId,
+      });
+    }
+    try {
+      db = openExistingDbMigratedReadOnly(
+        dataDir,
+        io.env === undefined ? {} : { env: io.env },
+      );
+      envelope =
+        db === undefined ? null : loadWorkflowMonitorEnvelope(db, runId);
+      readOnlyFallback = true;
+    } catch (fallbackError) {
+      return emitWorkflowRunWatchFailure(parsed, io, {
+        code: "data_dir_failed",
+        message:
+          fallbackError instanceof Error
+            ? fallbackError.message
+            : String(fallbackError),
+        dataDir,
+        runId,
+      });
+    }
   } finally {
     db?.close();
   }
@@ -2480,6 +2507,18 @@ async function workflowRunWatch(
   const emittedAt = advisory.emit
     ? envelope.generatedAt
     : seedMissingMonitorEmittedAt(envelope);
+
+  if (readOnlyFallback) {
+    return emitWorkflowRunWatch(
+      parsed,
+      io,
+      dataDir,
+      envelope,
+      progress,
+      advisory,
+      recommendation,
+    );
+  }
 
   let writeDb: MomentumDb | undefined;
   try {
@@ -2863,10 +2902,21 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
   let envelope: WorkflowRunLogsEnvelope | null;
   let db: MomentumDb | undefined;
   try {
-    db = openDb(dataDir, io.env === undefined ? {} : { env: io.env });
-    envelope = loadWorkflowRunLogs(db, runId, {
-      claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
-    });
+    if (fs.existsSync(dataDir) && !fs.statSync(dataDir).isDirectory()) {
+      throw new Error(`Data directory is not a directory: ${dataDir}`);
+    }
+    db = openExistingDbMigratedReadOnly(
+      dataDir,
+      io.env === undefined ? {} : { env: io.env },
+    );
+    envelope =
+      db === undefined
+        ? null
+        : loadWorkflowRunLogs(db, runId, {
+            claimedExecutorNames: configuredExecutorNames(
+              io.env ?? process.env,
+            ),
+          });
   } catch (err) {
     return emitWorkflowRunLogsFailure(parsed, io, {
       code: "data_dir_failed",

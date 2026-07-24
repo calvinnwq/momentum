@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -177,6 +178,58 @@ function makeDecision(): ExecutorDecisionRecord {
   };
 }
 
+async function holdWriterLock(dbPath: string): Promise<() => Promise<void>> {
+  const readyPath = `${dbPath}.writer-ready`;
+  const releasePath = `${dbPath}.writer-release`;
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec("BEGIN IMMEDIATE");
+fs.writeFileSync(process.argv[2], "ready");
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[3])) return;
+  db.exec("ROLLBACK");
+  db.close();
+  clearInterval(timer);
+}, 5);`,
+      dbPath,
+      readyPath,
+      releasePath,
+    ],
+    { stdio: "ignore" },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 5);
+    child.once("error", (error) => {
+      clearInterval(poll);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (fs.existsSync(readyPath)) return;
+      clearInterval(poll);
+      reject(new Error(`writer lock process exited before locking: ${code}`));
+    });
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    fs.writeFileSync(releasePath, "release");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  };
+}
+
 function seedRunWithRound(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
@@ -301,6 +354,44 @@ describe("momentum workflow run logs", () => {
       dataDir,
       runId: "cwfp-db-failed",
     });
+  });
+
+  it("reads a near-current legacy database through a snapshot while another process holds a writer lock", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithRound(db, "cwfp-logs-locked-legacy");
+      db.prepare(
+        "UPDATE workflow_steps SET kind = 'no-mistakes' WHERE run_id = ?",
+      ).run("cwfp-logs-locked-legacy");
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run([
+        "workflow",
+        "run",
+        "logs",
+        "cwfp-logs-locked-legacy",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        schemaVersion: number;
+        steps: Array<{ kind: string }>;
+      };
+      expect(payload.schemaVersion).toBe(3);
+      expect(payload.steps[0]?.kind).toBe("validate");
+    } finally {
+      await releaseWriter();
+    }
   });
 
   it("rejects an unexpected positional argument", async () => {
