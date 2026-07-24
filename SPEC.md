@@ -30,20 +30,30 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 - The goal-first CLI lane and its goal-iteration execution mechanism are
   retired. `Goal`, `Iteration`, and `Job` rows remain durable compatibility
   data served by `recovery clear`, daemon status/startup recovery, and doctor.
-  `goal-loop` remains an executor family.
+  `agent-loop` (recorded pre-rename as `goal-loop`) remains an executor when
+  the raw legacy identity is not claimed.
 
-Built-in executor identities currently include `goal-loop`, `one-shot`,
-`script`, `no-mistakes`, `delegate-supervisor`, `external-apply`, and
-`subworkflow`.
+Built-in executor identities currently include `agent-loop`, `agent-once`,
+`script`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
 Profile-backed registration and native binding details are owned by [Executor SDK](docs/executor-sdk.md#config-and-host-bindings).
 Step definitions may also name arbitrary valid permanent identities supplied by
 the configured executor registry.
-The legacy values remain readable for durable compatibility. The current
-`coding-workflow` definition classifies implementation and no-mistakes as
-`delegate-supervisor`, with `{ "tool": "gnhf" }` and
-`{ "tool": "no-mistakes" }` stored as portable step config.
-Version 1 remains registered unchanged for runs that recorded its legacy
-implementation and no-mistakes identities.
+Recorded definitions stay byte-for-byte immutable, so retired spellings remain
+readable through one shared non-mutating legacy projection: `goal-loop` projects
+to `agent-loop` and `one-shot` projects to `agent-once`, the
+`no-mistakes` and `linear-refresh` step kinds project to `validate` and
+`tracker-refresh`, and the legacy `no-mistakes` executor identity stays
+dispatchable as-is for retained definitions. A registered executor's raw name
+always wins over an alias, and durable executor definitions claim their raw
+identity for safe stale reattachment as well. Unclaimed legacy aliases are
+compatibility projections only; they do not become native executor
+registrations.
+The current `coding-workflow` definition (version 3) classifies the
+implementation and validate steps as `delegate-supervisor`, with
+`{ "tool": "gnhf" }` and `{ "tool": "no-mistakes" }` stored as portable step
+config.
+Versions 1 and 2 remain registered unchanged for runs that recorded their
+legacy vocabulary.
 Native dispatch projects `{ "command": "merge-cleanup" }` for the V1
 merge-cleanup step at runtime without rewriting that immutable definition.
 
@@ -112,7 +122,7 @@ credentials, stdin policy, and other machine-local values are host bindings.
 Daemon profile resolution and native no-fallback behavior are owned by [Daemon commands](docs/daemon.md#workflow-live-wrapper-profile).
 Structural preflight validation and module registration are separate runtime
 wiring; the SDK contract does not make either a private executor hook. The
-single-shot lifecycle also enforces its declared family-specific schema at
+single-shot lifecycle also enforces its declared executor-specific schema at
 runtime before it creates a durable round.
 
 `MOMENTUM_EXECUTOR_CONFIG` names a local JSON registry whose `executors` map
@@ -202,7 +212,7 @@ Host-owned repo-local log and result paths are excluded from the ignored-path ba
 Ignored-path comparison hashes every included entry's path and metadata, including a non-empty directory before recursively hashing its descendants, and intentionally treats additions, removals, or metadata changes as residue.
 Directory-only mode or timestamp mutations therefore cannot evade the baseline.
 Very large ignored trees can make capture expensive, and concurrent cache churn can conservatively refuse cleanup; mutable caches should live outside the supervised worktree when practical.
-The native goal-loop lifecycle is specified below in [Native Goal-Loop Contract](#native-goal-loop-contract).
+The native agent-loop lifecycle is specified below in [Agent-Loop Contract](#agent-loop-contract).
 `delegate-supervisor` composes one
 tool-adapter handoff for the active correlated external run with repeated bounded external-state reads across SDK
 ticks. The executor, not the adapter, owns durable rounds, semantic progress
@@ -210,7 +220,7 @@ heartbeats, four-minute stall recovery, finding and decision projection,
 identity corroboration, and terminal classification. A tool adapter supplies
 only handoff, interrupted-handoff recovery, and canonical state normalization;
 portable step config selects it with `tool`, so adding a tool does not add an
-executor family or durable schema value. Recovery after a persisted handoff
+executor or durable schema value. Recovery after a persisted handoff
 intent must reconcile durable tool evidence or fail closed before another
 launch.
 The profile-backed host writes no-mistakes launch intent before spawning the tool and writes reset or commit intent before the corresponding repository mutation.
@@ -243,14 +253,14 @@ settling cached success.
 No-mistakes normalization rejects ambiguous current AXI fields, malformed or duplicate step rows, unknown step statuses, and CI evidence outside the canonical steps table.
 Pending or running table rows remain active steps and cannot support terminal monitoring success.
 The supervisor reserves its synthetic approval identity, and only the latest resolved `approve` action authorizes completion after an approval boundary.
-The single-shot lifecycle (`one-shot` and `script` in the current
+The single-shot lifecycle (`agent-once` and `script` in the current
 schema) implements `Executor` directly and is driven through the durable
 envelope before its host accepts or refines the recommendation. Looping
 executors have no default iteration cap: requirements are the stop condition;
 only an explicitly configured cap may raise the durable `quota_exhausted` gate.
 The single-shot lifecycle runtime-normalizes the complete runner-adapter return before artifact writes, result observations, or completion checkpoints.
 Malformed JavaScript or casted returns are rejected with only the atomically materialized attempt, running round, and dispatch-binding checkpoint left for recovery.
-Successful `one-shot` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
+Successful `agent-once` turns require a successful normalized `RunnerResult`, while `script` turns are exit-code based and cannot return result-document evidence.
 
 If the anchor cannot confirm termination, the ownership-checked POSIX fallback
 receives its own bounded cleanup budget. The fallback budget starts only
@@ -280,22 +290,22 @@ The dependency-free `RunnerResult` shapes in
 and process adapters may import them at runtime without acquiring persistence or
 daemon ownership.
 
-## Native Goal-Loop Contract
+## Agent-Loop Contract
 
-The native `goal-loop` is Momentum's autonomous implementation flywheel below a workflow step.
-`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step.
+The native `agent-loop` is Momentum's autonomous implementation flywheel below a workflow step.
+`executor_attempt` is the whole autonomous agent-loop attempt for one workflow step.
 `executor_round` is one durable iteration beneath that attempt.
 The attempt owns the ordered round sequence, shared lease/checkpoint envelope, accumulated notes and learnings, and final stop condition.
 A completed round is never replayed, renamed, or overwritten to continue the loop.
 A later loop iteration creates the next round under the same attempt, and a retry after terminal recovery inserts a fresh immutable attempt with the next attempt number according to the step recovery policy.
 
-Goal-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.
+Agent-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.
 Executor attempt states are `pending`, `preparing`, `running`, `pausing`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
 Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirroring_external_state`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
-The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema.
+The runner-authored result document consumed by the shipped agent-loop mechanism remains the normalized `RunnerResult` schema.
 Before a native round hands control to a runner, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
 Source context and prior-round evidence are rendered as quoted untrusted JSON context, not executable instructions.
 The prompted result-file mechanism clears any stale result file, writes that prompt as a runner input artifact, lets the runner author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
@@ -306,13 +316,14 @@ Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaki
 
 After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
 Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
-The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts and is not emitted for current canonical rounds.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 `daemonClassification` is Momentum's persisted daemon classification after budget, recovery, and operator-gate policy are applied.
 `verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
 Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
-When a native goal-loop round has a usable absolute verification log path, Momentum writes a digested `commit_or_reset_evidence` sidecar at `<verification-log>.finalization.json` with the finalization outcome, commit metadata when present, changed files, verification status, recovery code, result path, verification log path, and commit/reset errors.
+When a native agent-loop round has a usable absolute verification log path, Momentum writes a digested `commit_or_reset_evidence` sidecar at `<verification-log>.finalization.json` with the finalization outcome, commit metadata when present, changed files, verification status, recovery code, result path, verification log path, and commit/reset errors.
 `commitSha` is non-null only after Momentum has verified and recorded the successful commit for that round.
 `recoveryReason` is non-null only when the round requires recovery or explains why no safe commit was created.
 
@@ -329,12 +340,12 @@ The loop must preserve no duplicate completed rounds and no duplicate commits by
 If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
 If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
 
-GNHF is source material, a compatibility reference, or an optional runner below `goal-loop` for legacy definitions; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
-GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native goal-loop runner mechanism.
+GNHF is source material, a compatibility reference, or an optional runner below the legacy `goal-loop` spelling for retained definitions when that raw identity is unclaimed; the current coding workflow instead selects it as portable tool config on the `delegate-supervisor` implementation step.
+GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may also inform the native agent-loop runner mechanism.
 `.gnhf/runs` is not Momentum's durable source of truth.
 Momentum's durable source of truth is the workflow run, step, executor attempt, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
-`gnhf` must not become a first-class executor family merely to reuse behavior.
-Whether delegated through `delegate-supervisor` or used beneath legacy `goal-loop`, GNHF must report into Momentum attempt and round records instead of making `.gnhf/runs` authoritative.
+`gnhf` must not become a first-class executor merely to reuse behavior.
+Whether delegated through `delegate-supervisor` or used beneath an unclaimed legacy `goal-loop` identity, GNHF must report into Momentum attempt and round records instead of making `.gnhf/runs` authoritative.
 
 ## Workflow Safety
 
@@ -385,7 +396,7 @@ The default policy is local intent creation only. The Linear path supports
 comment-only `source_satisfied` intents and explicit `status_update` intents
 whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the refusal reason.
-Before a workflow `linear-refresh` external write is attempted, the tail
+Before a workflow `tracker-refresh` external write is attempted, the tail
 lifecycle preflight must prove `LINEAR_API_KEY` in the applying process,
 `intent_apply_policy: external_apply_allowed`, a workflow issue scope, a matching
 Linear source item, and either one pending Linear `status_update` intent or enough
@@ -393,7 +404,7 @@ unique issue-scope/source evidence to seed the expected pending `status_update` 
 with a `Done` payload deterministically.
 The resulting intent must carry a valid payload with exactly one `state` / `stateId` and the stable idempotency marker.
 If durable external-apply audit evidence already proves the intended write
-landed and post-apply reconcile succeeded, `linear-refresh` reconciles without
+landed and post-apply reconcile succeeded, `tracker-refresh` reconciles without
 another Linear mutation.
 
 ## Source And Adapter Boundaries
@@ -424,7 +435,7 @@ Historical `cwfp-*` runs remain readable/importable compatibility state. They
 must not become the primary source of truth for new Momentum-owned runs.
 
 An opt-in Momentum-owned coding workflow is proven end to end through
-implementation, postflight, no-mistakes, merge cleanup, and Linear refresh.
+implementation, postflight, validate, merge cleanup, and tracker refresh.
 CWFP remains the default coding-workflow start and rollback route; switching
 the default is a separate, deliberate decision that must preserve rollback.
 
@@ -439,7 +450,7 @@ scope, approval boundary, skill revision, and the selected runtime/profile
 (`route.implementationEngine`, defaulting to the honest `gnhf` label); the daemon
 still resolves the executing live-wrapper profile from
 `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
-Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
+Native coding dispatch resolves executors from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
 `workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor identity, portable config, and on-start state) so an operator can inspect the proposed run before approval or execution.
@@ -448,7 +459,7 @@ The preview is a pure projection of the version-pinned built-in definition plus 
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
 `--implementation-engine` accepts `gnhf`, the persisted compatibility label `native-goal-loop`, or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
 Implementation-route execution semantics are owned by [Daemon commands](docs/daemon.md#workflow-live-wrapper-profile).
-The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
+The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `validate`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.
 `route.steps` records the operator's per-step selection for durable audit by status/handoff/monitor/logs and for dispatcher-created executor-round selection; it stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
@@ -460,14 +471,14 @@ The deterministic digest excludes volatile timestamps, lease heartbeat / expiry 
 Plain monitor reads do not write.
 `--advance` is accepted only for `momentum-native-coding` runs and persists only `monitor_last_seen_digest` / `monitor_last_seen_at` plus `monitor_last_emitted_digest` / `monitor_last_emitted_at` when the tick emits; generic workflow starts, imported `cwfp-*` compatibility runs, and fallback CWFP behavior remain unchanged.
 `workflow run watch --once` builds on the same monitor projection, but first runs at most one run-scoped dispatcher tick when the target native run exposes an approved non-tail `advance_to_step` action or an active running step is eligible for a scheduler recheck, and has no open gate, recovery, or manual-recovery flag.
-Approved `merge-cleanup` and `linear-refresh` tail steps are not started by the watch poller; they surface as `recommendedAction: "operator_decision"` and `nextAction.actionClass: "operator_decision"` with human-required tail policy metadata.
+Approved `merge-cleanup` and `tracker-refresh` tail steps are not started by the watch poller; they surface as `recommendedAction: "operator_decision"` and `nextAction.actionClass: "operator_decision"` with human-required tail policy metadata.
 The watch tick re-reads durable state after that bounded dispatch, persists the same digest / timestamp advisory baselines as monitor advance, and still never resolves gates, approvals, or recovery decisions by itself.
 The `workflow run watch --once --json` supervisor envelope is frozen as the wire contract cron, OpenClaw, and a future GUI consume, so downstream adapters never scrape prose or terminal text.
 Its top-level field set is fixed, `emit` is the machine-polling signal that suppresses repeated identical ticks below the quiet threshold while still surfacing meaningful changes and throttled quiet advisories, and it adds the watch-derived `recommendedAction`, `recommendedActionPolicy`, `nextPollSeconds`, `quietForSeconds`, `quietThresholdSeconds`, `stuckRisk`, `inspectionCommand`, and `humanAction` fields over the shared monitor projection so a consumer can branch and render a concise human update without a follow-up `workflow status` read.
 The envelope shape, enum vocabularies (`reason`, `disposition`, `phase`, `cleanup`, `recommendedAction`, `stuckRisk`, `nextAction.code`, `nextAction.actionClass`, and `humanAction.code`), the `humanAction.gateType` key, and common GUI scenarios are frozen by `test/fixtures/workflow-gui-contract.json` and `test/workflow-watch-contract.test.ts`, which fail if a required field disappears, an enum value drifts, or a scenario loses its expected human action, null action, failed-step next action, compact recovery detail, or stuck-risk inspection command.
-Supervisor action policy metadata classifies known watch, monitor, recovery, gate, and external-tail actions with `authority` (`auto_allowed`, `recommend_only`, `human_required`, or `forbidden`), `risk`, `evidenceRequired`, `rollback`, and a short rationale. `auto_allowed` is an explicit allowlist for safe wait/release/read-only or local recheck cases only. Approval/operator decisions, clear-recovery, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply require human authority. Destructive/default-switch/broad external actions are forbidden and must surface as blocked policy metadata, not silent execution. If policy metadata is absent or invalid, consumers must fail closed by treating every non-wait action as `human_required`.
+Supervisor action policy metadata classifies known watch, monitor, recovery, gate, and external-tail actions with `authority` (`auto_allowed`, `recommend_only`, `human_required`, or `forbidden`), `risk`, `evidenceRequired`, `rollback`, and a short rationale. `auto_allowed` is an explicit allowlist for safe wait/release/read-only or local recheck cases only. Approval/operator decisions, clear-recovery, stale manual recovery, no-mistakes recovery, merge cleanup, tracker refresh, and external-apply require human authority. Destructive/default-switch/broad external actions are forbidden and must surface as blocked policy metadata, not silent execution. If policy metadata is absent or invalid, consumers must fail closed by treating every non-wait action as `human_required`.
 The supervisor envelope carries quiet-duration and stuck-risk hints for fast pollers that should stay quiet during healthy unchanged ticks.
-The quiet thresholds are centralized in the watch advisory reducer: implementation 15m, postflight 10m, no-mistakes 15m, merge-cleanup 5m, linear-refresh 5m, approval reminders 30m, recovery reminders 60m, and idle 15m.
+The quiet thresholds are centralized in the watch advisory reducer: implementation 15m, postflight 10m, validate 15m, merge-cleanup 5m, tracker-refresh 5m, approval reminders 30m, recovery reminders 60m, and idle 15m.
 An unchanged tick remains `emit: false` until its threshold window is reached; threshold emissions use `reason: "quiet_heartbeat"` for approval / recovery / idle reminders or `reason: "stuck_risk"` for active execution, include elapsed `quietForSeconds`, the applied `quietThresholdSeconds`, and an inspection command when active execution may be stuck.
 These hints are advisory only: they never mark a run or step failed, never mutate execution lifecycle state, and never trigger LLM diagnosis in the CLI.
 `workflow run events` is the durable semantic replay API for supervisors and app clients that reconnect after process loss.
@@ -490,23 +501,23 @@ When the config gate is disabled, benign `watch_recheck` and `monitor_recheck` r
 Fail-closed auto-action escalations preserve sanitized human-review delivery text, suppress monitor-removal cleanup unless a disabled-monitor escalation audit was saved, and treat required pre-state-write audit status failure as a nonzero `openclaw_auto_action_audit_failed` refusal.
 Momentum still does not post webhooks, wake external lanes, remove external monitors, or rewind supervisor state when a host delivery attempt fails.
 Native tail recovery is hardened without changing the default route.
-Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
+Failed required `merge-cleanup` and `tracker-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`.
-The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
+The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
 The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no runner evidence.
-For the `no-mistakes` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
+For the `validate` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
-The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
-For the `no-mistakes` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
+The `tracker-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
+For the `validate` step, the no-mistakes tool adapter hands off the external run and normalizes its state for `delegate-supervisor`. A reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, is terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 That terminal handoff evidence is persisted for a full 40-character commit SHA before supervision.
 It settles only after a fresh status view corroborates the same run, branch, and exact current repository `HEAD` with passed or explicitly absent CI, no active findings, and no unresolved decisions; a compatible lagging monitoring view may corroborate the cached terminal state without replacing it.
 Current pending CI is never promoted by stored terminal proof, and proof for one commit never settles a descendant commit.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
 The delegate supervisor preserves each no-mistakes raw external-state digest in `inputDigest`, stores a separate semantic progress digest in `resultDigest`, and carries the last semantic-progress time across mirrored rounds; after four minutes without fresh progress or terminal evidence it parks the attempt in manual recovery so operators inspect the external run before clearing recovery.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed no-mistakes row.
-If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
+Ordinary failed validate steps remain `nextAction.actionClass: "retry_failed_step"` with `recoveryDetail: null`; an unflagged clear can still accept explicit checks-passed or structured deterministic evidence for the failed validate row.
+If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `validate` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
 That reconciliation accepts the legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` path and a structured deterministic evidence JSON path whose schema records the workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
 Its expected identity comes only from the current attempt's latest no-mistakes legacy checkpoint or a `delegate-supervisor` attempt whose durable handoff intent selects `tool: "no-mistakes"`; prior-attempt and other-tool checkpoints cannot authorize reconciliation.
 Structured evidence is refused when its schema, identity, findings, check state, outcome, or phase statuses are unknown, stale, ambiguous, partial, mismatched, unresolved, pending, failed, or otherwise non-successful.

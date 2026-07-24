@@ -1,5 +1,5 @@
 /**
- * Daemon-lane child-run context deriver for the `subworkflow` executor family
+ * Daemon-lane child-run context deriver for the `subworkflow` executor
  *.
  *
  * The landed the subworkflow seam entry-point factory (`dispatch/subworkflow-dispatch.ts`) takes its
@@ -49,7 +49,7 @@
  * Wiring: this deriver is injected into the daemon dispatch
  * composition (`withSubworkflowDispatch` in `cli.ts`, wrapping the base dispatch
  * via {@link createSubworkflowWorkflowDispatch}), with `subworkflow` flipped into
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so a configured `subworkflow` step now
+ * `PHASE1_DISPATCHABLE_EXECUTORS`, so a configured `subworkflow` step now
  * dispatches its child run through bounded `daemon start`.
  */
 
@@ -59,7 +59,7 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import { resolveDispatchedStepExecutorContext } from "../live-wrapper/daemon-exec-context.js";
 import type {
   ClaimedWorkflowStep,
-  WorkflowStepDispatchContext
+  WorkflowStepDispatchContext,
 } from "../dispatch/scheduler.js";
 import { buildDispatchedSubworkflowChildRunner } from "./subworkflow-child-runner.js";
 import type { DispatchedSubworkflowContextResolution } from "../dispatch/subworkflow-dispatch.js";
@@ -118,18 +118,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 export function resolveSubworkflowParentRunFacts(
   runId: string,
-  row: SubworkflowParentRunRow
+  row: SubworkflowParentRunRow,
 ): SubworkflowParentRunFactsResolution {
   if (!nonBlank(row.definitionKey)) {
     return {
       ok: false,
-      reason: `Subworkflow parent run ${runId} is not linked to a workflow definition; routing to manual recovery.`
+      reason: `Subworkflow parent run ${runId} is not linked to a workflow definition; routing to manual recovery.`,
     };
   }
   if (!nonBlank(row.objective)) {
     return {
       ok: false,
-      reason: `Subworkflow parent run ${runId} has no objective to inherit; routing to manual recovery.`
+      reason: `Subworkflow parent run ${runId} has no objective to inherit; routing to manual recovery.`,
     };
   }
 
@@ -143,13 +143,13 @@ export function resolveSubworkflowParentRunFacts(
     } catch {
       return {
         ok: false,
-        reason: `Subworkflow parent run ${runId} has a corrupt route; routing to manual recovery.`
+        reason: `Subworkflow parent run ${runId} has a corrupt route; routing to manual recovery.`,
       };
     }
     if (!isPlainObject(parsed)) {
       return {
         ok: false,
-        reason: `Subworkflow parent run ${runId} route is not an object; routing to manual recovery.`
+        reason: `Subworkflow parent run ${runId} route is not an object; routing to manual recovery.`,
       };
     }
     route = parsed;
@@ -162,8 +162,8 @@ export function resolveSubworkflowParentRunFacts(
       definitionKey: row.definitionKey,
       objective: row.objective,
       repoPath: row.repoPath,
-      sourceArtifactPath: row.sourceArtifactPath
-    }
+      sourceArtifactPath: row.sourceArtifactPath,
+    },
   };
 }
 
@@ -174,12 +174,12 @@ export function resolveSubworkflowParentRunFacts(
  */
 export function loadSubworkflowParentRunRow(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): SubworkflowParentRunRow | undefined {
   const row = db
     .prepare(
       `SELECT route_json, workflow_definition_key, objective, repo_path, source_artifact_path
-         FROM workflow_runs WHERE id = ?`
+         FROM workflow_runs WHERE id = ?`,
     )
     .get(runId) as
     | {
@@ -196,7 +196,7 @@ export function loadSubworkflowParentRunRow(
     definitionKey: row.workflow_definition_key,
     objective: row.objective,
     repoPath: row.repo_path,
-    sourceArtifactPath: row.source_artifact_path
+    sourceArtifactPath: row.source_artifact_path,
   };
 }
 
@@ -211,13 +211,13 @@ export function loadSubworkflowParentRunRow(
  */
 export function deriveDispatchedSubworkflowContext(
   claim: ClaimedWorkflowStep,
-  context: WorkflowStepDispatchContext
+  context: WorkflowStepDispatchContext,
 ): DispatchedSubworkflowContextResolution {
   const row = loadSubworkflowParentRunRow(context.db, claim.runId);
   if (row === undefined) {
     return {
       ok: false,
-      reason: `Subworkflow parent run ${claim.runId} not found; routing to manual recovery.`
+      reason: `Subworkflow parent run ${claim.runId} not found; routing to manual recovery.`,
     };
   }
 
@@ -228,18 +228,18 @@ export function deriveDispatchedSubworkflowContext(
     parentRunId: claim.runId,
     parentStepId: claim.stepId,
     parentRoute: facts.facts.route,
-    parentDefinitionKey: facts.facts.definitionKey
+    parentDefinitionKey: facts.facts.definitionKey,
   });
   if (!plan.ok) return { ok: false, reason: plan.reason };
 
   const execContext = resolveDispatchedStepExecutorContext(claim.runId, {
     repoPath: facts.facts.repoPath,
-    sourceArtifactPath: facts.facts.sourceArtifactPath
+    sourceArtifactPath: facts.facts.sourceArtifactPath,
   });
   if (!execContext.ok) {
     return {
       ok: false,
-      reason: `Subworkflow parent run ${claim.runId} has no repo path to host a child run; routing to manual recovery.`
+      reason: `Subworkflow parent run ${claim.runId} has no repo path to host a child run; routing to manual recovery.`,
     };
   }
 
@@ -251,7 +251,7 @@ export function deriveDispatchedSubworkflowContext(
     childRoute: plan.childRoute,
     repoPath: execContext.exec.repoPath,
     objective: facts.facts.objective,
-    now: context.now
+    now: context.now,
   });
   if (!built.ok) return { ok: false, reason: built.reason };
 
@@ -260,7 +260,7 @@ export function deriveDispatchedSubworkflowContext(
     runSubworkflowChild: built.run,
     evidence: {
       executorLogPath: path.join(execContext.exec.runDir, "subworkflow.log"),
-      resultJsonPath: path.join(execContext.exec.runDir, "subworkflow.json")
-    }
+      resultJsonPath: path.join(execContext.exec.runDir, "subworkflow.json"),
+    },
   };
 }

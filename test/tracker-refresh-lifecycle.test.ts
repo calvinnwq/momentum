@@ -5,15 +5,15 @@ import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 import type { SourceItem } from "../src/core/source/items.js";
 import {
-  planLinearRefreshAlreadyAppliedReconciliation,
-  planLinearRefreshLifecycle
-} from "../src/core/workflow/dispatch/linear-refresh-lifecycle.js";
+  planTrackerRefreshAlreadyAppliedReconciliation,
+  planTrackerRefreshLifecycle,
+} from "../src/core/workflow/dispatch/tracker-refresh-lifecycle.js";
 
 const ISSUE_SCOPE = "NGX-565";
 const SOURCE_ID = "source_565";
 const INTENT_ID = "intent_565";
 const EXPECTED_OPERATOR_REASON =
-  "daemon external-apply for workflow current-run/linear-refresh";
+  "daemon external-apply for workflow current-run/tracker-refresh";
 
 function source(overrides: Partial<SourceItem> = {}): SourceItem {
   return {
@@ -29,7 +29,7 @@ function source(overrides: Partial<SourceItem> = {}): SourceItem {
     goalId: null,
     createdAt: 1,
     updatedAt: 1,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -54,13 +54,13 @@ function intent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
     appliedAt: null,
     skippedAt: null,
     canceledAt: null,
-    ...overrides
+    ...overrides,
   };
 }
 
 function audit(
   appliedIntent: UpdateIntent,
-  overrides: Partial<IntentApplyAudit> = {}
+  overrides: Partial<IntentApplyAudit> = {},
 ): IntentApplyAudit {
   return {
     id: "audit_565",
@@ -71,7 +71,7 @@ function audit(
       externalId: appliedIntent.targetExternalId,
       externalKey: ISSUE_SCOPE,
       url: "https://linear.app/ngxcalvin/issue/NGX-565",
-      title: "Make linear refresh resumable"
+      title: "Make linear refresh resumable",
     },
     requestedAt: 1,
     finishedAt: 2,
@@ -84,7 +84,7 @@ function audit(
     idempotencyMarker: buildIdempotencyMarker({
       adapterKind: appliedIntent.adapterKind,
       intentId: appliedIntent.id,
-      payload: appliedIntent.payload
+      payload: appliedIntent.payload,
     }),
     lifecycleState: "succeeded",
     resultStatus: "succeeded",
@@ -93,12 +93,12 @@ function audit(
     externalRefs: {
       commentId: "comment_565",
       commentUrl: "https://linear.app/ngxcalvin/issue/NGX-565#comment",
-      stateTransitionId: "transition_565"
+      stateTransitionId: "transition_565",
     },
     reconcile: { status: "success", warning: null },
     createdAt: 1,
     updatedAt: 2,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -106,7 +106,9 @@ function sources(...items: SourceItem[]): ReadonlyMap<string, SourceItem> {
   return new Map(items.map((item) => [item.id, item]));
 }
 
-function baseInput(overrides: Partial<Parameters<typeof planLinearRefreshLifecycle>[0]> = {}) {
+function baseInput(
+  overrides: Partial<Parameters<typeof planTrackerRefreshLifecycle>[0]> = {},
+) {
   return {
     env: { LINEAR_API_KEY: "lin_secret" },
     intentApplyPolicy: "external_apply_allowed" as const,
@@ -114,140 +116,144 @@ function baseInput(overrides: Partial<Parameters<typeof planLinearRefreshLifecyc
     pendingIntents: [intent()],
     sourceItemsById: sources(source()),
     expectedOperatorReason: EXPECTED_OPERATOR_REASON,
-    ...overrides
+    ...overrides,
   };
 }
 
-describe("linear-refresh lifecycle planner", () => {
+describe("tracker-refresh lifecycle planner", () => {
   it("fails before mutation when Linear auth is missing", () => {
-    expect(
-      planLinearRefreshLifecycle(baseInput({ env: {} }))
-    ).toMatchObject({
+    expect(planTrackerRefreshLifecycle(baseInput({ env: {} }))).toMatchObject({
       phase: "preflight",
       status: "auth_missing",
       action: "fix_setup_config_then_retry",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
   it("requires external apply policy before mutation", () => {
     expect(
-      planLinearRefreshLifecycle(
-        baseInput({ intentApplyPolicy: "create_intents_only" })
-      )
+      planTrackerRefreshLifecycle(
+        baseInput({ intentApplyPolicy: "create_intents_only" }),
+      ),
     ).toMatchObject({
       phase: "preflight",
       status: "policy_denied",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
   it("requires exactly one pending intent", () => {
     expect(
-      planLinearRefreshLifecycle(baseInput({ pendingIntents: [] }))
+      planTrackerRefreshLifecycle(baseInput({ pendingIntents: [] })),
     ).toMatchObject({
       phase: "preflight",
       status: "intent_missing",
       action: "seed_pending_intent_then_retry",
-      safeToMutate: false
+      safeToMutate: false,
     });
     expect(
-      planLinearRefreshLifecycle(
-        baseInput({ pendingIntents: [intent(), intent({ id: "intent_2" })] })
-      )
+      planTrackerRefreshLifecycle(
+        baseInput({ pendingIntents: [intent(), intent({ id: "intent_2" })] }),
+      ),
     ).toMatchObject({
       phase: "preflight",
       status: "intent_duplicate",
       action: "resolve_intent_evidence",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
   it("ignores pending non-status intents when selecting the refresh status update", () => {
-    const plan = planLinearRefreshLifecycle(
+    const plan = planTrackerRefreshLifecycle(
       baseInput({
         pendingIntents: [
           intent({
             id: "intent_source_satisfied",
             intentType: "source_satisfied",
-            payload: { kind: "comment" }
+            payload: { kind: "comment" },
           }),
-          intent()
-        ]
-      })
+          intent(),
+        ],
+      }),
     );
 
     expect(plan).toMatchObject({
       phase: "apply",
       status: "ready",
       action: "apply_external_update",
-      safeToMutate: true
+      safeToMutate: true,
     });
     expect(plan.evidence.intentId).toBe(INTENT_ID);
   });
 
   it("requires a matching Linear source item", () => {
     expect(
-      planLinearRefreshLifecycle(baseInput({ sourceItemsById: sources() }))
+      planTrackerRefreshLifecycle(baseInput({ sourceItemsById: sources() })),
     ).toMatchObject({
       phase: "preflight",
       status: "source_missing",
       action: "resolve_intent_evidence",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
   it("requires a pending status_update payload with exactly one target state field", () => {
     expect(
-      planLinearRefreshLifecycle(
-        baseInput({ pendingIntents: [intent({ intentType: "source_satisfied" })] })
-      )
+      planTrackerRefreshLifecycle(
+        baseInput({
+          pendingIntents: [intent({ intentType: "source_satisfied" })],
+        }),
+      ),
     ).toMatchObject({ status: "intent_missing", safeToMutate: false });
     expect(
-      planLinearRefreshLifecycle(
-        baseInput({ pendingIntents: [intent({ payload: {} })] })
-      )
+      planTrackerRefreshLifecycle(
+        baseInput({ pendingIntents: [intent({ payload: {} })] }),
+      ),
     ).toMatchObject({ status: "payload_invalid", safeToMutate: false });
     expect(
-      planLinearRefreshLifecycle(
-        baseInput({ pendingIntents: [intent({ payload: { state: "Done", stateId: "done-id" } })] })
-      )
+      planTrackerRefreshLifecycle(
+        baseInput({
+          pendingIntents: [
+            intent({ payload: { state: "Done", stateId: "done-id" } }),
+          ],
+        }),
+      ),
     ).toMatchObject({ status: "payload_invalid", safeToMutate: false });
   });
 
   it("enters apply only when auth, policy, source, intent, marker, and payload are valid", () => {
-    const plan = planLinearRefreshLifecycle(baseInput());
+    const plan = planTrackerRefreshLifecycle(baseInput());
 
     expect(plan).toMatchObject({
       phase: "apply",
       status: "ready",
       action: "apply_external_update",
-      safeToMutate: true
+      safeToMutate: true,
     });
     expect(plan.evidence).toMatchObject({
       issueScopeIdentifier: ISSUE_SCOPE,
       intentId: INTENT_ID,
       sourceItemId: SOURCE_ID,
-      idempotencyKey: "linear:NGX-565:status_update:done"
+      idempotencyKey: "linear:NGX-565:status_update:done",
     });
     expect(plan.evidence.idempotencyMarker).toContain(INTENT_ID);
   });
 
   it("reconciles already-applied durable audit evidence without mutation", () => {
     const applied = intent({ status: "applied", appliedAt: 2 });
-    const plan = planLinearRefreshLifecycle(
+    const plan = planTrackerRefreshLifecycle(
       baseInput({
         pendingIntents: [],
         appliedIntents: [applied],
-        latestAuditsByIntentId: new Map([[applied.id, audit(applied)]])
-      })
+        latestAuditsByIntentId: new Map([[applied.id, audit(applied)]]),
+      }),
     );
 
     expect(plan).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
     expect(plan.evidence.auditId).toBe("audit_565");
   });
@@ -257,35 +263,35 @@ describe("linear-refresh lifecycle planner", () => {
     const appliedEvidence = {
       pendingIntents: [],
       appliedIntents: [applied],
-      latestAuditsByIntentId: new Map([[applied.id, audit(applied)]])
+      latestAuditsByIntentId: new Map([[applied.id, audit(applied)]]),
     };
 
     expect(
-      planLinearRefreshLifecycle(
+      planTrackerRefreshLifecycle(
         baseInput({
           ...appliedEvidence,
-          env: {}
-        })
-      )
+          env: {},
+        }),
+      ),
     ).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
 
     expect(
-      planLinearRefreshLifecycle(
+      planTrackerRefreshLifecycle(
         baseInput({
           ...appliedEvidence,
-          intentApplyPolicy: "create_intents_only"
-        })
-      )
+          intentApplyPolicy: "create_intents_only",
+        }),
+      ),
     ).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
@@ -299,20 +305,22 @@ describe("linear-refresh lifecycle planner", () => {
           [
             applied.id,
             audit(applied, {
+              // Deliberate legacy seed: an older run's frozen audit reason
+              // keeps its pre-rename step id spelling.
               operatorReason:
-                "daemon external-apply for workflow old-run/linear-refresh"
-            })
-          ]
-        ])
+                "daemon external-apply for workflow old-run/tracker-refresh",
+            }),
+          ],
+        ]),
       }),
-      expectedOperatorReason: EXPECTED_OPERATOR_REASON
+      expectedOperatorReason: EXPECTED_OPERATOR_REASON,
     };
 
-    expect(planLinearRefreshLifecycle(input)).toMatchObject({
+    expect(planTrackerRefreshLifecycle(input)).toMatchObject({
       phase: "preflight",
       status: "intent_stale",
       action: "resolve_intent_evidence",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
@@ -320,20 +328,20 @@ describe("linear-refresh lifecycle planner", () => {
     const applied = intent({ status: "applied", appliedAt: 2 });
 
     expect(
-      planLinearRefreshLifecycle(
+      planTrackerRefreshLifecycle(
         baseInput({
           pendingIntents: [],
           appliedIntents: [applied],
           latestAuditsByIntentId: new Map([
-            [applied.id, audit(applied, { idempotencyMarker: "stale" })]
-          ])
-        })
-      )
+            [applied.id, audit(applied, { idempotencyMarker: "stale" })],
+          ]),
+        }),
+      ),
     ).toMatchObject({
       phase: "preflight",
       status: "intent_stale",
       action: "resolve_intent_evidence",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
@@ -343,10 +351,10 @@ describe("linear-refresh lifecycle planner", () => {
       status: "applied",
       appliedAt: 1,
       idempotencyKey: "linear:NGX-565:status_update:old",
-      payload: { state: "In Review" }
+      payload: { state: "In Review" },
     });
     const currentApplied = intent({ status: "applied", appliedAt: 2 });
-    const plan = planLinearRefreshLifecycle(
+    const plan = planTrackerRefreshLifecycle(
       baseInput({
         pendingIntents: [],
         appliedIntents: [oldApplied, currentApplied],
@@ -355,24 +363,26 @@ describe("linear-refresh lifecycle planner", () => {
             oldApplied.id,
             audit(oldApplied, {
               id: "audit_old",
+              // Deliberate legacy seed: an older run's frozen audit reason
+              // keeps its pre-rename step id spelling.
               operatorReason:
-                "daemon external-apply for workflow old-run/linear-refresh"
-            })
+                "daemon external-apply for workflow old-run/tracker-refresh",
+            }),
           ],
-          [currentApplied.id, audit(currentApplied)]
-        ])
-      })
+          [currentApplied.id, audit(currentApplied)],
+        ]),
+      }),
     );
 
     expect(plan).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
     expect(plan.evidence).toMatchObject({
       intentId: INTENT_ID,
-      auditId: "audit_565"
+      auditId: "audit_565",
     });
   });
 
@@ -380,7 +390,7 @@ describe("linear-refresh lifecycle planner", () => {
     const stalePending = intent({
       id: "intent_stale_pending",
       idempotencyKey: "linear:NGX-565:status_update:stale",
-      payload: { state: "In Review" }
+      payload: { state: "In Review" },
     });
     const currentApplied = intent({ status: "applied", appliedAt: 2 });
     const appliedEvidence = {
@@ -388,36 +398,40 @@ describe("linear-refresh lifecycle planner", () => {
       pendingIntents: [stalePending],
       appliedIntents: [currentApplied],
       sourceItemsById: sources(source()),
-      latestAuditsByIntentId: new Map([[currentApplied.id, audit(currentApplied)]]),
-      expectedOperatorReason: EXPECTED_OPERATOR_REASON
+      latestAuditsByIntentId: new Map([
+        [currentApplied.id, audit(currentApplied)],
+      ]),
+      expectedOperatorReason: EXPECTED_OPERATOR_REASON,
     };
 
     expect(
-      planLinearRefreshAlreadyAppliedReconciliation(appliedEvidence)
+      planTrackerRefreshAlreadyAppliedReconciliation(appliedEvidence),
     ).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
 
-    const plan = planLinearRefreshLifecycle(
+    const plan = planTrackerRefreshLifecycle(
       baseInput({
         pendingIntents: [stalePending],
         appliedIntents: [currentApplied],
-        latestAuditsByIntentId: new Map([[currentApplied.id, audit(currentApplied)]])
-      })
+        latestAuditsByIntentId: new Map([
+          [currentApplied.id, audit(currentApplied)],
+        ]),
+      }),
     );
 
     expect(plan).toMatchObject({
       phase: "reconcile",
       status: "already_applied",
       action: "reconcile_already_applied",
-      safeToMutate: false
+      safeToMutate: false,
     });
     expect(plan.evidence).toMatchObject({
       intentId: INTENT_ID,
-      auditId: "audit_565"
+      auditId: "audit_565",
     });
   });
 
@@ -426,43 +440,43 @@ describe("linear-refresh lifecycle planner", () => {
       status: "applied",
       appliedAt: 2,
       intentType: "source_satisfied",
-      payload: { kind: "comment" }
+      payload: { kind: "comment" },
     });
 
     expect(
-      planLinearRefreshLifecycle(
+      planTrackerRefreshLifecycle(
         baseInput({
           pendingIntents: [],
           appliedIntents: [applied],
-          latestAuditsByIntentId: new Map([[applied.id, audit(applied)]])
-        })
-      )
+          latestAuditsByIntentId: new Map([[applied.id, audit(applied)]]),
+        }),
+      ),
     ).toMatchObject({
       phase: "preflight",
       status: "intent_missing",
       action: "seed_pending_intent_then_retry",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 
   it("refuses status updates whose source item does not match issue scope", () => {
     expect(
-      planLinearRefreshLifecycle(
+      planTrackerRefreshLifecycle(
         baseInput({
           pendingIntents: [intent({ targetExternalId: ISSUE_SCOPE })],
           sourceItemsById: sources(
             source({
               externalId: "linear-issue-other",
-              externalKey: "NGX-999"
-            })
-          )
-        })
-      )
+              externalKey: "NGX-999",
+            }),
+          ),
+        }),
+      ),
     ).toMatchObject({
       phase: "preflight",
       status: "intent_stale",
       action: "resolve_intent_evidence",
-      safeToMutate: false
+      safeToMutate: false,
     });
   });
 });

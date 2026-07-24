@@ -208,7 +208,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
 
       const attempt = db
         .prepare(
-          `SELECT workflow_run_id, step_key, executor_family, state,
+          `SELECT workflow_run_id, step_key, executor, state,
                   attempt_number AS attempt
              FROM executor_attempts WHERE workflow_run_id = ?`,
         )
@@ -216,21 +216,21 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       expect(attempt).toEqual({
         workflow_run_id: runId,
         step_key: "preflight",
-        executor_family: "one-shot",
+        executor: "agent-once",
         state: "running",
         attempt: 1,
       });
 
       const round = db
         .prepare(
-          `SELECT workflow_run_id, step_key, executor_family, state, artifact_root
+          `SELECT workflow_run_id, step_key, executor, state, artifact_root
              FROM executor_rounds WHERE workflow_run_id = ?`,
         )
         .get(runId) as Record<string, unknown>;
       expect(round).toEqual({
         workflow_run_id: runId,
         step_key: "preflight",
-        executor_family: "one-shot",
+        executor: "agent-once",
         state: "pending",
         artifact_root: null,
       });

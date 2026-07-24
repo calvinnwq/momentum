@@ -1,0 +1,52 @@
+{
+  "schema": "momentum.native-agent-loop.round-result.v1",
+  "summary": "Implemented one bounded slice and verified it locally.",
+  "keyChanges": [
+    "Added the native round contract fixture.",
+    "Recorded durable evidence pointers for the round."
+  ],
+  "learnings": [
+    "The next round should continue from the persisted checkpoint rather than terminal scrollback."
+  ],
+  "completionRecommendation": "continue",
+  "daemonClassification": "continue",
+  "verificationResult": {
+    "status": "passed",
+    "commands": [
+      {
+        "command": "pnpm test",
+        "exitCode": 0,
+        "durationMs": 1200,
+        "timedOut": false
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "class": "result_document",
+      "path": "goals/goal-1/executor/round-1/result.json",
+      "digest": "sha256:result"
+    },
+    {
+      "class": "verification_output",
+      "path": "goals/goal-1/executor/round-1/verification.log",
+      "digest": "sha256:verification"
+    }
+  ],
+  "checkpoints": [
+    {
+      "stage": "round_started",
+      "detail": "Round 1 claimed its lease and captured input digest."
+    },
+    {
+      "stage": "verification_captured",
+      "detail": "Focused verification passed before finalization."
+    }
+  ],
+  "changedFiles": ["SPEC.md", "docs/workflow-commands.md"],
+  "commitSha": "0123456789abcdef0123456789abcdef01234567",
+  "recoveryReason": null,
+  "remainingWork": [
+    "Implement native storage and runtime wiring in a later slice."
+  ]
+}

@@ -1,7 +1,7 @@
 /**
  * Pure half of the daemon-dispatchable `subworkflow` adapter.
  *
- * the subworkflow seam makes the `subworkflow` executor family daemon-dispatchable by connecting
+ * the subworkflow seam makes the `subworkflow` executor daemon-dispatchable by connecting
  * a child workflow run's terminal classification to the workflow dispatch /
  * executor-evidence lane — *without* inventing a parallel ad hoc runtime and
  * without weakening the fail-closed posture recursive runs require. The parent

@@ -9,18 +9,18 @@ import {
   isTerminalExecutorAttemptState,
   isTerminalExecutorRoundState,
   transitionExecutorAttempt,
-  type WorkflowExecutorFamily,
+  type WorkflowExecutor,
 } from "../src/core/executors/loop/reducer.js";
-import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
+import { isWorkflowExecutor } from "../src/core/workflow/definition/definition.js";
 import {
   SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
-  SINGLE_SHOT_EXECUTOR_FAMILIES,
+  SINGLE_SHOT_EXECUTORS,
   SINGLE_SHOT_FAILED_RECOVERY_CODES,
   SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION,
   SINGLE_SHOT_MANUAL_RECOVERY_CODES,
   SINGLE_SHOT_RECOVERY_CODES,
   decideSingleShotAttempt,
-  isSingleShotExecutorFamily,
+  isSingleShotExecutorName,
   planSingleShotAttempt,
   planSingleShotRoundArtifacts,
   planSingleShotRoundCheckpoints,
@@ -41,27 +41,24 @@ const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
 const ATTEMPT_TERMINAL_SET = new Set<string>(EXECUTOR_ATTEMPT_TERMINAL_STATES);
 const HUMAN_GATE_SET = new Set<string>(EXECUTOR_HUMAN_GATE_TYPES);
 
-describe("single-shot executor families", () => {
-  it("serves exactly the one-shot and script executor families", () => {
-    expect([...SINGLE_SHOT_EXECUTOR_FAMILIES].sort()).toEqual([
-      "one-shot",
-      "script",
-    ]);
+describe("single-shot executor executors", () => {
+  it("serves exactly the agent-once and script executor executors", () => {
+    expect([...SINGLE_SHOT_EXECUTORS].sort()).toEqual(["agent-once", "script"]);
   });
 
-  it("only names real workflow executor families", () => {
-    for (const family of SINGLE_SHOT_EXECUTOR_FAMILIES) {
-      expect(isWorkflowExecutorFamily(family)).toBe(true);
+  it("only names real workflow executor executors", () => {
+    for (const executor of SINGLE_SHOT_EXECUTORS) {
+      expect(isWorkflowExecutor(executor)).toBe(true);
     }
   });
 
-  it("recognizes the single-shot families and rejects the others", () => {
-    expect(isSingleShotExecutorFamily("one-shot")).toBe(true);
-    expect(isSingleShotExecutorFamily("script")).toBe(true);
-    expect(isSingleShotExecutorFamily("goal-loop")).toBe(false);
-    expect(isSingleShotExecutorFamily("no-mistakes")).toBe(false);
-    expect(isSingleShotExecutorFamily("external-apply")).toBe(false);
-    expect(isSingleShotExecutorFamily("subworkflow")).toBe(false);
+  it("recognizes the single-shot executors and rejects the others", () => {
+    expect(isSingleShotExecutorName("agent-once")).toBe(true);
+    expect(isSingleShotExecutorName("script")).toBe(true);
+    expect(isSingleShotExecutorName("agent-loop")).toBe(false);
+    expect(isSingleShotExecutorName("no-mistakes")).toBe(false);
+    expect(isSingleShotExecutorName("external-apply")).toBe(false);
+    expect(isSingleShotExecutorName("subworkflow")).toBe(false);
   });
 });
 
@@ -95,7 +92,7 @@ describe("single-shot recovery taxonomy", () => {
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("output_overflow");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("result_missing");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("result_invalid");
-    // Unsafe repo-finalization codes mirror the goal-loop recovery vocabulary.
+    // Unsafe repo-finalization codes mirror the agent-loop recovery vocabulary.
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("head_mismatch");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("repo_lock_lost");
     expect(SINGLE_SHOT_RECOVERY_CODES).toContain("reset_failed");
@@ -210,24 +207,24 @@ describe("decideSingleShotAttempt — totality", () => {
 });
 
 describe("singleShotAttemptId / singleShotRoundId", () => {
-  it("embeds the step-run identity, family, and attempt", () => {
-    expect(singleShotAttemptId("run1", "step1", "one-shot", 0)).toBe(
-      "run1::step1::one-shot::0",
+  it("embeds the step-run identity, executor, and attempt", () => {
+    expect(singleShotAttemptId("run1", "step1", "agent-once", 0)).toBe(
+      "run1::step1::agent-once::0",
     );
     expect(singleShotAttemptId("run1", "step1", "script", 2)).toBe(
       "run1::step1::script::2",
     );
   });
 
-  it("distinguishes families and attempts so re-runs never collide", () => {
-    const a = singleShotAttemptId("run1", "step1", "one-shot", 0);
+  it("distinguishes executors and attempts so re-runs never collide", () => {
+    const a = singleShotAttemptId("run1", "step1", "agent-once", 0);
     const b = singleShotAttemptId("run1", "step1", "script", 0);
-    const c = singleShotAttemptId("run1", "step1", "one-shot", 1);
+    const c = singleShotAttemptId("run1", "step1", "agent-once", 1);
     expect(new Set([a, b, c]).size).toBe(3);
   });
 
   it("mints a single deterministic round id under an attempt", () => {
-    const attemptId = singleShotAttemptId("run1", "step1", "one-shot", 0);
+    const attemptId = singleShotAttemptId("run1", "step1", "agent-once", 0);
     const roundId = singleShotRoundId(attemptId);
     expect(roundId).toContain(attemptId);
     // Stable: the same attempt always yields the same single round id.
@@ -238,7 +235,7 @@ describe("singleShotAttemptId / singleShotRoundId", () => {
 describe("planSingleShotAttempt", () => {
   it("projects a step-run identity into a running attempt record", () => {
     const attempt = planSingleShotAttempt({
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",
@@ -246,12 +243,12 @@ describe("planSingleShotAttempt", () => {
       startedAt: 1000,
     });
     expect(attempt.attemptId).toBe(
-      singleShotAttemptId("run1", "step1", "one-shot", 0),
+      singleShotAttemptId("run1", "step1", "agent-once", 0),
     );
     expect(attempt.workflowRunId).toBe("run1");
     expect(attempt.stepRunId).toBe("step1");
     expect(attempt.stepKey).toBe("preflight");
-    expect(attempt.executorFamily).toBe("one-shot");
+    expect(attempt.executor).toBe("agent-once");
     expect(attempt.attemptNumber).toBe(0);
     expect(attempt.state).toBe("running");
     expect(attempt.startedAt).toBe(1000);
@@ -259,16 +256,16 @@ describe("planSingleShotAttempt", () => {
     expect(attempt.finishedAt).toBeNull();
   });
 
-  it("carries the script family through unchanged", () => {
+  it("carries the script executor through unchanged", () => {
     const attempt = planSingleShotAttempt({
-      family: "script",
+      executor: "script",
       workflowRunId: "run9",
       stepRunId: "step9",
       stepKey: "merge-cleanup",
       attemptNumber: 3,
       startedAt: 50,
     });
-    expect(attempt.executorFamily).toBe("script");
+    expect(attempt.executor).toBe("script");
     expect(attempt.attemptNumber).toBe(3);
     expect(attempt.attemptId).toBe(
       singleShotAttemptId("run9", "step9", "script", 3),
@@ -277,7 +274,7 @@ describe("planSingleShotAttempt", () => {
 
   it("starts an attempt that can legally transition to its terminal state", () => {
     const attempt = planSingleShotAttempt({
-      family: "script",
+      executor: "script",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "merge-cleanup",
@@ -326,14 +323,14 @@ const SCRIPT_SELECTION: SingleShotRoundSelection = {
 };
 
 describe("planSingleShotRoundStart", () => {
-  it("projects a running single round at index 0 carrying the chosen family", () => {
+  it("projects a running single round at index 0 carrying the chosen executor", () => {
     const round = planSingleShotRoundStart({
       roundId: "r0",
       attemptId: "inv0",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",
-      family: "one-shot",
+      executor: "agent-once",
       attemptNumber: 0,
       selection: ONE_SHOT_SELECTION,
       inputDigest: "sha256:abc",
@@ -347,7 +344,7 @@ describe("planSingleShotRoundStart", () => {
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("preflight");
-    expect(round.executorFamily).toBe("one-shot");
+    expect(round.executor).toBe("agent-once");
     expect(round.attemptNumber).toBe(0);
     // A single shot has exactly one round.
     expect(round.roundIndex).toBe(0);
@@ -375,14 +372,14 @@ describe("planSingleShotRoundStart", () => {
     expect(round.humanGate).toBeNull();
   });
 
-  it("carries the script family with its null agent selection and a later attempt", () => {
+  it("carries the script executor with its null agent selection and a later attempt", () => {
     const round = planSingleShotRoundStart({
       roundId: "r0",
       attemptId: "inv0",
       workflowRunId: "run9",
       stepRunId: "step9",
       stepKey: "merge-cleanup",
-      family: "script",
+      executor: "script",
       attemptNumber: 3,
       selection: SCRIPT_SELECTION,
       inputDigest: null,
@@ -390,7 +387,7 @@ describe("planSingleShotRoundStart", () => {
       startedAt: 5,
     });
 
-    expect(round.executorFamily).toBe("script");
+    expect(round.executor).toBe("script");
     expect(round.attemptNumber).toBe(3);
     expect(round.roundIndex).toBe(0);
     expect(round.agentProvider).toBeNull();
@@ -406,7 +403,7 @@ describe("planSingleShotRoundStart", () => {
 describe("planSingleShotRoundStartForAttempt", () => {
   it("mints the single round id and inherits the attempt identity", () => {
     const attempt = planSingleShotAttempt({
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",
@@ -430,7 +427,7 @@ describe("planSingleShotRoundStartForAttempt", () => {
     expect(start.workflowRunId).toBe("run1");
     expect(start.stepRunId).toBe("step1");
     expect(start.stepKey).toBe("preflight");
-    expect(start.family).toBe("one-shot");
+    expect(start.executor).toBe("agent-once");
     expect(start.attemptNumber).toBe(0);
     expect(start.selection).toEqual(ONE_SHOT_SELECTION);
     expect(start.inputDigest).toBe("sha256:abc");
@@ -441,7 +438,7 @@ describe("planSingleShotRoundStartForAttempt", () => {
 
   it("feeds planSingleShotRoundStart to a coherent durable round-start record", () => {
     const attempt = planSingleShotAttempt({
-      family: "script",
+      executor: "script",
       workflowRunId: "run9",
       stepRunId: "step9",
       stepKey: "merge-cleanup",
@@ -459,7 +456,7 @@ describe("planSingleShotRoundStartForAttempt", () => {
 
     expect(round.roundId).toBe(singleShotRoundId(attempt.attemptId));
     expect(round.attemptId).toBe(attempt.attemptId);
-    expect(round.executorFamily).toBe("script");
+    expect(round.executor).toBe("script");
     expect(round.attemptNumber).toBe(1);
     expect(round.roundIndex).toBe(0);
     expect(round.state).toBe("running");
@@ -470,7 +467,7 @@ describe("planSingleShotRoundStartForAttempt", () => {
 
   it("omits logPaths from the start input when the runtime omits them", () => {
     const attempt = planSingleShotAttempt({
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "r",
       stepRunId: "s",
       stepKey: "preflight",
@@ -488,17 +485,17 @@ describe("planSingleShotRoundStartForAttempt", () => {
     expect("logPaths" in start).toBe(false);
   });
 
-  it("refuses to start a round for an attempt that is not a single-shot family", () => {
+  it("refuses to start a round for an attempt that is not a single-shot executor", () => {
     const attempt = {
       ...planSingleShotAttempt({
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run1",
         stepRunId: "step1",
         stepKey: "implementation",
         attemptNumber: 0,
         startedAt: 1,
       }),
-      executorFamily: "goal-loop" as WorkflowExecutorFamily,
+      executor: "agent-loop" as WorkflowExecutor,
     };
 
     expect(() =>
@@ -541,7 +538,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
     const selection = resolveSingleShotRoundSelection({
       stepConfig: { agentProvider: "claude" },
     });
-    // Unlike the goal-loop selection, there is no maxRounds field at all: a single
+    // Unlike the agent-loop selection, there is no maxRounds field at all: a single
     // shot has no loop budget to resolve.
     expect("maxRounds" in selection).toBe(false);
     expect("maxRounds" in selection.source).toBe(false);
@@ -571,15 +568,15 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
     expect(selection.source.timeoutMs).toBe("repository_policy");
   });
 
-  it("falls back to the executor family default below repository policy", () => {
+  it("falls back to the executor executor default below repository policy", () => {
     const selection = resolveSingleShotRoundSelection({
       repositoryPolicy: { agentProvider: "claude" },
-      familyDefault: { effort: "high", policyEnvelope: "script:bounded" },
+      executorDefault: { effort: "high", policyEnvelope: "script:bounded" },
     });
     expect(selection.effort).toBe("high");
-    expect(selection.source.effort).toBe("executor_family_default");
+    expect(selection.source.effort).toBe("executor_default");
     expect(selection.policyEnvelope).toBe("script:bounded");
-    expect(selection.source.policyEnvelope).toBe("executor_family_default");
+    expect(selection.source.policyEnvelope).toBe("executor_default");
   });
 
   it("uses the momentum global default as the floor for unspecified fields", () => {
@@ -599,14 +596,14 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       stepConfig: { agentProvider: "claude" },
       workflowConfig: { model: "claude-sonnet-4-6" },
       repositoryPolicy: { effort: "medium" },
-      familyDefault: { timeoutMs: 300_000 },
+      executorDefault: { timeoutMs: 300_000 },
       globalDefault: { policyEnvelope: "default" },
     });
     expect(selection.source).toEqual({
       agentProvider: "step_definition",
       model: "workflow_definition",
       effort: "repository_policy",
-      timeoutMs: "executor_family_default",
+      timeoutMs: "executor_default",
       policyEnvelope: "momentum_global_default",
     });
     expect(selection.timeoutMs).toBe(300_000);
@@ -655,7 +652,7 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
       workflowRunId: "run1",
       stepRunId: "step1",
       stepKey: "preflight",
-      family: "one-shot",
+      executor: "agent-once",
       attemptNumber: 0,
       selection,
       inputDigest: null,
@@ -791,8 +788,8 @@ describe("planSingleShotRoundArtifacts", () => {
     expect(record?.description).toBeNull();
   });
 
-  it("projects a one-shot round's result-file document as a result_document artifact", () => {
-    // The one-shot family produces a normalized result document (a RunnerResult
+  it("projects a agent-once round's result-file document as a result_document artifact", () => {
+    // The agent-once executor produces a normalized result document (a RunnerResult
     // file); it is the durable result-file evidence the round captured.
     const records = planSingleShotRoundArtifacts({
       roundId: "round-0",
@@ -813,7 +810,7 @@ describe("planSingleShotRoundArtifacts", () => {
   });
 
   it("projects a script round's bounded logs and commit evidence with no result document", () => {
-    // The script family is exit-code based with bounded logs and no required
+    // The script executor is exit-code based with bounded logs and no required
     // result file, so it records logs + commit/reset evidence and no
     // result_document row.
     const records = planSingleShotRoundArtifacts({
@@ -842,7 +839,7 @@ describe("planSingleShotRoundArtifacts", () => {
 });
 
 describe("planSingleShotRoundCheckpoints", () => {
-  it("records the full lifecycle stage stream for a one-shot round that captured a result", () => {
+  it("records the full lifecycle stage stream for a agent-once round that captured a result", () => {
     const records = planSingleShotRoundCheckpoints({
       roundId: "round-0",
       outcome: { ok: true },
@@ -882,7 +879,7 @@ describe("planSingleShotRoundCheckpoints", () => {
   });
 
   it("omits the result_captured stage for a script round (exit-code based, no result document)", () => {
-    // The script family is exit-code based and captures no result document, so a
+    // The script executor is exit-code based and captures no result document, so a
     // successful script round records no result_captured stage.
     const records = planSingleShotRoundCheckpoints({
       roundId: "round-0",
@@ -940,7 +937,7 @@ describe("planSingleShotRoundCheckpoints", () => {
 describe("planSingleShotRoundPersistence", () => {
   const oneShotResult: RunnerResult = {
     success: true,
-    summary: "ran the one-shot review pass",
+    summary: "ran the agent-once review pass",
     key_changes_made: ["approved the bounded change"],
     key_learnings: [],
     remaining_work: [],
@@ -948,13 +945,13 @@ describe("planSingleShotRoundPersistence", () => {
     commit: {
       type: "chore",
       scope: "single-shot",
-      subject: "one-shot pass",
+      subject: "agent-once pass",
       body: "",
       breaking: false,
     },
   };
 
-  it("captures the normalized result then settles a one-shot success", () => {
+  it("captures the normalized result then settles a agent-once success", () => {
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: true },
       result: oneShotResult,
@@ -967,7 +964,7 @@ describe("planSingleShotRoundPersistence", () => {
     });
     expect(plan.captureUpdate).toEqual({
       toState: "capturing_result",
-      summary: "ran the one-shot review pass",
+      summary: "ran the agent-once review pass",
       keyChanges: ["approved the bounded change"],
       keyLearnings: [],
       remainingWork: [],
@@ -988,10 +985,10 @@ describe("planSingleShotRoundPersistence", () => {
   });
 
   it("emits a bare capture for a script success so it can still reach succeeded", () => {
-    // The script family is exit-code based and captures no result document, but the
+    // The script executor is exit-code based and captures no result document, but the
     // round transition graph forbids running -> succeeded directly, so a successful
     // script round still emits a (bare) capturing_result patch — the structural
-    // difference from goal-loop, which keys the capture on a non-null result.
+    // difference from agent-loop, which keys the capture on a non-null result.
     const plan = planSingleShotRoundPersistence({ outcome: { ok: true } });
     expect(plan.captureUpdate).toEqual({ toState: "capturing_result" });
     expect(plan.terminalUpdate).toEqual({

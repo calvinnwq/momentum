@@ -12,7 +12,10 @@ import {
   resolveDelegateBranch,
   resolvePreparedDelegateCommitEvidence,
 } from "../../adapters/profile-backed-delegate-tool-adapter.js";
-import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
+import type {
+  LiveWrapperConfig,
+  LiveWrapperProfile,
+} from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 import { inspectRepo, type PreparedCommitEvidence } from "../repo/guard.js";
@@ -80,12 +83,12 @@ import {
   GoalLoopSdkExecutor,
   goalLoopDispatchBindingDetail,
   type GoalLoopExecutorHostBindings,
-} from "../executors/goal-loop/sdk.js";
+} from "../executors/agent-loop/sdk.js";
 import {
   planGoalLoopRoundStart,
   resolveGoalLoopRoundSelection,
-} from "../executors/goal-loop/executor.js";
-import { goalLoopRoundMechanismFromPromptedResultFile } from "../executors/goal-loop/mechanism.js";
+} from "../executors/agent-loop/executor.js";
+import { goalLoopRoundMechanismFromPromptedResultFile } from "../executors/agent-loop/mechanism.js";
 import {
   DelegateSupervisorExecutor,
   DELEGATE_SUPERVISOR_EXECUTOR_NAME,
@@ -107,6 +110,7 @@ import {
 import {
   buildCodingWorkflowChildEnv,
   loadCodingWorkflowWrapperConfig,
+  type CodingWorkflowWrapperStepConfig,
 } from "../workflow/live-wrapper/coding-workflow.js";
 import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dispatch/dogfood.js";
 import {
@@ -120,15 +124,20 @@ import {
 import { createSubworkflowWorkflowDispatch } from "../workflow/dispatch/subworkflow-dispatch.js";
 import { deriveDispatchedSubworkflowContext } from "../workflow/route/subworkflow-dispatch-context.js";
 import {
-  planLinearRefreshAlreadyAppliedReconciliation,
-  planLinearRefreshLifecycle,
-  type LinearRefreshLifecyclePlan,
-} from "../workflow/dispatch/linear-refresh-lifecycle.js";
+  planTrackerRefreshAlreadyAppliedReconciliation,
+  planTrackerRefreshLifecycle,
+  type TrackerRefreshLifecyclePlan,
+} from "../workflow/dispatch/tracker-refresh-lifecycle.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step/executor-real-adapters.js";
 import {
-  isWorkflowExecutorFamily,
-  WORKFLOW_EXECUTOR_FAMILIES,
+  isWorkflowExecutor,
+  WORKFLOW_EXECUTORS,
 } from "../workflow/definition/definition.js";
+import {
+  LEGACY_EXECUTOR_ALIASES,
+  LEGACY_SUPPORTED_EXECUTORS,
+  canonicalExecutorIdentity,
+} from "../workflow/definition/legacy.js";
 import { resolveWorkflowStepExecutorRuntime } from "../workflow/dispatch/persist.js";
 import {
   buildDispatchedStepExecutorInput,
@@ -139,6 +148,7 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
 import {
+  hasExecutorDefinition,
   listExecutorCheckpointsForRound,
   listExecutorRoundsForAttempt,
   listExecutorRoundsForStep,
@@ -184,11 +194,41 @@ export type DaemonWorkflowDispatchResolution =
   | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
   | { ok: false; message: string };
 
-const NATIVE_PROFILE_EXECUTOR_FAMILIES: ReadonlySet<string> = new Set([
-  "goal-loop",
-  "one-shot",
+const NATIVE_PROFILE_EXECUTORS: ReadonlySet<string> = new Set([
+  "agent-loop",
+  "agent-once",
   "script",
 ]);
+
+/** Whether a recorded identity resolves to a native profile-backed built-in. */
+function isNativeProfileExecutorIdentity(executorName: string): boolean {
+  return NATIVE_PROFILE_EXECUTORS.has(canonicalExecutorIdentity(executorName));
+}
+
+/**
+ * Whether a recorded identity is a built-in executor: a canonical value (via
+ * its legacy alias when the spelling is retired) or the dispatchable legacy
+ * `no-mistakes` identity.
+ */
+function isBuiltInExecutorIdentity(executorName: string): boolean {
+  return (
+    isWorkflowExecutor(canonicalExecutorIdentity(executorName)) ||
+    LEGACY_SUPPORTED_EXECUTORS.has(executorName)
+  );
+}
+
+/**
+ * Registry membership honouring the recorded identity first: a raw-name entry
+ * always wins; only a missing raw name may fall back to its canonical alias.
+ */
+function resolvesRegisteredExecutorName(
+  names: { has(name: string): boolean },
+  executorName: string,
+): boolean {
+  if (names.has(executorName)) return true;
+  const alias = LEGACY_EXECUTOR_ALIASES[executorName];
+  return alias !== undefined && names.has(alias);
+}
 
 export function resolveDaemonWorkflowStepDispatch(
   env: Record<string, string | undefined>,
@@ -214,6 +254,16 @@ export function resolveDaemonWorkflowStepDispatch(
       message: `Invalid ${DAEMON_EXECUTOR_CONFIG_ENV_VAR} (${executorConfig.source}): ${executorConfig.message}`,
     };
   }
+
+  const canonicalBuiltInExecutorNames = new Set(
+    builtIns
+      .map((executor) => executor.name)
+      .filter(
+        (name) =>
+          executorConfig.status !== "configured" ||
+          !executorConfig.configuredNames.has(name),
+      ),
+  );
 
   let legacy: DaemonWorkflowDispatchResolution;
   if (profile.status === "not_configured") {
@@ -247,6 +297,7 @@ export function resolveDaemonWorkflowStepDispatch(
         withExternalApplyDispatch(
           createRegisteredExecutorWorkflowDispatch(baseDispatch, {
             registry,
+            canonicalBuiltInExecutorNames,
             resolveHostBindings,
             resolveOwnedRoundMaterializer,
             // A delegated handoff is one durable SDK round; allow only that
@@ -278,20 +329,27 @@ export function resolveDaemonWorkflowStepDispatch(
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
       baseDispatch,
-      { registry: new Map() },
+      {
+        registry: new Map(),
+        canonicalBuiltInExecutorNames,
+      },
     );
     return {
       ok: true,
       dispatch: (claim, context) => {
         const runtime = resolveWorkflowStepExecutorRuntime(context.db, claim);
+        const durablyClaimed =
+          runtime.ok && hasExecutorDefinition(context.db, runtime.executorName);
         if (
           runtime.ok &&
-          NATIVE_PROFILE_EXECUTOR_FAMILIES.has(runtime.executorName) &&
+          !durablyClaimed &&
+          isNativeProfileExecutorIdentity(runtime.executorName) &&
           missingProfileDispatch !== undefined
         ) {
           return missingProfileDispatch(claim, context);
         }
-        return runtime.ok && !isWorkflowExecutorFamily(runtime.executorName)
+        return runtime.ok &&
+          (durablyClaimed || !isBuiltInExecutorIdentity(runtime.executorName))
           ? unavailableDispatch(claim, context)
           : legacy.dispatch(claim, context);
       },
@@ -328,17 +386,27 @@ export function resolveDaemonWorkflowStepDispatch(
             ),
       );
       const runtime = resolveWorkflowStepExecutorRuntime(context.db, claim);
+      const durablyClaimed =
+        runtime.ok && hasExecutorDefinition(context.db, runtime.executorName);
       if (
         runtime.ok &&
-        (loaded.registry.has(runtime.executorName) ||
-          unavailableReasons.has(runtime.executorName) ||
-          !isWorkflowExecutorFamily(runtime.executorName))
+        (durablyClaimed ||
+          resolvesRegisteredExecutorName(
+            loaded.registry,
+            runtime.executorName,
+          ) ||
+          resolvesRegisteredExecutorName(
+            unavailableReasons,
+            runtime.executorName,
+          ) ||
+          !isBuiltInExecutorIdentity(runtime.executorName))
       ) {
         if (registeredDispatch === undefined || registeredLoad !== loaded) {
           registeredDispatch = createRegisteredExecutorWorkflowDispatch(
             baseDispatch,
             {
               registry: loaded.registry,
+              canonicalBuiltInExecutorNames,
               unavailableReasons,
               ...(profileHostBindings !== undefined
                 ? { resolveHostBindings: profileHostBindings }
@@ -357,7 +425,8 @@ export function resolveDaemonWorkflowStepDispatch(
       }
       if (
         runtime.ok &&
-        NATIVE_PROFILE_EXECUTOR_FAMILIES.has(runtime.executorName) &&
+        !durablyClaimed &&
+        isNativeProfileExecutorIdentity(runtime.executorName) &&
         missingProfileDispatch !== undefined
       ) {
         return missingProfileDispatch(claim, context);
@@ -375,11 +444,12 @@ function createMissingProfileNativeDispatch(
 ): AsyncWorkflowStepDispatch {
   const registry = new Map(
     buildProfileBackedSdkExecutors()
-      .filter((executor) => NATIVE_PROFILE_EXECUTOR_FAMILIES.has(executor.name))
+      .filter((executor) => NATIVE_PROFILE_EXECUTORS.has(executor.name))
       .map((executor) => [executor.name, executor]),
   );
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
+    canonicalBuiltInExecutorNames: new Set(NATIVE_PROFILE_EXECUTORS),
     resolveHostBindings: ({ claim, context, executorName }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
@@ -409,14 +479,21 @@ function createMissingProfileNativeDispatch(
 }
 
 export function buildProfileBackedSdkExecutors(): Executor[] {
-  return WORKFLOW_EXECUTOR_FAMILIES.filter(
-    (name) => name !== "external-apply" && name !== "subworkflow",
-  ).map((name) =>
+  // Canonical built-ins register under their new names; the retained legacy
+  // `no-mistakes` identity stays registered as-is so recorded definitions keep
+  // selecting the exact executor they recorded.
+  const names: readonly string[] = [
+    ...WORKFLOW_EXECUTORS.filter(
+      (name) => name !== "external-apply" && name !== "subworkflow",
+    ),
+    ...LEGACY_SUPPORTED_EXECUTORS,
+  ];
+  return names.map((name) =>
     name === "delegate-supervisor"
       ? new DelegateSupervisorExecutor()
-      : name === "goal-loop"
+      : name === "agent-loop"
         ? new GoalLoopSdkExecutor()
-        : name === "one-shot" || name === "script"
+        : name === "agent-once" || name === "script"
           ? new SingleShotExecutor(name, (round, context) => {
               const runner = context.hostBindings.runRound;
               return runner === undefined
@@ -497,7 +574,7 @@ function createNativeOwnedRoundMaterializerResolver(
           })
         : resolveSingleShotRoundSelection({
             stepConfig: {
-              ...(input.executorName === "one-shot"
+              ...(input.executorName === "agent-once"
                 ? {
                     agentProvider: selection.agentProvider,
                     model: selection.model,
@@ -578,7 +655,7 @@ function createNativeOwnedRoundMaterializerResolver(
         workflowRunId: attempt.workflowRunId,
         stepRunId: attempt.stepRunId,
         stepKey: attempt.stepKey,
-        family: input.executorName as "one-shot" | "script",
+        executor: input.executorName as "agent-once" | "script",
         attemptNumber: attempt.attemptNumber,
         roundIndex,
         selection: selectionBinding,
@@ -596,7 +673,7 @@ function createNativeOwnedRoundMaterializerResolver(
         checkpoint: planSingleShotRoundStartedCheckpoint(
           round.roundId,
           singleShotDispatchBindingDetail(
-            start.family,
+            start.executor,
             input.config,
             sdkStart,
             selectionBinding,
@@ -964,7 +1041,7 @@ function createLiveStepHostBindingsResolver(
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
           "host_binding_mismatch",
-          "portable goal-loop timeoutMs does not match resolved host timeout",
+          "portable agent-loop timeoutMs does not match resolved host timeout",
         ),
       );
     }
@@ -976,7 +1053,7 @@ function createLiveStepHostBindingsResolver(
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
           "host_binding_mismatch",
-          "portable goal-loop policyEnvelope does not match resolved host policy",
+          "portable agent-loop policyEnvelope does not match resolved host policy",
         ),
       );
     }
@@ -1050,7 +1127,7 @@ function createLiveStepHostBindingsResolver(
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "runtime_unavailable",
-          `goal-loop round directory unavailable: ${preparedRound.error}`,
+          `agent-loop round directory unavailable: ${preparedRound.error}`,
         );
       }
       const roundRoot = preparedRound.roundRoot;
@@ -1061,7 +1138,7 @@ function createLiveStepHostBindingsResolver(
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "invalid_input",
-          "goal-loop resumable round artifact root does not match its bound round directory",
+          "agent-loop resumable round artifact root does not match its bound round directory",
         );
       }
       let roundArtifactDirectory: string;
@@ -1074,7 +1151,7 @@ function createLiveStepHostBindingsResolver(
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "runtime_unavailable",
-          `goal-loop result directory unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          `agent-loop result directory unavailable: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
       const roundResultPath = path.join(
@@ -1105,7 +1182,7 @@ function createLiveStepHostBindingsResolver(
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "host_binding_mismatch",
-          `goal-loop result_file collides with daemon-owned artifact path: ${collidingArtifact[0]}`,
+          `agent-loop result_file collides with daemon-owned artifact path: ${collidingArtifact[0]}`,
         );
       }
       const objective = loadWorkflowRunObjective(context.db, claim.runId);
@@ -1113,7 +1190,7 @@ function createLiveStepHostBindingsResolver(
         repoOwnership.settle(false);
         throw new RegisteredExecutorHostBindingsError(
           "invalid_input",
-          "goal-loop objective is unavailable",
+          "agent-loop objective is unavailable",
         );
       }
       const priorRounds = attemptRounds.filter(
@@ -1285,7 +1362,7 @@ function createLiveStepHostBindingsResolver(
       const roundIndex =
         resumableRound?.roundIndex ?? nextExecutorRoundIndex(attemptRounds);
       const runRound =
-        singleShot.name === "one-shot"
+        singleShot.name === "agent-once"
           ? createOneShotLiveWrapperRoundRunner(wrapper, {
               repoPath: safety.repoPath,
               kind: step.kind,
@@ -1365,7 +1442,7 @@ function createLiveStepHostBindingsResolver(
           workflowRunId: attempt.workflowRunId,
           stepRunId: attempt.stepRunId,
           stepKey: attempt.stepKey,
-          family: singleShot.name,
+          executor: singleShot.name,
           attemptNumber: attempt.attemptNumber,
           inputDigest:
             resumableRound?.inputDigest ??
@@ -1379,7 +1456,7 @@ function createLiveStepHostBindingsResolver(
         },
         selection: resolveSingleShotRoundSelection({
           stepConfig: {
-            ...(singleShot.name === "one-shot"
+            ...(singleShot.name === "agent-once"
               ? {
                   agentProvider: selection.selection.agentProvider,
                   model: selection.selection.model,
@@ -1850,7 +1927,9 @@ export function resolveProfileBackedDelegateToolStepKind(
     case "gnhf":
       return "implementation";
     case "no-mistakes":
-      return "no-mistakes";
+      // The delegated TOOL keeps its external `no-mistakes` identity; the
+      // workflow step kind it dispatches under is the canonical `validate`.
+      return "validate";
     default:
       return null;
   }
@@ -1864,7 +1943,14 @@ function resolveNoMistakesStatusRuntime(
   argsPrefix: readonly string[];
   env: Record<string, string | undefined>;
 } {
-  const outerWrapper = profile.wrappers.get("no-mistakes");
+  // The status wrapper drives the external no-mistakes TOOL. New profiles key
+  // it under the canonical `validate` step kind; legacy profiles keyed it
+  // under the tool's own `no-mistakes` spelling, which stays readable.
+  const outerWrapper =
+    profile.wrappers.get("validate") ??
+    (profile.wrappers as ReadonlyMap<string, LiveWrapperConfig>).get(
+      "no-mistakes",
+    );
   if (outerWrapper === undefined) {
     throw new RegisteredExecutorHostBindingsError(
       "runtime_unavailable",
@@ -1886,7 +1972,15 @@ function resolveNoMistakesStatusRuntime(
       loaded.error,
     );
   }
-  const stepConfig = loaded.config.steps["no-mistakes"];
+  // Prefer the canonical `validate` step config; fall back to the legacy
+  // `no-mistakes` spelling so existing user wrapper configs keep working.
+  const stepConfig =
+    loaded.config.steps["validate"] ??
+    (
+      loaded.config.steps as Partial<
+        Record<string, CodingWorkflowWrapperStepConfig>
+      >
+    )["no-mistakes"];
   const argsPrefix =
     stepConfig?.command !== undefined &&
     path.basename(stepConfig.command) === "no-mistakes"
@@ -2512,16 +2606,15 @@ function resolveDaemonExternalApplyContext(
     applied,
   );
   const operatorReason = linearRefreshOperatorReason(runId, stepId);
-  const alreadyAppliedLifecycle = planLinearRefreshAlreadyAppliedReconciliation(
-    {
+  const alreadyAppliedLifecycle =
+    planTrackerRefreshAlreadyAppliedReconciliation({
       issueScopeIdentifier,
       pendingIntents: pending,
       appliedIntents: applied,
       sourceItemsById,
       latestAuditsByIntentId,
       expectedOperatorReason: operatorReason,
-    },
-  );
+    });
   const alreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
     alreadyAppliedLifecycle,
     applied,
@@ -2537,7 +2630,7 @@ function resolveDaemonExternalApplyContext(
       reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`,
     };
   }
-  let lifecycle = planLinearRefreshLifecycle({
+  let lifecycle = planTrackerRefreshLifecycle({
     env,
     intentApplyPolicy: policy.value,
     issueScopeIdentifier,
@@ -2562,7 +2655,7 @@ function resolveDaemonExternalApplyContext(
       seeded.sourceItem.id,
       seeded.sourceItem,
     );
-    lifecycle = planLinearRefreshLifecycle({
+    lifecycle = planTrackerRefreshLifecycle({
       env,
       intentApplyPolicy: policy.value,
       issueScopeIdentifier,
@@ -2635,7 +2728,7 @@ function resolveDaemonExternalApplyContext(
 }
 
 function resolveLinearRefreshAlreadyAppliedContext(
-  lifecycle: LinearRefreshLifecyclePlan | null,
+  lifecycle: TrackerRefreshLifecyclePlan | null,
   applied: readonly UpdateIntent[],
   sourceItemsById: ReadonlyMap<string, SourceItem>,
   latestAuditsByIntentId: ReadonlyMap<
@@ -2714,7 +2807,7 @@ function seedLinearRefreshStatusUpdateIntent(input: {
       targetExternalId: sourceItem.externalId,
       intentType: "status_update",
       payload: { state: "Done" },
-      reason: `Workflow ${input.runId} reached linear-refresh for ${issueScopeIdentifier}; update Linear issue to Done.`,
+      reason: `Workflow ${input.runId} reached tracker-refresh for ${issueScopeIdentifier}; update Linear issue to Done.`,
       sourceItemId: sourceItem.id,
       idempotencyKey: `linear:${sourceItem.externalId}:status_update:done`,
     },

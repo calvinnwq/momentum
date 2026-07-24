@@ -1,7 +1,7 @@
 /**
- * Runtime mechanisms for the single-shot executor families.
+ * Runtime mechanisms for the single-shot executors.
  *
- * `one-shot` delegates to the live-step wrapper and therefore requires a
+ * `agent-once` delegates to the live-step wrapper and therefore requires a
  * normalized `RunnerResult` document on success. `script` runs an absolute
  * deterministic command with explicit argv/env/cwd, bounded stdout/stderr, and
  * succeeds from exit code plus log evidence without writing a result document.
@@ -105,7 +105,7 @@ export type SingleShotFinalizationConfig = {
 };
 
 /**
- * Repo-safety policy for `one-shot` runners. `read-only` rejects any HEAD or
+ * Repo-safety policy for `agent-once` runners. `read-only` rejects any HEAD or
  * worktree change; `finalize` allows mutations only through the shared
  * verification / commit / reset finalizer.
  */
@@ -151,9 +151,9 @@ const DEFAULT_SCRIPT_OUTPUT_MAX_BYTES = LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES;
 const SHA40_RE = /^[0-9a-f]{40}$/;
 
 /**
- * Build a `one-shot` round runner around a live-wrapper registry entry.
+ * Build a `agent-once` round runner around a live-wrapper registry entry.
  *
- * The returned runner accepts only `one-shot` rounds with an artifact root and
+ * The returned runner accepts only `agent-once` rounds with an artifact root and
  * absolute log path. Success requires the wrapped process to emit a valid
  * `RunnerResult`; failures and unsafe repo-finalization outcomes are converted
  * into stable single-shot recovery codes for the orchestrator.
@@ -166,9 +166,9 @@ export function createOneShotLiveWrapperRoundRunner(
     round: ExecutorRoundRecord,
     context?: SingleShotRoundRunnerContext,
   ) => {
-    if (round.executorFamily !== "one-shot") {
+    if (round.executor !== "agent-once") {
       return invalidInput(
-        "one-shot live wrapper runner requires one-shot round",
+        "agent-once live wrapper runner requires agent-once round",
       );
     }
     if (context !== undefined) {
@@ -184,12 +184,12 @@ export function createOneShotLiveWrapperRoundRunner(
     const logPath = primaryLogPath(round);
     if (round.artifactRoot === null || logPath === null) {
       return invalidInput(
-        "one-shot live wrapper rounds require artifactRoot and a log path",
+        "agent-once live wrapper rounds require artifactRoot and a log path",
       );
     }
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput(
-        "one-shot live wrapper rounds require an absolute log path",
+        "agent-once live wrapper rounds require an absolute log path",
       );
     }
     const platformError = processExecutionPlatformError();
@@ -197,7 +197,7 @@ export function createOneShotLiveWrapperRoundRunner(
       return unsupportedPlatformRecovery(
         logPath,
         round.artifactRoot,
-        "one-shot",
+        "agent-once",
         platformError.message,
       );
     }
@@ -417,7 +417,7 @@ export function createScriptCommandRoundRunner(
     round: ExecutorRoundRecord,
     context?: SingleShotRoundRunnerContext,
   ) => {
-    if (round.executorFamily !== "script") {
+    if (round.executor !== "script") {
       return invalidInput("script command runner requires script round");
     }
     const validation = validateScriptCommandConfig(config);
@@ -737,19 +737,19 @@ function readOnlyRecovery(
 function unsupportedPlatformRecovery(
   logPath: string,
   artifactRoot: string,
-  family: "one-shot" | "script",
+  executor: "agent-once" | "script",
   detail: string,
 ): SingleShotRoundMechanismResult {
   const logHandle = openScriptLog(logPath, artifactRoot);
   if (logHandle === null) {
-    return invalidInput(`${family} runner could not open refusal log path`);
+    return invalidInput(`${executor} runner could not open refusal log path`);
   }
   try {
     writeLine(
       logHandle,
-      `[single-shot-${family}] unsupported_platform: ${detail}`,
+      `[single-shot-${executor}] unsupported_platform: ${detail}`,
     );
-    writeLine(logHandle, `[single-shot-${family}] result: blocked`);
+    writeLine(logHandle, `[single-shot-${executor}] result: blocked`);
   } finally {
     closeLog(logHandle);
   }
@@ -794,7 +794,7 @@ function fallbackOneShotFailureCommitIntent(): CommitIntent {
   return {
     type: "chore",
     scope: "single-shot",
-    subject: "record one-shot failure",
+    subject: "record agent-once failure",
     body: "",
     breaking: false,
   };
@@ -1427,7 +1427,8 @@ function validatePortableOneShotConfig(
   ) {
     return {
       ok: false,
-      error: "portable one-shot timeoutMs does not match resolved host timeout",
+      error:
+        "portable agent-once timeoutMs does not match resolved host timeout",
     };
   }
   for (const field of ["harness", "model", "effort"] as const) {
@@ -1435,7 +1436,7 @@ function validatePortableOneShotConfig(
     if (expected !== undefined && expected !== hostIdentity?.agent?.[field]) {
       return {
         ok: false,
-        error: `portable one-shot agent.${field} does not match resolved host identity`,
+        error: `portable agent-once agent.${field} does not match resolved host identity`,
       };
     }
   }
@@ -1446,7 +1447,7 @@ function validatePortableOneShotConfig(
     return {
       ok: false,
       error:
-        "portable one-shot policyEnvelope does not match resolved host identity",
+        "portable agent-once policyEnvelope does not match resolved host identity",
     };
   }
   return { ok: true };

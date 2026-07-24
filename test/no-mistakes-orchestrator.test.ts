@@ -500,7 +500,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
   it("refuses to poll a live round outside the no-mistakes family", () => {
     const db = openMirrorRoundDb();
     db.prepare(
-      "UPDATE executor_rounds SET executor_family = 'goal-loop' WHERE round_id = ?",
+      "UPDATE executor_rounds SET executor = 'agent-loop' WHERE round_id = ?",
     ).run(ROUND_ID);
     let readCalls = 0;
 
@@ -1319,7 +1319,7 @@ describe("runNoMistakesMirrorStep — materialize attempt + round + first poll",
     const { db, result } = runStep(okReader({ stepStatus: "running" }));
 
     expect(result.attempt.attemptId).toBe(ATTEMPT_ID);
-    expect(result.attempt.executorFamily).toBe("no-mistakes");
+    expect(result.attempt.executor).toBe("no-mistakes");
     expect(result.round.round.roundId).toBe(ROUND_ID);
     expect(result.round.round.roundIndex).toBe(0);
     // No-mistakes owns its own pipeline: Momentum resolves no agent/model/effort.

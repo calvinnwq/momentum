@@ -11,10 +11,10 @@
  * `run/start-persist.ts`, and the CLI `workflow run start` surface
  * calls that persistence layer. Executor records, the opt-in daemon scheduler
  * lane, and executor adapter dispatch are layered separately; this pure
- * materializer does not run the landed goal-loop / one-shot / script /
+ * materializer does not run the landed agent-loop / agent-once / script /
  * no-mistakes mirror adapters or delegate-supervisor. The coding plan preview
  * in this module enriches
- * the projected steps with definition executor families and optional portable
+ * the projected steps with definition executor identities and optional portable
  * config for operator inspection, but it still does not invoke any executor or
  * write durable state.
  *
@@ -36,18 +36,26 @@
  *     unapproved run opens `pending`.
  *   - Durable run-start materialization carries only the canonical
  *     `WorkflowStepRecord` fields the substrate persists; the coding preview
- *     separately joins the executor family and optional portable config from the
+ *     separately joins the executor identity and optional portable config from the
  *     validated definition so the no-write plan can show how each step would
  *     dispatch.
  */
 
+import { isDeepStrictEqual } from "node:util";
+
 import { isSafeWorkflowRunPathSegment } from "../recovery/artifact.js";
 import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
+  BUILT_IN_WORKFLOW_DEFINITIONS,
   validateWorkflowDefinition,
+  type ExecutorName,
   type WorkflowDefinition,
-  type WorkflowExecutorFamily,
 } from "../definition/definition.js";
+import {
+  canonicalWorkflowStepKind,
+  effectiveStepExecutor,
+  type EffectiveExecutorOptions,
+} from "../definition/legacy.js";
 import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
@@ -165,7 +173,12 @@ export function materializeWorkflowRunStart(
 ): WorkflowRunStartResult {
   const errors: WorkflowRunStartError[] = [];
 
-  const validation = validateWorkflowDefinition(input.definition);
+  const allowLegacyStepKinds = isKnownRetainedBuiltInDefinition(
+    input.definition,
+  );
+  const validation = validateWorkflowDefinition(input.definition, {
+    allowLegacyStepKinds,
+  });
   if (!validation.ok) {
     errors.push({
       code: "definition_invalid",
@@ -243,13 +256,19 @@ export function materializeWorkflowRunStart(
 
   const steps: WorkflowStepRecord[] = [...definition.steps]
     .sort((a, b) => a.order - b.order)
-    .map((step) => ({
-      stepId: step.key,
-      kind: step.kind,
-      state: approvedKinds.has(step.kind) ? "approved" : "pending",
-      order: step.order,
-      required: step.required,
-    }));
+    .map((step) => {
+      // Runtime step rows carry only canonical kinds: a retained definition's
+      // legacy spelling projects through the shared legacy alias map here.
+      const kind =
+        canonicalWorkflowStepKind(step.kind) ?? (step.kind as WorkflowStepKind);
+      return {
+        stepId: step.key,
+        kind,
+        state: approvedKinds.has(kind) ? "approved" : "pending",
+        order: step.order,
+        required: step.required,
+      };
+    });
   const derivedRunState = deriveWorkflowRunState(steps);
 
   const run: WorkflowRunStartRun = {
@@ -275,16 +294,25 @@ export function materializeWorkflowRunStart(
   return { ok: true, plan: { run, steps } };
 }
 
+function isKnownRetainedBuiltInDefinition(definition: unknown): boolean {
+  return BUILT_IN_WORKFLOW_DEFINITIONS.some(
+    (builtIn) =>
+      builtIn.steps.some(
+        (step) => canonicalWorkflowStepKind(step.kind) !== step.kind,
+      ) && isDeepStrictEqual(definition, builtIn),
+  );
+}
+
 /**
  * One step of a frozen coding-workflow plan preview. It carries the canonical
- * {@link WorkflowStepRecord} fields plus the step's {@link WorkflowExecutorFamily}
+ * {@link WorkflowStepRecord} fields plus the step's {@link ExecutorName}
  * and optional portable config joined from the definition, so an operator can
  * read how each step will dispatch before the run is approved or executed.
  */
 export type WorkflowCodingPlanStep = {
   stepId: string;
   kind: WorkflowStepKind;
-  executor: WorkflowExecutorFamily;
+  executor: ExecutorName;
   config?: Record<string, unknown>;
   order: number;
   required: boolean;
@@ -337,12 +365,13 @@ function readImplementationEngine(
  * {@link WorkflowRunStartInput} a native coding start would use, without touching
  * any durable state. It reuses {@link materializeWorkflowRunStart} for the run /
  * step shape (so the preview matches exactly what a start would persist) and
- * enriches each step with the executor family and optional portable config
+ * enriches each step with the effective executor identity and optional portable config
  * declared on the definition. Invalid inputs surface the same refusal taxonomy
  * as a start.
  */
 export function materializeWorkflowCodingPlanPreview(
   input: WorkflowRunStartInput,
+  executorOptions: EffectiveExecutorOptions = {},
 ): WorkflowCodingPlanPreviewResult {
   const result = materializeWorkflowRunStart(input);
   if (!result.ok) {
@@ -362,7 +391,10 @@ export function materializeWorkflowCodingPlanPreview(
     return {
       stepId: step.stepId,
       kind: step.kind,
-      executor: definitionStep?.executor as WorkflowExecutorFamily,
+      executor: effectiveStepExecutor(
+        definitionStep?.executor as ExecutorName,
+        executorOptions,
+      ),
       ...(definitionStep?.config === undefined
         ? {}
         : { config: { ...definitionStep.config } }),

@@ -1,8 +1,8 @@
 /**
  * Legacy no-mistakes executor-mirror compatibility facade.
  *
- * Recorded workflow definitions may still use the legacy `no-mistakes` family
- * as an external-state mirror.
+ * Recorded workflow definitions may still use the legacy `no-mistakes`
+ * executor as an external-state mirror.
  * Current coding definitions use `delegate-supervisor` with
  * `tool: "no-mistakes"` instead.
  * Both paths normalize the same no-mistakes evidence fields:
@@ -16,13 +16,13 @@
  *   - Decisions and delegated-policy results.
  *   - PR URL and CI state.
  *
- * This module preserves the legacy `no-mistakes` family API for recorded
+ * This module preserves the legacy `no-mistakes` executor API for recorded
  * attempts: the {@link NoMistakesExternalState} snapshot aliases, durable
  * finding / decision projections, and deterministic attempt / round
  * identity. Classification delegates to the shared
  * `delegate-supervisor/classifier.ts` authority, so compatibility callers and
- * current tool adapters cannot drift. Like `single-shot/executor.ts` and
- * `goal-loop/executor.ts`, these compatibility helpers are pure functions of
+ * current tool adapters cannot drift. Like the agent-once and
+ * agent-loop executors, these compatibility helpers are pure functions of
  * their inputs: no SQLite, file system, git, or executor attempt. The legacy
  * mechanism / orchestrator siblings layer external-state reading and durable
  * persistence on top; current coding definitions instead use the
@@ -81,38 +81,39 @@ import type {
   ExecutorHumanGateType,
   ExecutorAttemptRecord,
   ExecutorAttemptState,
+  ExecutorName,
   ExecutorRoundRecord,
   ExecutorRoundState,
-  WorkflowExecutorFamily,
 } from "../core/executors/loop/reducer.js";
 
 /**
- * The single executor family this adapter mirrors. Pinned as a named constant —
- * mirroring `goal-loop/executor.ts`'s `GOAL_LOOP_EXECUTOR_FAMILY` — so the
- * mechanism / orchestrator twins and the family guard stay in sync.
+ * The single executor this adapter mirrors. Pinned as a named constant —
+ * mirroring `agent-loop/executor.ts`'s `AGENT_LOOP_EXECUTOR` — so the
+ * mechanism / orchestrator twins and the executor guard stay in sync. A legacy
+ * identity for recorded definitions, not a canonical `WorkflowExecutor`.
  */
-export const NO_MISTAKES_EXECUTOR_FAMILY =
-  "no-mistakes" as const satisfies WorkflowExecutorFamily;
+export const NO_MISTAKES_EXECUTOR =
+  "no-mistakes" as const satisfies ExecutorName;
 
-export type NoMistakesExecutorFamily = typeof NO_MISTAKES_EXECUTOR_FAMILY;
+export type NoMistakesExecutorName = typeof NO_MISTAKES_EXECUTOR;
 
 /**
- * The executor families this adapter serves: just `no-mistakes`. Exposed as a
+ * The executors this adapter serves: just `no-mistakes`. Exposed as a
  * one-element set so a daemon dispatcher can route a `StepDefinition.executor` to
- * the no-mistakes mirror the same way it routes the single-shot families, without
- * hard-coding the family string at the call site.
+ * the no-mistakes mirror the same way it routes the single-shot executors,
+ * without hard-coding the executor string at the call site.
  */
-export const NO_MISTAKES_EXECUTOR_FAMILIES = [
-  NO_MISTAKES_EXECUTOR_FAMILY,
-] as const satisfies readonly WorkflowExecutorFamily[];
+export const NO_MISTAKES_EXECUTORS = [
+  NO_MISTAKES_EXECUTOR,
+] as const satisfies readonly ExecutorName[];
 
 /**
- * Whether an executor family is the one this adapter mirrors.
+ * Whether an executor name is the one this adapter mirrors.
  */
-export function isNoMistakesExecutorFamily(
-  family: string,
-): family is NoMistakesExecutorFamily {
-  return family === NO_MISTAKES_EXECUTOR_FAMILY;
+export function isNoMistakesExecutorName(
+  executor: string,
+): executor is NoMistakesExecutorName {
+  return executor === NO_MISTAKES_EXECUTOR;
 }
 
 /**
@@ -280,7 +281,7 @@ export function decideNoMistakesUnreadable(
 /**
  * Mint the deterministic, reattachable executor-attempt id for a no-mistakes
  * mirror under a step run. The id embeds the `(workflowRunId, stepRunId)`
- * step-run identity, the `no-mistakes` family, and the `attempt`, so it is
+ * step-run identity, the `no-mistakes` executor, and the `attempt`, so it is
  * globally unique yet recomputable from durable state alone. A re-run of the step is a fresh `attempt`, so it never collides
  * with the prior mirror.
  */
@@ -289,7 +290,7 @@ export function noMistakesAttemptId(
   stepRunId: string,
   attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR_FAMILY}::${attemptNumber}`;
+  return `${workflowRunId}::${stepRunId}::${NO_MISTAKES_EXECUTOR}::${attemptNumber}`;
 }
 
 /**
@@ -307,9 +308,9 @@ export function noMistakesRoundId(attemptId: string): string {
  * The `StepRun` identity {@link planNoMistakesAttempt} projects into a durable
  * no-mistakes {@link ExecutorAttemptRecord}: the `(workflowRunId, stepRunId)`
  * step run, the step key, the re-run `attempt`, and the start clock the
- * orchestrator owns. There is no `family` field — the mirror serves exactly the
- * `no-mistakes` family — unlike the single-shot projection that carries a chosen
- * `one-shot` / `script` family.
+ * orchestrator owns. There is no executor field — the mirror serves exactly the
+ * `no-mistakes` executor — unlike the single-shot projection that carries a
+ * chosen `agent-once` / `script` executor.
  */
 export type PlanNoMistakesAttemptInput = {
   workflowRunId: string;
@@ -340,7 +341,7 @@ export function planNoMistakesAttempt(
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
+    executor: NO_MISTAKES_EXECUTOR,
     state: "running",
     attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
@@ -364,7 +365,7 @@ export type NoMistakesRoundRuntimeInputs = {
 
 /**
  * The inputs to {@link planNoMistakesRoundStart}: the materialized no-mistakes
- * attempt (whose identity and family the single mirror round inherits), the
+ * attempt (whose identity and executor the single mirror round inherits), the
  * per-round runtime inputs, and the round start clock. There is no round index — a
  * mirror is always the one long-lived round at index 0 — and no resolved
  * agent/model selection, because no-mistakes owns its own pipeline (the mirror
@@ -381,7 +382,7 @@ export type PlanNoMistakesRoundStartInput = {
  * round-start {@link ExecutorRoundRecord} the orchestrator inserts before it begins
  * mirroring. The round inherits the attempt's
  * `(workflowRunId, stepRunId, stepKey, attempt)` identity and its `no-mistakes`
- * family, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
+ * executor, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
  * the round's input digest / artifact root / log paths.
  *
  * Two mirror-specific differences from the single-shot round-start projection:
@@ -391,22 +392,22 @@ export type PlanNoMistakesRoundStartInput = {
  *     enters the capture/mirror phase directly; from there every decided round
  *     state ({@link decideNoMistakesMirror}) is a legal transition.
  *   - `agentProvider` / `model` / `effort` stay `null`. No-mistakes owns its own
- *     pipeline, so Momentum resolves no agent for the mirror, exactly as the deterministic `script` family
+ *     pipeline, so Momentum resolves no agent for the mirror, exactly as the deterministic `script` executor
  *     resolves no agent.
  *
  * Pure: no ids or clock are invented here, so later config edits cannot rewrite
  * the historical record for an already-started round.
  *
- * @throws {Error} if the attempt's family is not `no-mistakes` — the mirror
- * round must inherit the family {@link planNoMistakesAttempt} establishes.
+ * @throws {Error} if the attempt's executor is not `no-mistakes` — the mirror
+ * round must inherit the executor {@link planNoMistakesAttempt} establishes.
  */
 export function planNoMistakesRoundStart(
   input: PlanNoMistakesRoundStartInput,
 ): ExecutorRoundRecord {
   const { attempt, runtime } = input;
-  if (!isNoMistakesExecutorFamily(attempt.executorFamily)) {
+  if (!isNoMistakesExecutorName(attempt.executor)) {
     throw new Error(
-      `planNoMistakesRoundStart: attempt ${attempt.attemptId} has non-no-mistakes family ${attempt.executorFamily}; the mirror round must inherit the no-mistakes family`,
+      `planNoMistakesRoundStart: attempt ${attempt.attemptId} has non-no-mistakes executor ${attempt.executor}; the mirror round must inherit the no-mistakes executor`,
     );
   }
   return {
@@ -415,7 +416,7 @@ export function planNoMistakesRoundStart(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
+    executor: NO_MISTAKES_EXECUTOR,
     attemptNumber: attempt.attemptNumber,
     roundIndex: 0,
     state: "mirroring_external_state",
@@ -455,7 +456,7 @@ export type PlanNoMistakesRoundPersistenceInput = {
 /**
  * A pure, durable persistence plan for one mirror poll. The orchestrator applies
  * {@link roundUpdate} through `updateExecutorRound`, stamping the daemon clock the
- * pure projection cannot supply. Unlike the single-shot / goal-loop plans there is
+ * pure projection cannot supply. Unlike the single-shot / agent-loop plans there is
  * no separate capture patch: the mirror round already lives in
  * `mirroring_external_state` (the capture/mirror phase), from which the round
  * transition graph allows reaching `succeeded` directly, so one patch carries the

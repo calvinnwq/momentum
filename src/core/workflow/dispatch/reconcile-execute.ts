@@ -155,7 +155,7 @@ export function reconcileDispatchedWorkflowStep(
       runId,
       stepId,
       dispatchStartedAt: attempt.startedAt,
-      executorFamily: attempt.executorFamily,
+      executor: attempt.executor,
       attemptNumber: attempt.attemptNumber,
       attemptState: plan.attemptState,
       reason:
@@ -171,7 +171,7 @@ export function reconcileDispatchedWorkflowStep(
     runId,
     stepId,
     dispatchStartedAt: attempt.startedAt,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     stepState: plan.stepState,
     ...(leaseIdentity !== undefined ? { leaseIdentity } : {}),
     now,
@@ -191,7 +191,7 @@ function finalizeDispatchedStep(
     runId: string;
     stepId: string;
     dispatchStartedAt: number | null;
-    executorFamily: ExecutorName;
+    executor: ExecutorName;
     stepState: WorkflowStepTerminalState;
     leaseIdentity?: { holder: string; acquiredAt: number };
     now: number;
@@ -201,7 +201,7 @@ function finalizeDispatchedStep(
     runId,
     stepId,
     dispatchStartedAt,
-    executorFamily,
+    executor,
     stepState,
     leaseIdentity,
     now,
@@ -276,7 +276,7 @@ function finalizeDispatchedStep(
       db,
       runId,
       dispatchStartedAt,
-      executorFamily === "subworkflow",
+      executor === "subworkflow",
       now,
       leaseIdentity,
     );
@@ -307,7 +307,7 @@ function parkForManualRecovery(
     runId: string;
     stepId: string;
     dispatchStartedAt: number | null;
-    executorFamily: ExecutorName;
+    executor: ExecutorName;
     attemptNumber: number;
     attemptState: string;
     reason: string;
@@ -320,7 +320,7 @@ function parkForManualRecovery(
     runId,
     stepId,
     dispatchStartedAt,
-    executorFamily,
+    executor,
     attemptNumber,
     attemptState,
     reason,
@@ -409,7 +409,7 @@ function parkForManualRecovery(
       db,
       runId,
       dispatchStartedAt,
-      executorFamily === "subworkflow",
+      executor === "subworkflow",
       now,
       leaseIdentity,
     );

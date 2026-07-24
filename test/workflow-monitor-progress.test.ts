@@ -203,8 +203,8 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
     const before = makeEnvelope();
     const after = makeEnvelope({
       activeStep: {
-        stepId: "no-mistakes",
-        kind: "no-mistakes",
+        stepId: "validate",
+        kind: "validate",
         state: "approved",
         order: 2,
         required: true,
@@ -212,9 +212,9 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
       stepState: "approved",
       nextAction: {
         code: "advance_to_step",
-        stepId: "no-mistakes",
+        stepId: "validate",
         leaseKind: "managed-step",
-        detail: 'Approved step "no-mistakes" is the next step to dispatch.',
+        detail: 'Approved step "validate" is the next step to dispatch.',
       },
       counts: makeCounts({
         steps: 2,
@@ -288,8 +288,8 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         reportable: true,
         reportReason: "awaiting_approval",
         activeStep: {
-          stepId: "no-mistakes",
-          kind: "no-mistakes",
+          stepId: "validate",
+          kind: "validate",
           state: "pending",
           order: 2,
           required: true,
@@ -297,15 +297,14 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         stepState: "pending",
         nextAction: {
           code: "await_approval",
-          stepId: "no-mistakes",
+          stepId: "validate",
           leaseKind: "managed-step",
-          detail:
-            'Step "no-mistakes" is pending approval before it can advance.',
+          detail: 'Step "validate" is pending approval before it can advance.',
         },
       }),
     );
     expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("awaiting_approval");
-    expect(tick.currentStep).toBe("no-mistakes");
+    expect(tick.currentStep).toBe("validate");
     expect(tick.cleanup).toBe("none");
   });
 
@@ -318,8 +317,8 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         reportable: true,
         reportReason: "recovery_required",
         activeStep: {
-          stepId: "no-mistakes",
-          kind: "no-mistakes",
+          stepId: "validate",
+          kind: "validate",
           state: "failed",
           order: 2,
           required: true,
@@ -327,14 +326,14 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         stepState: "failed",
         nextAction: {
           code: "rerun_failed_step",
-          stepId: "no-mistakes",
+          stepId: "validate",
           leaseKind: "managed-step",
           detail: "A required step failed. Decide whether to retry.",
         },
         recovery: {
           code: "failed_required_step",
           message: "A required step finalized in failed state.",
-          stepId: "no-mistakes",
+          stepId: "validate",
         },
         counts: makeCounts({
           steps: 2,
@@ -552,10 +551,10 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
           },
         }),
         lastCheckpoint: {
-          stepId: "linear-refresh",
+          stepId: "tracker-refresh",
           at: 1_730_000_000_000,
           source: "ledger",
-          digest: "rc2-reconcile::linear-refresh::succeeded",
+          digest: "rc2-reconcile::tracker-refresh::succeeded",
         },
       }),
     );

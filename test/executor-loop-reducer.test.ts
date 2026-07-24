@@ -316,8 +316,8 @@ describe("transitionExecutorRound", () => {
 describe("executor-loop record shapes", () => {
   it("models an ExecutorDefinition as the rich per-step executor config", () => {
     const def: ExecutorDefinitionRecord = {
-      executorKey: "implementation-goal-loop",
-      family: "goal-loop",
+      executorKey: "implementation-agent-loop",
+      executor: "agent-loop",
       agentProvider: "claude-code",
       model: "claude-opus-4-8",
       effort: "high",
@@ -325,7 +325,7 @@ describe("executor-loop record shapes", () => {
       maxRounds: 8,
       policyEnvelope: "overnight-safe",
     };
-    expect(def.family).toBe("goal-loop");
+    expect(def.executor).toBe("agent-loop");
     expect(def.maxRounds).toBe(8);
   });
 
@@ -335,7 +335,7 @@ describe("executor-loop record shapes", () => {
       workflowRunId: "run-1",
       stepRunId: "step-impl",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       state: "running",
       attemptNumber: 1,
       startedAt: 1_000,
@@ -343,7 +343,7 @@ describe("executor-loop record shapes", () => {
       finishedAt: null,
     };
     expect(attempt.state).toBe("running");
-    expect(attempt.executorFamily).toBe("goal-loop");
+    expect(attempt.executor).toBe("agent-loop");
   });
 
   it("models an ExecutorRound carrying the common result schema fields", () => {
@@ -353,7 +353,7 @@ describe("executor-loop record shapes", () => {
       workflowRunId: "run-1",
       stepRunId: "step-impl",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "succeeded",

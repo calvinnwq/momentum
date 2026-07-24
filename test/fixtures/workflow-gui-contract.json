@@ -1,5 +1,6 @@
 {
   "watch": {
+    "schemaVersion": 3,
     "envelopeKeys": [
       "ok",
       "command",
@@ -27,13 +28,7 @@
       "digest"
     ],
     "scenarioKeys": {
-      "activeStep": [
-        "stepId",
-        "kind",
-        "state",
-        "order",
-        "required"
-      ],
+      "activeStep": ["stepId", "kind", "state", "order", "required"],
       "nextAction": [
         "actionClass",
         "code",
@@ -42,12 +37,7 @@
         "leaseKind",
         "detail"
       ],
-      "humanAction": [
-        "code",
-        "command",
-        "detail",
-        "gateType"
-      ],
+      "humanAction": ["code", "command", "detail", "gateType"],
       "recommendedActionPolicy": [
         "action",
         "authority",
@@ -273,15 +263,31 @@
       "rerun_failed_step"
     ],
     "humanActionCodes": ["approve", "resolve_gate", "clear_recovery"],
-    "recommendedActions": ["poll", "approve", "operator_decision", "recover", "release"],
-    "dispositions": ["wait", "report", "recover"],
-    "phases": [
-      "advancing",
-      "idle",
-      "awaiting_approval",
-      "blocked",
-      "terminal"
+    "stepKinds": [
+      "preflight",
+      "implementation",
+      "postflight",
+      "validate",
+      "merge-cleanup",
+      "tracker-refresh"
     ],
+    "executors": [
+      "agent-loop",
+      "agent-once",
+      "delegate-supervisor",
+      "script",
+      "external-apply",
+      "subworkflow"
+    ],
+    "recommendedActions": [
+      "poll",
+      "approve",
+      "operator_decision",
+      "recover",
+      "release"
+    ],
+    "dispositions": ["wait", "report", "recover"],
+    "phases": ["advancing", "idle", "awaiting_approval", "blocked", "terminal"],
     "reasons": [
       "terminal_succeeded",
       "terminal_canceled",
@@ -294,7 +300,12 @@
       "stuck_risk"
     ],
     "recommendedActionPolicy": {
-      "authority": ["auto_allowed", "recommend_only", "human_required", "forbidden"],
+      "authority": [
+        "auto_allowed",
+        "recommend_only",
+        "human_required",
+        "forbidden"
+      ],
       "risk": ["low", "medium", "high"],
       "stuckRisk": ["low", "medium", "high"]
     }
@@ -310,14 +321,7 @@
       "events",
       "counts"
     ],
-    "eventKeys": [
-      "id",
-      "cursor",
-      "timestamp",
-      "type",
-      "stepId",
-      "payload"
-    ],
+    "eventKeys": ["id", "cursor", "timestamp", "type", "stepId", "payload"],
     "types": [
       "step_started",
       "step_succeeded",

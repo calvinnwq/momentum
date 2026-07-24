@@ -33,7 +33,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
 
 /**
  * NGX-497 (RC-4) — the async run-path producer that makes the `subworkflow`
- * executor family daemon-dispatchable: it starts or attaches to a child workflow
+ * executor daemon-dispatchable: it starts or attaches to a child workflow
  * run (through an injected runner, so the daemon lane owns the start/attach and
  * there is no ad hoc parallel runtime here), observes the child run's terminal
  * classification, maps it into executor evidence via the landed pure
@@ -128,7 +128,7 @@ function approveAndClaim(
 function dispatchStep(
   db: MomentumDb,
   stepId: string = STEP_ID,
-  family: "subworkflow" | "one-shot" = "subworkflow",
+  family: "subworkflow" | "agent-once" = "subworkflow",
 ): void {
   const claim = approveAndClaim(db, stepId);
   executeWorkflowStepDispatch(claim, {
@@ -138,7 +138,7 @@ function dispatchStep(
   });
   if (family === "subworkflow") {
     db.prepare(
-      "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
+      "UPDATE executor_attempts SET executor = 'subworkflow' WHERE attempt_id = ?",
     ).run(deriveDispatchAttemptId(RUN_ID, stepId, 1));
   }
 }
@@ -613,7 +613,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
 
   it("refuses a non-subworkflow dispatch scaffold and never starts a child run", async () => {
     const db = openSeededDb();
-    dispatchStep(db, STEP_ID, "one-shot");
+    dispatchStep(db, STEP_ID, "agent-once");
     const runner = countingChildRunner(observe("succeeded"));
 
     const out = await executeAndReconcileDispatchedSubworkflowStep({
@@ -626,7 +626,7 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
     });
 
     expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
-    expect(out.detail).toContain("one-shot");
+    expect(out.detail).toContain("agent-once");
     expect(runner.calls()).toBe(0);
     expect(
       loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))

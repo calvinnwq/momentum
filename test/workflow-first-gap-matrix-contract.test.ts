@@ -3,8 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition/definition.js";
-import { PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES } from "../src/core/workflow/dispatch/dispatch.js";
+import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
+import { PHASE1_DISPATCHABLE_EXECUTORS } from "../src/core/workflow/dispatch/dispatch.js";
 import { expectSpecSection } from "./helpers/repo-docs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,18 +24,17 @@ describe("workflow-first gap matrix anchor", () => {
   });
 
   it("pins phase-1 dispatch families in code", () => {
-    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
-      "goal-loop",
-      "one-shot",
-      "no-mistakes",
+    expect([...WORKFLOW_EXECUTORS]).toEqual([
+      "agent-loop",
+      "agent-once",
       "delegate-supervisor",
       "script",
       "external-apply",
       "subworkflow",
     ]);
-    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES]).toEqual([
-      "goal-loop",
-      "one-shot",
+    expect([...PHASE1_DISPATCHABLE_EXECUTORS]).toEqual([
+      "agent-loop",
+      "agent-once",
       "script",
       "no-mistakes",
       "delegate-supervisor",

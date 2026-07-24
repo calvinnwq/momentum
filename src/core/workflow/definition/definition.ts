@@ -7,18 +7,18 @@
  * system, no executor execution. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
  * `definition/persist.ts`; first-class workflow run start, executor
- * records, the opt-in daemon scheduler lane, the native goal-loop / one-shot /
- * script SDK paths, and the legacy no-mistakes mirror / delegate-supervisor
- * profile-backed paths,
+ * records, the opt-in daemon scheduler lane, the native agent-loop /
+ * agent-once / script SDK paths, and the legacy no-mistakes mirror /
+ * delegate-supervisor profile-backed paths,
  * gates, and production dispatch scaffolds are layered on later modules.
- * Closeout dogfood and deferred executor-family adapters stay outside this
+ * Closeout dogfood and deferred executor adapters stay outside this
  * primitive module.
  *
  * Scope decisions pinned here, grounded in the compact runtime anchors in
  * SPEC.md and the long-form planning contracts externalized to the personal wiki:
  *
  *   - `StepDefinition.executor` names one permanent executor identity. Built-in
- *     family names and third-party registered names share this field. Portable
+ *     executor names and third-party registered names share this field. Portable
  *     executor intent belongs in the optional step `config`; machine-local
  *     command resolution stays below the definition contract.
  *   - `StepDefinition.kind` reuses the canonical workflow-run `WorkflowStepKind`
@@ -27,7 +27,7 @@
  *     Broadening the kind vocabulary for genuinely arbitrary steps is a
  *     deliberate future concern, not part of this slice.
  *   - The built-in coding workflow definition is shipped as data/config, not a
- *     fixed product boundary: its per-step executor families are editable
+ *     fixed product boundary: its per-step executors are editable
  *     defaults chosen from the contract's `step -> executor` mapping.
  *   - Built-in definitions are registered by `(key, version)`: unversioned
  *     lookup selects the latest known version for new starts, while versioned
@@ -35,37 +35,39 @@
  *     run.
  */
 
-import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";
+import {
+  LEGACY_WORKFLOW_STEP_KINDS,
+  WORKFLOW_STEP_KINDS,
+  type LegacyWorkflowStepKind,
+  type WorkflowStepKind,
+} from "../run/reducer.js";
 
 /**
- * Built-in executor identities pinned by SPEC.md's Runtime Model and Native
- * Goal-Loop Contract anchors. A `StepDefinition` may select one of these or an
+ * Built-in executor identities pinned by SPEC.md's Runtime Model and Agent-Loop
+ * Contract anchors. A `StepDefinition` may select one of these or an
  * arbitrary valid registered identity; delegated tools such as GNHF belong in
  * portable step config below `delegate-supervisor`, never in this built-in list.
+ * Retired spellings (`goal-loop`, `one-shot`) and the legacy `no-mistakes`
+ * mirror identity stay readable and dispatchable for recorded definitions
+ * through `definition/legacy.ts`, never through this canonical list.
  */
-export const WORKFLOW_EXECUTOR_FAMILIES = [
-  "goal-loop",
-  "one-shot",
-  "no-mistakes",
+export const WORKFLOW_EXECUTORS = [
+  "agent-loop",
+  "agent-once",
   "delegate-supervisor",
   "script",
   "external-apply",
   "subworkflow",
 ] as const;
-export type WorkflowExecutorFamily =
-  (typeof WORKFLOW_EXECUTOR_FAMILIES)[number];
+export type WorkflowExecutor = (typeof WORKFLOW_EXECUTORS)[number];
 
 /** Durable registration identity used by step definitions and executor rows. */
 export type ExecutorName = string;
 
-const EXECUTOR_FAMILY_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_EXECUTOR_FAMILIES,
-);
+const WORKFLOW_EXECUTOR_SET: ReadonlySet<string> = new Set(WORKFLOW_EXECUTORS);
 
-export function isWorkflowExecutorFamily(
-  value: string,
-): value is WorkflowExecutorFamily {
-  return EXECUTOR_FAMILY_SET.has(value);
+export function isWorkflowExecutor(value: string): value is WorkflowExecutor {
+  return WORKFLOW_EXECUTOR_SET.has(value);
 }
 
 export function isExecutorName(value: unknown): value is ExecutorName {
@@ -92,9 +94,17 @@ export function isExecutorName(value: unknown): value is ExecutorName {
  *   - `required` marks whether the step must reach terminal success for the run
  *     to succeed (mirrors `workflow_steps.required`).
  */
+/**
+ * Step-kind vocabulary accepted on stored definitions: the canonical
+ * {@link WorkflowStepKind} values plus retired spellings retained by
+ * previously recorded definition versions. Runtime rows only ever use the
+ * canonical values; `definition/legacy.ts` owns the projection.
+ */
+export type StepDefinitionKind = WorkflowStepKind | LegacyWorkflowStepKind;
+
 export type StepDefinition = {
   key: string;
-  kind: WorkflowStepKind;
+  kind: StepDefinitionKind;
   executor: ExecutorName;
   config?: Record<string, unknown>;
   order: number;
@@ -141,6 +151,10 @@ export type WorkflowDefinitionValidationResult =
   | { ok: true; definition: WorkflowDefinition }
   | { ok: false; errors: WorkflowDefinitionValidationError[] };
 
+export type WorkflowDefinitionValidationOptions = {
+  allowLegacyStepKinds?: boolean;
+};
+
 // Lowercase slug: alphanumeric segments joined by single hyphens. Keeps
 // definition / step keys safe as durable identities and future artifact paths.
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -162,6 +176,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 export function validateWorkflowDefinition(
   value: unknown,
+  options: WorkflowDefinitionValidationOptions = {},
 ): WorkflowDefinitionValidationResult {
   const errors: WorkflowDefinitionValidationError[] = [];
 
@@ -212,7 +227,7 @@ export function validateWorkflowDefinition(
       path: "steps",
     });
   } else {
-    validateSteps(rawSteps, errors);
+    validateSteps(rawSteps, errors, options.allowLegacyStepKinds === true);
   }
 
   if (errors.length > 0) {
@@ -224,6 +239,7 @@ export function validateWorkflowDefinition(
 function validateSteps(
   rawSteps: readonly unknown[],
   errors: WorkflowDefinitionValidationError[],
+  allowLegacyStepKinds: boolean,
 ): void {
   const seenKeys = new Set<string>();
   const seenOrders = new Set<number>();
@@ -258,7 +274,13 @@ function validateSteps(
 
     if (
       typeof rawStep["kind"] !== "string" ||
-      !(WORKFLOW_STEP_KINDS as readonly string[]).includes(rawStep["kind"])
+      !(
+        (WORKFLOW_STEP_KINDS as readonly string[]).includes(rawStep["kind"]) ||
+        (allowLegacyStepKinds &&
+          (LEGACY_WORKFLOW_STEP_KINDS as readonly string[]).includes(
+            rawStep["kind"],
+          ))
+      )
     ) {
       errors.push({
         code: "step_kind_invalid",
@@ -348,25 +370,27 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
 /**
  * The canonical OpenClaw coding workflow expressed as a built-in
  * {@link WorkflowDefinition}. Steps mirror the workflow-run `WorkflowStepKind` order;
- * executor families follow the `step -> executor` mapping in
+ * executors follow the `step -> executor` mapping in
  * SPEC.md, choosing one option where the
  * contract offers a pair:
  *
- *   - preflight      -> one-shot      (a single bounded prep attempt)
- *   - implementation -> delegate-supervisor (GNHF owns the implementation loop)
- *   - postflight     -> one-shot      (a single bounded review pass)
- *   - no-mistakes    -> delegate-supervisor (no-mistakes owns validation)
- *   - merge-cleanup  -> script        (deterministic profile-resolved command;
+ *   - preflight       -> agent-once   (a single bounded prep attempt)
+ *   - implementation  -> delegate-supervisor (GNHF owns the implementation loop)
+ *   - postflight      -> agent-once   (a single bounded review pass)
+ *   - validate        -> delegate-supervisor (no-mistakes owns validation)
+ *   - merge-cleanup   -> script       (deterministic profile-resolved command;
  *                                       operator-gated as a side-effecting tail)
- *   - linear-refresh -> external-apply (operator-mediated external write;
+ *   - tracker-refresh -> external-apply (operator-mediated external write;
  *                                       daemon-dispatchable through the
  *                                       external-apply safety-gated adapter)
  *
- * The delegated tool is portable step config, never an executor-family value.
- * Version 1 remains registered so existing runs keep resolving its legacy
- * implementation and no-mistakes identities. Dispatch projects the native
- * merge-cleanup command identity for recorded V1 runs without rewriting the
- * immutable definition.
+ * The delegated tool is portable step config, never an executor value.
+ * Versions 1 and 2 remain registered byte-for-byte so existing runs keep
+ * resolving the exact executor and step-kind spellings they recorded; the
+ * shared projection in `definition/legacy.ts` maps their retired vocabulary
+ * to effective values at read time, and dispatch projects the native
+ * merge-cleanup command identity for recorded V1 runs, all without rewriting
+ * the immutable definitions.
  */
 export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,
@@ -418,7 +442,7 @@ export const CODING_WORKFLOW_DEFINITION_V1: WorkflowDefinition = {
   ],
 };
 
-export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
+export const CODING_WORKFLOW_DEFINITION_V2: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,
   title: "OpenClaw Coding Workflow",
   version: 2,
@@ -447,8 +471,68 @@ export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
   }),
 };
 
+/**
+ * Version 3 is the first definition version recorded entirely in the approved
+ * vocabulary: `agent-once` replaces `one-shot`, the validation step's key and
+ * kind are `validate`, and the tracker tail's key and kind are
+ * `tracker-refresh`. Step-to-executor assignments are unchanged from V2.
+ */
+export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
+  key: CODING_WORKFLOW_DEFINITION_KEY,
+  title: "OpenClaw Coding Workflow",
+  version: 3,
+  steps: [
+    {
+      key: "preflight",
+      kind: "preflight",
+      executor: "agent-once",
+      order: 0,
+      required: true,
+    },
+    {
+      key: "implementation",
+      kind: "implementation",
+      executor: "delegate-supervisor",
+      config: { tool: "gnhf" },
+      order: 1,
+      required: true,
+    },
+    {
+      key: "postflight",
+      kind: "postflight",
+      executor: "agent-once",
+      order: 2,
+      required: true,
+    },
+    {
+      key: "validate",
+      kind: "validate",
+      executor: "delegate-supervisor",
+      config: { tool: "no-mistakes" },
+      order: 3,
+      required: true,
+    },
+    {
+      key: "merge-cleanup",
+      kind: "merge-cleanup",
+      executor: "script",
+      config: { command: "merge-cleanup" },
+      order: 4,
+      required: true,
+    },
+    {
+      key: "tracker-refresh",
+      kind: "tracker-refresh",
+      executor: "external-apply",
+      order: 5,
+      required: true,
+    },
+  ],
+};
+
 export const BUILT_IN_WORKFLOW_DEFINITIONS: readonly WorkflowDefinition[] = [
   CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION_V2,
   CODING_WORKFLOW_DEFINITION,
 ];
 

@@ -1,84 +1,77 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  WORKFLOW_EXECUTOR_FAMILIES,
-  type WorkflowExecutorFamily,
+  WORKFLOW_EXECUTORS,
+  type ExecutorName,
 } from "../src/core/workflow/definition/definition.js";
 import {
-  PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
+  PHASE1_DISPATCHABLE_EXECUTORS,
   WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
   WORKFLOW_STEP_RESOLUTION_FAILURES,
-  isPhase1DispatchableExecutorFamily,
+  isPhase1DispatchableExecutor,
   planWorkflowStepDispatch,
   type WorkflowStepDispatchResolution,
 } from "../src/core/workflow/dispatch/dispatch.js";
 
-function resolved(
-  executorFamily: WorkflowExecutorFamily,
-): WorkflowStepDispatchResolution {
-  return { ok: true, executorFamily };
+function resolved(executor: ExecutorName): WorkflowStepDispatchResolution {
+  return { ok: true, executor };
 }
 
-describe("phase-1 dispatchable executor families", () => {
-  it("supports exactly the daemon-dispatchable bounded-adapter families", () => {
+describe("phase-1 dispatchable executors", () => {
+  it("supports exactly the daemon-dispatchable bounded adapters", () => {
     // RC-4b (NGX-498) flipped `subworkflow` in once its configured production lane
-    // was proven, so every landed adapter family is now dispatchable.
-    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES].sort()).toEqual(
+    // was proven, so every landed executor is now dispatchable.
+    expect([...PHASE1_DISPATCHABLE_EXECUTORS].sort()).toEqual(
       [
         "external-apply",
         "delegate-supervisor",
-        "goal-loop",
+        "agent-loop",
         "no-mistakes",
-        "one-shot",
+        "agent-once",
         "script",
         "subworkflow",
       ].sort(),
     );
   });
 
-  it("is a subset of the workflow executor families", () => {
-    for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
-      expect(WORKFLOW_EXECUTOR_FAMILIES).toContain(family);
+  it("contains every canonical executor plus the retained legacy mirror", () => {
+    for (const executor of WORKFLOW_EXECUTORS) {
+      expect(PHASE1_DISPATCHABLE_EXECUTORS).toContain(executor);
     }
-    // Post-NGX-498 the phase-1 set covers every executor family; it can never
-    // exceed the full vocabulary.
-    expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThanOrEqual(
-      WORKFLOW_EXECUTOR_FAMILIES.length,
-    );
+    expect(PHASE1_DISPATCHABLE_EXECUTORS).toContain("no-mistakes");
+    expect(WORKFLOW_EXECUTORS).not.toContain("no-mistakes");
   });
 
   it("guards membership", () => {
-    expect(isPhase1DispatchableExecutorFamily("goal-loop")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("one-shot")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("no-mistakes")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("delegate-supervisor")).toBe(
-      true,
-    );
-    expect(isPhase1DispatchableExecutorFamily("script")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(true);
+    expect(isPhase1DispatchableExecutor("agent-loop")).toBe(true);
+    expect(isPhase1DispatchableExecutor("agent-once")).toBe(true);
+    expect(isPhase1DispatchableExecutor("no-mistakes")).toBe(true);
+    expect(isPhase1DispatchableExecutor("delegate-supervisor")).toBe(true);
+    expect(isPhase1DispatchableExecutor("script")).toBe(true);
+    expect(isPhase1DispatchableExecutor("external-apply")).toBe(true);
+    expect(isPhase1DispatchableExecutor("subworkflow")).toBe(true);
   });
 });
 
-describe("planWorkflowStepDispatch — supported families", () => {
-  for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
-    it(`routes ${family} to a real dispatch`, () => {
-      const plan = planWorkflowStepDispatch(resolved(family));
+describe("planWorkflowStepDispatch - supported executors", () => {
+  for (const executor of PHASE1_DISPATCHABLE_EXECUTORS) {
+    it(`routes ${executor} to a real dispatch`, () => {
+      const plan = planWorkflowStepDispatch(resolved(executor));
       expect(plan.action).toBe("dispatch");
       if (plan.action === "dispatch") {
-        expect(plan.executorFamily).toBe(family);
+        expect(plan.executor).toBe(executor);
       }
     });
   }
 });
 
-describe("planWorkflowStepDispatch — every executor family is now dispatchable (NGX-498)", () => {
-  it("has no remaining deferred executor family that fails closed", () => {
-    // RC-4b flipped the last deferred family (`subworkflow`); every member of the
-    // executor-family vocabulary now routes to a real dispatch.
-    for (const family of WORKFLOW_EXECUTOR_FAMILIES) {
-      expect(isPhase1DispatchableExecutorFamily(family)).toBe(true);
-      expect(planWorkflowStepDispatch(resolved(family)).action).toBe(
+describe("planWorkflowStepDispatch - every executor is now dispatchable (NGX-498)", () => {
+  it("has no remaining deferred executor that fails closed", () => {
+    // RC-4b flipped the last deferred executor (`subworkflow`); every member of
+    // the executor vocabulary now routes to a real dispatch.
+    for (const executor of WORKFLOW_EXECUTORS) {
+      expect(isPhase1DispatchableExecutor(executor)).toBe(true);
+      expect(planWorkflowStepDispatch(resolved(executor)).action).toBe(
         "dispatch",
       );
     }
@@ -87,16 +80,16 @@ describe("planWorkflowStepDispatch — every executor family is now dispatchable
   it("dispatches third-party executor names for registry resolution", () => {
     const plan = planWorkflowStepDispatch({
       ok: true,
-      executorFamily: "future-unlanded-family" as WorkflowExecutorFamily,
+      executor: "future-unlanded-executor",
     });
     expect(plan.action).toBe("dispatch");
     if (plan.action === "dispatch") {
-      expect(plan.executorFamily).toBe("future-unlanded-family");
+      expect(plan.executor).toBe("future-unlanded-executor");
     }
   });
 });
 
-describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
+describe("planWorkflowStepDispatch - resolution failures fail closed", () => {
   const cases: Array<{
     failure: (typeof WORKFLOW_STEP_RESOLUTION_FAILURES)[number];
     code: (typeof WORKFLOW_DISPATCH_FAIL_CLOSED_CODES)[number];
@@ -107,7 +100,7 @@ describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
       failure: "step_definition_not_found",
       code: "step_definition_not_found",
     },
-    { failure: "unknown_executor_family", code: "unknown_executor_family" },
+    { failure: "unknown_executor", code: "unknown_executor" },
   ];
 
   for (const { failure, code } of cases) {
@@ -125,7 +118,7 @@ describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
   it("threads a resolution detail into the fail-closed reason when present", () => {
     const plan = planWorkflowStepDispatch({
       ok: false,
-      failure: "unknown_executor_family",
+      failure: "unknown_executor",
       detail: "legacy-family",
     });
     expect(plan.action).toBe("fail_closed");
@@ -136,9 +129,9 @@ describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
 });
 
 describe("planWorkflowStepDispatch totality", () => {
-  it("never throws across every executor family and resolution failure", () => {
-    for (const family of WORKFLOW_EXECUTOR_FAMILIES) {
-      expect(() => planWorkflowStepDispatch(resolved(family))).not.toThrow();
+  it("never throws across every executor and resolution failure", () => {
+    for (const executor of WORKFLOW_EXECUTORS) {
+      expect(() => planWorkflowStepDispatch(resolved(executor))).not.toThrow();
     }
     for (const failure of WORKFLOW_STEP_RESOLUTION_FAILURES) {
       expect(() =>
@@ -148,7 +141,7 @@ describe("planWorkflowStepDispatch totality", () => {
   });
 
   it("returns one of the two discriminated actions for every input", () => {
-    const plan = planWorkflowStepDispatch(resolved("goal-loop"));
+    const plan = planWorkflowStepDispatch(resolved("agent-loop"));
     expect(["dispatch", "fail_closed"]).toContain(plan.action);
   });
 });

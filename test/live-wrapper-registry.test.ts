@@ -612,6 +612,22 @@ describe("parseLiveWrapperProfile", () => {
       "/usr/bin/postflight",
     );
   });
+
+  it("uses the canonical wrapper before validating a legacy alias", () => {
+    const result = parseLiveWrapperProfile({
+      name: "openclaw-live",
+      wrappers: {
+        validate: clone(validWrapper),
+        "no-mistakes": {},
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.wrappers.get("validate")?.command).toBe(
+      "/usr/bin/gnhf-runner",
+    );
+  });
 });
 
 describe("resolveLiveWrapper", () => {
@@ -629,6 +645,21 @@ describe("resolveLiveWrapper", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.kind).toBe("implementation");
+    expect(result.config.command).toBe("/usr/bin/gnhf-runner");
+  });
+
+  it("resolves a legacy step kind through its canonical wrapper", () => {
+    const parsed = parseLiveWrapperProfile({
+      name: "legacy-openclaw-live",
+      wrappers: { "no-mistakes": clone(validWrapper) },
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const result = resolveLiveWrapper(parsed.profile, "no-mistakes");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.kind).toBe("validate");
     expect(result.config.command).toBe("/usr/bin/gnhf-runner");
   });
 

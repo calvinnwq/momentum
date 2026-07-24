@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb } from "../src/adapters/db.js";
+import { openDb, openExistingDbMigratedReadOnly } from "../src/adapters/db.js";
 import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
 import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
 import { selectRunnableWorkflowWork } from "../src/core/workflow/dispatch/scheduler.js";
@@ -1650,9 +1650,9 @@ describe("applyQueueMigrations", () => {
       db.prepare(
         `INSERT INTO executor_attempts
            (attempt_id, workflow_run_id, step_run_id, step_key,
-            executor_family, state, attempt_number, created_at, updated_at)
+            executor, state, attempt_number, created_at, updated_at)
          VALUES ('inv-x', 'run-x', 'step-x', 'implementation',
-                 'goal-loop', 'pending', 1, 1, 1)`,
+                 'agent-loop', 'pending', 1, 1, 1)`,
       ).run();
     }
 
@@ -1674,7 +1674,7 @@ describe("applyQueueMigrations", () => {
           "workflow_run_id",
           "step_run_id",
           "step_key",
-          "executor_family",
+          "executor",
           "attempt_number",
           "round_index",
           "state",
@@ -1713,7 +1713,7 @@ describe("applyQueueMigrations", () => {
           "workflow_run_id",
           "step_run_id",
           "step_key",
-          "executor_family",
+          "executor",
           "state",
           "attempt_number",
           "started_at",
@@ -1733,7 +1733,7 @@ describe("applyQueueMigrations", () => {
         );
         for (const col of [
           "executor_key",
-          "family",
+          "executor",
           "agent_provider",
           "model",
           "effort",
@@ -1800,10 +1800,10 @@ describe("applyQueueMigrations", () => {
         const insertRound = db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-              executor_family, attempt_number, round_index, state,
+              executor, attempt_number, round_index, state,
               created_at, updated_at)
            VALUES (?, 'inv-x', 'run-x', 'step-x', 'implementation',
-                   'goal-loop', 1, ?, 'pending', 1, 1)`,
+                   'agent-loop', 1, ?, 'pending', 1, 1)`,
         );
         insertRound.run("round-a", 0);
         // the same round_index under one attempt collides
@@ -1824,10 +1824,10 @@ describe("applyQueueMigrations", () => {
         db.prepare(
           `INSERT INTO executor_rounds
              (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-              executor_family, attempt_number, round_index, state,
+              executor, attempt_number, round_index, state,
               created_at, updated_at)
            VALUES ('round-x', 'inv-x', 'run-x', 'step-x', 'implementation',
-                   'goal-loop', 1, 0, 'pending', 1, 1)`,
+                   'agent-loop', 1, 0, 'pending', 1, 1)`,
         ).run();
         const insertCheckpoint = db.prepare(
           `INSERT INTO executor_checkpoints
@@ -1852,9 +1852,9 @@ describe("applyQueueMigrations", () => {
             .prepare(
               `INSERT INTO executor_attempts
                  (attempt_id, workflow_run_id, step_run_id, step_key,
-                  executor_family, state, attempt_number, created_at, updated_at)
+                  executor, state, attempt_number, created_at, updated_at)
                VALUES ('inv-orphan', 'run-missing', 'step-missing',
-                       'implementation', 'goal-loop', 'pending', 1, 1, 1)`,
+                       'implementation', 'agent-loop', 'pending', 1, 1, 1)`,
             )
             .run(),
         ).toThrow(/FOREIGN KEY/i);
@@ -1874,10 +1874,10 @@ describe("applyQueueMigrations", () => {
             .prepare(
               `INSERT INTO executor_rounds
                  (round_id, attempt_id, workflow_run_id, step_run_id,
-                  step_key, executor_family, attempt_number, round_index, state,
+                  step_key, executor, attempt_number, round_index, state,
                   created_at, updated_at)
                VALUES ('round-orphan', 'inv-missing', 'run-x', 'step-x',
-                       'implementation', 'goal-loop', 1, 0, 'pending', 1, 1)`,
+                       'implementation', 'agent-loop', 1, 0, 'pending', 1, 1)`,
             )
             .run(),
         ).toThrow(/FOREIGN KEY/i);
@@ -2038,7 +2038,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
 
       const attempts = db
         .prepare(
-          `SELECT attempt_id, workflow_run_id, step_run_id, executor_family,
+          `SELECT attempt_id, workflow_run_id, step_run_id, executor,
                   state, attempt_number, started_at, heartbeat_at, finished_at,
                   legacy_invocation_id, legacy_provenance
              FROM executor_attempts
@@ -2047,6 +2047,17 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         )
         .all() as Array<Record<string, unknown>>;
       expect(attempts).toHaveLength(4);
+
+      // The legacy fixture lands directly on the renamed executor vocabulary:
+      // `one-shot` becomes `agent-once`, while the mirror attempt keeps its
+      // legacy `no-mistakes` identity (no durable mirror checkpoint proves the
+      // external tool, so it is not converted to delegate-supervisor).
+      expect(attempts.map((attempt) => attempt.executor)).toEqual([
+        "delegate-supervisor",
+        "delegate-supervisor",
+        "agent-once",
+        "no-mistakes",
+      ]);
 
       const [implFirst, implLatest, preflight, preflightMirror] = attempts as [
         Record<string, unknown>,
@@ -2118,6 +2129,44 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
       });
     } finally {
       db.close();
+    }
+  });
+
+  it("applies prerequisite migrations before opening an SDK-05 database read-only", () => {
+    const dataDir = seedLegacyDataDir();
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(tableNames(db!)).not.toContain("executor_invocations");
+      expect(
+        db!
+          .prepare(
+            `SELECT attempt_id, executor
+               FROM executor_attempts
+              WHERE workflow_run_id = 'run-1'
+              ORDER BY step_run_id, attempt_number`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          attempt_id: "run-1::implementation::dispatch::attempt-1",
+          executor: "delegate-supervisor",
+        },
+        {
+          attempt_id: "run-1::implementation::dispatch",
+          executor: "delegate-supervisor",
+        },
+        {
+          attempt_id: "run-1::preflight::dispatch",
+          executor: "agent-once",
+        },
+        {
+          attempt_id: "no-mistakes::run-1::preflight::mirror",
+          executor: "no-mistakes",
+        },
+      ]);
+    } finally {
+      db?.close();
     }
   });
 
@@ -2614,6 +2663,12 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
            SET round_index = 8
          WHERE round_id = 'run-1::implementation::dispatch::round-1';
         UPDATE executor_attempts
+           SET executor = 'goal-loop'
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_rounds
+           SET executor = 'goal-loop'
+         WHERE attempt_id = 'run-1::implementation::dispatch';
+        UPDATE executor_attempts
            SET state = 'manual_recovery_required', finished_at = 2600
          WHERE attempt_id = 'run-1::implementation::dispatch';
         UPDATE executor_rounds
@@ -2627,6 +2682,7 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         stepId: "implementation",
         now: 3000,
         stepState: "running",
+        executor: "agent-loop",
       });
       expect(started).toMatchObject({
         started: true,
@@ -2634,6 +2690,19 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         attemptNumber: 3,
         roundIndex: 9,
       });
+      if (!started.started) throw new Error("expected retry attempt to start");
+      expect(
+        db
+          .prepare(
+            "SELECT executor FROM executor_attempts WHERE attempt_id = ?",
+          )
+          .get(started.attemptId),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        db
+          .prepare("SELECT executor FROM executor_rounds WHERE attempt_id = ?")
+          .get(started.attemptId),
+      ).toEqual({ executor: "agent-loop" });
       const attempts = db
         .prepare(
           `SELECT attempt_id, state, attempt_number FROM executor_attempts
@@ -2852,12 +2921,12 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
          WHERE attempt_id = 'run-1::implementation::attempt-3';
         INSERT INTO executor_rounds
           (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-           executor_family, attempt_number, round_index, state, created_at,
+           executor, attempt_number, round_index, state, created_at,
            updated_at)
         VALUES
           ('run-1::implementation::attempt-4::round-6',
            'round-id-owner::implementation::dispatch', 'round-id-owner',
-           'implementation', 'implementation', 'one-shot', 1, 1,
+           'implementation', 'implementation', 'agent-once', 1, 1,
            'succeeded', 3100, 3100);
         CREATE TRIGGER reject_allocated_retry_round
         BEFORE INSERT ON executor_rounds
@@ -2970,6 +3039,1220 @@ describe("SDK-05 legacy executor-invocation to attempt/round migration", () => {
         { id: "r", needs_manual_recovery: 1 },
         { id: "r::s", needs_manual_recovery: 1 },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("NAM-02 workflow vocabulary migration (NGX-653)", () => {
+  // Post-SDK05, pre-rename schema: the attempt/round spine is already split,
+  // but the executor columns still carry the Family-era names and rows still
+  // use the pre-rename vocabulary.
+  const PRE_RENAME_SCHEMA_AND_ROWS = `
+CREATE TABLE workflow_runs (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'pending',
+  goal_id TEXT,
+  source TEXT NOT NULL,
+  source_artifact_path TEXT,
+  plan_json TEXT NOT NULL DEFAULT '{}',
+  route_json TEXT NOT NULL DEFAULT '{}',
+  approval_boundary TEXT,
+  batch_group TEXT,
+  batch_role TEXT,
+  needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+  manual_recovery_reason TEXT,
+  manual_recovery_at INTEGER,
+  started_at INTEGER,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE workflow_steps (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  step_order INTEGER NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  ledger_offset INTEGER,
+  result_digest TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  started_at INTEGER,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, step_id)
+) STRICT;
+
+CREATE TABLE workflow_approvals (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  boundary TEXT NOT NULL,
+  actor TEXT,
+  phrase TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  artifact_digest TEXT NOT NULL,
+  recorded_at INTEGER NOT NULL,
+  discharged_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, boundary)
+) STRICT;
+
+CREATE TABLE workflow_gates (
+  gate_id TEXT PRIMARY KEY,
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT,
+  attempt_id TEXT,
+  round_id TEXT,
+  target_scope TEXT NOT NULL,
+  gate_type TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  evidence TEXT,
+  allowed_actions TEXT NOT NULL DEFAULT '[]',
+  recommended_action TEXT,
+  policy_envelope TEXT NOT NULL DEFAULT '[]',
+  resolved_at INTEGER,
+  resolved_by TEXT,
+  resolution_mode TEXT,
+  chosen_action TEXT,
+  resolution TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE workflow_definitions (
+  key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (key, version)
+) STRICT;
+
+CREATE TABLE step_definitions (
+  definition_key TEXT NOT NULL,
+  definition_version INTEGER NOT NULL,
+  step_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  executor TEXT NOT NULL,
+  config_json TEXT,
+  step_order INTEGER NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (definition_key, definition_version, step_key),
+  FOREIGN KEY (definition_key, definition_version)
+    REFERENCES workflow_definitions(key, version)
+) STRICT;
+
+CREATE TABLE executor_definitions (
+  executor_key TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  agent_provider TEXT,
+  model TEXT,
+  effort TEXT,
+  timeout_ms INTEGER,
+  max_rounds INTEGER,
+  policy_envelope TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE executor_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  executor_family TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  attempt_number INTEGER NOT NULL DEFAULT 1,
+  started_at INTEGER,
+  heartbeat_at INTEGER,
+  finished_at INTEGER,
+  legacy_invocation_id TEXT,
+  legacy_provenance TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workflow_run_id, step_run_id)
+    REFERENCES workflow_steps(run_id, step_id)
+) STRICT;
+
+CREATE TABLE executor_rounds (
+  round_id TEXT PRIMARY KEY,
+  attempt_id TEXT NOT NULL REFERENCES executor_attempts(attempt_id),
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  executor_family TEXT NOT NULL,
+  attempt_number INTEGER NOT NULL DEFAULT 1,
+  round_index INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  classification TEXT,
+  executor_recommendation TEXT,
+  started_at INTEGER,
+  heartbeat_at INTEGER,
+  finished_at INTEGER,
+  agent_provider TEXT,
+  model TEXT,
+  effort TEXT,
+  input_digest TEXT,
+  result_digest TEXT,
+  artifact_root TEXT,
+  log_paths TEXT NOT NULL DEFAULT '[]',
+  summary TEXT,
+  key_changes TEXT NOT NULL DEFAULT '[]',
+  key_learnings TEXT NOT NULL DEFAULT '[]',
+  remaining_work TEXT NOT NULL DEFAULT '[]',
+  changed_files TEXT NOT NULL DEFAULT '[]',
+  verification_status TEXT,
+  verification_results TEXT NOT NULL DEFAULT '[]',
+  commit_sha TEXT,
+  recovery_code TEXT,
+  human_gate TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workflow_run_id, step_run_id)
+    REFERENCES workflow_steps(run_id, step_id)
+) STRICT;
+
+CREATE TABLE executor_checkpoints (
+  checkpoint_id TEXT PRIMARY KEY,
+  round_id TEXT NOT NULL REFERENCES executor_rounds(round_id),
+  sequence INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  detail TEXT,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO workflow_runs
+  (id, state, source, plan_json, route_json, approval_boundary,
+   created_at, updated_at)
+VALUES
+  ('vocab-run-1', 'running', 'momentum-native-coding-workflow', '{}',
+   '{"steps":{"no-mistakes":{"runner_profile":"careful"}}}', 'no-mistakes',
+   100, 900),
+  ('vocab-run-2', 'running', 'momentum-native-coding-workflow', '{}', '{}',
+   'through-no-mistakes', 100, 900);
+
+INSERT INTO workflow_steps
+  (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+VALUES
+  ('vocab-run-1', 'implementation', 'implementation', 'succeeded', 0, 1,
+   100, 200),
+  ('vocab-run-1', 'no-mistakes', 'no-mistakes', 'succeeded', 1, 1, 200, 300),
+  ('vocab-run-1', 'linear-refresh', 'linear-refresh', 'succeeded', 2, 1,
+   300, 400),
+  ('vocab-run-2', 'implementation', 'implementation', 'running', 0, 1,
+   100, 900);
+
+INSERT INTO workflow_approvals
+  (run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+   recorded_at, created_at, updated_at)
+VALUES
+  ('vocab-run-1', 'no-mistakes', 'operator', 'no-mistakes',
+   '.agent-workflows/vocab-run-1/approval-no-mistakes.json',
+   'sha256:approval', 150, 150, 150);
+
+INSERT INTO workflow_gates
+  (gate_id, workflow_run_id, step_run_id, target_scope, gate_type, reason,
+   evidence, allowed_actions, recommended_action, created_at, updated_at)
+VALUES
+  ('vocab-gate-1', 'vocab-run-1', 'no-mistakes', 'step',
+   'manual_recovery_required', 'no-mistakes step parked',
+   'external_state_blocked', '["clear_recovery"]', 'clear_recovery', 250, 250);
+
+INSERT INTO workflow_definitions (key, version, title, created_at, updated_at)
+VALUES ('coding-workflow', 2, 'Recorded V2', 1, 1);
+
+INSERT INTO step_definitions
+  (definition_key, definition_version, step_key, kind, executor, step_order,
+   required, created_at, updated_at)
+VALUES
+  ('coding-workflow', 2, 'implementation', 'implementation', 'goal-loop', 1,
+   1, 1, 1),
+  ('coding-workflow', 2, 'no-mistakes', 'no-mistakes', 'no-mistakes', 5,
+   1, 1, 1);
+
+INSERT INTO executor_definitions (executor_key, family, created_at, updated_at)
+VALUES ('custom-loop', 'goal-loop', 1, 1);
+
+INSERT INTO executor_attempts
+  (attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+   state, attempt_number, started_at, finished_at, legacy_provenance,
+   created_at, updated_at)
+VALUES
+  ('vocab-impl', 'vocab-run-1', 'implementation', 'implementation',
+   'goal-loop', 'succeeded', 1, 100, 200, NULL, 100, 200),
+  ('vocab-nm-provable', 'vocab-run-1', 'no-mistakes', 'no-mistakes',
+   'no-mistakes', 'succeeded', 1, 200, 300,
+   '{"source":"legacy_invocation_row","legacyExecutor":"recorded-value"}', 200, 300),
+  ('vocab-refresh', 'vocab-run-1', 'linear-refresh', 'linear-refresh',
+   'one-shot', 'succeeded', 1, 300, 400, NULL, 300, 400),
+  ('vocab-nm-unprovable', 'vocab-run-2', 'implementation', 'implementation',
+   'no-mistakes', 'failed', 1, 400, 500, NULL, 400, 500),
+  ('vocab-nm-live', 'vocab-run-2', 'implementation', 'implementation',
+   'no-mistakes', 'running', 2, 600, NULL, NULL, 600, 900);
+
+INSERT INTO executor_rounds
+  (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+   executor_family, attempt_number, round_index, state, created_at,
+   updated_at)
+VALUES
+  ('vocab-impl-r0', 'vocab-impl', 'vocab-run-1', 'implementation',
+   'implementation', 'goal-loop', 1, 0, 'succeeded', 100, 200),
+  ('vocab-nm-provable-r0', 'vocab-nm-provable', 'vocab-run-1', 'no-mistakes',
+   'no-mistakes', 'no-mistakes', 1, 0, 'succeeded', 200, 300),
+  ('vocab-refresh-r0', 'vocab-refresh', 'vocab-run-1', 'linear-refresh',
+   'linear-refresh', 'one-shot', 1, 0, 'succeeded', 300, 400),
+  ('vocab-nm-unprovable-r0', 'vocab-nm-unprovable', 'vocab-run-2',
+   'implementation', 'implementation', 'no-mistakes', 1, 0, 'failed',
+   400, 500),
+  ('vocab-nm-live-r0', 'vocab-nm-live', 'vocab-run-2', 'implementation',
+   'implementation', 'no-mistakes', 2, 0, 'running', 600, 900);
+
+INSERT INTO executor_checkpoints
+  (checkpoint_id, round_id, sequence, stage, detail, created_at)
+VALUES
+  ('vocab-cp-provable', 'vocab-nm-provable-r0', 0,
+   'expected_external_identity',
+   '{"externalRunId":"nm-run-77","branch":"feature/vocab","headSha":"abc123"}',
+   210),
+  ('vocab-cp-unprovable', 'vocab-nm-unprovable-r0', 0,
+   'expected_external_identity', '{"externalRunId":"nm-run-78"}', 410),
+  ('vocab-cp-live', 'vocab-nm-live-r0', 0, 'external_state_mirrored',
+   '{"externalRunId":"nm-run-79","branch":"feature/vocab","headSha":"fed321"}',
+   610);
+`;
+
+  function seedPreRenameDataDir(
+    options: {
+      claimOneShotDefinition?: boolean;
+      claimNoMistakesDefinition?: boolean;
+    } = {},
+  ): string {
+    const dataDir = makeTempDir("momentum-nam02-migration-");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      db.exec(PRE_RENAME_SCHEMA_AND_ROWS);
+      if (options.claimOneShotDefinition) {
+        // A third-party registration that claims the old built-in spelling as
+        // its own identity; the value rename must then leave `one-shot`
+        // untouched everywhere.
+        db.prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('one-shot', 'one-shot', 1, 1)`,
+        ).run();
+      }
+      if (options.claimNoMistakesDefinition) {
+        db.prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('no-mistakes', 'no-mistakes', 1, 1)`,
+        ).run();
+      }
+    } finally {
+      db.close();
+    }
+    return dataDir;
+  }
+
+  it("creates fresh data dirs with the renamed executor columns and no legacy vocabulary", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      for (const table of ["executor_attempts", "executor_rounds"]) {
+        const cols = getColumns(db, table).map((row) => row.name);
+        expect(cols, table).toContain("executor");
+        expect(cols, table).not.toContain("executor_family");
+      }
+      const definitionCols = getColumns(db, "executor_definitions").map(
+        (row) => row.name,
+      );
+      expect(definitionCols).toContain("executor");
+      expect(definitionCols).not.toContain("family");
+
+      const legacyValues = db
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM executor_attempts
+               WHERE executor IN ('goal-loop', 'one-shot')) +
+             (SELECT COUNT(*) FROM executor_rounds
+               WHERE executor IN ('goal-loop', 'one-shot')) +
+             (SELECT COUNT(*) FROM workflow_steps
+               WHERE kind IN ('no-mistakes', 'linear-refresh')) AS count`,
+        )
+        .get() as { count: number };
+      expect(legacyValues.count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("renames executor columns and upgrades runtime vocabulary on a pre-rename data dir", () => {
+    const dataDir = seedPreRenameDataDir();
+    const db = openDb(dataDir);
+    try {
+      for (const table of ["executor_attempts", "executor_rounds"]) {
+        const cols = getColumns(db, table).map((row) => row.name);
+        expect(cols, table).toContain("executor");
+        expect(cols, table).not.toContain("executor_family");
+      }
+      const definitionCols = getColumns(db, "executor_definitions").map(
+        (row) => row.name,
+      );
+      expect(definitionCols).toContain("executor");
+      expect(definitionCols).not.toContain("family");
+
+      // Step kinds move to the renamed vocabulary; step ids never change
+      // (event ids and artifact trees anchor on them).
+      expect(
+        db
+          .prepare(
+            `SELECT step_id, kind FROM workflow_steps
+              WHERE run_id = 'vocab-run-1' ORDER BY step_order`,
+          )
+          .all(),
+      ).toEqual([
+        { step_id: "implementation", kind: "implementation" },
+        { step_id: "no-mistakes", kind: "validate" },
+        { step_id: "linear-refresh", kind: "tracker-refresh" },
+      ]);
+
+      // Approval boundaries and route step overrides re-spell.
+      const runs = db
+        .prepare(
+          `SELECT id, approval_boundary, route_json
+             FROM workflow_runs ORDER BY id`,
+        )
+        .all() as Array<Record<string, unknown>>;
+      expect(runs[0]).toMatchObject({
+        id: "vocab-run-1",
+        approval_boundary: "validate",
+      });
+      expect(JSON.parse(String(runs[0]?.route_json))).toEqual({
+        steps: { validate: { runner_profile: "careful" } },
+      });
+      expect(runs[1]).toMatchObject({
+        id: "vocab-run-2",
+        approval_boundary: "through-validate",
+      });
+
+      // Executor values upgrade in attempts, rounds, and the definitions
+      // identity column. The provable terminal no-mistakes attempt converts;
+      // the rest of the no-mistakes rows keep their legacy identity.
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, executor FROM executor_attempts
+              ORDER BY attempt_id`,
+          )
+          .all(),
+      ).toEqual([
+        { attempt_id: "vocab-impl", executor: "agent-loop" },
+        { attempt_id: "vocab-nm-live", executor: "no-mistakes" },
+        { attempt_id: "vocab-nm-provable", executor: "delegate-supervisor" },
+        { attempt_id: "vocab-nm-unprovable", executor: "no-mistakes" },
+        { attempt_id: "vocab-refresh", executor: "agent-once" },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT round_id, executor FROM executor_rounds
+              ORDER BY round_id`,
+          )
+          .all(),
+      ).toEqual([
+        { round_id: "vocab-impl-r0", executor: "agent-loop" },
+        { round_id: "vocab-nm-live-r0", executor: "no-mistakes" },
+        { round_id: "vocab-nm-provable-r0", executor: "delegate-supervisor" },
+        { round_id: "vocab-nm-unprovable-r0", executor: "no-mistakes" },
+        { round_id: "vocab-refresh-r0", executor: "agent-once" },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_definitions
+              WHERE executor_key = 'custom-loop'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+
+      // Digest-anchored surfaces keep their recorded spellings: recorded
+      // step definitions, approvals, and gates never change.
+      expect(
+        db
+          .prepare(
+            `SELECT step_key, kind, executor FROM step_definitions
+              WHERE definition_key = 'coding-workflow'
+                AND definition_version = 2
+              ORDER BY step_order`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          step_key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+        },
+        {
+          step_key: "no-mistakes",
+          kind: "no-mistakes",
+          executor: "no-mistakes",
+        },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT boundary, phrase, artifact_digest FROM workflow_approvals
+              WHERE run_id = 'vocab-run-1'`,
+          )
+          .get(),
+      ).toEqual({
+        boundary: "no-mistakes",
+        phrase: "no-mistakes",
+        artifact_digest: "sha256:approval",
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT step_run_id, target_scope, reason, evidence
+               FROM workflow_gates WHERE gate_id = 'vocab-gate-1'`,
+          )
+          .get(),
+      ).toEqual({
+        step_run_id: "no-mistakes",
+        target_scope: "step",
+        reason: "no-mistakes step parked",
+        evidence: "external_state_blocked",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates a pre-rename database before returning a read-only handle", () => {
+    const dataDir = seedPreRenameDataDir();
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        getColumns(db!, "executor_attempts").map((row) => row.name),
+      ).toContain("executor");
+      expect(
+        db!
+          .prepare(
+            "SELECT executor FROM executor_attempts WHERE attempt_id = 'vocab-impl'",
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+    } finally {
+      db?.close();
+    }
+  });
+
+  it("preserves canonical executor values when mixed legacy columns are present", () => {
+    const dataDir = makeTempDir("momentum-nam02-mixed-executor-columns-");
+    const current = openDb(dataDir);
+    try {
+      current
+        .prepare(
+          `INSERT INTO workflow_runs
+             (id, state, source, plan_json, route_json, created_at, updated_at)
+           VALUES ('mixed-columns-run', 'running', 'test', '{}', '{}', 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO workflow_steps
+             (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES ('mixed-columns-run', 'implementation', 'implementation', 'running', 0, 1, 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, executor, created_at, updated_at)
+           VALUES ('mixed-definition', 'agent-loop', 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_attempts
+             (attempt_id, workflow_run_id, step_run_id, step_key, executor,
+              state, attempt_number, created_at, updated_at)
+           VALUES ('mixed-attempt', 'mixed-columns-run', 'implementation',
+                   'implementation', 'agent-loop', 'running', 1, 1, 1)`,
+        )
+        .run();
+      current
+        .prepare(
+          `INSERT INTO executor_rounds
+             (round_id, attempt_id, workflow_run_id, step_run_id, step_key,
+              executor, attempt_number, round_index, state, created_at, updated_at)
+           VALUES ('mixed-round', 'mixed-attempt', 'mixed-columns-run',
+                   'implementation', 'implementation', 'agent-loop', 1, 0,
+                   'running', 1, 1)`,
+        )
+        .run();
+    } finally {
+      current.close();
+    }
+
+    const mixed = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      mixed.exec(`
+        ALTER TABLE executor_attempts ADD COLUMN executor_family TEXT;
+        ALTER TABLE executor_rounds ADD COLUMN executor_family TEXT;
+        ALTER TABLE executor_definitions ADD COLUMN family TEXT;
+        UPDATE executor_attempts SET executor_family = 'goal-loop';
+        UPDATE executor_rounds SET executor_family = 'goal-loop';
+        UPDATE executor_definitions SET family = 'goal-loop';
+      `);
+    } finally {
+      mixed.close();
+    }
+
+    const upgraded = openDb(dataDir);
+    try {
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'mixed-attempt'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'mixed-round'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+      expect(
+        upgraded
+          .prepare(
+            `SELECT executor FROM executor_definitions
+              WHERE executor_key = 'mixed-definition'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("opens a partial SDK-05 database without a legacy rounds table", () => {
+    const dataDir = makeTempDir("momentum-sdk05-partial-rounds-");
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          state TEXT NOT NULL,
+          goal_id TEXT,
+          source TEXT NOT NULL,
+          plan_json TEXT NOT NULL DEFAULT '{}',
+          batch_group TEXT,
+          batch_role TEXT,
+          needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE workflow_steps (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          state TEXT NOT NULL,
+          step_order INTEGER NOT NULL,
+          required INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        ) STRICT;
+        CREATE TABLE executor_invocations (
+          invocation_id TEXT PRIMARY KEY,
+          workflow_run_id TEXT NOT NULL,
+          step_run_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          executor_family TEXT NOT NULL,
+          state TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        INSERT INTO workflow_runs
+          (id, state, source, plan_json, created_at, updated_at)
+        VALUES ('partial-sdk05-run', 'running', 'test', '{}', 1, 1);
+        INSERT INTO workflow_steps
+          (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+        VALUES ('partial-sdk05-run', 'implementation', 'implementation',
+                'running', 0, 1, 1, 1);
+        INSERT INTO executor_invocations
+          (invocation_id, workflow_run_id, step_run_id, step_key,
+           executor_family, state, attempt, created_at, updated_at)
+        VALUES ('partial-invocation', 'partial-sdk05-run', 'implementation',
+                'implementation', 'goal-loop', 'running', 1, 1, 1);
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(tableNames(db!)).toContain("executor_invocations");
+      expect(tableNames(db!)).toContain("executor_rounds");
+      expect(
+        db!
+          .prepare(
+            "SELECT id FROM workflow_runs WHERE id = 'partial-sdk05-run'",
+          )
+          .get(),
+      ).toEqual({ id: "partial-sdk05-run" });
+    } finally {
+      db?.close();
+    }
+  });
+
+  it("migrates workflow vocabulary in a partial read-only database", () => {
+    const dataDir = makeTempDir("momentum-nam02-partial-readonly-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          route_json TEXT NOT NULL DEFAULT '{}',
+          approval_boundary TEXT
+        ) STRICT;
+        CREATE TABLE workflow_steps (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        ) STRICT;
+        INSERT INTO workflow_runs (id, route_json, approval_boundary)
+        VALUES (
+          'partial-vocab-run',
+          '{"steps":{"no-mistakes":{"runner_profile":"careful"}}}',
+          'through-no-mistakes'
+        );
+        INSERT INTO workflow_steps (run_id, step_id, kind)
+        VALUES ('partial-vocab-run', 'no-mistakes', 'no-mistakes');
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        db!
+          .prepare(
+            `SELECT approval_boundary, route_json
+               FROM workflow_runs WHERE id = 'partial-vocab-run'`,
+          )
+          .get(),
+      ).toEqual({
+        approval_boundary: "through-validate",
+        route_json: '{"steps":{"validate":{"runner_profile":"careful"}}}',
+      });
+      expect(
+        db!
+          .prepare(
+            `SELECT step_id, kind
+               FROM workflow_steps WHERE run_id = 'partial-vocab-run'`,
+          )
+          .get(),
+      ).toEqual({ step_id: "no-mistakes", kind: "validate" });
+    } finally {
+      db?.close();
+    }
+  });
+
+  it("does not query missing executor_definitions during a read-only probe", () => {
+    const dataDir = makeTempDir("momentum-nam02-missing-executor-definitions-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE executor_attempts (
+          attempt_id TEXT,
+          executor TEXT,
+          state TEXT,
+          legacy_provenance TEXT
+        );
+        CREATE TABLE executor_rounds (
+          round_id TEXT,
+          attempt_id TEXT,
+          executor TEXT
+        );
+        CREATE TABLE executor_checkpoints (
+          round_id TEXT,
+          stage TEXT,
+          detail TEXT
+        );
+        INSERT INTO executor_attempts
+          (attempt_id, executor, state, legacy_provenance)
+        VALUES ('partial-attempt', 'no-mistakes', 'succeeded', NULL);
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    db?.close();
+  });
+
+  it("rekeys both retained route aliases with canonical-key precedence", () => {
+    const dataDir = makeTempDir("momentum-nam02-route-aliases-");
+    const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      writable.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          route_json TEXT NOT NULL DEFAULT '{}'
+        ) STRICT;
+        INSERT INTO workflow_runs (id, route_json) VALUES
+          (
+            'route-collision',
+            '{"steps":{"no-mistakes":{"model":"legacy","effort":"low"},"validate":{"model":"canonical"}}}'
+          ),
+          (
+            'route-linear-refresh',
+            '{"steps":{"linear-refresh":{"model":"tracker"}}}'
+          );
+      `);
+    } finally {
+      writable.close();
+    }
+
+    const db = openExistingDbMigratedReadOnly(dataDir);
+    expect(db).toBeDefined();
+    try {
+      expect(
+        db
+          ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
+          .get("route-collision"),
+      ).toEqual({
+        route_json:
+          '{"steps":{"validate":{"model":"canonical","effort":"low"}}}',
+      });
+      expect(
+        db
+          ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
+          .get("route-linear-refresh"),
+      ).toEqual({
+        route_json: '{"steps":{"tracker-refresh":{"model":"tracker"}}}',
+      });
+    } finally {
+      db?.close();
+    }
+  });
+
+  it("returns a read-only handle immediately when a legacy vocabulary writer holds the lock", () => {
+    const dataDir = makeTempDir("momentum-nam02-readonly-lock-");
+    const initial = openDb(dataDir);
+    initial
+      .prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, route_json, created_at, updated_at)
+         VALUES ('locked-legacy-run', 'running', 'test', '{}', '{}', 1, 1)`,
+      )
+      .run();
+    initial
+      .prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+         VALUES ('locked-legacy-run', 'no-mistakes', 'no-mistakes', 'running', 0, 1, 1, 1)`,
+      )
+      .run();
+    initial.close();
+
+    const writer = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    writer.exec("BEGIN IMMEDIATE");
+    try {
+      const startedAt = Date.now();
+      const db = openExistingDbMigratedReadOnly(dataDir);
+      expect(db).toBeDefined();
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      expect(
+        db
+          ?.prepare(
+            "SELECT kind FROM workflow_steps WHERE run_id = 'locked-legacy-run'",
+          )
+          .get(),
+      ).toEqual({ kind: "validate" });
+      db?.close();
+    } finally {
+      writer.exec("ROLLBACK");
+      writer.close();
+    }
+  });
+
+  it("does not take a write lock when opening a current database read-only", () => {
+    const dataDir = makeTempDir("momentum-nam02-current-readonly-lock-");
+    const writer = openDb(dataDir);
+    writer.exec("BEGIN IMMEDIATE");
+    let readOnly: ReturnType<typeof openExistingDbMigratedReadOnly>;
+    try {
+      readOnly = openExistingDbMigratedReadOnly(dataDir);
+      expect(readOnly).toBeDefined();
+      expect(
+        readOnly!
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .get(),
+      ).toBeDefined();
+    } finally {
+      readOnly?.close();
+      writer.exec("ROLLBACK");
+      writer.close();
+    }
+  });
+
+  it("does not convert a provable no-mistakes row when durable configuration claims that identity", () => {
+    const dataDir = seedPreRenameDataDir({
+      claimNoMistakesDefinition: true,
+    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor, legacy_provenance
+               FROM executor_attempts
+              WHERE attempt_id = 'vocab-nm-provable'`,
+          )
+          .get(),
+      ).toEqual({
+        executor: "no-mistakes",
+        legacy_provenance:
+          '{"source":"legacy_invocation_row","legacyExecutor":"recorded-value"}',
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-nm-provable-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "no-mistakes" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves legacy executor identities claimed only by daemon config", () => {
+    const dataDir = seedPreRenameDataDir();
+    const configPath = path.join(dataDir, "executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        executors: {
+          "goal-loop": "./goal-loop.mjs",
+          "one-shot": "./one-shot.mjs",
+          "no-mistakes": "./no-mistakes.mjs",
+        },
+      }),
+    );
+    const previousConfig = process.env.MOMENTUM_EXECUTOR_CONFIG;
+    process.env.MOMENTUM_EXECUTOR_CONFIG = configPath;
+    let db: DatabaseSync | undefined;
+    try {
+      db = openDb(dataDir);
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, executor FROM executor_attempts
+              WHERE attempt_id IN ('vocab-impl', 'vocab-refresh', 'vocab-nm-provable')
+              ORDER BY attempt_id`,
+          )
+          .all(),
+      ).toEqual([
+        { attempt_id: "vocab-impl", executor: "goal-loop" },
+        { attempt_id: "vocab-nm-provable", executor: "no-mistakes" },
+        { attempt_id: "vocab-refresh", executor: "one-shot" },
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT round_id, executor FROM executor_rounds
+              WHERE round_id IN ('vocab-impl-r0', 'vocab-refresh-r0', 'vocab-nm-provable-r0')
+              ORDER BY round_id`,
+          )
+          .all(),
+      ).toEqual([
+        { round_id: "vocab-impl-r0", executor: "goal-loop" },
+        { round_id: "vocab-nm-provable-r0", executor: "no-mistakes" },
+        { round_id: "vocab-refresh-r0", executor: "one-shot" },
+      ]);
+    } finally {
+      db?.close();
+      if (previousConfig === undefined) {
+        delete process.env.MOMENTUM_EXECUTOR_CONFIG;
+      } else {
+        process.env.MOMENTUM_EXECUTOR_CONFIG = previousConfig;
+      }
+    }
+  });
+
+  it.each(["missing", "malformed"])(
+    "preserves ambiguous legacy executor identities when config is %s",
+    (configState) => {
+      const dataDir = seedPreRenameDataDir();
+      const configPath = path.join(dataDir, "executors.json");
+      if (configState === "malformed") {
+        fs.writeFileSync(configPath, "{not-json");
+      }
+
+      const db = openDb(dataDir, {
+        env: { MOMENTUM_EXECUTOR_CONFIG: configPath },
+      });
+      try {
+        expect(
+          db
+            .prepare(
+              `SELECT attempt_id, executor FROM executor_attempts
+                WHERE attempt_id IN ('vocab-impl', 'vocab-refresh', 'vocab-nm-provable')
+                ORDER BY attempt_id`,
+            )
+            .all(),
+        ).toEqual([
+          { attempt_id: "vocab-impl", executor: "goal-loop" },
+          { attempt_id: "vocab-nm-provable", executor: "no-mistakes" },
+          { attempt_id: "vocab-refresh", executor: "one-shot" },
+        ]);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("preserves a legacy executor value when its canonical identity is claimed", () => {
+    const dataDir = seedPreRenameDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('agent-loop', 'agent-loop', 1, 1)`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'vocab-impl'`,
+          )
+          .get(),
+      ).toEqual({ executor: "goal-loop" });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-impl-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "goal-loop" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves no-mistakes when delegate-supervisor is claimed", () => {
+    const dataDir = seedPreRenameDataDir();
+    const legacy = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacy
+        .prepare(
+          `INSERT INTO executor_definitions
+             (executor_key, family, created_at, updated_at)
+           VALUES ('delegate-supervisor', 'delegate-supervisor', 1, 1)`,
+        )
+        .run();
+    } finally {
+      legacy.close();
+    }
+
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor, legacy_provenance FROM executor_attempts
+              WHERE attempt_id = 'vocab-nm-provable'`,
+          )
+          .get(),
+      ).toEqual({
+        executor: "no-mistakes",
+        legacy_provenance:
+          '{"source":"legacy_invocation_row","legacyExecutor":"recorded-value"}',
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-nm-provable-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "no-mistakes" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("converts only provably mirrored terminal no-mistakes attempts to delegate-supervisor", () => {
+    const dataDir = seedPreRenameDataDir();
+    const db = openDb(dataDir);
+    try {
+      const converted = db
+        .prepare(
+          `SELECT executor, legacy_provenance FROM executor_attempts
+            WHERE attempt_id = 'vocab-nm-provable'`,
+        )
+        .get() as Record<string, unknown>;
+      expect(converted.executor).toBe("delegate-supervisor");
+      // The conversion records its authoritative origin while preserving a
+      // conflicting recorded value under a migration-specific key.
+      expect(JSON.parse(String(converted.legacy_provenance))).toEqual({
+        source: "legacy_invocation_row",
+        legacyExecutor: "no-mistakes",
+        legacyExecutorBeforeNam02VocabularyMigration: "recorded-value",
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE attempt_id = 'vocab-nm-provable'`,
+          )
+          .get(),
+      ).toEqual({ executor: "delegate-supervisor" });
+
+      // A live attempt stays no-mistakes even with a provable mirror
+      // checkpoint; a terminal attempt whose checkpoint payload lacks the
+      // external run identity fields stays too, with provenance untouched.
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_id, executor, legacy_provenance
+               FROM executor_attempts
+              WHERE attempt_id IN ('vocab-nm-live', 'vocab-nm-unprovable')
+              ORDER BY attempt_id`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          attempt_id: "vocab-nm-live",
+          executor: "no-mistakes",
+          legacy_provenance: null,
+        },
+        {
+          attempt_id: "vocab-nm-unprovable",
+          executor: "no-mistakes",
+          legacy_provenance: null,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("changes zero rows when the migrated database is opened again", () => {
+    const dataDir = seedPreRenameDataDir();
+    const first = openDb(dataDir);
+    const snapshot = (db: DatabaseSync) => ({
+      runs: db.prepare("SELECT * FROM workflow_runs ORDER BY id").all(),
+      steps: db
+        .prepare("SELECT * FROM workflow_steps ORDER BY run_id, step_id")
+        .all(),
+      approvals: db
+        .prepare("SELECT * FROM workflow_approvals ORDER BY run_id, boundary")
+        .all(),
+      gates: db.prepare("SELECT * FROM workflow_gates ORDER BY gate_id").all(),
+      stepDefinitions: db
+        .prepare(
+          `SELECT * FROM step_definitions
+            ORDER BY definition_key, definition_version, step_key`,
+        )
+        .all(),
+      executorDefinitions: db
+        .prepare("SELECT * FROM executor_definitions ORDER BY executor_key")
+        .all(),
+      attempts: db
+        .prepare("SELECT * FROM executor_attempts ORDER BY attempt_id")
+        .all(),
+      rounds: db
+        .prepare("SELECT * FROM executor_rounds ORDER BY round_id")
+        .all(),
+      checkpoints: db
+        .prepare("SELECT * FROM executor_checkpoints ORDER BY checkpoint_id")
+        .all(),
+    });
+    const before = snapshot(first);
+    first.close();
+
+    const second = openDb(dataDir);
+    try {
+      expect(snapshot(second)).toEqual(before);
+    } finally {
+      second.close();
+    }
+  });
+
+  it("keeps a third-party one-shot identity untouched everywhere while goal-loop still renames", () => {
+    const dataDir = seedPreRenameDataDir({ claimOneShotDefinition: true });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'vocab-refresh'`,
+          )
+          .get(),
+      ).toEqual({ executor: "one-shot" });
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_rounds
+              WHERE round_id = 'vocab-refresh-r0'`,
+          )
+          .get(),
+      ).toEqual({ executor: "one-shot" });
+      expect(
+        db
+          .prepare(
+            `SELECT executor_key, executor FROM executor_definitions
+              ORDER BY executor_key`,
+          )
+          .all(),
+      ).toEqual([
+        { executor_key: "custom-loop", executor: "agent-loop" },
+        { executor_key: "one-shot", executor: "one-shot" },
+      ]);
+      // The unclaimed rename is unaffected by the guard.
+      expect(
+        db
+          .prepare(
+            `SELECT executor FROM executor_attempts
+              WHERE attempt_id = 'vocab-impl'`,
+          )
+          .get(),
+      ).toEqual({ executor: "agent-loop" });
     } finally {
       db.close();
     }

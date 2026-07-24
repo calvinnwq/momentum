@@ -6,15 +6,18 @@ import path from "node:path";
 
 import {
   finalizeWorkflowStep,
-  finalizeWorkflowStepFromResultFile
+  finalizeWorkflowStepFromResultFile,
 } from "../src/core/executors/shared/step-finalize.js";
-import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
+import type {
+  CommitIntent,
+  RunnerResult,
+} from "../src/core/executors/runner/types.js";
 
 // Git-heavy integration coverage for the shared verify -> commit / reset
 // finalization seam (`shared/step-finalize.ts`). These cases were originally
 // written against the M9 live-step lane's `*LiveWorkflowStep*` alias names; the
 // M9 lane and its `live-step/finalize.ts` alias were deleted under NGX-599, so
-// the same behavior is pinned directly against the neutral seam the goal-loop
+// the same behavior is pinned directly against the neutral seam the agent-loop
 // and single-shot families consume.
 
 const ZERO_SHA = "0".repeat(40);
@@ -38,7 +41,7 @@ function makeTempDir(prefix = "momentum-live-finalize-"): string {
 function runGit(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
@@ -73,7 +76,7 @@ function setupRepoWithStepEdits(): {
   fs.writeFileSync(
     path.join(repoPath, "step-edit.txt"),
     "from-live-step\n",
-    "utf-8"
+    "utf-8",
   );
   return { repoPath, baseHead, logPath: makeLogPath() };
 }
@@ -85,7 +88,7 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
     subject: "prove live workflow step finalize",
     body: "",
     breaking: false,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -98,7 +101,7 @@ function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
     remaining_work: [],
     goal_complete: false,
     commit: baseIntent(),
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -124,7 +127,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("committed");
@@ -133,7 +136,7 @@ describe("finalizeWorkflowStep", () => {
     expect(result.commit.commitSha).not.toBe(baseHead);
     expect(result.head).toBe(result.commit.commitSha);
     expect(result.commit.message).toBe(
-      "feat(live): prove live workflow step finalize"
+      "feat(live): prove live workflow step finalize",
     );
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
@@ -141,7 +144,7 @@ describe("finalizeWorkflowStep", () => {
 
     const log = fs.readFileSync(logPath, "utf-8");
     expect(log).toContain(
-      "[verify] summary: all 1 verification command(s) passed"
+      "[verify] summary: all 1 verification command(s) passed",
     );
   });
 
@@ -155,7 +158,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("committed");
@@ -171,7 +174,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_step_failure");
@@ -196,7 +199,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo ok", "false"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_verification_failure");
@@ -228,7 +231,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("manual_recovery_required");
@@ -259,7 +262,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: ["echo nothing-to-commit"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("commit_failed");
@@ -278,7 +281,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: "/tmp/verification.log"
+      verificationLogPath: "/tmp/verification.log",
     });
 
     expect(result.outcome).toBe("invalid_input");
@@ -297,7 +300,7 @@ describe("finalizeWorkflowStep", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("git_failed");
@@ -308,7 +311,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
   it("commits using the result file's commit intent when it reports success", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeRunnerResultFile({
-      commit: baseIntent({ type: "fix", scope: "wf", subject: "live wire-up" })
+      commit: baseIntent({ type: "fix", scope: "wf", subject: "live wire-up" }),
     });
 
     const result = finalizeWorkflowStepFromResultFile({
@@ -317,7 +320,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo verify-ok"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("committed");
@@ -340,7 +343,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("reset_step_failure");
@@ -366,7 +369,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("result_missing");
@@ -391,7 +394,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("result_invalid");
@@ -413,7 +416,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("result_invalid");
@@ -429,7 +432,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("result_invalid");
@@ -450,7 +453,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath: linkPath,
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: logPath
+      verificationLogPath: logPath,
     });
 
     expect(result.outcome).toBe("result_invalid");
@@ -471,7 +474,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath,
       verificationCommands: ["echo should-not-run"],
       verificationTimeoutSec: 30,
-      verificationLogPath: makeLogPath()
+      verificationLogPath: makeLogPath(),
     });
 
     expect(result.outcome).toBe("manual_recovery_required");
@@ -491,7 +494,7 @@ describe("finalizeWorkflowStepFromResultFile", () => {
       resultFilePath: "",
       verificationCommands: [],
       verificationTimeoutSec: 30,
-      verificationLogPath: "/tmp/verification.log"
+      verificationLogPath: "/tmp/verification.log",
     });
 
     expect(result.outcome).toBe("invalid_input");

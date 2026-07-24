@@ -5,7 +5,10 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { listEvidenceRecords } from "../src/core/evidence/records.js";
+import {
+  ingestEvidenceRecord,
+  listEvidenceRecords,
+} from "../src/core/evidence/records.js";
 import { listUpdateIntents } from "../src/core/intent/update-intents.js";
 
 type RunResult = {
@@ -40,15 +43,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
 
   return { code, stdout, stderr };
@@ -63,7 +66,7 @@ function writeLedger(filePath: string, lines: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(
     filePath,
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
   );
 }
 
@@ -78,27 +81,27 @@ function buildWorkflowFixture(rootDir: string, runId: string): string {
     resolvedScope: {
       issues: ["NGX-291"],
       source: "explicit",
-      status: "resolved"
-    }
+      status: "resolved",
+    },
   });
   writeLedger(path.join(runDir, "ledger.jsonl"), [
     {
       runId,
       step: "preflight",
       status: "complete",
-      ts: "2026-05-17T10:00:00Z"
+      ts: "2026-05-17T10:00:00Z",
     },
     {
       runId,
       step: "implementation",
       status: "started",
-      ts: "2026-05-17T10:01:00Z"
+      ts: "2026-05-17T10:01:00Z",
     },
     {
       runId,
       step: "implementation",
       status: "complete",
-      ts: "2026-05-17T10:30:00Z"
+      ts: "2026-05-17T10:30:00Z",
     },
     {
       runId,
@@ -110,8 +113,8 @@ function buildWorkflowFixture(rootDir: string, runId: string): string {
       branch: "gnhf/test-branch",
       linearIssue: "NGX-291",
       linearState: "Done",
-      verification: ["pnpm test", "pnpm typecheck"]
-    }
+      verification: ["pnpm test", "pnpm typecheck"],
+    },
   ]);
   return runDir;
 }
@@ -119,14 +122,14 @@ function buildWorkflowFixture(rootDir: string, runId: string): string {
 function seedGoal(
   dataDir: string,
   goalId: string,
-  state: string = "queued"
+  state: string = "queued",
 ): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
       `INSERT INTO goals
          (id, title, branch, artifact_dir, state, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(goalId, "evidence goal", "momentum/test", "/tmp/test", state, 1, 1);
   } finally {
     db.close();
@@ -136,7 +139,7 @@ function seedGoal(
 function seedSourceItem(
   dataDir: string,
   sourceItemId: string,
-  goalId: string | null = null
+  goalId: string | null = null,
 ): void {
   const db = openDb(dataDir);
   try {
@@ -145,7 +148,7 @@ function seedSourceItem(
          (id, adapter_kind, external_id, external_key, url, title,
           status, metadata_json, last_observed_at, goal_id,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       sourceItemId,
       "linear",
@@ -158,7 +161,7 @@ function seedSourceItem(
       1,
       goalId,
       1,
-      1
+      1,
     );
   } finally {
     db.close();
@@ -173,14 +176,14 @@ describe("momentum evidence ingest", () => {
       "ingest",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "evidence ingest",
-      code: "path_required"
+      code: "path_required",
     });
   });
 
@@ -200,11 +203,11 @@ describe("momentum evidence ingest", () => {
       "--path",
       "/tmp/x",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for evidence ingest: extra"
+      "Unexpected argument for evidence ingest: extra",
     );
   });
 
@@ -220,7 +223,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
 
@@ -249,7 +252,7 @@ describe("momentum evidence ingest", () => {
       "preflight_complete",
       "implementation_started",
       "implementation_complete",
-      "merge_complete"
+      "merge_complete",
     ]);
 
     const db = openDb(dataDir);
@@ -275,7 +278,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
 
@@ -290,11 +293,11 @@ describe("momentum evidence ingest", () => {
     const createdByType = new Map(payload.created.map((r) => [r.type, r]));
     expect(createdByType.get("plan_created")).toMatchObject({
       runId: "cwfp-typedlink001",
-      stepId: null
+      stepId: null,
     });
     expect(createdByType.get("implementation_complete")).toMatchObject({
       runId: "cwfp-typedlink001",
-      stepId: "implementation"
+      stepId: "implementation",
     });
 
     const db = openDb(dataDir);
@@ -308,8 +311,12 @@ describe("momentum evidence ingest", () => {
       expect(byType.get("plan_created")!.stepId).toBeNull();
       // Ledger step events carry the durable step id (the bare step name).
       expect(byType.get("preflight_complete")!.stepId).toBe("preflight");
-      expect(byType.get("implementation_started")!.stepId).toBe("implementation");
-      expect(byType.get("implementation_complete")!.stepId).toBe("implementation");
+      expect(byType.get("implementation_started")!.stepId).toBe(
+        "implementation",
+      );
+      expect(byType.get("implementation_complete")!.stepId).toBe(
+        "implementation",
+      );
       expect(byType.get("merge_complete")!.stepId).toBe("merge-cleanup");
     } finally {
       db.close();
@@ -328,7 +335,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
@@ -344,7 +351,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
@@ -362,6 +369,230 @@ describe("momentum evidence ingest", () => {
     }
   });
 
+  it("deduplicates mixed legacy and canonical approval boundary spellings", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runId = "cwfp-approval-alias-idem";
+    const runDir = path.join(workflowRoot, runId);
+    writeJsonFile(path.join(runDir, "approval-no-mistakes.json"), {
+      runId,
+      boundary: "no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z",
+    });
+    writeJsonFile(path.join(runDir, "approval-validate.json"), {
+      runId,
+      boundary: "validate",
+      approvedAt: "2026-05-17T09:01:00Z",
+    });
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      counts: { observed: 2, created: 1, skipped: 1 },
+    });
+
+    const db = openDb(dataDir);
+    try {
+      expect(listEvidenceRecords(db, {})).toMatchObject([
+        {
+          type: "step_approved",
+          ingestKey: `agent-workflow:${runId}:approval:validate`,
+          metadata: { boundary: "no-mistakes" },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    ["validate", "no-mistakes", "validate_complete"],
+    ["no-mistakes", "validate", "no_mistakes_complete"],
+  ])(
+    "reconciles a %s plan step with its %s ledger alias idempotently",
+    async (planStep, ledgerAlias, expectedType) => {
+      const dataDir = makeTempDir();
+      const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+      const runId = `cwfp-alias-${planStep}`;
+      const runDir = path.join(workflowRoot, runId);
+      writeJsonFile(path.join(runDir, "plan.json"), {
+        runId,
+        schemaVersion: 1,
+        objective: "Verify retained workflow evidence identity",
+        taskFlow: {
+          childTasks: [{ stepId: planStep }],
+        },
+      });
+      writeLedger(path.join(runDir, "ledger.jsonl"), [
+        {
+          runId,
+          step: ledgerAlias,
+          status: "complete",
+          ts: "2026-05-17T10:00:00Z",
+        },
+        {
+          runId,
+          step: planStep,
+          status: "complete",
+          ts: "2026-05-17T10:01:00Z",
+        },
+      ]);
+
+      const argv = [
+        "evidence",
+        "ingest",
+        "--path",
+        runDir,
+        "--data-dir",
+        dataDir,
+        "--json",
+      ];
+      const first = await run(argv);
+      expect(first.code).toBe(0);
+      const firstPayload = JSON.parse(first.stdout) as {
+        counts: { observed: number; created: number; skipped: number };
+      };
+      expect(firstPayload.counts).toMatchObject({
+        observed: 3,
+        created: 2,
+        skipped: 1,
+      });
+
+      const second = await run(argv);
+      expect(second.code).toBe(0);
+      const secondPayload = JSON.parse(second.stdout) as {
+        counts: { observed: number; created: number; skipped: number };
+      };
+      expect(secondPayload.counts).toMatchObject({
+        observed: 3,
+        created: 0,
+        skipped: 3,
+      });
+
+      const standaloneLedger = await run([
+        "evidence",
+        "ingest",
+        "--path",
+        path.join(runDir, "ledger.jsonl"),
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+      expect(standaloneLedger.code).toBe(0);
+      const standalonePayload = JSON.parse(standaloneLedger.stdout) as {
+        counts: { observed: number; created: number; skipped: number };
+      };
+      expect(standalonePayload.counts).toMatchObject({
+        observed: 2,
+        created: 0,
+        skipped: 2,
+      });
+
+      const db = openDb(dataDir);
+      try {
+        const records = listEvidenceRecords(db, {});
+        expect(records).toHaveLength(2);
+        expect(
+          records.find((record) => record.type === expectedType),
+        ).toMatchObject({
+          type: expectedType,
+          stepId: planStep,
+          ingestKey: `agent-workflow:${runId}:${planStep}:complete`,
+          metadata: {
+            step: ledgerAlias,
+            status: "complete",
+          },
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  it("does not duplicate evidence previously ingested under a ledger alias", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runId = "cwfp-preexisting-alias";
+    const runDir = path.join(workflowRoot, runId);
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      runId,
+      schemaVersion: 1,
+      objective: "Replay retained workflow evidence",
+      taskFlow: {
+        childTasks: [{ stepId: "validate" }],
+      },
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      ingestEvidenceRecord(db, {
+        source: "agent-workflow",
+        type: "no_mistakes_complete",
+        occurredAt: Date.parse("2026-05-17T10:00:00Z"),
+        summary: `No-mistakes complete (${runId})`,
+        metadata: {
+          step: "no-mistakes",
+          status: "complete",
+        },
+        runId,
+        stepId: "no-mistakes",
+        ingestKey: `agent-workflow:${runId}:no-mistakes:complete`,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { observed: number; created: number; skipped: number };
+    };
+    expect(payload.counts).toMatchObject({
+      observed: 2,
+      created: 1,
+      skipped: 1,
+    });
+
+    const replayedDb = openDb(dataDir);
+    try {
+      const records = listEvidenceRecords(replayedDb, {});
+      expect(records).toHaveLength(2);
+      expect(
+        records.filter(
+          (record) =>
+            record.type === "validate_complete" ||
+            record.type === "no_mistakes_complete",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      replayedDb.close();
+    }
+  });
+
   it("attaches existing unlinked records when an idempotent replay provides a goal", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
@@ -375,7 +606,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
 
@@ -388,7 +619,7 @@ describe("momentum evidence ingest", () => {
       "g-evidence-replay",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const payload = JSON.parse(second.stdout) as {
@@ -422,7 +653,7 @@ describe("momentum evidence ingest", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -434,7 +665,7 @@ describe("momentum evidence ingest", () => {
     expect(payload.counts.diagnostics).toBe(1);
     expect(payload.diagnostics[0]).toMatchObject({
       code: "evidence_format_unknown",
-      reason: "unrecognized_filename"
+      reason: "unrecognized_filename",
     });
   });
 
@@ -453,7 +684,7 @@ describe("momentum evidence ingest", () => {
       "g-evidence-1",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -489,7 +720,7 @@ describe("momentum evidence ingest", () => {
       "g-evidence-intent",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -504,14 +735,14 @@ describe("momentum evidence ingest", () => {
     expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
     expect(payload.intentEvaluations[0]?.intent).toMatchObject({
       status: "pending",
-      sourceItemId: "si-intent-goal"
+      sourceItemId: "si-intent-goal",
     });
 
     const db = openDb(dataDir);
     try {
       const intents = listUpdateIntents(db, {
         status: "pending",
-        goalId: "g-evidence-intent"
+        goalId: "g-evidence-intent",
       });
       expect(intents).toHaveLength(1);
       expect(intents[0]?.sourceItemId).toBe("si-intent-goal");
@@ -538,7 +769,7 @@ describe("momentum evidence ingest", () => {
       "g-evidence-multi",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -551,10 +782,12 @@ describe("momentum evidence ingest", () => {
     expect(payload.counts.intentsCreated).toBe(2);
     expect(payload.intentEvaluations.map((entry) => entry.outcome)).toEqual([
       "intent_created",
-      "intent_created"
+      "intent_created",
     ]);
     expect(
-      payload.intentEvaluations.map((entry) => entry.intent?.sourceItemId).sort()
+      payload.intentEvaluations
+        .map((entry) => entry.intent?.sourceItemId)
+        .sort(),
     ).toEqual(["si-intent-a", "si-intent-b"]);
   });
 
@@ -575,7 +808,7 @@ describe("momentum evidence ingest", () => {
       "si-covered",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -589,10 +822,10 @@ describe("momentum evidence ingest", () => {
     expect(payload.counts.intentWarnings).toBe(1);
     expect(payload.intentEvaluations.map((entry) => entry.outcome)).toEqual([
       "intent_created",
-      "evidence_insufficient"
+      "evidence_insufficient",
     ]);
     expect(payload.intentEvaluations[1]?.warning?.sourceItemId).toBe(
-      "si-uncovered"
+      "si-uncovered",
     );
   });
 
@@ -610,7 +843,7 @@ describe("momentum evidence ingest", () => {
       "missing-goal",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -618,7 +851,7 @@ describe("momentum evidence ingest", () => {
       ok: false,
       command: "evidence ingest",
       code: "goal_not_found",
-      goalId: "missing-goal"
+      goalId: "missing-goal",
     });
 
     const db = openDb(dataDir);
@@ -643,7 +876,7 @@ describe("momentum evidence ingest", () => {
       "missing-item",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -651,7 +884,7 @@ describe("momentum evidence ingest", () => {
       ok: false,
       command: "evidence ingest",
       code: "source_item_not_found",
-      sourceItemId: "missing-item"
+      sourceItemId: "missing-item",
     });
 
     const db = openDb(dataDir);
@@ -677,7 +910,7 @@ describe("momentum evidence ingest", () => {
       "si-1",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -712,7 +945,7 @@ describe("momentum evidence ingest", () => {
       "si-intent-source",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -725,14 +958,14 @@ describe("momentum evidence ingest", () => {
     expect(payload.counts.intentsCreated).toBe(1);
     expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
     expect(payload.intentEvaluations[0]?.verificationEvidence).toMatchObject({
-      sourceItemId: "si-intent-source"
+      sourceItemId: "si-intent-source",
     });
 
     const db = openDb(dataDir);
     try {
       const intents = listUpdateIntents(db, {
         status: "pending",
-        goalId: "g-source-intent"
+        goalId: "g-source-intent",
       });
       expect(intents).toHaveLength(1);
       expect(intents[0]?.sourceItemId).toBe("si-intent-source");
@@ -752,7 +985,7 @@ describe("momentum evidence ingest", () => {
       "--path",
       runDir,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(`Evidence ingest: ${runDir}`);
@@ -766,7 +999,7 @@ describe("momentum evidence ingest", () => {
     const dataDir = makeTempDir();
     const missingPath = path.join(
       makeTempDir("momentum-cli-evidence-missing-"),
-      "does-not-exist"
+      "does-not-exist",
     );
 
     const result = await run([
@@ -776,7 +1009,7 @@ describe("momentum evidence ingest", () => {
       missingPath,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -787,7 +1020,7 @@ describe("momentum evidence ingest", () => {
     expect(payload.counts.diagnostics).toBe(1);
     expect(payload.diagnostics[0]).toMatchObject({
       code: "evidence_format_invalid",
-      reason: "path_not_readable"
+      reason: "path_not_readable",
     });
   });
 });

@@ -102,7 +102,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 2,
+      definitionVersion: 3,
       repoPath: repoDir,
       objective: "Dogfood the explicit door",
     });
@@ -121,7 +121,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         state: "pending",
         source: "momentum-native-coding",
         workflow_definition_key: "coding-workflow",
-        workflow_definition_version: 2,
+        workflow_definition_version: 3,
       });
       const steps = db
         .prepare(
@@ -132,9 +132,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
+        "validate",
         "merge-cleanup",
-        "linear-refresh",
+        "tracker-refresh",
       ]);
     } finally {
       db.close();
@@ -194,7 +194,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
 
     expect(result.code).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
-      definitionVersion: 2,
+      definitionVersion: 3,
       implementationEngine: "native-goal-loop",
       route: { implementationEngine: "native-goal-loop" },
     });
@@ -235,14 +235,14 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 1,
           required: false,
         },
@@ -271,7 +271,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       ok: true,
       command: "workflow run start-coding",
       definitionKey: "coding-workflow",
-      definitionVersion: 2,
+      definitionVersion: 3,
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(6);
 
@@ -290,9 +290,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         { step_id: "preflight", required: 1 },
         { step_id: "implementation", required: 1 },
         { step_id: "postflight", required: 1 },
-        { step_id: "no-mistakes", required: 1 },
+        { step_id: "validate", required: 1 },
         { step_id: "merge-cleanup", required: 1 },
-        { step_id: "linear-refresh", required: 1 },
+        { step_id: "tracker-refresh", required: 1 },
       ]);
     } finally {
       verifyDb.close();
@@ -310,14 +310,14 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 1,
           required: false,
         },
@@ -730,7 +730,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
         repoDir,
         runId: "ngx-563-invalid-approval-before-db",
         objective: "Reject invalid approval boundary",
-        extra: ["--approval-boundary", "through-linear-refresh"],
+        extra: ["--approval-boundary", "through-tracker-refresh"],
       }),
     );
 
@@ -966,7 +966,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         extra: [
           "--steps-json",
           JSON.stringify({
-            "no-mistakes": { effort: "high" },
+            validate: { effort: "high" },
             implementation: { model: "  claude-opus-4-8  ", harness: "gnhf" },
           }),
         ],
@@ -984,11 +984,11 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         implementationEngine: "gnhf",
         steps: {
           implementation: { harness: "gnhf", model: "claude-opus-4-8" },
-          "no-mistakes": { effort: "high" },
+          validate: { effort: "high" },
         },
       });
       expect(runRow.route_json).toContain(
-        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"no-mistakes":{"effort":"high"}}',
+        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"validate":{"effort":"high"}}',
       );
     } finally {
       db.close();
@@ -1064,7 +1064,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
               harness: "opencode",
               model: "gpt-5.5",
             },
-            "no-mistakes": {
+            validate: {
               harness: "codex",
               model: "openai/gpt-5.5",
               effort: "high",
@@ -1092,7 +1092,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
             harness: "opencode",
             model: "openai/gpt-5.5",
           },
-          "no-mistakes": {
+          validate: {
             harness: "codex",
             model: "gpt-5.5",
             effort: "high",

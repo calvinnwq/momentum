@@ -41,7 +41,7 @@ Environment:
 Each invocation wraps `workflow run watch <run-id> --once --json`. The underlying
 watch tick may safely dispatch at most one approved non-tail Momentum-native
 coding step, or recheck one active running step that the scheduler can revisit.
-Approved `merge-cleanup` and `linear-refresh` tail steps are returned as
+Approved `merge-cleanup` and `tracker-refresh` tail steps are returned as
 operator decisions instead of being started by the supervisor poller. OpenClaw then
 classifies the returned watch envelope into a smaller operator event type:
 `progress`, `approval`, `recovery`, `stuck-risk`, `terminal`, or `null`.

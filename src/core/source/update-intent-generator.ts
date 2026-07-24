@@ -14,6 +14,7 @@ import {
  * do not flip a Goal to "satisfied" prematurely.
  */
 export const DEFAULT_VERIFICATION_EVIDENCE_TYPES: readonly string[] = [
+  "validate_complete",
   "no_mistakes_complete",
   "verification_passed",
   "merge_complete",

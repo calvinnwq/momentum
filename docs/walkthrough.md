@@ -38,7 +38,7 @@ node dist/index.js workflow run start \
   --data-dir "$DATA" --json
 ```
 
-`workflow run start` resolves the built-in `coding-workflow` definition, loads repo policy, and durably persists one `workflow_runs` row plus six ordered `workflow_steps` rows (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
+`workflow run start` resolves the built-in `coding-workflow` definition, loads repo policy, and durably persists one `workflow_runs` row plus six ordered `workflow_steps` rows (`preflight`, `implementation`, `postflight`, `validate`, `merge-cleanup`, `tracker-refresh`).
 The success envelope reports `"state": "pending"`, `"definitionKey": "coding-workflow"`, and `"counts": {"steps": 6}`.
 
 ## Run one bounded daemon cycle
@@ -53,7 +53,7 @@ node dist/index.js daemon status --data-dir "$DATA" --json
 ```
 
 With no approved steps yet, the bounded loop exits cleanly with `loop.exitReason: "max_idle_cycles"`, `loop.lastWorkflowCode: "idle"`, and `loop.workflowStepsDispatched: 0`, and `daemon status` then reports the terminal `stopped` daemon run.
-Dispatching real work additionally requires an approval (below) and, for profile-backed step kinds including native `goal-loop`, `one-shot`, and `script`, a configured `MOMENTUM_LIVE_WRAPPER_PROFILE`; see [Daemon commands](daemon.md).
+Dispatching real work additionally requires an approval (below) and, for profile-backed executors including native `agent-loop`, `agent-once`, and `script`, a configured `MOMENTUM_LIVE_WRAPPER_PROFILE`; see [Daemon commands](daemon.md).
 
 ## Inspect the run
 

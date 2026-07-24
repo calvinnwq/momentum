@@ -197,7 +197,7 @@ function definition(
     version: 1,
     steps: stepKeys.map((key, order) => ({
       key,
-      kind: tool === "gnhf" ? "implementation" : "no-mistakes",
+      kind: tool === "gnhf" ? "implementation" : "validate",
       executor: "delegate-supervisor",
       config: { tool },
       order,
@@ -266,11 +266,11 @@ function insertRetryAttemptRow(
   ).run(runId);
   db.prepare(
     `INSERT INTO executor_attempts
-       (attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+       (attempt_id, workflow_run_id, step_run_id, step_key, executor,
         state, attempt_number, started_at, heartbeat_at, finished_at,
         created_at, updated_at)
      SELECT workflow_run_id || '::' || step_run_id || '::attempt-' || ?,
-            workflow_run_id, step_run_id, step_key, executor_family,
+            workflow_run_id, step_run_id, step_key, executor,
             'running', ?, started_at, heartbeat_at, NULL,
             created_at, updated_at
        FROM executor_attempts

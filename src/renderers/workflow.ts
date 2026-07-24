@@ -132,7 +132,7 @@ export function emitWorkflowRunStartFailure(
  * `workflow run start-coding` would durably persist - run id, repo, objective,
  * issue scope, route/profile, implementation engine, and per-step route
  * selections, approval boundary, definition key/version, and the ordered steps
- * each with its executor family and on-start state - but carries an explicit
+ * each with its executor and on-start state - but carries an explicit
  * `preview: true` marker and writes nothing. It contains no wall-clock fields,
  * so repeated previews of the same inputs are byte-stable and safe to show
  * before approval.
@@ -334,7 +334,7 @@ export function emitWorkflowStatusList(
     ok: true,
     command: "workflow status",
     dataDir,
-    schemaVersion: 2,
+    schemaVersion: 3,
     state: parsed.state ?? null,
     filter: parsed.filter ?? null,
     count: summaries.length,
@@ -380,7 +380,7 @@ export function emitWorkflowStatusDetail(
     ok: true,
     command: "workflow status",
     dataDir,
-    schemaVersion: 2,
+    schemaVersion: 3,
     run: workflowRunToJsonShape(detail.run),
     steps: detail.steps.map(workflowStepToJsonShape),
     approvals: detail.approvals.map(workflowApprovalToJsonShape),
@@ -1119,11 +1119,11 @@ function workflowWatchApprovalBoundaryForStepKind(
       return "through-implementation";
     case "postflight":
       return "through-postflight";
-    case "no-mistakes":
-      return "through-no-mistakes";
+    case "validate":
+      return "through-validate";
     case "merge-cleanup":
       return "through-merge-cleanup";
-    case "linear-refresh":
+    case "tracker-refresh":
       return "full";
     default:
       return null;
@@ -1225,7 +1225,7 @@ function workflowOperatorActionClassForMonitor(
     monitor.recovery?.code === "failed_external_side_effect_step" ||
     (monitor.nextAction.code === "clear_recovery" &&
       (monitor.activeStep?.kind === "merge-cleanup" ||
-        monitor.activeStep?.kind === "linear-refresh"))
+        monitor.activeStep?.kind === "tracker-refresh"))
   ) {
     return "reconcile_external_tail";
   }
@@ -1236,7 +1236,7 @@ function workflowOperatorActionClassForMonitor(
     return "clear_recovery";
   }
   if (
-    monitor.activeStep?.kind === "no-mistakes" &&
+    monitor.activeStep?.kind === "validate" &&
     monitor.nextAction.code === "rerun_failed_step"
   ) {
     return "retry_failed_step";
@@ -1274,6 +1274,8 @@ function workflowMonitorHasExternalTailAdvance(
   return (
     monitor.nextAction.code === "advance_to_step" &&
     (monitor.nextAction.stepId === "merge-cleanup" ||
+      monitor.nextAction.stepId === "tracker-refresh" ||
+      // Step ids on runs recorded before the tracker-refresh rename are frozen.
       monitor.nextAction.stepId === "linear-refresh")
   );
 }
@@ -1316,7 +1318,7 @@ function isInterruptedNoMistakesRecovery(
   options: WorkflowOperatorActionClassContext,
 ): boolean {
   if (
-    monitor.activeStep?.kind !== "no-mistakes" ||
+    monitor.activeStep?.kind !== "validate" ||
     (monitor.nextAction.code !== "rerun_failed_step" &&
       monitor.nextAction.code !== "clear_recovery")
   ) {
@@ -1536,7 +1538,7 @@ export function workflowRoundToJsonShape(
     attemptId: round.attemptId,
     stepRunId: round.stepRunId,
     stepKey: round.stepKey,
-    executorFamily: round.executorFamily,
+    executor: round.executor,
     attemptNumber: round.attemptNumber,
     roundIndex: round.roundIndex,
     state: round.state,
@@ -1578,7 +1580,10 @@ function workflowNativeRoundEvidence(
   round: WorkflowRunLogRound,
 ): Record<string, unknown> {
   return {
-    schema: "momentum.native-goal-loop.round-result.v1",
+    schema:
+      round.executor === "goal-loop"
+        ? "momentum.native-goal-loop.round-result.v1"
+        : "momentum.native-agent-loop.round-result.v1",
     summary: round.summary,
     keyChanges: round.keyChanges,
     learnings: round.keyLearnings,
@@ -1613,7 +1618,10 @@ function workflowShouldEmitNativeRoundEvidence(
   round: WorkflowRunLogRound,
 ): boolean {
   return (
-    round.executorFamily === "goal-loop" &&
+    // Replayed frozen artifacts may still surface the legacy `goal-loop`
+    // spelling. Only an unclaimed identity belongs to the built-in executor.
+    !round.executorIdentityClaimed &&
+    (round.executor === "agent-loop" || round.executor === "goal-loop") &&
     (round.classification !== null || round.executorRecommendation != null)
   );
 }
@@ -1641,7 +1649,7 @@ export function workflowAttemptToJsonShape(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     state: attempt.state,
     attemptNumber: attempt.attemptNumber,
     startedAt: attempt.startedAt,
@@ -1688,7 +1696,7 @@ export function renderWorkflowRunLogsText(
     lines.push(
       `- ${attempt.attemptId} [${attempt.stepKey}/${attempt.state}]` +
         ` attempt=${attempt.attemptNumber}` +
-        ` executor=${attempt.executorFamily}`,
+        ` executor=${attempt.executor}`,
     );
   }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);

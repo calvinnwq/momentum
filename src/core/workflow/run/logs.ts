@@ -19,6 +19,7 @@ import {
   listExecutorFindingsForRound,
   listExecutorAttemptsForRun,
   listExecutorRoundsForRun,
+  hasExecutorDefinition,
 } from "../../executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -39,13 +40,16 @@ import {
  * an `attempt` counter) with immutable `attempts` (`attemptId` /
  * `attemptNumber`), and re-keyed rounds by `attemptId` / `attemptNumber`.
  */
-export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 2;
+export const WORKFLOW_RUN_LOGS_SCHEMA_VERSION = 3;
 
 export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
+  claimedExecutorNames?: ReadonlySet<string>;
+  executorClaimsKnown?: boolean;
 };
 
 export type WorkflowRunLogRound = ExecutorRoundRecord & {
+  executorIdentityClaimed: boolean;
   artifacts: ExecutorArtifactRecord[];
   checkpoints: ExecutorCheckpointRecord[];
   findings: ExecutorFindingRecord[];
@@ -71,6 +75,10 @@ export function loadWorkflowRunLogs(
   const attempts = listExecutorAttemptsForRun(db, runId);
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
+    executorIdentityClaimed:
+      options.executorClaimsKnown === false ||
+      hasExecutorDefinition(db, round.executor) ||
+      options.claimedExecutorNames?.has(round.executor) === true,
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
     checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
     findings: listExecutorFindingsForRound(db, round.roundId),

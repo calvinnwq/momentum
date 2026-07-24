@@ -4,9 +4,9 @@ import type { UpdateIntent } from "../../intent/update-intents.js";
 import type { SourceItem } from "../../source/items.js";
 import type { UpdateIntentApplyPolicy } from "../../intent/policy.js";
 
-export type LinearRefreshLifecyclePhase = "preflight" | "apply" | "reconcile";
+export type TrackerRefreshLifecyclePhase = "preflight" | "apply" | "reconcile";
 
-export type LinearRefreshLifecycleStatus =
+export type TrackerRefreshLifecycleStatus =
   | "auth_missing"
   | "policy_denied"
   | "issue_scope_missing"
@@ -18,17 +18,17 @@ export type LinearRefreshLifecycleStatus =
   | "already_applied"
   | "ready";
 
-export type LinearRefreshLifecycleAction =
+export type TrackerRefreshLifecycleAction =
   | "fix_setup_config_then_retry"
   | "seed_pending_intent_then_retry"
   | "resolve_intent_evidence"
   | "reconcile_already_applied"
   | "apply_external_update";
 
-export type LinearRefreshLifecyclePlan = {
-  phase: LinearRefreshLifecyclePhase;
-  status: LinearRefreshLifecycleStatus;
-  action: LinearRefreshLifecycleAction;
+export type TrackerRefreshLifecyclePlan = {
+  phase: TrackerRefreshLifecyclePhase;
+  status: TrackerRefreshLifecycleStatus;
+  action: TrackerRefreshLifecycleAction;
   safeToMutate: boolean;
   message: string;
   evidence: {
@@ -42,7 +42,7 @@ export type LinearRefreshLifecyclePlan = {
   };
 };
 
-export type LinearRefreshLifecycleInput = {
+export type TrackerRefreshLifecycleInput = {
   env: Record<string, string | undefined>;
   intentApplyPolicy: UpdateIntentApplyPolicy;
   issueScopeIdentifier?: string | null;
@@ -53,8 +53,8 @@ export type LinearRefreshLifecycleInput = {
   expectedOperatorReason: string | null;
 };
 
-export type LinearRefreshAlreadyAppliedReconciliationInput = Pick<
-  LinearRefreshLifecycleInput,
+export type TrackerRefreshAlreadyAppliedReconciliationInput = Pick<
+  TrackerRefreshLifecycleInput,
   | "issueScopeIdentifier"
   | "pendingIntents"
   | "appliedIntents"
@@ -63,9 +63,9 @@ export type LinearRefreshAlreadyAppliedReconciliationInput = Pick<
   | "expectedOperatorReason"
 >;
 
-export function planLinearRefreshLifecycle(
-  input: LinearRefreshLifecycleInput
-): LinearRefreshLifecyclePlan {
+export function planTrackerRefreshLifecycle(
+  input: TrackerRefreshLifecycleInput,
+): TrackerRefreshLifecyclePlan {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
   if (issueScopeIdentifier === null) {
     return plan(
@@ -73,14 +73,18 @@ export function planLinearRefreshLifecycle(
       "issue_scope_missing",
       "resolve_intent_evidence",
       false,
-      evidence(null, null, null, null)
+      evidence(null, null, null, null),
     );
   }
 
-  const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
+  const currentAppliedPlan = planCurrentAppliedEvidence(
+    input,
+    issueScopeIdentifier,
+  );
   if (currentAppliedPlan !== null) return currentAppliedPlan;
 
-  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
+  const pendingStatusIntents =
+    input.pendingIntents.filter(isStatusUpdateIntent);
 
   if (input.intentApplyPolicy !== "external_apply_allowed") {
     return plan(
@@ -88,7 +92,7 @@ export function planLinearRefreshLifecycle(
       "policy_denied",
       "fix_setup_config_then_retry",
       false,
-      evidence(issueScopeIdentifier, null, null, null)
+      evidence(issueScopeIdentifier, null, null, null),
     );
   }
   if (!hasLinearAuth(input.env)) {
@@ -97,7 +101,7 @@ export function planLinearRefreshLifecycle(
       "auth_missing",
       "fix_setup_config_then_retry",
       false,
-      evidence(issueScopeIdentifier, null, null, null)
+      evidence(issueScopeIdentifier, null, null, null),
     );
   }
   if (pendingStatusIntents.length > 1) {
@@ -106,7 +110,12 @@ export function planLinearRefreshLifecycle(
       "intent_duplicate",
       "resolve_intent_evidence",
       false,
-      evidence(issueScopeIdentifier, pendingStatusIntents[0] ?? null, null, null)
+      evidence(
+        issueScopeIdentifier,
+        pendingStatusIntents[0] ?? null,
+        null,
+        null,
+      ),
     );
   }
   if (pendingStatusIntents.length === 0) {
@@ -122,7 +131,7 @@ export function planLinearRefreshLifecycle(
       validation.status,
       validation.action,
       false,
-      evidence(issueScopeIdentifier, intent, source, null)
+      evidence(issueScopeIdentifier, intent, source, null),
     );
   }
 
@@ -131,13 +140,13 @@ export function planLinearRefreshLifecycle(
     "ready",
     "apply_external_update",
     true,
-    evidence(issueScopeIdentifier, intent, source, idempotencyMarker(intent))
+    evidence(issueScopeIdentifier, intent, source, idempotencyMarker(intent)),
   );
 }
 
-export function planLinearRefreshAlreadyAppliedReconciliation(
-  input: LinearRefreshAlreadyAppliedReconciliationInput
-): LinearRefreshLifecyclePlan | null {
+export function planTrackerRefreshAlreadyAppliedReconciliation(
+  input: TrackerRefreshAlreadyAppliedReconciliationInput,
+): TrackerRefreshLifecyclePlan | null {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
   if (issueScopeIdentifier === null) return null;
 
@@ -145,10 +154,13 @@ export function planLinearRefreshAlreadyAppliedReconciliation(
 }
 
 function planAlreadyAppliedOrMissing(
-  input: LinearRefreshLifecycleInput,
-  issueScopeIdentifier: string
-): LinearRefreshLifecyclePlan {
-  const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
+  input: TrackerRefreshLifecycleInput,
+  issueScopeIdentifier: string,
+): TrackerRefreshLifecyclePlan {
+  const currentAppliedPlan = planCurrentAppliedEvidence(
+    input,
+    issueScopeIdentifier,
+  );
   if (currentAppliedPlan !== null) return currentAppliedPlan;
 
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
@@ -157,14 +169,18 @@ function planAlreadyAppliedOrMissing(
     const source = sourceForIntent(input.sourceItemsById, intent);
     const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
     const marker = idempotencyMarker(intent);
-    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
+    const validation = validateAppliedIntent(
+      intent,
+      source,
+      issueScopeIdentifier,
+    );
     if (!validation.ok) {
       return plan(
         "preflight",
         validation.status,
         validation.action,
         false,
-        evidence(issueScopeIdentifier, intent, source, marker, audit)
+        evidence(issueScopeIdentifier, intent, source, marker, audit),
       );
     }
     return plan(
@@ -172,7 +188,7 @@ function planAlreadyAppliedOrMissing(
       "intent_stale",
       "resolve_intent_evidence",
       false,
-      evidence(issueScopeIdentifier, intent, source, marker, audit)
+      evidence(issueScopeIdentifier, intent, source, marker, audit),
     );
   }
   if (applied.length > 1) {
@@ -186,8 +202,8 @@ function planAlreadyAppliedOrMissing(
         issueScopeIdentifier,
         intent,
         sourceForIntent(input.sourceItemsById, intent),
-        null
-      )
+        null,
+      ),
     );
   }
   return plan(
@@ -195,20 +211,24 @@ function planAlreadyAppliedOrMissing(
     "intent_missing",
     "seed_pending_intent_then_retry",
     false,
-    evidence(issueScopeIdentifier, null, null, null)
+    evidence(issueScopeIdentifier, null, null, null),
   );
 }
 
 function planCurrentAppliedEvidence(
-  input: LinearRefreshAlreadyAppliedReconciliationInput,
-  issueScopeIdentifier: string
-): LinearRefreshLifecyclePlan | null {
+  input: TrackerRefreshAlreadyAppliedReconciliationInput,
+  issueScopeIdentifier: string,
+): TrackerRefreshLifecyclePlan | null {
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
   const currentApplied = applied.flatMap((intent) => {
     const source = sourceForIntent(input.sourceItemsById, intent);
     const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
     const marker = idempotencyMarker(intent);
-    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
+    const validation = validateAppliedIntent(
+      intent,
+      source,
+      issueScopeIdentifier,
+    );
     if (
       validation.ok &&
       auditMatchesCurrentRun(audit, marker, input.expectedOperatorReason)
@@ -230,8 +250,8 @@ function planCurrentAppliedEvidence(
         appliedIntent.intent,
         appliedIntent.source,
         appliedIntent.marker,
-        appliedIntent.audit
-      )
+        appliedIntent.audit,
+      ),
     );
   }
   if (currentApplied.length > 1) {
@@ -246,8 +266,8 @@ function planCurrentAppliedEvidence(
         appliedIntent.intent,
         appliedIntent.source,
         appliedIntent.marker,
-        appliedIntent.audit
-      )
+        appliedIntent.audit,
+      ),
     );
   }
   return null;
@@ -256,19 +276,19 @@ function planCurrentAppliedEvidence(
 function validateIntent(
   intent: UpdateIntent,
   source: SourceItem | null,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ):
   | { ok: true }
   | {
       ok: false;
       status: "source_missing" | "intent_stale" | "payload_invalid";
-      action: LinearRefreshLifecycleAction;
+      action: TrackerRefreshLifecycleAction;
     } {
   if (source === null || source.adapterKind !== "linear") {
     return {
       ok: false,
       status: "source_missing",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   if (
@@ -280,14 +300,14 @@ function validateIntent(
     return {
       ok: false,
       status: "intent_stale",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   if (!statusUpdatePayloadValid(intent.payload)) {
     return {
       ok: false,
       status: "payload_invalid",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   return { ok: true };
@@ -296,19 +316,19 @@ function validateIntent(
 function validateAppliedIntent(
   intent: UpdateIntent,
   source: SourceItem | null,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ):
   | { ok: true }
   | {
       ok: false;
       status: "source_missing" | "intent_stale" | "payload_invalid";
-      action: LinearRefreshLifecycleAction;
+      action: TrackerRefreshLifecycleAction;
     } {
   if (source === null || source.adapterKind !== "linear") {
     return {
       ok: false,
       status: "source_missing",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   if (
@@ -320,14 +340,14 @@ function validateAppliedIntent(
     return {
       ok: false,
       status: "intent_stale",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   if (!statusUpdatePayloadValid(intent.payload)) {
     return {
       ok: false,
       status: "payload_invalid",
-      action: "resolve_intent_evidence"
+      action: "resolve_intent_evidence",
     };
   }
   return { ok: true };
@@ -339,7 +359,7 @@ function isStatusUpdateIntent(intent: UpdateIntent): boolean {
 
 function sourceMatchesIssueScope(
   source: SourceItem,
-  issueScopeIdentifier: string
+  issueScopeIdentifier: string,
 ): boolean {
   return (
     source.externalId === issueScopeIdentifier ||
@@ -349,10 +369,11 @@ function sourceMatchesIssueScope(
 
 function intentTargetMatchesSource(
   intent: UpdateIntent,
-  source: SourceItem
+  source: SourceItem,
 ): boolean {
   return (
-    intent.targetExternalId === null || intent.targetExternalId === source.externalId
+    intent.targetExternalId === null ||
+    intent.targetExternalId === source.externalId
   );
 }
 
@@ -364,7 +385,7 @@ function statusUpdatePayloadValid(payload: Record<string, unknown>): boolean {
 
 function sourceForIntent(
   sourceItemsById: ReadonlyMap<string, SourceItem>,
-  intent: UpdateIntent
+  intent: UpdateIntent,
 ): SourceItem | null {
   if (intent.sourceItemId === null) return null;
   return sourceItemsById.get(intent.sourceItemId) ?? null;
@@ -374,14 +395,14 @@ function idempotencyMarker(intent: UpdateIntent): string {
   return buildIdempotencyMarker({
     adapterKind: intent.adapterKind,
     intentId: intent.id,
-    payload: intent.payload
+    payload: intent.payload,
   });
 }
 
 function auditMatchesCurrentRun(
   audit: IntentApplyAudit | null,
   marker: string,
-  expectedOperatorReason: string | null
+  expectedOperatorReason: string | null,
 ): audit is IntentApplyAudit {
   return (
     audit !== null &&
@@ -393,7 +414,10 @@ function auditMatchesCurrentRun(
 }
 
 function hasLinearAuth(env: Record<string, string | undefined>): boolean {
-  return typeof env["LINEAR_API_KEY"] === "string" && env["LINEAR_API_KEY"]!.trim().length > 0;
+  return (
+    typeof env["LINEAR_API_KEY"] === "string" &&
+    env["LINEAR_API_KEY"]!.trim().length > 0
+  );
 }
 
 function evidence(
@@ -401,8 +425,8 @@ function evidence(
   intent: UpdateIntent | null,
   source: SourceItem | null,
   marker: string | null,
-  audit: IntentApplyAudit | null = null
-): LinearRefreshLifecyclePlan["evidence"] {
+  audit: IntentApplyAudit | null = null,
+): TrackerRefreshLifecyclePlan["evidence"] {
   return {
     issueScopeIdentifier,
     intentId: intent?.id ?? null,
@@ -410,24 +434,24 @@ function evidence(
     targetExternalId: intent?.targetExternalId ?? source?.externalId ?? null,
     idempotencyKey: intent?.idempotencyKey ?? null,
     idempotencyMarker: marker,
-    auditId: audit?.id ?? null
+    auditId: audit?.id ?? null,
   };
 }
 
 function plan(
-  phase: LinearRefreshLifecyclePhase,
-  status: LinearRefreshLifecycleStatus,
-  action: LinearRefreshLifecycleAction,
+  phase: TrackerRefreshLifecyclePhase,
+  status: TrackerRefreshLifecycleStatus,
+  action: TrackerRefreshLifecycleAction,
   safeToMutate: boolean,
-  evidenceValue: LinearRefreshLifecyclePlan["evidence"]
-): LinearRefreshLifecyclePlan {
+  evidenceValue: TrackerRefreshLifecyclePlan["evidence"],
+): TrackerRefreshLifecyclePlan {
   return {
     phase,
     status,
     action,
     safeToMutate,
-    message: `linear-refresh ${phase} classified ${status}; action=${action}`,
-    evidence: evidenceValue
+    message: `tracker-refresh ${phase} classified ${status}; action=${action}`,
+    evidence: evidenceValue,
   };
 }
 

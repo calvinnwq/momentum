@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -86,6 +87,58 @@ async function run(
     env,
   });
   return { code, stdout, stderr };
+}
+
+async function holdWriterLock(dbPath: string): Promise<() => Promise<void>> {
+  const readyPath = `${dbPath}.writer-ready`;
+  const releasePath = `${dbPath}.writer-release`;
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec("BEGIN IMMEDIATE");
+fs.writeFileSync(process.argv[2], "ready");
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[3])) return;
+  db.exec("ROLLBACK");
+  db.close();
+  clearInterval(timer);
+}, 5);`,
+      dbPath,
+      readyPath,
+      releasePath,
+    ],
+    { stdio: "ignore" },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 5);
+    child.once("error", (error) => {
+      clearInterval(poll);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (fs.existsSync(readyPath)) return;
+      clearInterval(poll);
+      reject(new Error(`writer lock process exited before locking: ${code}`));
+    });
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    fs.writeFileSync(releasePath, "release");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  };
 }
 
 const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
@@ -226,7 +279,51 @@ function seedLease(
 }
 
 describe("momentum workflow run watch", () => {
-  it("returns a one-shot JSON supervisor envelope for a running native workflow", async () => {
+  it("returns a migrated watch envelope from a snapshot while another process holds a writer lock", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-locked-legacy";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "running",
+        order: 0,
+      });
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run([
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        command: "workflow run watch",
+        runId,
+        emit: true,
+        activeStep: { stepId: "no-mistakes", state: "running" },
+      });
+    } finally {
+      await releaseWriter();
+    }
+  });
+
+  it("returns a agent-once JSON supervisor envelope for a running native workflow", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-watch-running";
     const db = openDb(dataDir);
@@ -636,7 +733,7 @@ describe("momentum workflow run watch", () => {
   it("refuses to start delegate-supervisor steps without a live-wrapper profile", async () => {
     for (const target of [
       { stepId: "implementation", order: 1 },
-      { stepId: "no-mistakes", order: 3 },
+      { stepId: "validate", order: 3 },
     ]) {
       const dataDir = makeTempDir();
       const runId = `mwf-watch-${target.stepId}-profile-required`;
@@ -845,9 +942,9 @@ describe("momentum workflow run watch", () => {
         { stepId: "preflight", state: "succeeded" },
         { stepId: "implementation", state: "succeeded" },
         { stepId: "postflight", state: "succeeded" },
-        { stepId: "no-mistakes", state: "succeeded" },
+        { stepId: "validate", state: "succeeded" },
         { stepId: "merge-cleanup", state: "approved" },
-        { stepId: "linear-refresh", state: "pending" },
+        { stepId: "tracker-refresh", state: "pending" },
       ]);
       const leaseCount = after
         .prepare(
@@ -866,7 +963,7 @@ describe("momentum workflow run watch", () => {
     }
   });
 
-  it("does not expose an approved linear-refresh tail step as pollable", async () => {
+  it("does not expose an approved tracker-refresh tail step as pollable", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-watch-tail-linear-class";
     const db = openDb(dataDir);
@@ -875,7 +972,7 @@ describe("momentum workflow run watch", () => {
         definition: CODING_WORKFLOW_DEFINITION,
         runId,
         repoPath: "/repos/momentum",
-        objective: "Exercise watch linear-refresh action class",
+        objective: "Exercise watch tracker-refresh action class",
         now: SEED_NOW,
         source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
         approvalBoundary: "full",
@@ -884,7 +981,7 @@ describe("momentum workflow run watch", () => {
         "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5",
       ).run(runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'",
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'tracker-refresh'",
       ).run(runId);
     } finally {
       db.close();
@@ -919,7 +1016,7 @@ describe("momentum workflow run watch", () => {
       nextAction: {
         actionClass: "operator_decision",
         code: "advance_to_step",
-        stepId: "linear-refresh",
+        stepId: "tracker-refresh",
       },
       recommendedAction: "operator_decision",
       recommendedActionPolicy: {
@@ -1460,8 +1557,8 @@ describe("momentum workflow run watch", () => {
       policyAction: "merge_cleanup",
     },
     {
-      stepId: "linear-refresh",
-      kind: "linear-refresh",
+      stepId: "tracker-refresh",
+      kind: "tracker-refresh",
       policyAction: "linear_refresh",
     },
   ])(

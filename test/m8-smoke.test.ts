@@ -63,9 +63,9 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
       "approve",
       runId,
       "--approval-boundary",
-      "no-mistakes",
+      "validate",
       "--phrase",
-      "approve no-mistakes",
+      "approve validate",
       "--actor",
       "smoke-operator",
       "--data-dir",
@@ -80,7 +80,7 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
       ok: true,
       command: "workflow run approve",
       runId,
-      boundary: "no-mistakes",
+      boundary: "validate",
     });
 
     // Both the imported and operator-added approvals compose into status.
@@ -89,7 +89,7 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
       statusAfterApprove["approvals"] as Array<Record<string, unknown>>
     ).map((approval) => approval["boundary"]);
     expect(approvalBoundaries).toContain("through-merge-cleanup");
-    expect(approvalBoundaries).toContain("no-mistakes");
+    expect(approvalBoundaries).toContain("validate");
 
     // Drive every step through the fake executor to terminal success,
     // re-importing between iterations. The operator approval survives the
@@ -138,7 +138,7 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
         Record<string, unknown>
       >
     ).map((approval) => approval["boundary"]);
-    expect(finalApprovalBoundaries).toContain("no-mistakes");
+    expect(finalApprovalBoundaries).toContain("validate");
 
     // workflow run monitor: a stable terminal report, no recovery, and no
     // evidence pointers before ingest.
@@ -146,7 +146,7 @@ describe("Milestone 8 operator-control end-to-end smoke (NGX-330)", () => {
     expect(monitor).toMatchObject({
       ok: true,
       command: "workflow run monitor",
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       runState: "succeeded",
       terminal: true,

@@ -1,7 +1,5 @@
 import type { WorkflowMonitorEnvelope } from "./envelope.js";
-import type {
-  WorkflowMonitorProgressTick
-} from "./progress.js";
+import type { WorkflowMonitorProgressTick } from "./progress.js";
 import type { WorkflowStepKind } from "../run/reducer.js";
 
 export const WORKFLOW_WATCH_REASONS = [
@@ -13,19 +11,19 @@ export const WORKFLOW_WATCH_REASONS = [
   "in_progress",
   "idle",
   "quiet_heartbeat",
-  "stuck_risk"
+  "stuck_risk",
 ] as const;
 export type WorkflowWatchReason = (typeof WORKFLOW_WATCH_REASONS)[number];
 
 export const WORKFLOW_WATCH_DEFAULT_QUIET_THRESHOLDS_SECONDS = {
   implementation: 15 * 60,
   postflight: 10 * 60,
-  "no-mistakes": 15 * 60,
+  validate: 15 * 60,
   "merge-cleanup": 5 * 60,
-  "linear-refresh": 5 * 60,
+  "tracker-refresh": 5 * 60,
   approval: 30 * 60,
   recovery: 60 * 60,
-  idle: 15 * 60
+  idle: 15 * 60,
 } as const;
 
 export type WorkflowWatchQuietThresholdsSeconds =
@@ -51,7 +49,7 @@ export type DeriveWorkflowWatchAdvisoryOptions = {
 export function deriveWorkflowWatchAdvisory(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  options: DeriveWorkflowWatchAdvisoryOptions
+  options: DeriveWorkflowWatchAdvisoryOptions,
 ): WorkflowWatchAdvisory {
   const now = options.now ?? envelope.generatedAt;
   const thresholds =
@@ -59,7 +57,7 @@ export function deriveWorkflowWatchAdvisory(
   const quietThresholdSeconds = selectQuietThresholdSeconds(
     envelope,
     progress,
-    thresholds
+    thresholds,
   );
   const quietForSeconds = progress.emit
     ? 0
@@ -74,7 +72,7 @@ export function deriveWorkflowWatchAdvisory(
       quietThresholdSeconds,
       stuckRisk: baseStuckRisk,
       activeStepId: progress.currentStep,
-      inspectionCommand: null
+      inspectionCommand: null,
     };
   }
 
@@ -88,7 +86,7 @@ export function deriveWorkflowWatchAdvisory(
       quietThresholdSeconds,
       stuckRisk: baseStuckRisk,
       activeStepId: progress.currentStep,
-      inspectionCommand: null
+      inspectionCommand: null,
     };
   }
 
@@ -100,7 +98,10 @@ export function deriveWorkflowWatchAdvisory(
       quietThresholdSeconds,
       stuckRisk: raiseStuckRisk(baseStuckRisk),
       activeStepId: progress.currentStep,
-      inspectionCommand: buildInspectionCommand(envelope.runId, options.dataDir)
+      inspectionCommand: buildInspectionCommand(
+        envelope.runId,
+        options.dataDir,
+      ),
     };
   }
 
@@ -111,14 +112,14 @@ export function deriveWorkflowWatchAdvisory(
     quietThresholdSeconds,
     stuckRisk: baseStuckRisk,
     activeStepId: progress.currentStep,
-    inspectionCommand: null
+    inspectionCommand: null,
   };
 }
 
 function selectQuietThresholdSeconds(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  thresholds: WorkflowWatchQuietThresholdsSeconds
+  thresholds: WorkflowWatchQuietThresholdsSeconds,
 ): number {
   if (progress.cleanup === "release") return 0;
   if (progress.phase === "blocked" || hasHardRecovery(envelope)) {
@@ -141,7 +142,7 @@ function secondsSince(then: number | null, now: number): number {
 
 function isActiveExecution(
   envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
 ): boolean {
   return (
     progress.phase === "advancing" &&
@@ -152,7 +153,7 @@ function isActiveExecution(
 
 function classifyBaseStuckRisk(
   envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
 ): WorkflowWatchAdvisory["stuckRisk"] {
   if (
     envelope.recovery?.code === "monitor_drift_stale" &&
@@ -176,7 +177,7 @@ function hasHardRecovery(envelope: WorkflowMonitorEnvelope): boolean {
 }
 
 function raiseStuckRisk(
-  stuckRisk: WorkflowWatchAdvisory["stuckRisk"]
+  stuckRisk: WorkflowWatchAdvisory["stuckRisk"],
 ): WorkflowWatchAdvisory["stuckRisk"] {
   return stuckRisk === "low" ? "medium" : stuckRisk;
 }
@@ -189,19 +190,21 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function isThresholdStepKind(kind: WorkflowStepKind): kind is Extract<
+function isThresholdStepKind(
+  kind: WorkflowStepKind,
+): kind is Extract<
   WorkflowStepKind,
   | "implementation"
   | "postflight"
-  | "no-mistakes"
+  | "validate"
   | "merge-cleanup"
-  | "linear-refresh"
+  | "tracker-refresh"
 > {
   return (
     kind === "implementation" ||
     kind === "postflight" ||
-    kind === "no-mistakes" ||
+    kind === "validate" ||
     kind === "merge-cleanup" ||
-    kind === "linear-refresh"
+    kind === "tracker-refresh"
   );
 }

@@ -788,6 +788,69 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
+  it("releases a stale roundless attempt owned by a configured raw legacy executor", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-configured-goal-loop";
+      const stepId = "preflight";
+      seedRun(db, { runId, state: "running", repoPath: "/repos/a" });
+      seedStep(db, {
+        runId,
+        stepId,
+        kind: "preflight",
+        state: "running",
+        order: 0,
+      });
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId: deriveDispatchAttemptId(runId, stepId, 1),
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executor: "goal-loop",
+          state: "running",
+          attemptNumber: 1,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 60_000,
+        heartbeatAt: NOW - 60_000,
+        expiresAt: NOW,
+      });
+
+      const result = recoverStaleWorkflowLeases(db, {
+        now: NOW + 1,
+        claimedExecutorNames: new Set(["goal-loop"]),
+      });
+
+      expect(result.recovered).toEqual([
+        {
+          runId,
+          leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+          holder: "daemon-old",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+        },
+      ]);
+      expect(result.skipped).toEqual([]);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBe(NOW + 1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("releases a stale auto-release lease so the run becomes runnable again", () => {
     const db = openDb(makeTempDir());
     try {
@@ -1695,7 +1758,7 @@ function seedCheckpointedDelegateHandoff(
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
-      executorFamily: "delegate-supervisor",
+      executor: "delegate-supervisor",
       state: "running",
       attemptNumber: 1,
       startedAt: NOW,
@@ -1716,7 +1779,7 @@ function seedCheckpointedDelegateHandoff(
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
-    executorFamily: "delegate-supervisor",
+    executor: "delegate-supervisor",
     attemptNumber: 1,
     roundIndex: 0,
     state: "capturing_result",
@@ -1781,7 +1844,7 @@ function seedDelegateBeforeCurrentAttemptRound(
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
-      executorFamily: "delegate-supervisor",
+      executor: "delegate-supervisor",
       state: "running",
       attemptNumber: 1,
       startedAt: NOW,
@@ -1803,7 +1866,7 @@ function seedDelegateBeforeCurrentAttemptRound(
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
-    executorFamily: "delegate-supervisor",
+    executor: "delegate-supervisor",
     attemptNumber: 1,
     roundIndex: 0,
     state: "running",
@@ -1841,7 +1904,7 @@ function seedDelegateBeforeCurrentAttemptRound(
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
-      executorFamily: "delegate-supervisor",
+      executor: "delegate-supervisor",
       state: "running",
       attemptNumber: 2,
       startedAt: NOW,
@@ -1873,7 +1936,7 @@ function seedRegisteredSdkContinuation(
       workflowRunId: runId,
       stepRunId: stepId,
       stepKey: stepId,
-      executorFamily: "fixture-executor",
+      executor: "fixture-executor",
       state: "running",
       attemptNumber: 1,
       startedAt: NOW,
@@ -1894,7 +1957,7 @@ function seedRegisteredSdkContinuation(
     workflowRunId: runId,
     stepRunId: stepId,
     stepKey: stepId,
-    executorFamily: "fixture-executor",
+    executor: "fixture-executor",
     attemptNumber: 1,
     roundIndex: 0,
     state: "running",
@@ -1934,6 +1997,78 @@ function seedRegisteredSdkContinuation(
       },
     },
   );
+  return { attemptId, roundId };
+}
+
+function seedUnclassifiedMechanismContinuation(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  executor: string,
+) {
+  seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+  seedStep(db, {
+    runId,
+    stepId,
+    kind: "implementation",
+    state: "running",
+    order: 0,
+  });
+  const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+  insertExecutorAttempt(
+    db,
+    {
+      attemptId,
+      workflowRunId: runId,
+      stepRunId: stepId,
+      stepKey: stepId,
+      executor,
+      state: "running",
+      attemptNumber: 1,
+      startedAt: NOW,
+      heartbeatAt: NOW,
+      finishedAt: null,
+    },
+    { now: NOW },
+  );
+  const envelope = createDurableExecutorEnvelope({
+    db,
+    attemptId,
+    now: () => NOW,
+  });
+  const roundId = `${attemptId}::round-1`;
+  envelope.facade.startRound({
+    roundId,
+    attemptId,
+    workflowRunId: runId,
+    stepRunId: stepId,
+    stepKey: stepId,
+    executor,
+    attemptNumber: 1,
+    roundIndex: 0,
+    state: "running",
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: null,
+    resultDigest: null,
+    artifactRoot: null,
+    logPaths: [],
+    summary: "unclassified mechanism continuation",
+    keyChanges: [],
+    keyLearnings: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+  });
+  envelope.facade.recordCheckpoint(roundId, {
+    checkpointId: `${roundId}-mechanism-completed`,
+    sequence: 0,
+    stage: "mechanism_completed",
+    detail: JSON.stringify({ recommendation: "continue" }),
+  });
+  updateExecutorRound(db, roundId, { toState: "capturing_result" });
   return { attemptId, roundId };
 }
 
@@ -2502,7 +2637,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
             workflowRunId: runId,
             stepRunId: stepId,
             stepKey: stepId,
-            executorFamily: "delegate-supervisor",
+            executor: "delegate-supervisor",
             state: "running",
             attemptNumber: 1,
             startedAt: NOW,
@@ -2523,7 +2658,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
-          executorFamily: "delegate-supervisor",
+          executor: "delegate-supervisor",
           attemptNumber: 1,
           roundIndex: 0,
           state: "running",
@@ -2578,7 +2713,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
             workflowRunId: runId,
             stepRunId: stepId,
             stepKey: stepId,
-            executorFamily: "delegate-supervisor",
+            executor: "delegate-supervisor",
             state: "running",
             attemptNumber: 2,
             startedAt: NOW,
@@ -2599,7 +2734,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
-          executorFamily: "delegate-supervisor",
+          executor: "delegate-supervisor",
           attemptNumber: 2,
           roundIndex: 1,
           state: "capturing_result",
@@ -2686,7 +2821,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
           workflowRunId: runId,
           stepRunId: stepId,
           stepKey: stepId,
-          executorFamily: "delegate-supervisor",
+          executor: "delegate-supervisor",
           state: "running",
           attemptNumber: 2,
           startedAt: NOW,
@@ -2706,7 +2841,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         attemptNumber: 2,
         roundIndex: 1,
         state: "capturing_result",
@@ -2786,6 +2921,168 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("does not resume a custom goal-loop through the native continuation lane", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-custom-goal-loop-continuation";
+      const stepId = "implementation";
+      seedRun(db, { runId, state: "running", repoPath: "/repos/fixture" });
+      seedStep(db, {
+        runId,
+        stepId,
+        kind: "implementation",
+        state: "running",
+        order: 0,
+      });
+      const attemptId = deriveDispatchAttemptId(runId, stepId, 1);
+      insertExecutorAttempt(
+        db,
+        {
+          attemptId,
+          workflowRunId: runId,
+          stepRunId: stepId,
+          stepKey: stepId,
+          executor: "goal-loop",
+          state: "running",
+          attemptNumber: 1,
+          startedAt: NOW,
+          heartbeatAt: NOW,
+          finishedAt: null,
+        },
+        { now: NOW },
+      );
+      const envelope = createDurableExecutorEnvelope({
+        db,
+        attemptId,
+        now: () => NOW,
+      });
+      const roundId = `${attemptId}::round-1`;
+      envelope.facade.startRound({
+        roundId,
+        attemptId,
+        workflowRunId: runId,
+        stepRunId: stepId,
+        stepKey: stepId,
+        executor: "goal-loop",
+        attemptNumber: 1,
+        roundIndex: 0,
+        state: "running",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        inputDigest: null,
+        resultDigest: null,
+        artifactRoot: null,
+        logPaths: [],
+        summary: "custom goal-loop continuation",
+        keyChanges: [],
+        keyLearnings: [],
+        remainingWork: [],
+        changedFiles: [],
+        verificationStatus: null,
+        commitSha: null,
+      });
+      envelope.facade.recordCheckpoint(roundId, {
+        checkpointId: `${roundId}-mechanism-completed`,
+        sequence: 0,
+        stage: "mechanism_completed",
+        detail: JSON.stringify({ recommendation: "continue" }),
+      });
+      updateExecutorRound(db, roundId, { toState: "capturing_result" });
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("idle");
+      expect(recorder.calls).toHaveLength(0);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a stale raw no-mistakes continuation when it is claimed", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-claimed-no-mistakes-continuation";
+      const stepId = "implementation";
+      seedUnclassifiedMechanismContinuation(db, runId, stepId, "no-mistakes");
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+        claimedExecutorNames: new Set(["no-mistakes"]),
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls).toHaveLength(1);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resumes a raw no-mistakes continuation through the retained built-in lane", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const runId = "stale-unclaimed-no-mistakes-continuation";
+      const stepId = "implementation";
+      seedUnclassifiedMechanismContinuation(db, runId, stepId, "no-mistakes");
+      seedLease(db, {
+        runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "daemon-old",
+        acquiredAt: NOW - 1_000,
+        heartbeatAt: NOW - 1_000,
+        expiresAt: NOW,
+      });
+      const recorder = recordingDispatch();
+
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW + 1,
+      });
+
+      expect(result.code).toBe("dispatched");
+      expect(recorder.calls).toHaveLength(1);
+      expect(getWorkflowRunManualRecoveryState(db, runId)).toMatchObject({
+        needsManualRecovery: false,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("resumes an unclassified delegate gate observation", () => {
     const db = openDb(makeTempDir());
     try {
@@ -2821,7 +3118,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",
@@ -3125,7 +3422,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",
@@ -3238,7 +3535,7 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
         workflowRunId: runId,
         stepRunId: stepId,
         stepKey: stepId,
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         attemptNumber: 1,
         roundIndex: 1,
         state: "mirroring_external_state",

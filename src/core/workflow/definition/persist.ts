@@ -25,6 +25,8 @@
  *     loaded definition always round-trips to what was last persisted.
  */
 
+import { isDeepStrictEqual } from "node:util";
+
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
@@ -32,9 +34,9 @@ import {
   type StepDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionValidationError,
-  type WorkflowExecutorFamily,
+  type ExecutorName,
+  type StepDefinitionKind,
 } from "./definition.js";
-import type { WorkflowStepKind } from "../run/reducer.js";
 
 /**
  * Thrown by {@link persistWorkflowDefinition} when the supplied value is not a
@@ -76,7 +78,28 @@ export function persistWorkflowDefinition(
   definition: unknown,
   options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary {
-  const validation = validateWorkflowDefinition(definition);
+  // Retained built-in versions are immutable compatibility data, not new
+  // user-authored definitions, so their legacy step kinds remain valid here.
+  const isBuiltIn = BUILT_IN_WORKFLOW_DEFINITIONS.some((builtIn) =>
+    isDeepStrictEqual(builtIn, definition),
+  );
+  return persistWorkflowDefinitionWithLegacyMode(
+    db,
+    definition,
+    options,
+    isBuiltIn,
+  );
+}
+
+function persistWorkflowDefinitionWithLegacyMode(
+  db: MomentumDb,
+  definition: unknown,
+  options: PersistWorkflowDefinitionOptions,
+  allowLegacyStepKinds: boolean,
+): PersistWorkflowDefinitionSummary {
+  const validation = validateWorkflowDefinition(definition, {
+    allowLegacyStepKinds,
+  });
   if (!validation.ok) {
     throw new InvalidWorkflowDefinitionError(validation.errors);
   }
@@ -208,8 +231,8 @@ export function loadWorkflowDefinition(
     );
     return {
       key: row.step_key,
-      kind: row.kind as WorkflowStepKind,
-      executor: row.executor as WorkflowExecutorFamily,
+      kind: row.kind as StepDefinitionKind,
+      executor: row.executor as ExecutorName,
       ...(config === undefined ? {} : { config }),
       order: row.step_order,
       required: row.required === 1,
@@ -266,7 +289,7 @@ export function seedBuiltInWorkflowDefinitions(
   options: PersistWorkflowDefinitionOptions = {},
 ): PersistWorkflowDefinitionSummary[] {
   return BUILT_IN_WORKFLOW_DEFINITIONS.map((definition) =>
-    persistWorkflowDefinition(db, definition, options),
+    persistWorkflowDefinitionWithLegacyMode(db, definition, options, true),
   );
 }
 

@@ -2,8 +2,8 @@
 
 Executor runtime domain. This folder owns the executor registration, config
 validation, bounded tick driver, and durable execution _mechanisms_: the
-executor-loop reducer/persistence, the goal-loop, single-shot, and
-delegate-supervisor executor families, the compatibility live-step wrapper
+executor-loop reducer/persistence, the agent-loop, single-shot, and
+delegate-supervisor executors, the compatibility live-step wrapper
 executor, and the no-mistakes state reader and legacy mirror support, plus their
 runner-profile, foreground iteration, and runner-smoke support. It holds
 business/runtime behavior only:
@@ -11,29 +11,29 @@ reducers, state machines, persistence policies, and execution decisions. It does
 not parse CLI arguments or format output.
 
 These modules were regrouped from the former flat `src/*.ts` root siblings
-(ARCH-04) and later split into family folders with no behavior change. Filename
+(ARCH-04) and later split into per-executor folders with no behavior change. Filename
 prefixes are dropped inside each folder. Command, renderer, and adapter seams
 were left in place; importers still reference the concrete modules below.
 
 ## Local structure
 
-| Concern                        | Modules                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/portable-command.ts`, `sdk/driver.ts`  |
-| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                                      |
-| Goal-loop executor             | `goal-loop/sdk.ts`, `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
-| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                |
-| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`                    |
-| Live-step executor             | `live-step/executor.ts`, `live-step/sdk-executor.ts` (compatibility live-wrapper lane)                                    |
-| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                                         |
-| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                                |
-| Runner support                 | `runner/profile.ts`                                                                                                       |
-| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                                       |
-| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                                     |
+| Concern                        | Modules                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Executor SDK                   | `sdk/types.ts`, `sdk/envelope.ts`, `sdk/registry.ts`, `sdk/config-schema.ts`, `sdk/portable-command.ts`, `sdk/driver.ts`       |
+| Executor loop                  | `loop/reducer.ts`, `loop/persist.ts`                                                                                           |
+| Agent-loop executor            | `agent-loop/sdk.ts`, `agent-loop/executor.ts`, `agent-loop/mechanism.ts`, `agent-loop/orchestrator.ts`, `agent-loop/prompt.ts` |
+| Single-shot executor           | `single-shot/sdk.ts`, `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts`                     |
+| Delegate-supervisor executor   | `delegate-supervisor/executor.ts`, `delegate-supervisor/classifier.ts`, `delegate-supervisor/types.ts`                         |
+| Live-step executor             | `live-step/executor.ts`, `live-step/sdk-executor.ts` (compatibility live-wrapper lane)                                         |
+| Shared step finalization       | `shared/step-finalize.ts` (neutral verify -> commit / reset seam)                                                              |
+| No-mistakes mechanism          | `no-mistakes/mechanism.ts`                                                                                                     |
+| Runner support                 | `runner/profile.ts`                                                                                                            |
+| Runner smoke                   | `smoke/linear-read.ts`, `smoke/workflow-harness.ts`                                                                            |
+| Runner result shapes & parsing | `runner/types.ts`, `runner/result.ts`                                                                                          |
 
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
-point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
-families build on `loop/reducer` / `loop/persist`.
+point; `loop/persist.ts` wraps it with persistence. The agent-loop and single-shot
+executors build on `loop/reducer` / `loop/persist`.
 `sdk/types.ts` is the dependency-free third-party contract: one bounded `tick`,
 a declared portable config schema, a durable snapshot, and an envelope facade
 that can record observations/evidence but cannot classify terminal state.
@@ -48,9 +48,9 @@ Classification, its checkpoint, and attempt settlement commit atomically on
 the controller after a tick returns.
 The controller also rejects classification decisions whose attempt or round
 state is inconsistent with the classification before writing any settlement.
-`goal-loop/sdk.ts` and `single-shot/sdk.ts` are the native profile-backed built-ins: `goal-loop`, `one-shot`, and `script` implement the same `Executor` interface and accept narrow runner adapters as lifecycle extension points.
+`agent-loop/sdk.ts` and `single-shot/sdk.ts` are the native profile-backed built-ins: `agent-loop`, `agent-once`, and `script` implement the same `Executor` interface and accept narrow runner adapters as lifecycle extension points.
 `delegate-supervisor/executor.ts` remains the default coding implementation route, while `live-step/sdk-executor.ts` retains the compatibility `no-mistakes` identity.
-These native goal-loop, single-shot, and live-step lifecycles record replay-safe mechanism completion before daemon classification.
+These native agent-loop, single-shot, and live-step lifecycles record replay-safe mechanism completion before daemon classification.
 The built-in runner
 mechanisms supervise process groups asynchronously below a crash-surviving
 anchor/watchdog, terminate them on tick cancellation or daemon loss, require a
@@ -91,20 +91,20 @@ driving remain separate runtime concerns joined by the same executor identity an
 declared config schema.
 Before artifact writes, result observations, or completion checkpoints, the lifecycle runtime-normalizes the complete runner-adapter return.
 Malformed JavaScript or casted returns leave only the atomically materialized attempt, running round, and dispatch-binding checkpoint for recovery.
-Successful `one-shot` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
-The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
+Successful `agent-once` turns require a successful normalized `RunnerResult`; exit-code-based `script` turns forbid result-document evidence.
+The native `agent-loop` executor renders deterministic per-round prompts through `agent-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
 The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_attempts` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
-The concrete goal-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
-The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while legacy definitions may still run it beneath `goal-loop`.
-In both cases it must report through Momentum attempt and round evidence rather than become an executor family or make `.gnhf/runs` authoritative state.
+The concrete agent-loop mechanism writes `commit_or_reset_evidence` as a digested finalization sidecar at `<verification-log>.finalization.json` when the verification log path is a usable absolute path.
+The current coding workflow selects GNHF as portable tool config below `delegate-supervisor`, while retained legacy definitions follow the raw-identity compatibility rule in `SPEC.md` when running beneath the legacy `goal-loop` spelling.
+In both cases it must report through Momentum attempt and round evidence rather than become an executor identity or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization
 
 The verify -> commit / reset finalization transaction lives in the neutrally-named
 `shared/step-finalize.ts` seam (`finalizeWorkflowStep` /
-`finalizeWorkflowStepFromResultFile`), consumed directly by the goal-loop
-and single-shot families.
+`finalizeWorkflowStepFromResultFile`), consumed directly by the agent-loop
+and single-shot executors.
 
 The retired live-step direct-finalize lane (`live-step/advance.ts`,
 `live-step/orchestrator.ts`, `live-step/run-recovery.ts`) and its
@@ -173,7 +173,7 @@ adapter interfaces, never executor persistence.
 
 ## Deferred
 
-- Exported family-specific executor types stay beside their behavior in their owning module. The
+- Exported executor-specific types stay beside their behavior in their owning module. The
   shared runner-result shapes now live at `src/core/executors/runner/types.ts`
   (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `RunnerResult`, and the
   `RunnerResult{Error,Success,Parse}` envelopes), with their parser

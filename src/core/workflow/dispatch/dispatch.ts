@@ -43,42 +43,46 @@
  * `{ action: ... }` convention used by the reducers and the gate brain.
  */
 
-import type {
-  ExecutorName,
-  WorkflowExecutorFamily,
-} from "../definition/definition.js";
+import type { ExecutorName } from "../definition/definition.js";
+import { canonicalExecutorIdentity } from "../definition/legacy.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 
 /**
- * Legacy built-in executor-family set retained for callers that need to narrow a
- * built-in identity to its historical production-adapter type.
+ * Legacy built-in executor set retained for callers that need to narrow a
+ * built-in identity to its historical production-adapter type. Holds canonical
+ * values plus the dispatchable legacy `no-mistakes` identity.
  * Arbitrary registered executor identities do not need membership in this set to
  * receive the common dispatch scaffold.
  */
-export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
-  "goal-loop",
-  "one-shot",
+export const PHASE1_DISPATCHABLE_EXECUTORS = [
+  "agent-loop",
+  "agent-once",
   "script",
   "no-mistakes",
   "delegate-supervisor",
   "external-apply",
   "subworkflow",
 ] as const;
-export type Phase1DispatchableExecutorFamily =
-  (typeof PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES)[number];
+export type Phase1DispatchableExecutor =
+  (typeof PHASE1_DISPATCHABLE_EXECUTORS)[number];
 
-const PHASE1_DISPATCHABLE_FAMILY_SET: ReadonlySet<WorkflowExecutorFamily> =
-  new Set(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES);
+const PHASE1_DISPATCHABLE_EXECUTOR_SET: ReadonlySet<string> = new Set(
+  PHASE1_DISPATCHABLE_EXECUTORS,
+);
 
 /**
- * Whether `family` is one of the legacy built-in production-adapter identities.
- * Narrows to {@link Phase1DispatchableExecutorFamily} for callers that need that
- * built-in distinction; it is not the registered-executor dispatch gate.
+ * Whether `executor` is one of the legacy built-in production-adapter
+ * identities. Recorded values are classified through
+ * {@link canonicalExecutorIdentity}, so retired spellings on old rows still
+ * narrow to {@link Phase1DispatchableExecutor}; it is not the
+ * registered-executor dispatch gate.
  */
-export function isPhase1DispatchableExecutorFamily(
-  family: WorkflowExecutorFamily,
-): family is Phase1DispatchableExecutorFamily {
-  return PHASE1_DISPATCHABLE_FAMILY_SET.has(family);
+export function isPhase1DispatchableExecutor(
+  executor: ExecutorName,
+): executor is Phase1DispatchableExecutor {
+  return PHASE1_DISPATCHABLE_EXECUTOR_SET.has(
+    canonicalExecutorIdentity(executor),
+  );
 }
 
 /**
@@ -92,14 +96,14 @@ export function isPhase1DispatchableExecutorFamily(
  *     cannot be resolved to an executor identity (for example, an imported run).
  *   - `step_definition_not_found`: no `step_definitions` row matches the claimed
  *     step's `(definitionKey, definitionVersion, stepId)` identity.
- *   - `unknown_executor_family`: the step definition's `executor` column is not a
+ *   - `unknown_executor`: the step definition's `executor` column is not a
  *     syntactically valid durable executor identity (corrupt or legacy state).
  */
 export const WORKFLOW_STEP_RESOLUTION_FAILURES = [
   "run_not_found",
   "definition_unlinked",
   "step_definition_not_found",
-  "unknown_executor_family",
+  "unknown_executor",
 ] as const;
 export type WorkflowStepResolutionFailure =
   (typeof WORKFLOW_STEP_RESOLUTION_FAILURES)[number];
@@ -108,24 +112,24 @@ export type WorkflowStepResolutionFailure =
  * The resolved facts about a claimed workflow step that the dispatch decision
  * needs: either the step's executor identity, or a typed resolution failure (with
  * an optional detail for the operator-facing reason, e.g. the offending raw
- * family string).
+ * executor string).
  */
 export type WorkflowStepDispatchResolution =
-  | { ok: true; executorFamily: ExecutorName }
+  | { ok: true; executor: ExecutorName }
   | { ok: false; failure: WorkflowStepResolutionFailure; detail?: string };
 
 /**
  * Stable fail-closed codes the dispatcher stamps on a durable manual-recovery
  * outcome so daemon-lane telemetry, recovery artifacts, and status / monitor
  * surfaces can recognise the cause. One per resolution failure plus
- * the retained `unsupported_executor_family` compatibility code.
+ * the retained `unsupported_executor` compatibility code.
  */
 export const WORKFLOW_DISPATCH_FAIL_CLOSED_CODES = [
   "workflow_run_not_found",
   "workflow_definition_unlinked",
   "step_definition_not_found",
-  "unknown_executor_family",
-  "unsupported_executor_family",
+  "unknown_executor",
+  "unsupported_executor",
   "route_config_invalid",
 ] as const;
 export type WorkflowDispatchFailClosedCode =
@@ -141,13 +145,13 @@ export type WorkflowDispatchFailClosedCode =
  *     operator-visible manual-recovery outcome and releases the dispatch lease.
  */
 export type WorkflowStepDispatchPlan =
-  | { action: "dispatch"; executorFamily: ExecutorName }
+  | { action: "dispatch"; executor: ExecutorName }
   | {
       action: "fail_closed";
       code: WorkflowDispatchFailClosedCode;
       /** Phase 1 routes every fail-closed outcome to `manual_recovery_required`. */
       gateType: WorkflowGateType;
-      /** Operator-facing reason; names the offending family / detail when known. */
+      /** Operator-facing reason; names the offending executor / detail when known. */
       reason: string;
     };
 
@@ -166,17 +170,17 @@ const RESOLUTION_FAILURE_PLANS: Record<
   definition_unlinked: {
     code: "workflow_definition_unlinked",
     reason: () =>
-      "Claimed workflow run has no workflow definition link, so its step cannot be resolved to an executor family; routing to manual recovery.",
+      "Claimed workflow run has no workflow definition link, so its step cannot be resolved to an executor; routing to manual recovery.",
   },
   step_definition_not_found: {
     code: "step_definition_not_found",
     reason: (detail) =>
       `No step definition matches the claimed step${detail ? ` (${detail})` : ""}; routing the dispatch to manual recovery.`,
   },
-  unknown_executor_family: {
-    code: "unknown_executor_family",
+  unknown_executor: {
+    code: "unknown_executor",
     reason: (detail) =>
-      `Claimed step resolves to an unknown executor family${detail ? `: ${detail}` : ""}; routing the dispatch to manual recovery.`,
+      `Claimed step resolves to an unknown executor${detail ? `: ${detail}` : ""}; routing the dispatch to manual recovery.`,
   },
 };
 
@@ -202,5 +206,5 @@ export function planWorkflowStepDispatch(
     };
   }
 
-  return { action: "dispatch", executorFamily: resolution.executorFamily };
+  return { action: "dispatch", executor: resolution.executor };
 }

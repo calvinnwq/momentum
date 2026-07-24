@@ -6,7 +6,7 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
@@ -51,11 +51,11 @@ const CHILD_DEFINITION: WorkflowDefinition = {
     {
       key: "preflight",
       kind: "preflight",
-      executor: "one-shot",
+      executor: "agent-once",
       order: 0,
-      required: true
-    }
-  ]
+      required: true,
+    },
+  ],
 };
 
 const CHILD_DEFINITION_V2: WorkflowDefinition = {
@@ -66,17 +66,17 @@ const CHILD_DEFINITION_V2: WorkflowDefinition = {
     {
       key: "implementation",
       kind: "implementation",
-      executor: "one-shot",
+      executor: "agent-once",
       order: 1,
-      required: true
-    }
-  ]
+      required: true,
+    },
+  ],
 };
 
 const OTHER_DEFINITION: WorkflowDefinition = {
   ...CHILD_DEFINITION,
   key: "other-child-workflow",
-  title: "Other Child Workflow"
+  title: "Other Child Workflow",
 };
 
 /** A propagated child route, as iteration 2's `deriveChildSubworkflowRoute` builds. */
@@ -86,9 +86,9 @@ const CHILD_ROUTE = {
       parentRunId: PARENT_RUN_ID,
       parentStepId: STEP_ID,
       depth: 1,
-      ancestorDefinitionKeys: ["coding-workflow"]
-    }
-  }
+      ancestorDefinitionKeys: ["coding-workflow"],
+    },
+  },
 };
 
 const tempRoots: string[] = [];
@@ -107,7 +107,9 @@ function makeTempDir(prefix = "momentum-sub-runner-"): string {
 }
 
 /** A migrated DB with the parent run started and the child definition persisted. */
-function openSeededDb(options: { withChildDefinition?: boolean } = {}): MomentumDb {
+function openSeededDb(
+  options: { withChildDefinition?: boolean } = {},
+): MomentumDb {
   const db = openDb(makeTempDir());
   persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
@@ -115,7 +117,7 @@ function openSeededDb(options: { withChildDefinition?: boolean } = {}): Momentum
     runId: PARENT_RUN_ID,
     repoPath: "/repos/momentum",
     objective: "Parent run for RC-4b child-runner coverage",
-    now: NOW
+    now: NOW,
   });
   if (options.withChildDefinition !== false) {
     persistWorkflowDefinition(db, CHILD_DEFINITION, { now: NOW });
@@ -143,17 +145,18 @@ function buildRunner(
     childDefinitionKey?: string;
     childDefinitionVersion?: number;
     childRunId?: string;
-  } = {}
+  } = {},
 ) {
   return buildDispatchedSubworkflowChildRunner({
     db,
     childRunId: overrides.childRunId ?? CHILD_RUN_ID,
     childDefinitionKey: overrides.childDefinitionKey ?? CHILD_DEFINITION_KEY,
-    childDefinitionVersion: overrides.childDefinitionVersion ?? CHILD_DEFINITION.version,
+    childDefinitionVersion:
+      overrides.childDefinitionVersion ?? CHILD_DEFINITION.version,
     childRoute: CHILD_ROUTE,
     repoPath: "/repos/momentum",
     objective: "RC-4b child workflow run",
-    now: NOW
+    now: NOW,
   });
 }
 
@@ -194,7 +197,7 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
     const db = openSeededDb();
     persistWorkflowDefinition(db, CHILD_DEFINITION_V2, { now: NOW + 1 });
     const resolution = buildRunner(db, {
-      childDefinitionVersion: CHILD_DEFINITION.version
+      childDefinitionVersion: CHILD_DEFINITION.version,
     });
     if (!resolution.ok) throw new Error(resolution.reason);
 
@@ -203,7 +206,9 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
     const child = loadWorkflowRunDetail(db, CHILD_RUN_ID);
     expect(child?.steps).toHaveLength(CHILD_DEFINITION.steps.length);
     const row = db
-      .prepare("SELECT workflow_definition_version FROM workflow_runs WHERE id = ?")
+      .prepare(
+        "SELECT workflow_definition_version FROM workflow_runs WHERE id = ?",
+      )
       .get(CHILD_RUN_ID) as { workflow_definition_version: number | null };
     expect(row.workflow_definition_version).toBe(CHILD_DEFINITION.version);
   });
@@ -221,7 +226,7 @@ describe("buildDispatchedSubworkflowChildRunner — start-or-attach idempotency"
 
     // The child run reaches its own terminal success between ticks.
     db.prepare(
-      "UPDATE workflow_runs SET state = 'succeeded', updated_at = ? WHERE id = ?"
+      "UPDATE workflow_runs SET state = 'succeeded', updated_at = ? WHERE id = ?",
     ).run(NOW + 5, CHILD_RUN_ID);
 
     const second = await resolution.run();
@@ -237,7 +242,9 @@ describe("buildDispatchedSubworkflowChildRunner — fail closed on a missing chi
   it("refuses at build time when the child definition key does not resolve, starting no child run", () => {
     const db = openSeededDb({ withChildDefinition: false });
 
-    const resolution = buildRunner(db, { childDefinitionKey: "no-such-definition" });
+    const resolution = buildRunner(db, {
+      childDefinitionKey: "no-such-definition",
+    });
 
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
@@ -255,7 +262,7 @@ describe("buildDispatchedSubworkflowChildRunner — fail closed on unsupported a
       runId: CHILD_RUN_ID,
       repoPath: "/repos/momentum",
       objective: "Conflicting pre-existing child run",
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     const resolution = buildRunner(db);
@@ -275,11 +282,11 @@ describe("buildDispatchedSubworkflowChildRunner — fail closed on unsupported a
       runId: CHILD_RUN_ID,
       repoPath: "/repos/momentum",
       objective: "Conflicting pre-existing child run",
-      now: NOW + 1
+      now: NOW + 1,
     });
 
     const resolution = buildRunner(db, {
-      childDefinitionVersion: CHILD_DEFINITION.version
+      childDefinitionVersion: CHILD_DEFINITION.version,
     });
 
     expect(resolution.ok).toBe(false);
@@ -302,7 +309,7 @@ describe("buildDispatchedSubworkflowChildRunner — observation mirrors child ma
     const marked = markWorkflowRunNeedsManualRecovery(db, {
       runId: CHILD_RUN_ID,
       reason,
-      now: NOW + 25
+      now: NOW + 25,
     });
     expect(marked.ok).toBe(true);
 

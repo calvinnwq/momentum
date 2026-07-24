@@ -28,7 +28,7 @@ import {
   type GoalLoopRoundArtifacts,
   type GoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput,
-} from "../src/core/executors/goal-loop/executor.js";
+} from "../src/core/executors/agent-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
@@ -300,13 +300,13 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
   return {
     success: true,
     summary: "implemented the bounded round",
-    key_changes_made: ["added the goal-loop projection"],
+    key_changes_made: ["added the agent-loop projection"],
     key_learnings: ["learned a thing"],
     remaining_work: ["wire up the orchestrator"],
     goal_complete: false,
     commit: {
       type: "feat",
-      scope: "goal-loop",
+      scope: "agent-loop",
       subject: "project round evidence",
       body: "",
       breaking: false,
@@ -322,7 +322,7 @@ const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round evidence",
+    message: "feat(agent-loop): project round evidence",
   },
   head: SHA_A,
 };
@@ -334,7 +334,7 @@ const COMMITTED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round evidence",
+    message: "feat(agent-loop): project round evidence",
   },
   head: SHA_A,
 };
@@ -844,15 +844,15 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
     expect(selection.source.maxRounds).toBe("repository_policy");
   });
 
-  it("falls back to the executor family default below repository policy", () => {
+  it("falls back to the executor default below repository policy", () => {
     const selection = resolveGoalLoopRoundSelection({
       repositoryPolicy: { agentProvider: "claude" },
-      familyDefault: { maxRounds: 10, effort: "high" },
+      executorDefault: { maxRounds: 10, effort: "high" },
     });
     expect(selection.maxRounds).toBe(10);
-    expect(selection.source.maxRounds).toBe("executor_family_default");
+    expect(selection.source.maxRounds).toBe("executor_default");
     expect(selection.effort).toBe("high");
-    expect(selection.source.effort).toBe("executor_family_default");
+    expect(selection.source.effort).toBe("executor_default");
   });
 
   it("uses the momentum global default as the floor for unspecified fields", () => {
@@ -873,14 +873,14 @@ describe("resolveGoalLoopRoundSelection — precedence", () => {
       stepConfig: { agentProvider: "claude" },
       workflowConfig: { model: "claude-sonnet-4-6" },
       repositoryPolicy: { effort: "medium" },
-      familyDefault: { maxRounds: 9 },
+      executorDefault: { maxRounds: 9 },
       globalDefault: { timeoutMs: 600_000 },
     });
     expect(selection.source).toEqual({
       agentProvider: "step_definition",
       model: "workflow_definition",
       effort: "repository_policy",
-      maxRounds: "executor_family_default",
+      maxRounds: "executor_default",
       timeoutMs: "momentum_global_default",
       policyEnvelope: "momentum_global_default",
     });
@@ -952,9 +952,9 @@ function startInput(
 }
 
 describe("planGoalLoopRoundStart", () => {
-  it("builds a running-state goal-loop round-start record", () => {
+  it("builds a running-state agent-loop round-start record", () => {
     const record = planGoalLoopRoundStart(startInput());
-    expect(record.executorFamily).toBe("goal-loop");
+    expect(record.executor).toBe("agent-loop");
     expect(record.state).toBe("running");
     expect(record.classification).toBeNull();
     expect(record.roundId).toBe("round-1");
@@ -1227,7 +1227,7 @@ describe("planGoalLoopRoundCheckpoints", () => {
 });
 
 // ---------------------------------------------------------------------------
-// goal-loop executor adapter "below StepRun": deterministic attempt / round
+// agent-loop executor adapter "below StepRun": deterministic attempt / round
 // identity materialization. These pure helpers turn a StepRun identity into the
 // durable ExecutorAttempt + per-round ExecutorRound identities, so every
 // caller mints reattachable ids the same way (contract "Heartbeat And Reattach":
@@ -1259,7 +1259,7 @@ describe("goalLoopAttemptId", () => {
     const id = goalLoopAttemptId(RUN_A, "implementation", 2);
     expect(id).toContain(RUN_A);
     expect(id).toContain("implementation");
-    expect(id).toContain("goal-loop");
+    expect(id).toContain("agent-loop");
     expect(id).toContain("2");
   });
 
@@ -1290,7 +1290,7 @@ describe("goalLoopRoundId", () => {
 });
 
 describe("planGoalLoopAttempt", () => {
-  it("projects a StepRun identity into a running goal-loop attempt record", () => {
+  it("projects a StepRun identity into a running agent-loop attempt record", () => {
     const attempt = planGoalLoopAttempt({
       workflowRunId: RUN_A,
       stepRunId: "implementation",
@@ -1303,7 +1303,7 @@ describe("planGoalLoopAttempt", () => {
       workflowRunId: RUN_A,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       state: "running",
       attemptNumber: 1,
       startedAt: 1_000,
@@ -1367,7 +1367,7 @@ describe("planGoalLoopRoundStartForAttempt", () => {
     });
     const round = planGoalLoopRoundStart(start);
     expect(round.state).toBe("running");
-    expect(round.executorFamily).toBe("goal-loop");
+    expect(round.executor).toBe("agent-loop");
     expect(round.roundId).toBe(goalLoopRoundId(attempt.attemptId, 2));
     expect(round.attemptId).toBe(attempt.attemptId);
     expect(round.roundIndex).toBe(2);

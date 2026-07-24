@@ -24,7 +24,7 @@ export default {
       workflowRunId: attempt.workflowRunId,
       stepRunId: attempt.stepRunId,
       stepKey: attempt.stepKey,
-      executorFamily: attempt.executorFamily,
+      executor: attempt.executor,
       attemptNumber: attempt.attemptNumber,
       roundIndex: context.state.rounds.length,
       state: "capturing_result",

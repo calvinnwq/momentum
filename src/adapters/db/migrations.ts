@@ -2,6 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 
 type MomentumDb = DatabaseSync;
 
+export type QueueMigrationOptions = {
+  claimedExecutorNames?: ReadonlySet<string>;
+  executorClaimsKnown?: boolean;
+};
+
 type ColumnSpec = { name: string; type: string };
 
 const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
@@ -536,7 +541,7 @@ CREATE TABLE IF NOT EXISTS executor_attempts (
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
   step_run_id TEXT NOT NULL,
   step_key TEXT NOT NULL,
-  executor_family TEXT NOT NULL,
+  executor TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
   attempt_number INTEGER NOT NULL DEFAULT 1,
   started_at INTEGER,
@@ -577,7 +582,7 @@ CREATE TABLE IF NOT EXISTS ${tableName} (
   workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
   step_run_id TEXT NOT NULL,
   step_key TEXT NOT NULL,
-  executor_family TEXT NOT NULL,
+  executor TEXT NOT NULL,
   attempt_number INTEGER NOT NULL DEFAULT 1,
   round_index INTEGER NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
@@ -628,7 +633,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_rounds_attempt_index
 const EXECUTOR_LOOP_DDL = `
 CREATE TABLE IF NOT EXISTS executor_definitions (
   executor_key TEXT PRIMARY KEY,
-  family TEXT NOT NULL,
+  executor TEXT NOT NULL,
   agent_provider TEXT,
   model TEXT,
   effort TEXT,
@@ -798,6 +803,8 @@ type LegacyExecutorAttemptGroup = {
   lifecycleAt: number;
 };
 
+// Mirrors `EXECUTOR_ATTEMPT_TERMINAL_STATES` / `isTerminalExecutorAttemptState`
+// in src/core/executors/loop/reducer.ts.
 const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "manual_recovery_required",
   "blocked",
@@ -805,6 +812,56 @@ const LEGACY_TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "succeeded",
   "cancelled",
 ]);
+
+// Canonical spellings for renamed built-in executor values. An old spelling is
+// only rewritten when durable definitions and the configured executor registry
+// are known to claim neither spelling. Before the rename the registry refused
+// duplicate built-in names, so an explicit registration under the old spelling
+// can only be a third-party identity that must keep its recorded value
+// everywhere. A claim on the replacement spelling also reserves that identity
+// against receiving historical rows from a different owner.
+const LEGACY_EXECUTOR_VALUE_RENAMES: ReadonlyArray<[string, string]> = [
+  ["goal-loop", "agent-loop"],
+  ["one-shot", "agent-once"],
+];
+
+function executorDefinitionClaimsKey(db: MomentumDb, key: string): boolean {
+  if (!tableExists(db, "executor_definitions")) return false;
+  return (
+    db
+      .prepare("SELECT 1 FROM executor_definitions WHERE executor_key = ?")
+      .get(key) !== undefined
+  );
+}
+
+function executorIdentityIsClaimed(
+  db: MomentumDb,
+  key: string,
+  options: QueueMigrationOptions,
+): boolean {
+  return (
+    options.executorClaimsKnown === false ||
+    executorDefinitionClaimsKey(db, key) ||
+    options.claimedExecutorNames?.has(key) === true
+  );
+}
+
+function renameableLegacyExecutorValues(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): ReadonlyMap<string, string> {
+  const renames = new Map<string, string>();
+  for (const [oldValue, newValue] of LEGACY_EXECUTOR_VALUE_RENAMES) {
+    if (
+      executorIdentityIsClaimed(db, oldValue, options) ||
+      executorIdentityIsClaimed(db, newValue, options)
+    ) {
+      continue;
+    }
+    renames.set(oldValue, newValue);
+  }
+  return renames;
+}
 
 const LEGACY_RECOVERY_BEARING_ATTEMPT_STATES: ReadonlySet<string> = new Set([
   "manual_recovery_required",
@@ -881,8 +938,16 @@ function compareLegacyAttemptGroups(
  * which SQLite ignores inside a transaction; a `foreign_key_check` over the
  * rebuilt tables guards the swap before commit.
  */
-function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
+function migrateLegacyExecutorInvocationSchema(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): void {
   if (!tableExists(db, "executor_invocations")) return;
+  // A partially upgraded SDK-05 database may have persisted invocations before
+  // the legacy round table was created. The additive migration below creates
+  // the current attempt/round tables; do not run the legacy rebuild against a
+  // missing source table.
+  if (!tableExists(db, "executor_rounds")) return;
   db.exec("PRAGMA foreign_keys = OFF");
   try {
     db.exec("BEGIN IMMEDIATE");
@@ -893,6 +958,14 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         ensureColumn(db, "executor_rounds", column);
       }
       db.exec(EXECUTOR_ATTEMPTS_DDL);
+
+      // The legacy source tables keep their recorded `executor_family` column
+      // when read; the rebuilt tables write the renamed `executor` column, and
+      // renamed built-in executor values are mapped in the same pass so one
+      // upgrade from the oldest schema lands directly on the new vocabulary.
+      const executorRenames = renameableLegacyExecutorValues(db, options);
+      const canonicalExecutorValue = (value: string): string =>
+        executorRenames.get(value) ?? value;
 
       const invocations = db
         .prepare(
@@ -905,7 +978,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
         .all() as unknown as LegacyExecutorInvocationRow[];
       const insertAttempt = db.prepare(
         `INSERT INTO executor_attempts (
-           attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+           attempt_id, workflow_run_id, step_run_id, step_key, executor,
            state, attempt_number, started_at, heartbeat_at, finished_at,
            legacy_invocation_id, legacy_provenance, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1060,7 +1133,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
               invocation.workflow_run_id,
               invocation.step_run_id,
               invocation.step_key,
-              invocation.executor_family,
+              canonicalExecutorValue(invocation.executor_family),
               invocation.state,
               assignedAttemptNumber,
               invocation.started_at,
@@ -1099,7 +1172,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
             invocation.workflow_run_id,
             invocation.step_run_id,
             invocation.step_key,
-            invocation.executor_family,
+            canonicalExecutorValue(invocation.executor_family),
             state,
             assignedAttemptNumber,
             startedAts.length > 0 ? Math.min(...startedAts) : null,
@@ -1195,7 +1268,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
       const insertRound = db.prepare(
         `INSERT INTO executor_rounds_next (
            round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-           executor_family, attempt_number, round_index, state, classification,
+           executor, attempt_number, round_index, state, classification,
            executor_recommendation, started_at, heartbeat_at, finished_at,
            agent_provider, model, effort, input_digest, result_digest,
            artifact_root, log_paths, summary, key_changes, key_learnings,
@@ -1223,7 +1296,7 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
           round.workflow_run_id as string,
           round.step_run_id as string,
           round.step_key as string,
-          round.executor_family as string,
+          canonicalExecutorValue(round.executor_family as string),
           assignedAttemptNumber,
           round.round_index as number,
           round.state as string,
@@ -1366,6 +1439,514 @@ function migrateLegacyExecutorInvocationSchema(db: MomentumDb): void {
   }
 }
 
+// Runtime workflow rows renamed by the pre-1.0 vocabulary sweep. Only
+// deterministic, unambiguous values are rewritten; digest-anchored surfaces
+// (workflow_approvals, workflow_gates.target_scope, step_definitions,
+// evidence_records, workflow_steps.step_id, artifact paths) keep their
+// recorded spellings.
+const WORKFLOW_STEP_KIND_RENAMES: ReadonlyArray<[string, string]> = [
+  ["no-mistakes", "validate"],
+  ["linear-refresh", "tracker-refresh"],
+];
+
+const WORKFLOW_APPROVAL_BOUNDARY_RENAMES: ReadonlyArray<[string, string]> = [
+  ["no-mistakes", "validate"],
+  ["through-no-mistakes", "through-validate"],
+];
+
+// The exact durable markers the legacy no-mistakes mirror persists
+// (src/adapters/no-mistakes-orchestrator.ts): the expected external identity
+// checkpoint written at mirror start and the corroborated external-state
+// checkpoints written per poll. No other writer uses these stages, and both
+// carry the external no-mistakes run identity payload, so an attempt whose
+// rounds hold one provably mirrored the external no-mistakes tool.
+const NO_MISTAKES_MIRROR_CHECKPOINT_STAGES = [
+  "expected_external_identity",
+  "external_state_mirrored",
+] as const;
+
+// Matches `externalIdentityFromCheckpointDetail` in
+// src/adapters/no-mistakes-orchestrator.ts: the payload must carry the string
+// external no-mistakes run identity fields.
+function isNoMistakesExternalIdentityDetail(detail: string | null): boolean {
+  if (detail === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+  const identity = parsed as Record<string, unknown>;
+  return (
+    typeof identity.externalRunId === "string" &&
+    typeof identity.branch === "string" &&
+    typeof identity.headSha === "string"
+  );
+}
+
+function withNoMistakesMigrationProvenance(
+  provenance: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const merged = { ...provenance };
+  if (
+    Object.hasOwn(provenance, "legacyExecutor") &&
+    provenance["legacyExecutor"] !== "no-mistakes"
+  ) {
+    const keyRoot = "legacyExecutorBeforeNam02VocabularyMigration";
+    let key = keyRoot;
+    let suffix = 2;
+    while (Object.hasOwn(merged, key)) {
+      key = `${keyRoot}${suffix}`;
+      suffix += 1;
+    }
+    merged[key] = provenance["legacyExecutor"];
+  }
+  merged["legacyExecutor"] = "no-mistakes";
+  return merged;
+}
+
+/**
+ * Migrate durable rows onto the renamed executor and step-kind vocabulary, in
+ * place and idempotently.
+ *
+ * Runs after `migrateLegacyExecutorInvocationSchema` and the additive pass, so
+ * every table exists in its current shape on fresh, upgraded, and
+ * already-current data dirs alike. Every step is a no-op when nothing matches:
+ *
+ *   - Pre-rename data dirs get their columns renamed
+ *     (`executor_attempts.executor_family` / `executor_rounds.executor_family`
+ *     -> `executor`, `executor_definitions.family` -> `executor`); fresh DDL
+ *     already uses the new names.
+ *   - `workflow_steps.kind` and `workflow_runs.approval_boundary` move to the
+ *     renamed spellings. `workflow_steps.step_id` never changes: event ids and
+ *     artifact trees anchor on it.
+ *   - `route_json` step-override objects are re-keyed from `no-mistakes` to
+ *     `validate`; rows with unreadable JSON or a colliding target key stay
+ *     untouched.
+ *   - Renamed built-in executor values are rewritten in `executor_attempts`,
+ *     `executor_rounds`, and the `executor_definitions.executor` identity
+ *     column, skipped entirely when a registration claims the old spelling as
+ *     its own `executor_key` or the daemon config explicitly owns the old name
+ *     (a third-party identity keeps its value everywhere, including its own
+ *     row).
+ *   - A legacy `no-mistakes` executor attempt converts to
+ *     `delegate-supervisor` only when it is terminal *and* its rounds hold a
+ *     durable no-mistakes mirror checkpoint proving the external tool; the
+ *     conversion records `{"legacyExecutor":"no-mistakes"}` in the attempt's
+ *     `legacy_provenance`, preserving any conflicting prior value under a
+ *     collision-free migration key. Anything short of that proof stays
+ *     `no-mistakes` for the classified legacy reader.
+ */
+function migrateWorkflowVocabulary(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): void {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
+    mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
+    mergeOrRenameExecutorColumn(db, "executor_definitions", "family");
+
+    if (columnExists(db, "workflow_steps", "kind")) {
+      const updateStepKind = db.prepare(
+        "UPDATE workflow_steps SET kind = ? WHERE kind = ?",
+      );
+      for (const [oldValue, newValue] of WORKFLOW_STEP_KIND_RENAMES) {
+        updateStepKind.run(newValue, oldValue);
+      }
+    }
+
+    if (columnExists(db, "workflow_runs", "approval_boundary")) {
+      const updateBoundary = db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ? WHERE approval_boundary = ?",
+      );
+      for (const [oldValue, newValue] of WORKFLOW_APPROVAL_BOUNDARY_RENAMES) {
+        updateBoundary.run(newValue, oldValue);
+      }
+    }
+
+    if (
+      columnExists(db, "workflow_runs", "id") &&
+      columnExists(db, "workflow_runs", "route_json")
+    ) {
+      const routeRows = db
+        .prepare(
+          `SELECT id, route_json FROM workflow_runs
+            WHERE route_json LIKE '%"no-mistakes"%'
+               OR route_json LIKE '%"linear-refresh"%'`,
+        )
+        .all() as Array<{ id: string; route_json: string }>;
+      const updateRoute = db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = ?",
+      );
+      for (const row of routeRows) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(row.route_json);
+        } catch {
+          continue;
+        }
+        if (
+          parsed === null ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed)
+        ) {
+          continue;
+        }
+        const route = parsed as Record<string, unknown>;
+        const steps = route.steps;
+        if (
+          steps === null ||
+          typeof steps !== "object" ||
+          Array.isArray(steps)
+        ) {
+          continue;
+        }
+        const stepOverrides = steps as Record<string, unknown>;
+        if (
+          !Object.hasOwn(stepOverrides, "no-mistakes") &&
+          !Object.hasOwn(stepOverrides, "linear-refresh")
+        ) {
+          continue;
+        }
+        const rekeyed = new Map<
+          string,
+          { value: unknown; canonical: boolean }
+        >();
+        for (const [key, value] of Object.entries(stepOverrides)) {
+          const canonicalKey =
+            key === "no-mistakes"
+              ? "validate"
+              : key === "linear-refresh"
+                ? "tracker-refresh"
+                : key;
+          const canonical = canonicalKey === key;
+          const existing = rekeyed.get(canonicalKey);
+          if (existing === undefined) {
+            rekeyed.set(canonicalKey, { value, canonical });
+            continue;
+          }
+          if (canonical && !existing.canonical) {
+            rekeyed.set(canonicalKey, {
+              value: mergeRouteOverrideValues(existing.value, value),
+              canonical: true,
+            });
+          }
+        }
+        updateRoute.run(
+          JSON.stringify({
+            ...route,
+            steps: Object.fromEntries(
+              [...rekeyed.entries()].map(([key, entry]) => [key, entry.value]),
+            ),
+          }),
+          row.id,
+        );
+      }
+    }
+
+    for (const [oldValue, newValue] of renameableLegacyExecutorValues(
+      db,
+      options,
+    )) {
+      if (columnExists(db, "executor_attempts", "executor")) {
+        db.prepare(
+          "UPDATE executor_attempts SET executor = ? WHERE executor = ?",
+        ).run(newValue, oldValue);
+      }
+      if (columnExists(db, "executor_rounds", "executor")) {
+        db.prepare(
+          "UPDATE executor_rounds SET executor = ? WHERE executor = ?",
+        ).run(newValue, oldValue);
+      }
+      if (
+        columnExists(db, "executor_definitions", "executor") &&
+        columnExists(db, "executor_definitions", "executor_key")
+      ) {
+        db.prepare(
+          `UPDATE executor_definitions SET executor = ?
+            WHERE executor = ? AND executor_key <> ?`,
+        ).run(newValue, oldValue, oldValue);
+      }
+    }
+
+    const terminalStates = [...LEGACY_TERMINAL_ATTEMPT_STATES];
+    const canClassifyNoMistakes =
+      columnExists(db, "executor_attempts", "attempt_id") &&
+      columnExists(db, "executor_attempts", "executor") &&
+      columnExists(db, "executor_attempts", "state") &&
+      columnExists(db, "executor_attempts", "legacy_provenance") &&
+      columnExists(db, "executor_rounds", "round_id") &&
+      columnExists(db, "executor_rounds", "attempt_id") &&
+      columnExists(db, "executor_rounds", "executor") &&
+      columnExists(db, "executor_definitions", "executor_key") &&
+      columnExists(db, "executor_checkpoints", "round_id") &&
+      columnExists(db, "executor_checkpoints", "stage") &&
+      columnExists(db, "executor_checkpoints", "detail");
+    const candidates =
+      !canClassifyNoMistakes ||
+      executorIdentityIsClaimed(db, "no-mistakes", options) ||
+      executorIdentityIsClaimed(db, "delegate-supervisor", options)
+        ? []
+        : (db
+            .prepare(
+              `SELECT attempt_id, legacy_provenance FROM executor_attempts
+          WHERE executor = 'no-mistakes'
+            AND NOT EXISTS (
+              SELECT 1 FROM executor_definitions
+               WHERE executor_key = 'no-mistakes'
+            )
+            AND state IN (${terminalStates.map(() => "?").join(", ")})`,
+            )
+            .all(...terminalStates) as Array<{
+            attempt_id: string;
+            legacy_provenance: string | null;
+          }>);
+    const selectMirrorMarkers = canClassifyNoMistakes
+      ? db.prepare(
+          `SELECT c.detail
+         FROM executor_checkpoints AS c
+         JOIN executor_rounds AS r ON r.round_id = c.round_id
+        WHERE r.attempt_id = ?
+          AND c.stage IN (${NO_MISTAKES_MIRROR_CHECKPOINT_STAGES.map(
+            (stage) => `'${stage}'`,
+          ).join(", ")})`,
+        )
+      : undefined;
+    const convertAttempt = canClassifyNoMistakes
+      ? db.prepare(
+          `UPDATE executor_attempts
+          SET executor = 'delegate-supervisor', legacy_provenance = ?
+        WHERE attempt_id = ?`,
+        )
+      : undefined;
+    const convertRounds = canClassifyNoMistakes
+      ? db.prepare(
+          `UPDATE executor_rounds SET executor = 'delegate-supervisor'
+        WHERE attempt_id = ? AND executor = 'no-mistakes'`,
+        )
+      : undefined;
+    for (const candidate of candidates) {
+      const markers = selectMirrorMarkers!.all(candidate.attempt_id) as Array<{
+        detail: string | null;
+      }>;
+      if (
+        !markers.some((marker) =>
+          isNoMistakesExternalIdentityDetail(marker.detail),
+        )
+      ) {
+        continue;
+      }
+      let provenance: Record<string, unknown> = {};
+      if (candidate.legacy_provenance !== null) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(candidate.legacy_provenance);
+        } catch {
+          continue;
+        }
+        if (
+          parsed === null ||
+          typeof parsed !== "object" ||
+          Array.isArray(parsed)
+        ) {
+          continue;
+        }
+        provenance = parsed as Record<string, unknown>;
+      }
+      convertAttempt!.run(
+        JSON.stringify(withNoMistakesMigrationProvenance(provenance)),
+        candidate.attempt_id,
+      );
+      convertRounds!.run(candidate.attempt_id);
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function applyWorkflowVocabularyMigration(
+  db: MomentumDb,
+  options: QueueMigrationOptions = {},
+): void {
+  if (!workflowVocabularyMigrationNeeded(db, options)) return;
+  migrateWorkflowVocabulary(db, options);
+}
+
+/**
+ * Avoid taking a write lock for current-schema read-only database opens.
+ * Legacy rows still opt into the existing in-place migration, while a current
+ * database with no mutable legacy vocabulary can be opened without a
+ * `BEGIN IMMEDIATE` side effect.
+ */
+function workflowVocabularyMigrationNeeded(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): boolean {
+  for (const [table, column] of [
+    ["executor_attempts", "executor_family"],
+    ["executor_rounds", "executor_family"],
+    ["executor_definitions", "family"],
+  ] as const) {
+    if (columnExists(db, table, column)) return true;
+  }
+
+  if (
+    columnHasValue(db, "workflow_steps", "kind", "no-mistakes") ||
+    columnHasValue(db, "workflow_steps", "kind", "linear-refresh") ||
+    columnHasValue(db, "workflow_runs", "approval_boundary", "no-mistakes") ||
+    columnHasValue(
+      db,
+      "workflow_runs",
+      "approval_boundary",
+      "through-no-mistakes",
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    columnHasSubstring(db, "workflow_runs", "route_json", '"no-mistakes"') ||
+    columnHasSubstring(db, "workflow_runs", "route_json", '"linear-refresh"')
+  ) {
+    return true;
+  }
+
+  for (const oldValue of renameableLegacyExecutorValues(db, options).keys()) {
+    if (
+      columnHasValue(db, "executor_attempts", "executor", oldValue) ||
+      columnHasValue(db, "executor_rounds", "executor", oldValue) ||
+      executorDefinitionHasValue(db, oldValue)
+    ) {
+      return true;
+    }
+  }
+
+  return hasProvableNoMistakesMigrationCandidate(db, options);
+}
+
+function columnHasValue(
+  db: MomentumDb,
+  table: string,
+  column: string,
+  value: string,
+): boolean {
+  if (!columnExists(db, table, column)) return false;
+  return (
+    db
+      .prepare(`SELECT 1 FROM ${table} WHERE ${column} = ? LIMIT 1`)
+      .get(value) !== undefined
+  );
+}
+
+function columnHasSubstring(
+  db: MomentumDb,
+  table: string,
+  column: string,
+  value: string,
+): boolean {
+  if (!columnExists(db, table, column)) return false;
+  return (
+    db
+      .prepare(`SELECT 1 FROM ${table} WHERE ${column} LIKE ? LIMIT 1`)
+      .get(`%${value}%`) !== undefined
+  );
+}
+
+function mergeRouteOverrideValues(
+  legacyValue: unknown,
+  canonicalValue: unknown,
+): unknown {
+  if (
+    legacyValue !== null &&
+    typeof legacyValue === "object" &&
+    !Array.isArray(legacyValue) &&
+    canonicalValue !== null &&
+    typeof canonicalValue === "object" &&
+    !Array.isArray(canonicalValue)
+  ) {
+    return {
+      ...(legacyValue as Record<string, unknown>),
+      ...(canonicalValue as Record<string, unknown>),
+    };
+  }
+  return canonicalValue;
+}
+
+function executorDefinitionHasValue(db: MomentumDb, oldValue: string): boolean {
+  if (
+    !columnExists(db, "executor_definitions", "executor") ||
+    !columnExists(db, "executor_definitions", "executor_key")
+  ) {
+    return false;
+  }
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM executor_definitions
+          WHERE executor = ? AND executor_key <> ? LIMIT 1`,
+      )
+      .get(oldValue, oldValue) !== undefined
+  );
+}
+
+function hasProvableNoMistakesMigrationCandidate(
+  db: MomentumDb,
+  options: QueueMigrationOptions,
+): boolean {
+  if (
+    !columnExists(db, "executor_attempts", "attempt_id") ||
+    !columnExists(db, "executor_attempts", "executor") ||
+    !columnExists(db, "executor_attempts", "state") ||
+    !columnExists(db, "executor_attempts", "legacy_provenance") ||
+    !columnExists(db, "executor_rounds", "round_id") ||
+    !columnExists(db, "executor_rounds", "attempt_id") ||
+    !columnExists(db, "executor_rounds", "executor") ||
+    !columnExists(db, "executor_checkpoints", "round_id") ||
+    !columnExists(db, "executor_checkpoints", "stage") ||
+    !columnExists(db, "executor_checkpoints", "detail") ||
+    !tableExists(db, "executor_definitions") ||
+    executorIdentityIsClaimed(db, "no-mistakes", options) ||
+    executorIdentityIsClaimed(db, "delegate-supervisor", options)
+  ) {
+    return false;
+  }
+
+  const terminalStates = [...LEGACY_TERMINAL_ATTEMPT_STATES];
+  const candidates = db
+    .prepare(
+      `SELECT attempt_id FROM executor_attempts
+        WHERE executor = 'no-mistakes'
+          AND NOT EXISTS (
+            SELECT 1 FROM executor_definitions
+             WHERE executor_key = 'no-mistakes'
+          )
+          AND state IN (${terminalStates.map(() => "?").join(", ")})`,
+    )
+    .all(...terminalStates) as Array<{ attempt_id: string }>;
+  const stageList = NO_MISTAKES_MIRROR_CHECKPOINT_STAGES.map(
+    (stage) => `'${stage}'`,
+  ).join(", ");
+  const markers = db.prepare(
+    `SELECT c.detail
+       FROM executor_checkpoints AS c
+       JOIN executor_rounds AS r ON r.round_id = c.round_id
+      WHERE r.attempt_id = ?
+        AND c.stage IN (${stageList})`,
+  );
+  return candidates.some((candidate) =>
+    (
+      markers.all(candidate.attempt_id) as Array<{ detail: string | null }>
+    ).some((marker) => isNoMistakesExternalIdentityDetail(marker.detail)),
+  );
+}
+
 function columnExists(db: MomentumDb, table: string, column: string): boolean {
   const rows = db
     .prepare(`PRAGMA table_info(${table})`)
@@ -1373,10 +1954,37 @@ function columnExists(db: MomentumDb, table: string, column: string): boolean {
   return rows.some((row) => row.name === column);
 }
 
-export function applyQueueMigrations(db: MomentumDb): void {
+function mergeOrRenameExecutorColumn(
+  db: MomentumDb,
+  table: string,
+  legacyColumn: string,
+): void {
+  const hasLegacyColumn = columnExists(db, table, legacyColumn);
+  if (!hasLegacyColumn) return;
+  if (!columnExists(db, table, "executor")) {
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN ${legacyColumn} TO executor`);
+    return;
+  }
+
+  // Mixed-version schemas already have the canonical column. Preserve its
+  // non-empty value and only recover an empty canonical cell from the legacy
+  // column; leave the legacy column in place as compatibility provenance.
+  db.exec(
+    `UPDATE ${table}
+        SET executor = ${legacyColumn}
+      WHERE (executor IS NULL OR trim(executor) = '')
+        AND ${legacyColumn} IS NOT NULL
+        AND trim(${legacyColumn}) <> ''`,
+  );
+}
+
+export function applyQueueMigrations(
+  db: MomentumDb,
+  options: QueueMigrationOptions = {},
+): void {
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
-  migrateLegacyExecutorInvocationSchema(db);
+  migrateLegacyExecutorInvocationSchema(db, options);
   db.exec("BEGIN");
   try {
     if (tableExists(db, "jobs")) {
@@ -1454,6 +2062,9 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec("ROLLBACK");
     throw error;
   }
+  // Runs after the additive pass so every table exists in its current shape
+  // before the vocabulary rename inspects and rewrites rows.
+  migrateWorkflowVocabulary(db, options);
 }
 
 type PragmaColumnRow = { name: string };
