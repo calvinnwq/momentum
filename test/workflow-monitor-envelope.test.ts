@@ -98,8 +98,8 @@ function monitorFrom(overrides: Partial<WorkflowMonitorInput>) {
 }
 
 describe("workflow-monitor-envelope constants", () => {
-  it("pins the schema version at 2 for the attempt/round gate anchor rename", () => {
-    expect(WORKFLOW_MONITOR_SCHEMA_VERSION).toBe(2);
+  it("pins the schema version at 3 for the executor vocabulary rename", () => {
+    expect(WORKFLOW_MONITOR_SCHEMA_VERSION).toBe(3);
   });
 
   it("exposes a stable set of dispositions", () => {
@@ -155,7 +155,7 @@ describe("classifyWorkflowMonitorReport", () => {
 
   it("asks for operator recovery when a required step failed", () => {
     const monitor = monitorFrom({
-      steps: [step("no-mistakes", "no-mistakes", "failed", 0)],
+      steps: [step("validate", "validate", "failed", 0)],
     });
     expect(monitor.runState).toBe("failed");
     expect(monitor.recovery?.code).toBe("failed_required_step");
@@ -167,7 +167,7 @@ describe("classifyWorkflowMonitorReport", () => {
     });
   });
 
-  // A failed external-side-effect tail step (merge-cleanup / linear-refresh) may
+  // A failed external-side-effect tail step (merge-cleanup / tracker-refresh) may
   // have already pushed a branch or merged a PR before failing. The operator-
   // facing report must surface it as a recoverable ask - not mask it behind the
   // generic failed-required-step rerun guidance and not present it as a clean
@@ -367,7 +367,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
     const envelope = buildWorkflowMonitorEnvelope(detailFrom(), {
       generatedAt: 4_242,
     });
-    expect(envelope.schemaVersion).toBe(2);
+    expect(envelope.schemaVersion).toBe(3);
     expect(envelope.generatedAt).toBe(4_242);
     expect(envelope.runId).toBe(RUN_ID);
     expect(envelope.runState).toBe("running");
@@ -408,7 +408,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
 
   it("surfaces a failed external-side-effect tail step as a recoverable envelope, not a clean terminal failure", () => {
     const monitor = monitorFrom({
-      steps: [step("linear-refresh", "linear-refresh", "failed", 0)],
+      steps: [step("tracker-refresh", "tracker-refresh", "failed", 0)],
     });
     expect(monitor.recovery?.code).toBe("failed_external_side_effect_step");
     const envelope = buildWorkflowMonitorEnvelope(

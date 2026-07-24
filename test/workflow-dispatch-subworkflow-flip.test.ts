@@ -31,7 +31,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  *
  * RC-4 (NGX-497) landed the daemon-dispatchable `subworkflow` *mechanism* but kept
  * production fail-closed: `subworkflow` stayed out of
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and no daemon lane composed the child
+ * `PHASE1_DISPATCHABLE_EXECUTORS` and no daemon lane composed the child
  * runner. Iterations 1-4 of this ticket landed the keystone child-config /
  * recursion-safety deciders, the route-sourced launch plan, the key-resolved
  * start-or-attach child runner, and the daemon-lane context deriver — each behind
@@ -57,7 +57,7 @@ const CHILD_DEFINITION: WorkflowDefinition = {
     {
       key: "preflight",
       kind: "preflight",
-      executor: "one-shot",
+      executor: "agent-once",
       order: 1,
       required: true,
     },
@@ -193,7 +193,7 @@ describe("subworkflow production flip — configured step dispatches through dae
         db,
         deriveDispatchAttemptId(runId, PARENT_STEP_ID, 1),
       );
-      expect(attempt?.executorFamily).toBe("subworkflow");
+      expect(attempt?.executor).toBe("subworkflow");
       expect(attempt?.state).toBe("running");
 
       // A REAL child workflow run now exists, started through the run-start seam.
@@ -269,7 +269,7 @@ describe("subworkflow production flip — terminal child evidence mirrors back t
         loadExecutorAttempt(
           db,
           deriveDispatchAttemptId(runId, PARENT_STEP_ID, 1),
-        )?.executorFamily,
+        )?.executor,
       ).toBe("subworkflow");
 
       // Tick 1: the real deriver reads the parent run row + route config, resolves

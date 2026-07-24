@@ -8,7 +8,7 @@ import {
   GOAL_LOOP_GLOBAL_DEFAULT_SELECTION,
   decideGoalLoopRound,
   resolveGoalLoopRoundSelection,
-} from "../src/core/executors/goal-loop/executor.js";
+} from "../src/core/executors/agent-loop/executor.js";
 import {
   insertExecutorAttempt,
   insertExecutorCheckpoint,
@@ -52,7 +52,7 @@ afterEach(() => {
   }
 });
 
-function openExecutorDb(family: ExecutorAttemptRecord["executorFamily"]): {
+function openExecutorDb(executor: ExecutorAttemptRecord["executor"]): {
   db: MomentumDb;
   attempt: ExecutorAttemptRecord;
 } {
@@ -69,11 +69,11 @@ function openExecutorDb(family: ExecutorAttemptRecord["executorFamily"]): {
        VALUES ('run-1', 'step-1', 'implementation', 0, 1, 1)`,
   ).run();
   const attempt: ExecutorAttemptRecord = {
-    attemptId: `inv-${family}`,
+    attemptId: `inv-${executor}`,
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: family,
+    executor,
     state: "running",
     attemptNumber: 1,
     startedAt: 1,
@@ -94,7 +94,7 @@ function emptyRound(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     attemptNumber: attempt.attemptNumber,
     roundIndex: 0,
     state,
@@ -206,12 +206,12 @@ describe("executor SDK core contract", () => {
   ])(
     "settles a human gate with $label as executor_contract_invalid",
     async ({ allowedActions, recommendedAction }) => {
-      const { db, attempt } = openExecutorDb("one-shot");
+      const { db, attempt } = openExecutorDb("agent-once");
       const result = await driveExecutorTicks({
         db,
         attemptId: attempt.attemptId,
         executor: {
-          name: "one-shot",
+          name: "agent-once",
           configSchema: {
             type: "object",
             properties: {},
@@ -309,7 +309,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("passes executors a frozen facade without daemon decision authority", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -335,7 +335,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("revokes every executor write while the attempt waits for an operator", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -388,7 +388,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("enforces observation-only state authority at runtime", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -437,7 +437,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("uses the envelope clock for executor round timestamps", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     let clockCalls = 0;
     const envelope = createDurableExecutorEnvelope({
       db,
@@ -465,7 +465,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects malformed round starts and observations without coercion", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -491,7 +491,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects malformed progress and child evidence before any durable write", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -560,7 +560,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("atomically records a round observation with its checkpoint batch", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -608,7 +608,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects a second round while its predecessor is active", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -629,7 +629,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects gapped indexes and attempt identity mismatches", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -655,7 +655,7 @@ describe("executor SDK core contract", () => {
   it("continues migrated one-based round indexes at max plus one", () => {
     // Migrated SDK-05 dispatch rounds are 1-based, so the next expected index
     // is max(roundIndex) + 1 across the step, never the round count.
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     insertExecutorRound(db, {
       ...emptyRound(attempt, "manual_recovery_required"),
       roundId: `${attempt.attemptId}::round-1`,
@@ -688,7 +688,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects every executor evidence path after a round becomes terminal", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -753,7 +753,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects every executor write after the attempt becomes terminal", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -826,7 +826,7 @@ describe("executor SDK core contract", () => {
     ];
 
     for (const write of writes) {
-      expect(write).toThrow("attempt inv-one-shot is terminal");
+      expect(write).toThrow("attempt inv-agent-once is terminal");
     }
     expect(loadExecutorRound(db, round.roundId)?.state).toBe(
       "mirroring_external_state",
@@ -834,7 +834,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rolls back round classification and its checkpoint when attempt settlement fails", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -881,7 +881,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects daemon decisions with inconsistent attempt state before writing", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -914,7 +914,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects daemon decisions with incompatible round state before writing", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -947,7 +947,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("rejects classification-inconsistent recovery codes and human gates", () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1036,7 +1036,7 @@ describe("executor SDK core contract", () => {
   });
 
   it("allocates executor-owned round and checkpoint identities around migrated collisions", () => {
-    const { db, attempt: priorAttempt } = openExecutorDb("goal-loop");
+    const { db, attempt: priorAttempt } = openExecutorDb("agent-loop");
     const currentAttempt: ExecutorAttemptRecord = {
       ...priorAttempt,
       attemptId: "run-1::step-1::attempt-2",
@@ -1133,7 +1133,7 @@ function daemonCheckpoint(roundId: string, sequence: number) {
 
 describe("single-shot built-in SDK proof", () => {
   it("implements the same contract and leaves classification to its host", async () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1157,7 +1157,7 @@ describe("single-shot built-in SDK proof", () => {
     const executor: Executor<
       SingleShotExecutorConfig,
       SingleShotExecutorHostBindings
-    > = new SingleShotExecutor("one-shot", () => ({
+    > = new SingleShotExecutor("agent-once", () => ({
       outcome: { ok: true },
       result,
       resultDigest: "sha256:result",
@@ -1176,7 +1176,7 @@ describe("single-shot built-in SDK proof", () => {
           workflowRunId: attempt.workflowRunId,
           stepRunId: attempt.stepRunId,
           stepKey: attempt.stepKey,
-          family: "one-shot",
+          executor: "agent-once",
           attemptNumber: attempt.attemptNumber,
           inputDigest: "sha256:input",
           artifactRoot: "/artifacts/round-0",
@@ -1215,18 +1215,18 @@ describe("single-shot built-in SDK proof", () => {
         stage: "late",
         detail: null,
       }),
-    ).toThrow("attempt inv-one-shot is terminal");
+    ).toThrow("attempt inv-agent-once is terminal");
   });
 
   it("rejects malformed successful runner results before persisting evidence", async () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
       now: () => 30,
     });
     const roundId = `${attempt.attemptId}::round::0`;
-    const executor = new SingleShotExecutor("one-shot", () => ({
+    const executor = new SingleShotExecutor("agent-once", () => ({
       outcome: { ok: true },
       result: { success: true } as RunnerResult,
       resultDigest: "sha256:malformed",
@@ -1246,7 +1246,7 @@ describe("single-shot built-in SDK proof", () => {
             workflowRunId: attempt.workflowRunId,
             stepRunId: attempt.stepRunId,
             stepKey: attempt.stepKey,
-            family: "one-shot",
+            executor: "agent-once",
             attemptNumber: attempt.attemptNumber,
             inputDigest: "sha256:input",
             artifactRoot: "/artifacts/round-0",
@@ -1258,7 +1258,7 @@ describe("single-shot built-in SDK proof", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(
-      "Invalid one-shot mechanism output: Runner result `summary` must be a non-empty string.",
+      "Invalid agent-once mechanism output: Runner result `summary` must be a non-empty string.",
     );
 
     expect(loadExecutorRound(db, roundId)?.state).toBe("running");
@@ -1309,7 +1309,7 @@ describe("single-shot built-in SDK proof", () => {
       "evidence.changedFiles must be an array of strings",
     ],
   ])("rejects %s before persistence", async (_name, mechanism, message) => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1317,7 +1317,7 @@ describe("single-shot built-in SDK proof", () => {
     });
     const roundId = `${attempt.attemptId}::round::0`;
     const executor = new SingleShotExecutor(
-      "one-shot",
+      "agent-once",
       () => mechanism as never,
     );
 
@@ -1332,7 +1332,7 @@ describe("single-shot built-in SDK proof", () => {
             workflowRunId: attempt.workflowRunId,
             stepRunId: attempt.stepRunId,
             stepKey: attempt.stepKey,
-            family: "one-shot",
+            executor: "agent-once",
             attemptNumber: attempt.attemptNumber,
             inputDigest: "sha256:input",
             artifactRoot: "/artifacts/round-0",
@@ -1383,7 +1383,7 @@ describe("single-shot built-in SDK proof", () => {
             workflowRunId: attempt.workflowRunId,
             stepRunId: attempt.stepRunId,
             stepKey: attempt.stepKey,
-            family: "script",
+            executor: "script",
             attemptNumber: attempt.attemptNumber,
             inputDigest: "sha256:input",
             artifactRoot: "/artifacts/round-0",
@@ -1402,7 +1402,7 @@ describe("single-shot built-in SDK proof", () => {
   });
 
   it("isolates durable dispatch binding from runner mutations", async () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1417,7 +1417,7 @@ describe("single-shot built-in SDK proof", () => {
         workflowRunId: attempt.workflowRunId,
         stepRunId: attempt.stepRunId,
         stepKey: attempt.stepKey,
-        family: "one-shot" as const,
+        executor: "agent-once" as const,
         attemptNumber: attempt.attemptNumber,
         inputDigest: "sha256:input",
         artifactRoot: "/artifacts/round-0",
@@ -1425,7 +1425,7 @@ describe("single-shot built-in SDK proof", () => {
         startedAt: 10,
       },
     };
-    const first = new SingleShotExecutor("one-shot", (_round, context) => {
+    const first = new SingleShotExecutor("agent-once", (_round, context) => {
       expect(() => {
         (context.config.agent as { harness?: string }).harness = "mutated";
       }).toThrow();
@@ -1462,7 +1462,7 @@ describe("single-shot built-in SDK proof", () => {
     });
 
     let reran = false;
-    const resumed = await new SingleShotExecutor("one-shot", () => {
+    const resumed = await new SingleShotExecutor("agent-once", () => {
       reran = true;
       throw new Error("mechanism must not rerun");
     }).tick({
@@ -1478,7 +1478,7 @@ describe("single-shot built-in SDK proof", () => {
   });
 
   it("resumes daemon classification from a durable mechanism checkpoint", async () => {
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1492,7 +1492,7 @@ describe("single-shot built-in SDK proof", () => {
         workflowRunId: attempt.workflowRunId,
         stepRunId: attempt.stepRunId,
         stepKey: attempt.stepKey,
-        family: "one-shot" as const,
+        executor: "agent-once" as const,
         attemptNumber: attempt.attemptNumber,
         inputDigest: "sha256:input",
         artifactRoot: "/artifacts/round-0",
@@ -1500,7 +1500,7 @@ describe("single-shot built-in SDK proof", () => {
         startedAt: 10,
       },
     };
-    const first = new SingleShotExecutor("one-shot", () => ({
+    const first = new SingleShotExecutor("agent-once", () => ({
       outcome: { ok: true },
       result: {
         success: true,
@@ -1549,7 +1549,7 @@ describe("single-shot built-in SDK proof", () => {
       start: { ...hostBindings.start, attemptNumber: 2 },
     };
     await expect(
-      new SingleShotExecutor("one-shot", () => {
+      new SingleShotExecutor("agent-once", () => {
         throw new Error("changed dispatch must not rerun");
       }).tick({
         state: envelope.snapshot(),
@@ -1561,7 +1561,7 @@ describe("single-shot built-in SDK proof", () => {
     ).rejects.toThrow("changed dispatch inputs");
 
     let reran = false;
-    const resumed = new SingleShotExecutor("one-shot", () => {
+    const resumed = new SingleShotExecutor("agent-once", () => {
       reran = true;
       throw new Error("mechanism must not rerun");
     });
@@ -1603,7 +1603,7 @@ describe("single-shot built-in SDK proof", () => {
     // SDK-05 recorded `invocation outcome: ...` details and the migration
     // preserves checkpoint payloads verbatim; the resume parser must accept the
     // historical prefix while new checkpoints emit the attempt vocabulary.
-    const { db, attempt } = openExecutorDb("one-shot");
+    const { db, attempt } = openExecutorDb("agent-once");
     const envelope = createDurableExecutorEnvelope({
       db,
       attemptId: attempt.attemptId,
@@ -1617,7 +1617,7 @@ describe("single-shot built-in SDK proof", () => {
         workflowRunId: attempt.workflowRunId,
         stepRunId: attempt.stepRunId,
         stepKey: attempt.stepKey,
-        family: "one-shot" as const,
+        executor: "agent-once" as const,
         attemptNumber: attempt.attemptNumber,
         inputDigest: "sha256:input",
         artifactRoot: "/artifacts/round-0",
@@ -1625,7 +1625,7 @@ describe("single-shot built-in SDK proof", () => {
         startedAt: 10,
       },
     };
-    await new SingleShotExecutor("one-shot", () => ({
+    await new SingleShotExecutor("agent-once", () => ({
       outcome: { ok: true },
       result: {
         success: true,
@@ -1656,7 +1656,7 @@ describe("single-shot built-in SDK proof", () => {
     ).run(roundId);
 
     let reran = false;
-    const tick = await new SingleShotExecutor("one-shot", () => {
+    const tick = await new SingleShotExecutor("agent-once", () => {
       reran = true;
       throw new Error("mechanism must not rerun");
     }).tick({

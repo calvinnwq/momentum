@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   finalizeWorkflowStep,
-  finalizeWorkflowStepFromResultFile
+  finalizeWorkflowStepFromResultFile,
 } from "../src/core/executors/shared/step-finalize.js";
 import type { CommitIntent } from "../src/core/executors/runner/types.js";
 
 // Covers the NGX-494 shared finalization seam (`step-finalize.ts`), the
 // workflow/runtime-owned home of the verify -> commit / reset transaction that
-// the goal-loop and single-shot executor families consume directly. The
+// the agent-loop and single-shot executors consume directly. The
 // M9-named `live-step/finalize.ts` back-compat alias was deleted with the M9
 // live-step lane under NGX-599, so the neutral seam is the only surface.
 //
@@ -44,7 +44,7 @@ function baseIntent(): CommitIntent {
     scope: "step",
     subject: "finalize step",
     body: "",
-    breaking: false
+    breaking: false,
   };
 }
 
@@ -57,7 +57,7 @@ describe("finalizeWorkflowStep (shared seam, no-git decision paths)", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 5,
-      verificationLogPath: "/tmp/verify.log"
+      verificationLogPath: "/tmp/verify.log",
     });
     expect(result.outcome).toBe("invalid_input");
     if (result.outcome === "invalid_input") {
@@ -73,7 +73,7 @@ describe("finalizeWorkflowStep (shared seam, no-git decision paths)", () => {
       commitIntent: baseIntent(),
       verificationCommands: [],
       verificationTimeoutSec: 5,
-      verificationLogPath: "/tmp/verify.log"
+      verificationLogPath: "/tmp/verify.log",
     });
     expect(result.outcome).toBe("invalid_input");
     if (result.outcome === "invalid_input") {
@@ -90,7 +90,7 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
       resultFilePath: "   ",
       verificationCommands: [],
       verificationTimeoutSec: 5,
-      verificationLogPath: "/tmp/verify.log"
+      verificationLogPath: "/tmp/verify.log",
     });
     expect(result.outcome).toBe("invalid_input");
   });
@@ -104,14 +104,14 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
       resultFilePath,
       verificationCommands: [],
       verificationTimeoutSec: 5,
-      verificationLogPath: path.join(dir, "verify.log")
+      verificationLogPath: path.join(dir, "verify.log"),
     });
     expect(result.outcome).toBe("result_missing");
     if (result.outcome === "result_missing") {
       // The durable "live step ..." contract wording is preserved verbatim
       // across the relocation.
       expect(result.error).toBe(
-        `live step result file was not written at ${resultFilePath}.`
+        `live step result file was not written at ${resultFilePath}.`,
       );
       expect(result.resultFilePath).toBe(resultFilePath);
     }
@@ -127,7 +127,7 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
       resultFilePath,
       verificationCommands: [],
       verificationTimeoutSec: 5,
-      verificationLogPath: path.join(dir, "verify.log")
+      verificationLogPath: path.join(dir, "verify.log"),
     });
     expect(result.outcome).toBe("result_invalid");
     if (result.outcome === "result_invalid") {
@@ -137,20 +137,20 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
   });
 });
 
-describe("executor-family finalization ownership boundary (NGX-494 AC #1, NGX-599)", () => {
-  // NGX-494 AC #1 disentangled the goal-loop family from the M9-named
+describe("executor finalization ownership boundary (NGX-494 AC #1, NGX-599)", () => {
+  // NGX-494 AC #1 disentangled the agent-loop family from the M9-named
   // finalization alias; NGX-599 deleted the M9 live-step lane and migrated the
-  // single-shot family too. Every executor family must reach the shared
+  // single-shot executor too. Every executor must reach the shared
   // verify -> commit / reset transaction through the neutral
   // `shared/step-finalize.ts` seam; the deleted `live-step/finalize.ts` alias
   // path must never come back.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "..");
   const seamConsumers = [
-    "src/core/executors/goal-loop/mechanism.ts",
-    "src/core/executors/goal-loop/executor.ts",
-    "src/core/executors/goal-loop/orchestrator.ts",
-    "src/core/executors/single-shot/mechanism.ts"
+    "src/core/executors/agent-loop/mechanism.ts",
+    "src/core/executors/agent-loop/executor.ts",
+    "src/core/executors/agent-loop/orchestrator.ts",
+    "src/core/executors/single-shot/mechanism.ts",
   ];
 
   for (const relative of seamConsumers) {
@@ -158,11 +158,11 @@ describe("executor-family finalization ownership boundary (NGX-494 AC #1, NGX-59
       const source = fs.readFileSync(path.join(repoRoot, relative), "utf8");
       expect(
         source.includes('"../shared/step-finalize.js"'),
-        `${relative} should import the finalization seam from "../shared/step-finalize.js"`
+        `${relative} should import the finalization seam from "../shared/step-finalize.js"`,
       ).toBe(true);
       expect(
         source.includes('"../live-step/finalize.js"'),
-        `${relative} must not import from the M9 "../live-step/finalize.js" alias as an ownership boundary`
+        `${relative} must not import from the M9 "../live-step/finalize.js" alias as an ownership boundary`,
       ).toBe(false);
     });
   }

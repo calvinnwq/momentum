@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { renderGoalLoopRoundPrompt } from "../src/core/executors/goal-loop/prompt.js";
+import { renderGoalLoopRoundPrompt } from "../src/core/executors/agent-loop/prompt.js";
 
 describe("renderGoalLoopRoundPrompt", () => {
   it("renders a deterministic native round prompt with source context, prior evidence, and the runner result contract", () => {
     const prompt = renderGoalLoopRoundPrompt({
-      objective: "Implement native goal-loop prompt and result handling.",
+      objective: "Implement native agent-loop prompt and result handling.",
       resultPath: "/tmp/momentum/round-2/result.json",
       round: {
         workflowRunId: "run-1",
@@ -30,7 +30,7 @@ describe("renderGoalLoopRoundPrompt", () => {
         },
       ],
       verificationCommands: [
-        "pnpm vitest run --config vitest.fast.config.ts test/goal-loop-prompt.test.ts",
+        "pnpm vitest run --config vitest.fast.config.ts test/agent-loop-prompt.test.ts",
         "pnpm typecheck",
       ],
       acceptanceRequirements: [
@@ -52,9 +52,9 @@ describe("renderGoalLoopRoundPrompt", () => {
       ],
     });
 
-    expect(prompt).toContain("# Momentum native goal-loop round prompt");
+    expect(prompt).toContain("# Momentum native agent-loop round prompt");
     expect(prompt).toContain(
-      "- objective: Implement native goal-loop prompt and result handling.",
+      "- objective: Implement native agent-loop prompt and result handling.",
     );
     expect(prompt).toContain("- issue_scope: NGX-569");
     expect(prompt).toContain("- round_index: 1");
@@ -85,10 +85,10 @@ describe("renderGoalLoopRoundPrompt", () => {
     expect(prompt).toContain("Acceptance criteria from the tracker.");
     expect(prompt).toContain("```json");
     expect(prompt).toMatchInlineSnapshot(`
-      "# Momentum native goal-loop round prompt
+      "# Momentum native agent-loop round prompt
 
       ## Objective
-      - objective: Implement native goal-loop prompt and result handling.
+      - objective: Implement native agent-loop prompt and result handling.
       - issue_scope: NGX-569
 
       ## Round identity
@@ -129,7 +129,7 @@ describe("renderGoalLoopRoundPrompt", () => {
       - Invalid or missing result JSON routes to recovery evidence.
 
       Verification commands:
-      - pnpm vitest run --config vitest.fast.config.ts test/goal-loop-prompt.test.ts
+      - pnpm vitest run --config vitest.fast.config.ts test/agent-loop-prompt.test.ts
       - pnpm typecheck
 
       Stop requirements:

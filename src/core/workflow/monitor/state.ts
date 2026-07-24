@@ -13,7 +13,7 @@
  * `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`,
  * `failed_external_side_effect_step`. The last splits off the subset of
  * `failed_required_step` where the failed required step is an external-side-
- * effect tail step (merge-cleanup / linear-refresh): its child may already have
+ * effect tail step (merge-cleanup / tracker-refresh): its child may already have
  * pushed a branch, merged a PR, or written the tracker before exiting non-zero,
  * so the recovery steers operators to verify external state and reconcile via
  * `clear-recovery` rather than the `rerun_failed_step` that an ordinary failed
@@ -47,7 +47,7 @@ import {
   type WorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepRecord,
-  type WorkflowStepState
+  type WorkflowStepState,
 } from "../run/reducer.js";
 
 export const WORKFLOW_MONITOR_NEXT_ACTION_CODES = [
@@ -57,7 +57,7 @@ export const WORKFLOW_MONITOR_NEXT_ACTION_CODES = [
   "resume_running",
   "investigate_stale",
   "clear_recovery",
-  "rerun_failed_step"
+  "rerun_failed_step",
 ] as const;
 export type WorkflowMonitorNextActionCode =
   (typeof WORKFLOW_MONITOR_NEXT_ACTION_CODES)[number];
@@ -68,7 +68,7 @@ export const WORKFLOW_MONITOR_RECOVERY_CODES = [
   "manual_recovery_lease",
   "monitor_drift_stale",
   "failed_required_step",
-  "failed_external_side_effect_step"
+  "failed_external_side_effect_step",
 ] as const;
 export type WorkflowMonitorRecoveryCode =
   (typeof WORKFLOW_MONITOR_RECOVERY_CODES)[number];
@@ -82,9 +82,7 @@ export type WorkflowMonitorAdvisory = {
 };
 
 export type WorkflowMonitorCheckpointSource =
-  | "ledger"
-  | "approval"
-  | "lease-heartbeat";
+  "ledger" | "approval" | "lease-heartbeat";
 
 export type WorkflowMonitorCheckpoint = {
   stepId: string;
@@ -172,7 +170,7 @@ export type WorkflowMonitorInput = {
 const DEFAULT_CHECKPOINT_STALE_MS = 30 * 60 * 1000;
 
 export function deriveWorkflowMonitorState(
-  input: WorkflowMonitorInput
+  input: WorkflowMonitorInput,
 ): WorkflowMonitorState {
   if (typeof input.runId !== "string" || input.runId.length === 0) {
     throw new Error("deriveWorkflowMonitorState: runId is required");
@@ -183,14 +181,14 @@ export function deriveWorkflowMonitorState(
   const graceMs = input.graceMs ?? 0;
   if (!Number.isFinite(graceMs) || graceMs < 0) {
     throw new Error(
-      "deriveWorkflowMonitorState: graceMs must be a non-negative finite number"
+      "deriveWorkflowMonitorState: graceMs must be a non-negative finite number",
     );
   }
   const checkpointStaleMs =
     input.checkpointStaleMs ?? DEFAULT_CHECKPOINT_STALE_MS;
   if (!Number.isFinite(checkpointStaleMs) || checkpointStaleMs < 0) {
     throw new Error(
-      "deriveWorkflowMonitorState: checkpointStaleMs must be a non-negative finite number"
+      "deriveWorkflowMonitorState: checkpointStaleMs must be a non-negative finite number",
     );
   }
 
@@ -199,17 +197,17 @@ export function deriveWorkflowMonitorState(
     holder: lease.holder,
     classification: classifyWorkflowLease(lease, {
       now: input.now,
-      graceMs
+      graceMs,
     }),
     expiresAt: lease.expiresAt,
     heartbeatAt: lease.heartbeatAt,
-    releasedAt: lease.releasedAt
+    releasedAt: lease.releasedAt,
   }));
 
   const runState = deriveWorkflowRunState(input.steps, {
     leases: input.leases,
     now: input.now,
-    graceMs
+    graceMs,
   });
   const terminal = isTerminalRunState(runState);
   const blocked = runState === "blocked";
@@ -218,7 +216,7 @@ export function deriveWorkflowMonitorState(
   const monitorDrift = classifyMonitorDrift(
     input.monitor ?? null,
     runState,
-    activeStep
+    activeStep,
   );
   const lastCheckpoint = input.lastCheckpoint ?? null;
 
@@ -226,7 +224,7 @@ export function deriveWorkflowMonitorState(
     lastCheckpoint,
     activeStep,
     input.now,
-    checkpointStaleMs
+    checkpointStaleMs,
   );
   const hasFreshDispatchLease = hasFreshDispatchEvidence(leaseViews);
 
@@ -239,7 +237,7 @@ export function deriveWorkflowMonitorState(
     hasFreshDispatchLease,
     lastCheckpoint,
     monitorDrift,
-    steps: input.steps
+    steps: input.steps,
   });
 
   const nextAction = decideNextAction({
@@ -249,7 +247,7 @@ export function deriveWorkflowMonitorState(
     checkpointFresh,
     hasFreshDispatchLease,
     steps: input.steps,
-    leases: leaseViews
+    leases: leaseViews,
   });
 
   return {
@@ -263,12 +261,12 @@ export function deriveWorkflowMonitorState(
     monitorDrift,
     nextAction,
     needsRecoveryArtifact: recovery !== null,
-    recovery
+    recovery,
   };
 }
 
 function pickActiveStep(
-  steps: readonly WorkflowStepRecord[]
+  steps: readonly WorkflowStepRecord[],
 ): WorkflowMonitorActiveStep | null {
   if (steps.length === 0) return null;
   const sorted = [...steps].sort((a, b) => a.order - b.order);
@@ -291,14 +289,14 @@ function toActive(step: WorkflowStepRecord): WorkflowMonitorActiveStep {
     kind: step.kind,
     state: step.state,
     order: step.order,
-    required: step.required
+    required: step.required,
   };
 }
 
 function classifyMonitorDrift(
   monitor: WorkflowMonitorAdvisory | null,
   actualState: WorkflowRunState,
-  activeStep: WorkflowMonitorActiveStep | null
+  activeStep: WorkflowMonitorActiveStep | null,
 ): WorkflowMonitorDrift | null {
   if (monitor === null) return null;
   const advisoryTerminal = monitor.terminal;
@@ -329,7 +327,7 @@ function classifyMonitorDrift(
     advisoryTerminal,
     actualState,
     drifted: reason !== null,
-    reason
+    reason,
   };
 }
 
@@ -337,7 +335,7 @@ function isCheckpointFresh(
   checkpoint: WorkflowMonitorCheckpoint | null,
   activeStep: WorkflowMonitorActiveStep | null,
   now: number,
-  staleMs: number
+  staleMs: number,
 ): boolean {
   if (checkpoint === null) return false;
   if (activeStep === null) return false;
@@ -346,7 +344,7 @@ function isCheckpointFresh(
 }
 
 function hasFreshDispatchEvidence(
-  leases: readonly WorkflowMonitorLeaseView[]
+  leases: readonly WorkflowMonitorLeaseView[],
 ): boolean {
   for (const lease of leases) {
     if (lease.leaseKind === "monitor") continue;
@@ -367,7 +365,9 @@ type RecoveryInput = {
   steps: readonly WorkflowStepRecord[];
 };
 
-function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null {
+function classifyRecovery(
+  input: RecoveryInput,
+): WorkflowMonitorRecovery | null {
   if (input.runState === "blocked") {
     const stepId =
       input.activeStep?.stepId ?? findStepIdForManualRecoveryLease(input.steps);
@@ -375,26 +375,24 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
       code: "manual_recovery_lease",
       message:
         "An outstanding manual-recovery-required lease is blocking this run. Inspect leases and clear recovery before allowing new claims.",
-      stepId
+      stepId,
     };
   }
   if (input.runState === "failed") {
-    const failed = input.steps.find(
-      (s) => s.state === "failed" && s.required
-    );
+    const failed = input.steps.find((s) => s.state === "failed" && s.required);
     if (failed && isExternalSideEffectTailStepKind(failed.kind)) {
       return {
         code: "failed_external_side_effect_step",
         message:
           "A required external-side-effect tail step finalized in failed state after it may have already pushed a branch, merged a pull request, or written the tracker. Verify the remote, pull request, and tracker state, then reconcile via `momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>` - do not blindly re-run the step, which could double-merge or re-write.",
-        stepId: failed.stepId
+        stepId: failed.stepId,
       };
     }
     return {
       code: "failed_required_step",
       message:
         "A required step finalized in failed state. Inspect the executor log / artifact tree and decide whether to retry or mark for manual recovery.",
-      stepId: failed?.stepId ?? null
+      stepId: failed?.stepId ?? null,
     };
   }
   if (input.activeStep?.state === "running") {
@@ -402,14 +400,15 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
       if (input.monitorDrift?.drifted) {
         return {
           code: "monitor_drift_stale",
-          message: "Step is running with fresh evidence, but the monitor advisory disagrees with the substrate state. The monitor snapshot may be stale.",
-          stepId: input.activeStep.stepId
+          message:
+            "Step is running with fresh evidence, but the monitor advisory disagrees with the substrate state. The monitor snapshot may be stale.",
+          stepId: input.activeStep.stepId,
         };
       }
       return null;
     }
     const hasDispatchLeaseRecorded = input.leases.some(
-      (l) => l.leaseKind !== "monitor"
+      (l) => l.leaseKind !== "monitor",
     );
     return {
       code: hasDispatchLeaseRecorded
@@ -418,34 +417,35 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
       message: hasDispatchLeaseRecorded
         ? "Step is running but the dispatch lease is stale and no recent checkpoint has been observed. The managed child may have died silently."
         : "Step is running but no dispatch lease has ever been recorded and no recent checkpoint exists. The step may be a ghost: a managed child died before any durable progress was recorded.",
-      stepId: input.activeStep.stepId
+      stepId: input.activeStep.stepId,
     };
   }
   if (input.runState === "running" && input.activeStep === null) {
     const orphan = input.leases.find(
-      (l) => l.classification !== "released" && l.leaseKind !== "monitor"
+      (l) => l.classification !== "released" && l.leaseKind !== "monitor",
     );
     if (orphan) {
       return {
         code: "stale_running_step",
         message:
           "All steps have finalized, but a non-monitor lease is still outstanding and is holding the run in running. Investigate the orphaned lease before clearing recovery.",
-        stepId: null
+        stepId: null,
       };
     }
   }
   if (!input.terminal && input.monitorDrift?.drifted) {
     return {
       code: "monitor_drift_stale",
-      message: "Monitor advisory disagrees with the substrate state. No other recovery condition applies, but the monitor snapshot may be stale.",
-      stepId: input.activeStep?.stepId ?? null
+      message:
+        "Monitor advisory disagrees with the substrate state. No other recovery condition applies, but the monitor snapshot may be stale.",
+      stepId: input.activeStep?.stepId ?? null,
     };
   }
   return null;
 }
 
 function findStepIdForManualRecoveryLease(
-  steps: readonly WorkflowStepRecord[]
+  steps: readonly WorkflowStepRecord[],
 ): string | null {
   const running = steps.find((s) => s.state === "running");
   if (running) return running.stepId;
@@ -471,7 +471,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       stepId: input.recovery?.stepId ?? input.activeStep?.stepId ?? null,
       leaseKind: null,
       detail:
-        "Run is blocked. Clear the manual recovery once the underlying cause has been resolved."
+        "Run is blocked. Clear the manual recovery once the underlying cause has been resolved.",
     };
   }
   if (input.runState === "failed") {
@@ -483,7 +483,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
         stepId: failedStep.stepId,
         leaseKind: null,
         detail:
-          "An external-side-effect tail step failed after it may have already merged the pull request or written the tracker. Verify the remote, pull request, and tracker state, then clear recovery to reconcile - do not re-run the step blindly."
+          "An external-side-effect tail step failed after it may have already merged the pull request or written the tracker. Verify the remote, pull request, and tracker state, then clear recovery to reconcile - do not re-run the step blindly.",
       };
     }
     return {
@@ -491,7 +491,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       stepId: failedStep?.stepId ?? null,
       leaseKind: failedStep ? leaseKindForStep(failedStep) : null,
       detail:
-        "A required step failed. Decide whether to retry the step or mark the run for manual recovery."
+        "A required step failed. Decide whether to retry the step or mark the run for manual recovery.",
     };
   }
   if (input.runState === "succeeded" || input.runState === "canceled") {
@@ -502,21 +502,21 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       detail:
         input.runState === "succeeded"
           ? "Run is terminally succeeded. No further action required."
-          : "Run is canceled. No further action required."
+          : "Run is canceled. No further action required.",
     };
   }
   const active = input.activeStep;
   if (active === null) {
     if (input.runState === "running") {
       const orphan = input.leases.find(
-        (l) => l.classification !== "released" && l.leaseKind !== "monitor"
+        (l) => l.classification !== "released" && l.leaseKind !== "monitor",
       );
       if (orphan) {
         return {
           code: "investigate_stale",
           stepId: null,
           leaseKind: orphan.leaseKind,
-          detail: `All steps have finalized but a ${orphan.leaseKind} lease held by ${orphan.holder} is still outstanding. Investigate the orphaned lease before clearing recovery.`
+          detail: `All steps have finalized but a ${orphan.leaseKind} lease held by ${orphan.holder} is still outstanding. Investigate the orphaned lease before clearing recovery.`,
         };
       }
     }
@@ -525,11 +525,14 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       stepId: null,
       leaseKind: null,
       detail:
-        "No steps recorded yet. Await plan import / approval to populate the run."
+        "No steps recorded yet. Await plan import / approval to populate the run.",
     };
   }
   if (active.state === "running") {
-    if (input.recovery !== null && input.recovery.code !== "monitor_drift_stale") {
+    if (
+      input.recovery !== null &&
+      input.recovery.code !== "monitor_drift_stale"
+    ) {
       return {
         code: "investigate_stale",
         stepId: active.stepId,
@@ -537,14 +540,14 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
         detail:
           input.recovery.code === "ghost_active_no_lease"
             ? "Running step has no dispatch lease and no recent checkpoint. Inspect the run directory and decide whether to recover or cancel."
-            : "Running step's dispatch lease is stale and no recent checkpoint has been observed. Inspect the run directory before forcing progress."
+            : "Running step's dispatch lease is stale and no recent checkpoint has been observed. Inspect the run directory before forcing progress.",
       };
     }
     return {
       code: "resume_running",
       stepId: active.stepId,
       leaseKind: leaseKindForStep(active),
-      detail: describeRunningStepResume(input)
+      detail: describeRunningStepResume(input),
     };
   }
   if (active.state === "approved") {
@@ -552,7 +555,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       code: "advance_to_step",
       stepId: active.stepId,
       leaseKind: leaseKindForStep(active),
-      detail: `Approved step "${active.stepId}" is the next step to dispatch.`
+      detail: `Approved step "${active.stepId}" is the next step to dispatch.`,
     };
   }
   if (active.state === "blocked") {
@@ -560,19 +563,19 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       code: "clear_recovery",
       stepId: active.stepId,
       leaseKind: null,
-      detail: `Step "${active.stepId}" is blocked. Clear the manual recovery once the underlying cause is resolved.`
+      detail: `Step "${active.stepId}" is blocked. Clear the manual recovery once the underlying cause is resolved.`,
     };
   }
   return {
     code: "await_approval",
     stepId: active.stepId,
     leaseKind: leaseKindForStep(active),
-    detail: `Step "${active.stepId}" is pending approval before it can advance.`
+    detail: `Step "${active.stepId}" is pending approval before it can advance.`,
   };
 }
 
 function leaseKindForStep(
-  _step: { kind: WorkflowStepKind } | WorkflowStepRecord
+  _step: { kind: WorkflowStepKind } | WorkflowStepRecord,
 ): WorkflowLeaseKind {
   // Every coding-workflow step dispatches through the managed-step lease in
   // the workflow-run contract; monitor / dispatch leases live around the step boundary,
@@ -584,7 +587,7 @@ function describeRunningStepResume(
   input: Pick<
     NextActionInput,
     "checkpointFresh" | "hasFreshDispatchLease" | "recovery"
-  >
+  >,
 ): string {
   if (input.recovery?.code === "monitor_drift_stale") {
     return "Step is running with fresh evidence, but monitor advisory disagrees with substrate state. Allow it to continue while flagging the drift.";

@@ -89,7 +89,7 @@ describe("coding workflow structural preflight", () => {
 
   it("refuses unsupported route steps with stable compact evidence fields", () => {
     const result = preflightCodingWorkflowRouteSteps({
-      "linear-refresh": { model: "opus" },
+      "tracker-refresh": { model: "opus" },
     });
 
     expect(result.ok).toBe(false);
@@ -99,12 +99,12 @@ describe("coding workflow structural preflight", () => {
         checkId: "route.steps",
         status: "failed",
         severity: "error",
-        path: "route.steps.linear-refresh",
-        key: "linear-refresh",
+        path: "route.steps.tracker-refresh",
+        key: "tracker-refresh",
         message:
-          'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
+          'Coding route step "tracker-refresh" is not configurable; supported steps: implementation, postflight, validate, merge-cleanup.',
         recommendedAction:
-          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key.",
+          "Use route.steps only for implementation, postflight, validate, or merge-cleanup, or remove the unsupported step key.",
       },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
@@ -164,7 +164,7 @@ describe("coding workflow structural preflight", () => {
       repoPath: "/tmp/momentum-repo",
       objective: "Validate the structural run shape",
       now: 123,
-      approvalBoundary: "through-linear-refresh",
+      approvalBoundary: "through-tracker-refresh",
     });
 
     expect(result.ok).toBe(false);
@@ -184,6 +184,37 @@ describe("coding workflow structural preflight", () => {
     const evidence = result.evidence[0];
     if (evidence === undefined) throw new Error("expected preflight evidence");
     expect(Object.keys(evidence)).toEqual(STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS);
+  });
+
+  it("refuses retired approval-boundary spellings as run-start input", () => {
+    // Pre-1.0 surface break: legacy boundary INPUT spellings are refused;
+    // only frozen workflow_approvals rows keep the old spellings.
+    for (const legacyBoundary of ["no-mistakes", "through-no-mistakes"]) {
+      const result = preflightCodingWorkflowRunStartInput({
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId: "run-shape-legacy-boundary",
+        repoPath: "/tmp/momentum-repo",
+        objective: "Refuse legacy approval boundary spellings",
+        now: 123,
+        approvalBoundary: legacyBoundary,
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected failed preflight");
+      expect(result.evidence).toEqual([
+        {
+          checkId: "workflow.run_shape",
+          status: "failed",
+          severity: "error",
+          path: "approvalBoundary",
+          key: "approvalBoundary",
+          message:
+            "Approval boundary is not a known workflow approval boundary.",
+          recommendedAction:
+            "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.",
+        },
+      ]);
+    }
   });
 
   it("refuses blank coding issue-scope identifiers with compact run-shape evidence", () => {
@@ -481,10 +512,10 @@ describe("coding workflow structural preflight", () => {
     ]);
   });
 
-  it("refuses no-mistakes wrapper config without an explicit runner profile", () => {
+  it("refuses validate wrapper config without an explicit runner profile", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
         },
@@ -498,10 +529,10 @@ describe("coding workflow structural preflight", () => {
         checkId: "wrapper.config",
         status: "failed",
         severity: "error",
-        path: "wrapper.config.steps.no-mistakes.runner_profile",
+        path: "wrapper.config.steps.validate.runner_profile",
         key: "runner_profile",
         message:
-          "Wrapper config `runner_profile` is required for the no-mistakes step.",
+          "Wrapper config `runner_profile` is required for the validate step.",
         recommendedAction:
           'Add a no-mistakes runner_profile with interface="axi", stdin="closed", agent, required_env, and agent_path.',
       },
@@ -511,7 +542,37 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
-  it("returns compact passed evidence for valid no-mistakes runner profiles", () => {
+  it("returns compact passed evidence for valid validate runner profiles", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        validate: {
+          command: "/bin/sh",
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: {
+            interface: "axi",
+            stdin: "closed",
+            agent: "codex",
+            required_env: ["HOME", "CODEX_HOME", "PATH"],
+            agent_path: "/tmp/codex-runner",
+          },
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected passed preflight");
+    expect(result.config.steps["validate"]?.noMistakesRunnerProfile).toEqual({
+      interface: "axi",
+      stdin: "closed",
+      agent: "codex",
+      requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
+      agentPath: "/tmp/codex-runner",
+    });
+  });
+
+  it("accepts a legacy steps.no-mistakes wrapper key and normalizes it to validate", () => {
+    // Deliberate legacy seed: existing user wrapper configs may still key the
+    // validate step by its retired `no-mistakes` spelling.
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
         "no-mistakes": {
@@ -530,21 +591,19 @@ describe("coding workflow structural preflight", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected passed preflight");
-    expect(result.config.steps["no-mistakes"]?.noMistakesRunnerProfile).toEqual(
-      {
-        interface: "axi",
-        stdin: "closed",
-        agent: "codex",
-        requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
-        agentPath: "/tmp/codex-runner",
-      },
-    );
+    expect(result.config.steps["validate"]?.noMistakesRunnerProfile).toEqual({
+      interface: "axi",
+      stdin: "closed",
+      agent: "codex",
+      requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
+      agentPath: "/tmp/codex-runner",
+    });
   });
 
-  it("refuses no-mistakes runner profiles with required env outside env_allow", () => {
+  it("refuses validate runner profiles with required env outside env_allow", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           env_allow: ["PATH", "HOME"],
           runner_profile: {
@@ -565,12 +624,12 @@ describe("coding workflow structural preflight", () => {
         checkId: "wrapper.config",
         status: "failed",
         severity: "error",
-        path: "wrapper.config.steps.no-mistakes.env_allow",
+        path: "wrapper.config.steps.validate.env_allow",
         key: "env_allow",
         message:
           "Wrapper config `env_allow` must include runner_profile.required_env entries: CODEX_HOME.",
         recommendedAction:
-          'Add "CODEX_HOME" to wrapper.config.steps.no-mistakes.env_allow so the runner profile environment can reach no-mistakes.',
+          'Add "CODEX_HOME" to wrapper.config.steps.validate.env_allow so the runner profile environment can reach no-mistakes.',
       },
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(
@@ -578,10 +637,10 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
-  it("refuses no-mistakes runner profiles with non-absolute agent paths", () => {
+  it("refuses validate runner profiles with non-absolute agent paths", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
-        "no-mistakes": {
+        validate: {
           command: "/bin/sh",
           env_allow: ["PATH", "HOME", "CODEX_HOME"],
           runner_profile: {
@@ -598,10 +657,10 @@ describe("coding workflow structural preflight", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected failed preflight");
     expect(result.evidence[0]).toMatchObject({
-      path: "wrapper.config.steps.no-mistakes.runner_profile.agent_path",
+      path: "wrapper.config.steps.validate.runner_profile.agent_path",
       key: "agent_path",
       recommendedAction:
-        "Set wrapper.config.steps.no-mistakes.runner_profile.agent_path to an absolute executable path.",
+        "Set wrapper.config.steps.validate.runner_profile.agent_path to an absolute executable path.",
     });
     expect(Object.keys(result.evidence[0])).toEqual(
       STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,

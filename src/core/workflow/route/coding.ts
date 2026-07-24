@@ -86,15 +86,15 @@ export const CODING_ROUTE_STEPS_KEY = "steps";
 /**
  * The coding-workflow steps that accept operator route/config overrides - the
  * steps that are currently operationally meaningful for harness/model/effort
- * selection (implementation, postflight, no-mistakes, merge-cleanup). `preflight`
- * (bounded prep) and `linear-refresh` (the safety-gated external-apply adapter)
+ * selection (implementation, postflight, validate, merge-cleanup). `preflight`
+ * (bounded prep) and `tracker-refresh` (the safety-gated external-apply adapter)
  * are intentionally excluded; configuring them fails closed (`step_unsupported`).
  * Declared in canonical order so a normalized override map is byte-stable.
  */
 export const CONFIGURABLE_CODING_STEP_KEYS = [
   "implementation",
   "postflight",
-  "no-mistakes",
+  "validate",
   "merge-cleanup",
 ] as const;
 
@@ -125,7 +125,7 @@ export type CodingStepRouteOverride = Partial<
  * overrides is simply absent and resolves to the defaults.
  */
 export type CodingStepRouteOverrides = Partial<
-  Record<ConfigurableCodingStepKey, CodingStepRouteOverride>
+  Record<ConfigurableCodingStepKey | "tracker-refresh", CodingStepRouteOverride>
 >;
 
 /**
@@ -191,9 +191,18 @@ export type CodingStepRouteOverridesResult =
       path?: string;
     };
 
+type CodingStepRouteValidationOptions = {
+  allowPersistedTrackerRefresh?: boolean;
+};
+
 const CONFIGURABLE_STEP_KEY_SET: ReadonlySet<string> = new Set(
   CONFIGURABLE_CODING_STEP_KEYS,
 );
+
+const PERSISTED_CODING_STEP_KEY_SET: ReadonlySet<string> = new Set([
+  ...CONFIGURABLE_CODING_STEP_KEYS,
+  "tracker-refresh",
+]);
 
 const ROUTE_FIELD_SET: ReadonlySet<string> = new Set(CODING_STEP_ROUTE_FIELDS);
 
@@ -205,6 +214,12 @@ function isConfigurableCodingStepKey(
   value: string,
 ): value is ConfigurableCodingStepKey {
   return CONFIGURABLE_STEP_KEY_SET.has(value);
+}
+
+function isPersistedCodingStepKey(
+  value: string,
+): value is ConfigurableCodingStepKey | "tracker-refresh" {
+  return PERSISTED_CODING_STEP_KEY_SET.has(value);
 }
 
 function isCodingStepRouteField(value: string): value is CodingStepRouteField {
@@ -252,6 +267,7 @@ export function resolveCodingRouteModelAlias(
  */
 export function validateCodingStepRouteOverrides(
   value: unknown,
+  options: CodingStepRouteValidationOptions = {},
 ): CodingStepRouteOverridesResult {
   if (value === undefined || value === null) {
     return { ok: true, overrides: {} };
@@ -267,14 +283,26 @@ export function validateCodingStepRouteOverrides(
   // Validate each provided step in input order so the first refusal is reported
   // against the offending key; build the normalized output in canonical order.
   const normalizedByStep = new Map<
-    ConfigurableCodingStepKey,
+    ConfigurableCodingStepKey | "tracker-refresh",
     CodingStepRouteOverride
   >();
+  const isAllowedStepKey = (
+    stepKey: string,
+  ): stepKey is ConfigurableCodingStepKey | "tracker-refresh" =>
+    isConfigurableCodingStepKey(stepKey) ||
+    (options.allowPersistedTrackerRefresh === true &&
+      stepKey === "tracker-refresh");
+  const supportedStepKeys: ReadonlyArray<
+    ConfigurableCodingStepKey | "tracker-refresh"
+  > =
+    options.allowPersistedTrackerRefresh === true
+      ? [...CONFIGURABLE_CODING_STEP_KEYS, "tracker-refresh"]
+      : CONFIGURABLE_CODING_STEP_KEYS;
   for (const [stepKey, rawStepConfig] of Object.entries(value)) {
-    if (!isConfigurableCodingStepKey(stepKey)) {
+    if (!isAllowedStepKey(stepKey)) {
       return refuse(
         "step_unsupported",
-        `Coding route step "${stepKey}" is not configurable; supported steps: ${CONFIGURABLE_CODING_STEP_KEYS.join(", ")}.`,
+        `Coding route step "${stepKey}" is not configurable; supported steps: ${supportedStepKeys.join(", ")}.`,
         `${CODING_ROUTE_STEPS_KEY}.${stepKey}`,
       );
     }
@@ -322,7 +350,7 @@ export function validateCodingStepRouteOverrides(
   }
 
   const overrides: CodingStepRouteOverrides = {};
-  for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
+  for (const stepKey of supportedStepKeys) {
     const fields = normalizedByStep.get(stepKey);
     if (fields === undefined) {
       continue;
@@ -354,7 +382,60 @@ export function readCodingStepRouteOverrides(
   if (raw === undefined) {
     return { ok: true, overrides: {} };
   }
-  return validateCodingStepRouteOverrides(raw);
+  return validateCodingStepRouteOverrides(
+    projectPersistedCodingStepRouteAliases(raw),
+    { allowPersistedTrackerRefresh: true },
+  );
+}
+
+function projectPersistedCodingStepRouteAliases(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const projected = new Map<string, { value: unknown; canonical: boolean }>();
+  for (const [key, routeValue] of Object.entries(value)) {
+    const canonicalKey =
+      key === "no-mistakes"
+        ? "validate"
+        : key === "linear-refresh"
+          ? "tracker-refresh"
+          : key;
+    const canonical = canonicalKey === key;
+    const existing = projected.get(canonicalKey);
+    if (existing === undefined) {
+      projected.set(canonicalKey, { value: routeValue, canonical });
+      continue;
+    }
+    if (canonical && !existing.canonical) {
+      projected.set(canonicalKey, {
+        value: mergePersistedRouteOverrideValues(existing.value, routeValue),
+        canonical: true,
+      });
+    }
+  }
+  return Object.fromEntries(
+    [...projected.entries()].map(([key, entry]) => [key, entry.value]),
+  );
+}
+
+function mergePersistedRouteOverrideValues(
+  legacyValue: unknown,
+  canonicalValue: unknown,
+): unknown {
+  if (
+    legacyValue !== null &&
+    typeof legacyValue === "object" &&
+    !Array.isArray(legacyValue) &&
+    canonicalValue !== null &&
+    typeof canonicalValue === "object" &&
+    !Array.isArray(canonicalValue)
+  ) {
+    return {
+      ...(legacyValue as Record<string, unknown>),
+      ...(canonicalValue as Record<string, unknown>),
+    };
+  }
+  return canonicalValue;
 }
 
 /**
@@ -403,7 +484,7 @@ export function resolveCodingStepExecutorSelection(
   overrides: CodingStepRouteOverrides,
   stepKey: string,
 ): CodingStepExecutorSelection {
-  if (!isConfigurableCodingStepKey(stepKey)) {
+  if (!isPersistedCodingStepKey(stepKey)) {
     return { agentProvider: null, model: null, effort: null };
   }
   const override = overrides[stepKey];

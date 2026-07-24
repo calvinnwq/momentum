@@ -112,7 +112,7 @@ Executors are the primary SDK surface.
 A third party adds an executor against documented interfaces, and the proof of the SDK is that the built-in executors use it themselves.
 If Momentum's own tracker adapter or agent wrapper needs private hooks, the SDK is not done.
 
-The current schema calls this concept an "executor family"; the pre-1.0 nomenclature sweep drops the suffix and renames the values (`one-shot` to `agent-once`, `goal-loop` to `agent-loop`, `no-mistakes` to `delegate-supervisor` with the tool as step config).
+The pre-1.0 nomenclature sweep has landed: the schema calls this concept an "executor" (the "family" suffix is gone), `one-shot` became `agent-once`, `goal-loop` became `agent-loop`, and the coding workflow's validation step selects `delegate-supervisor` with the tool as step config, while recorded legacy spellings stay readable through a non-mutating projection.
 How steps bind to real commands on a given machine is that host's **bindings**, selected by environment; the words "route" and "profile" are retired rather than redefined.
 
 ## Stability And 1.0

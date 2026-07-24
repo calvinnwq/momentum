@@ -52,7 +52,7 @@ export type RetryableDispatchedStepRecovery = {
   stepId: string;
   kind: WorkflowStepKind;
   attemptId: string;
-  executorFamily: ExecutorName;
+  executor: ExecutorName;
   attemptNumber: number;
   latestRoundIndex: number;
   recoveryCode: string;
@@ -66,7 +66,7 @@ type RetryableDispatchRow = {
   step_id: string;
   kind: string;
   attempt_id: string;
-  executor_family: string;
+  executor: string;
   attempt_state: string;
   attempt_number: number;
   round_index: number | null;
@@ -95,7 +95,7 @@ export function findRetryableDispatchedStepRecovery(
               s.required,
               s.started_at,
               a.attempt_id,
-              a.executor_family,
+              a.executor,
               a.state AS attempt_state,
               a.attempt_number,
               (SELECT MAX(step_round.round_index)
@@ -211,6 +211,8 @@ export function startRetryableDispatchAttempt(
     now: number;
     stepState?: RetryableStepState;
     selection?: RetryRoundSelection;
+    /** Current dispatch resolution, which may differ from the prior attempt. */
+    executor?: ExecutorName;
     executorOwnsRounds?: boolean;
   },
 ): StartRetryableDispatchAttemptResult {
@@ -251,7 +253,7 @@ export function startRetryableDispatchAttempt(
             workflowRunId: retryable.runId,
             stepRunId: retryable.stepId,
             stepKey: retryable.stepId,
-            executorFamily: retryable.executorFamily,
+            executor: input.executor ?? retryable.executor,
             state: "running",
             attemptNumber: nextAttemptNumber,
             startedAt: input.now,
@@ -288,6 +290,7 @@ export function startRetryableDispatchAttempt(
         nextAttemptNumber,
         nextRoundIndex,
         input.selection ?? DEFAULT_RETRY_ROUND_SELECTION,
+        input.executor ?? retryable.executor,
       );
       let nextRoundId = canonicalRound.roundId;
       let roundAllocationSuffix = 0;
@@ -336,18 +339,15 @@ function parseRetryableDispatchRow(
 ): RetryableDispatchedStepRecovery | undefined {
   if (row === undefined) return undefined;
   if (!isWorkflowStepKind(row.kind)) return undefined;
-  if (!isExecutorName(row.executor_family)) return undefined;
-  if (
-    row.executor_family === "external-apply" ||
-    row.executor_family === "subworkflow"
-  ) {
+  if (!isExecutorName(row.executor)) return undefined;
+  if (row.executor === "external-apply" || row.executor === "subworkflow") {
     return undefined;
   }
   if (
     row.round_index === null ||
     row.recovery_code === null ||
     !isRetryableAttemptState(row.attempt_state, row.recovery_code) ||
-    !isRetryableDispatchRecovery(row.executor_family, row.recovery_code)
+    !isRetryableDispatchRecovery(row.executor, row.recovery_code)
   ) {
     return undefined;
   }
@@ -357,7 +357,7 @@ function parseRetryableDispatchRow(
     stepId: row.step_id,
     kind: row.kind,
     attemptId: row.attempt_id,
-    executorFamily: row.executor_family,
+    executor: row.executor,
     attemptNumber: row.attempt_number,
     latestRoundIndex: row.round_index,
     recoveryCode: row.recovery_code,
@@ -400,6 +400,7 @@ function buildRetryRound(
   attemptNumber: number,
   roundIndex: number,
   selection: RetryRoundSelection,
+  executor: ExecutorName,
 ): ExecutorRoundRecord {
   return {
     roundId: `${attemptId}::round-${roundIndex}`,
@@ -407,7 +408,7 @@ function buildRetryRound(
     workflowRunId: retryable.runId,
     stepRunId: retryable.stepId,
     stepKey: retryable.stepId,
-    executorFamily: retryable.executorFamily,
+    executor,
     attemptNumber,
     roundIndex,
     state: "pending",
@@ -439,13 +440,12 @@ function isWorkflowStepKind(value: string): value is WorkflowStepKind {
 }
 
 function isRetryableDispatchRecovery(
-  executorFamily: ExecutorName,
+  executor: ExecutorName,
   recoveryCode: string,
 ): boolean {
   if (GENERIC_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)) return true;
   return (
-    (executorFamily === "delegate-supervisor" ||
-      executorFamily === "no-mistakes") &&
+    (executor === "delegate-supervisor" || executor === "no-mistakes") &&
     DELEGATE_RETRYABLE_DISPATCH_RECOVERY_CODES.has(recoveryCode)
   );
 }

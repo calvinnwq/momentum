@@ -23,7 +23,9 @@ afterEach(() => {
   }
 });
 
-function makeTempDir(prefix = "momentum-cli-workflow-run-update-step-"): string {
+function makeTempDir(
+  prefix = "momentum-cli-workflow-run-update-step-",
+): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -37,15 +39,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -68,7 +70,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -87,7 +89,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     null,
     now,
     now,
-    now
+    now,
   );
 }
 
@@ -100,7 +102,7 @@ function seedStep(
     state?: string;
     order: number;
     required?: boolean;
-  }
+  },
 ): void {
   const now = 1_730_000_000_000;
   db.prepare(
@@ -108,7 +110,7 @@ function seedStep(
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -123,7 +125,7 @@ function seedStep(
     null,
     null,
     now,
-    now
+    now,
   );
 }
 
@@ -138,13 +140,13 @@ function seedLease(
     heartbeatAt?: number;
     releasedAt?: number | null;
     stalePolicy?: string;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_leases
        (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
         released_at, stale_policy, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.leaseKind,
@@ -155,14 +157,14 @@ function seedLease(
     input.releasedAt ?? null,
     input.stalePolicy ?? "auto-release",
     input.acquiredAt,
-    input.acquiredAt
+    input.acquiredAt,
   );
 }
 
 function readStep(
   dataDir: string,
   runId: string,
-  stepId: string
+  stepId: string,
 ): {
   state: string;
   operator_reason: string | null;
@@ -178,7 +180,7 @@ function readStep(
         `SELECT state, operator_reason, operator_actor,
                 operator_evidence_pointer, operator_ledger_pointer,
                 operator_transition_at
-           FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+           FROM workflow_steps WHERE run_id = ? AND step_id = ?`,
       )
       .get(runId, stepId) as {
       state: string;
@@ -197,9 +199,9 @@ function readRunState(dataDir: string, runId: string): string {
   const db = openDb(dataDir);
   try {
     return (
-      db
-        .prepare("SELECT state FROM workflow_runs WHERE id = ?")
-        .get(runId) as { state: string }
+      db.prepare("SELECT state FROM workflow_runs WHERE id = ?").get(runId) as {
+        state: string;
+      }
     ).state;
   } finally {
     db.close();
@@ -222,20 +224,23 @@ function readRunFinishedAt(dataDir: string, runId: string): number | null {
 function setRunFinishedAt(
   dataDir: string,
   runId: string,
-  finishedAt: number
+  finishedAt: number,
 ): void {
   const db = openDb(dataDir);
   try {
     db.prepare("UPDATE workflow_runs SET finished_at = ? WHERE id = ?").run(
       finishedAt,
-      runId
+      runId,
     );
   } finally {
     db.close();
   }
 }
 
-function readRunMonitor(dataDir: string, runId: string): {
+function readRunMonitor(
+  dataDir: string,
+  runId: string,
+): {
   monitor_last_seen_state: string | null;
   monitor_terminal: number | null;
   monitor_step: string | null;
@@ -248,7 +253,7 @@ function readRunMonitor(dataDir: string, runId: string): {
       .prepare(
         `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
                 monitor_last_seen_digest, monitor_last_emitted_digest
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
       .get(runId) as {
       monitor_last_seen_state: string | null;
@@ -264,7 +269,7 @@ function readRunMonitor(dataDir: string, runId: string): {
 
 function readRunRecoveryState(
   dataDir: string,
-  runId: string
+  runId: string,
 ): {
   needs_manual_recovery: number;
   manual_recovery_reason: string | null;
@@ -274,7 +279,7 @@ function readRunRecoveryState(
     return db
       .prepare(
         `SELECT needs_manual_recovery, manual_recovery_reason
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
       .get(runId) as {
       needs_manual_recovery: number;
@@ -300,14 +305,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -324,14 +329,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "step_not_found"
+      code: "step_not_found",
     });
   });
 
@@ -350,14 +355,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "invalid_state"
+      code: "invalid_state",
     });
   });
 
@@ -372,7 +377,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -389,14 +394,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "succeeded",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "invalid_transition"
+      code: "invalid_transition",
     });
     expect(readStep(dataDir, runId, "implementation").state).toBe("running");
   });
@@ -416,14 +421,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "run_not_found"
+      code: "run_not_found",
     });
   });
 
@@ -438,7 +443,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -457,14 +462,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "step_not_found"
+      code: "step_not_found",
     });
   });
 
@@ -479,7 +484,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -502,7 +507,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       ".agent-workflows/cwfp-succeed/ledger.jsonl#offset=42",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -515,18 +520,17 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       previousState: "running",
       runState: "succeeded",
       actor: "calvinnwq",
-      evidencePointer:
-        ".agent-workflows/cwfp-succeed/ledger.jsonl#offset=42"
+      evidencePointer: ".agent-workflows/cwfp-succeed/ledger.jsonl#offset=42",
     });
 
     const step = readStep(dataDir, runId, "implementation");
     expect(step.state).toBe("succeeded");
     expect(step.operator_reason).toBe(
-      "managed child finished but durable terminal evidence never landed"
+      "managed child finished but durable terminal evidence never landed",
     );
     expect(step.operator_actor).toBe("calvinnwq");
     expect(step.operator_evidence_pointer).toBe(
-      ".agent-workflows/cwfp-succeed/ledger.jsonl#offset=42"
+      ".agent-workflows/cwfp-succeed/ledger.jsonl#offset=42",
     );
     expect(typeof step.operator_transition_at).toBe("number");
     expect(readRunState(dataDir, runId)).toBe("succeeded");
@@ -543,15 +547,15 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedStep(db, {
         runId,
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         state: "pending",
         order: 2,
-        required: false
+        required: false,
       });
     } finally {
       db.close();
@@ -563,17 +567,17 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "update-step",
       runId,
       "--step",
-      "linear-refresh",
+      "tracker-refresh",
       "--state",
       "skipped",
       "--reason",
       "linear refresh handled out of band",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
-    expect(readStep(dataDir, runId, "linear-refresh").state).toBe("skipped");
+    expect(readStep(dataDir, runId, "tracker-refresh").state).toBe("skipped");
 
     const statusResult = await run([
       "workflow",
@@ -581,7 +585,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
     const statusPayload = JSON.parse(statusResult.stdout) as {
@@ -589,8 +593,11 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     };
     expect(statusPayload.steps).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ stepId: "linear-refresh", state: "skipped" })
-      ])
+        expect.objectContaining({
+          stepId: "tracker-refresh",
+          state: "skipped",
+        }),
+      ]),
     );
   });
 
@@ -605,7 +612,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "no-mistakes",
         kind: "no-mistakes",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -626,7 +633,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       ".agent-workflows/cwfp-fail/ledger.jsonl#offset=7",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -635,7 +642,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       command: "workflow run update-step",
       state: "failed",
       runState: "failed",
-      ledgerPointer: ".agent-workflows/cwfp-fail/ledger.jsonl#offset=7"
+      ledgerPointer: ".agent-workflows/cwfp-fail/ledger.jsonl#offset=7",
     });
     expect(readStep(dataDir, runId, "no-mistakes").state).toBe("failed");
     expect(readRunState(dataDir, runId)).toBe("failed");
@@ -652,14 +659,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "running",
-        order: 0
+        order: 0,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "approved",
-        order: 1
+        order: 1,
       });
       db.prepare(
         `UPDATE workflow_runs
@@ -668,7 +675,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
                 monitor_step = 'preflight',
                 monitor_last_seen_digest = 'stale-digest',
                 monitor_last_emitted_digest = 'stale-digest'
-          WHERE id = ?`
+          WHERE id = ?`,
       ).run(runId);
     } finally {
       db.close();
@@ -687,7 +694,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator advanced preflight",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readRunState(dataDir, runId)).toBe("approved");
@@ -696,7 +703,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       monitor_terminal: 0,
       monitor_step: "implementation",
       monitor_last_seen_digest: null,
-      monitor_last_emitted_digest: null
+      monitor_last_emitted_digest: null,
     });
 
     const monitorResult = await run([
@@ -706,7 +713,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(monitorResult.code).toBe(0);
     const payload = JSON.parse(monitorResult.stdout) as Record<string, unknown>;
@@ -714,11 +721,11 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       ok: true,
       disposition: "wait",
       reportable: false,
-      reportReason: "in_progress"
+      reportReason: "in_progress",
     });
     expect(payload["monitorDrift"]).toMatchObject({
       drifted: false,
-      reason: null
+      reason: null,
     });
   });
 
@@ -733,7 +740,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "postflight",
         kind: "postflight",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -752,7 +759,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator holding for manual inspection",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readStep(dataDir, runId, "postflight").state).toBe("blocked");
@@ -770,7 +777,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "postflight",
         kind: "postflight",
         state: "blocked",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -789,7 +796,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator cleared the block",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readStep(dataDir, runId, "postflight").state).toBe("approved");
@@ -807,7 +814,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "postflight",
         kind: "postflight",
         state: "blocked",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -826,7 +833,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator canceled the blocked step",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readStep(dataDir, runId, "postflight").state).toBe("canceled");
@@ -844,7 +851,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -863,14 +870,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "cannot succeed a step that never ran",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "invalid_transition"
+      code: "invalid_transition",
     });
     const step = readStep(dataDir, runId, "implementation");
     expect(step.state).toBe("pending");
@@ -889,7 +896,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -910,12 +917,15 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "calvinnwq",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ];
     const first = await run(args);
     expect(first.code).toBe(0);
-    const firstAt = readStep(dataDir, runId, "implementation")
-      .operator_transition_at;
+    const firstAt = readStep(
+      dataDir,
+      runId,
+      "implementation",
+    ).operator_transition_at;
 
     const second = await run(args);
     expect(second.code).toBe(0);
@@ -924,10 +934,10 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       ok: true,
       command: "workflow run update-step",
       state: "succeeded",
-      idempotent: true
+      idempotent: true,
     });
     expect(
-      readStep(dataDir, runId, "implementation").operator_transition_at
+      readStep(dataDir, runId, "implementation").operator_transition_at,
     ).toBe(firstAt);
   });
 
@@ -942,7 +952,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -963,7 +973,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "calvinnwq",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ];
     const first = await run(args);
     expect(first.code).toBe(0);
@@ -978,7 +988,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     expect(secondPayload).toMatchObject({
       ok: true,
       idempotent: true,
-      runState: "succeeded"
+      runState: "succeeded",
     });
     expect(readRunFinishedAt(dataDir, runId)).toBe(originalFinishedAt);
   });
@@ -994,7 +1004,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1013,7 +1023,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "first finalize",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
 
@@ -1030,17 +1040,17 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "second finalize with different reason",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(1);
     const payload = JSON.parse(second.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run update-step",
-      code: "invalid_transition"
+      code: "invalid_transition",
     });
     expect(readStep(dataDir, runId, "implementation").operator_reason).toBe(
-      "first finalize"
+      "first finalize",
     );
   });
 
@@ -1055,14 +1065,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "preflight",
         kind: "preflight",
         state: "succeeded",
-        order: 1
+        order: 1,
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 2
+        order: 2,
       });
     } finally {
       db.close();
@@ -1081,7 +1091,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "finalize the last required step",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     expect(readRunState(dataDir, runId)).toBe("succeeded");
@@ -1098,7 +1108,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
       const now = Date.now();
       seedLease(db, {
@@ -1106,7 +1116,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         leaseKind: "managed-step",
         holder: "child-executor",
         acquiredAt: now - 1_000,
-        expiresAt: now + 60_000
+        expiresAt: now + 60_000,
       });
     } finally {
       db.close();
@@ -1125,14 +1135,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator finalized while child lease cleanup is still pending",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
       command: "workflow run update-step",
-      runState: "running"
+      runState: "running",
     });
     expect(readStep(dataDir, runId, "implementation").state).toBe("succeeded");
     expect(readRunState(dataDir, runId)).toBe("running");
@@ -1149,7 +1159,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         stepId: "postflight",
         kind: "postflight",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1168,7 +1178,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "stale operator action",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1177,7 +1187,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       command: "workflow run update-step",
       code: "invalid_transition",
       runId,
-      stepId: "postflight"
+      stepId: "postflight",
     });
     expect(readStep(dataDir, runId, "postflight").state).toBe("running");
     expect(readRunState(dataDir, runId)).toBe("succeeded");
@@ -1192,14 +1202,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         runId,
         state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "ghost active step requires operator recovery"
+        manualRecoveryReason: "ghost active step requires operator recovery",
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1218,7 +1228,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator canceled ghost step",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(update.code).toBe(0);
     const updatePayload = JSON.parse(update.stdout) as Record<string, unknown>;
@@ -1229,7 +1239,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       stepId: "implementation",
       state: "canceled",
       previousState: "running",
-      runState: "canceled"
+      runState: "canceled",
     });
     expect(readStep(dataDir, runId, "implementation").state).toBe("canceled");
     expect(readRunState(dataDir, runId)).toBe("canceled");
@@ -1242,14 +1252,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(clear.code).toBe(0);
     const clearPayload = JSON.parse(clear.stdout) as Record<string, unknown>;
     expect(clearPayload).toMatchObject({
       ok: true,
       command: "workflow run clear-recovery",
-      runId
+      runId,
     });
     expect(readRunRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
   });
@@ -1263,14 +1273,14 @@ describe("momentum workflow run update-step (NGX-326)", () => {
         runId,
         state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "ghost active step requires operator recovery"
+        manualRecoveryReason: "ghost active step requires operator recovery",
       });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
         state: "running",
-        order: 1
+        order: 1,
       });
     } finally {
       db.close();
@@ -1289,7 +1299,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "operator keeps step blocked",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -1297,7 +1307,7 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       ok: false,
       command: "workflow run update-step",
       code: "manual_recovery_required",
-      runId
+      runId,
     });
     expect(readStep(dataDir, runId, "implementation").state).toBe("running");
   });

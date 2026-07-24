@@ -514,7 +514,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         },
         {
           runId: intentRunId,
-          step: "no-mistakes",
+          step: "validate",
           status: "complete",
           ts: "2026-05-21T08:25:00Z",
         },
@@ -2110,7 +2110,7 @@ async function establishM6ExternalApplyFixture(options: {
     },
     {
       runId: intentRunId,
-      step: "no-mistakes",
+      step: "validate",
       status: "complete",
       ts: "2026-05-21T08:25:00Z",
     },

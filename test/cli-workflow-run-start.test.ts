@@ -105,7 +105,7 @@ describe("momentum workflow run start (NGX-346)", () => {
       state: "pending",
       approvalBoundary: null,
       definitionKey: "coding-workflow",
-      definitionVersion: 2,
+      definitionVersion: 3,
       repoPath: repoDir,
       objective: "Ship NGX-346",
     });
@@ -128,7 +128,7 @@ describe("momentum workflow run start (NGX-346)", () => {
         repo_path: repoDir,
         objective: "Ship NGX-346",
         workflow_definition_key: "coding-workflow",
-        workflow_definition_version: 2,
+        workflow_definition_version: 3,
       });
       const steps = db
         .prepare(
@@ -140,12 +140,12 @@ describe("momentum workflow run start (NGX-346)", () => {
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
+        "validate",
         "merge-cleanup",
-        "linear-refresh",
+        "tracker-refresh",
       ]);
       expect(steps.every((s) => s.state === "pending")).toBe(true);
-      expect(loadWorkflowDefinition(db, "coding-workflow", 2)).toBeDefined();
+      expect(loadWorkflowDefinition(db, "coding-workflow", 3)).toBeDefined();
     } finally {
       db.close();
     }
@@ -226,14 +226,14 @@ describe("momentum workflow run start (NGX-346)", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 1,
           required: false,
         },

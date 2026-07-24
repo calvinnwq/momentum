@@ -18,7 +18,7 @@ import type { ExecutorRegistry } from "../../executors/sdk/registry.js";
 
 import {
   getBuiltInWorkflowDefinition,
-  WORKFLOW_EXECUTOR_FAMILIES,
+  WORKFLOW_EXECUTORS,
   type WorkflowDefinition,
 } from "../definition/definition.js";
 import {
@@ -39,6 +39,11 @@ import {
   type WorkflowRunStartError,
 } from "../run/start.js";
 import { WORKFLOW_STEP_KINDS } from "../run/reducer.js";
+import {
+  canonicalExecutorIdentity,
+  canonicalWorkflowStepKind,
+  LEGACY_SUPPORTED_EXECUTORS,
+} from "../definition/legacy.js";
 
 export const STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS = [
   "checkId",
@@ -145,9 +150,13 @@ export function preflightWorkflowExecutorConfigs(
     if (executor === undefined) {
       if (
         options.allowUnregisteredBuiltIns === true &&
-        (WORKFLOW_EXECUTOR_FAMILIES as readonly string[]).includes(
-          step.executor,
-        )
+        // Retained definitions may still record a legacy built-in executor
+        // spelling, so classify through the canonical identity and the
+        // dispatchable legacy identities.
+        ((WORKFLOW_EXECUTORS as readonly string[]).includes(
+          canonicalExecutorIdentity(step.executor),
+        ) ||
+          LEGACY_SUPPORTED_EXECUTORS.has(step.executor))
       ) {
         continue;
       }
@@ -746,7 +755,9 @@ function locateWrapperConfigFieldFailure(
       };
     }
 
-    if (stepKind === "no-mistakes") {
+    // Wrapper configs may still key the validate step by its retired
+    // `no-mistakes` spelling, so compare through the canonical kind.
+    if (canonicalWorkflowStepKind(stepKind) === "validate") {
       const rawProfile = rawStep["runner_profile"];
       if (rawProfile === undefined) {
         return {

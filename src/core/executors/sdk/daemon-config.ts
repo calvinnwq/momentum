@@ -15,6 +15,7 @@ export type DaemonExecutorRegistryResolution =
   | {
       status: "configured";
       source: string;
+      configuredNames: ReadonlySet<string>;
       load: () => Promise<ExecutorRegistryLoadResult>;
     }
   | { status: "invalid"; source: string; message: string };
@@ -49,6 +50,7 @@ export function resolveDaemonExecutorRegistry(
   return {
     status: "configured",
     source,
+    configuredNames: new Set(Object.keys(parsed.config.executors)),
     load: () => {
       if (loaded !== undefined) return loaded;
       const loading = loadExecutorRegistry({

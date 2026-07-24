@@ -455,7 +455,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
             reason: "recovery_clear_refused",
             message:
               `Workflow run ${input.runId} cannot reconcile failed step ` +
-              `${recoveryBeforeClear.stepId} from no-mistakes evidence. The step must be a failed required no-mistakes step and the evidence pointer must prove checks-passed.`,
+              `${recoveryBeforeClear.stepId} from no-mistakes evidence. The step must be a failed required validate step and the evidence pointer must prove checks-passed.`,
             recoveryCode: recoveryBeforeClear.code,
             blockingStepId: recoveryBeforeClear.stepId,
           };
@@ -627,7 +627,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     .get(input.runId, input.stepId) as FailedStepBeforeReconcileRow | undefined;
   if (
     row === undefined ||
-    row.kind !== "no-mistakes" ||
+    row.kind !== "validate" ||
     row.state !== "failed" ||
     row.required !== 1
   ) {
@@ -656,7 +656,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
               updated_at = ?
         WHERE run_id = ?
           AND step_id = ?
-          AND kind = 'no-mistakes'
+          AND kind = 'validate'
           AND state = 'failed'`,
     )
     .run(
@@ -780,9 +780,9 @@ function loadCurrentNoMistakesCheckpointIdentity(
              WHERE latest.workflow_run_id = r.workflow_run_id
                AND latest.step_run_id = r.step_run_id
           )
-          AND r.executor_family IN ('no-mistakes', 'delegate-supervisor')
+          AND r.executor IN ('no-mistakes', 'delegate-supervisor')
           AND (
-            r.executor_family = 'no-mistakes'
+            r.executor = 'no-mistakes'
             OR EXISTS (
               SELECT 1
                 FROM executor_rounds AS intent_round

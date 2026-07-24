@@ -40,15 +40,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -71,7 +71,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
         needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
         started_at, finished_at,
         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state,
@@ -90,7 +90,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     null,
     now,
     now,
-    now
+    now,
   );
 }
 
@@ -103,7 +103,7 @@ function seedStep(
     state?: string;
     order: number;
     required?: boolean;
-  }
+  },
 ): void {
   const now = 1_730_000_000_000;
   db.prepare(
@@ -111,7 +111,7 @@ function seedStep(
        (run_id, step_id, kind, state, step_order, required,
         ledger_offset, result_digest, error_code, error_message,
         started_at, finished_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.stepId,
@@ -126,11 +126,14 @@ function seedStep(
     null,
     null,
     now,
-    now
+    now,
   );
 }
 
-function readRunMonitor(dataDir: string, runId: string): {
+function readRunMonitor(
+  dataDir: string,
+  runId: string,
+): {
   monitor_last_seen_state: string | null;
   monitor_terminal: number | null;
   monitor_step: string | null;
@@ -143,7 +146,7 @@ function readRunMonitor(dataDir: string, runId: string): {
       .prepare(
         `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
                 monitor_last_seen_digest, monitor_last_emitted_digest
-           FROM workflow_runs WHERE id = ?`
+           FROM workflow_runs WHERE id = ?`,
       )
       .get(runId) as {
       monitor_last_seen_state: string | null;
@@ -165,25 +168,26 @@ function seedApproval(
     phrase?: string;
     artifactPath?: string;
     artifactDigest?: string;
-  }
+  },
 ): void {
   const now = 1_730_000_000_000;
   db.prepare(
     `INSERT INTO workflow_approvals
        (run_id, boundary, actor, phrase, artifact_path,
         artifact_digest, recorded_at, discharged_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.boundary,
     null,
     input.phrase ?? "approve implementation",
-    input.artifactPath ?? `workflow-run-approve://${input.runId}/${input.boundary}`,
+    input.artifactPath ??
+      `workflow-run-approve://${input.runId}/${input.boundary}`,
     input.artifactDigest ?? "existing-digest",
     now,
     null,
     now,
-    now
+    now,
   );
 }
 
@@ -200,14 +204,14 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "run_id_required"
+      code: "run_id_required",
     });
   });
 
@@ -224,14 +228,14 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve run boundary",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "invalid_boundary"
+      code: "invalid_boundary",
     });
   });
 
@@ -241,7 +245,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId: "cwfp-approve-casual",
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -258,21 +262,21 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "go ahead",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "invalid_boundary"
+      code: "invalid_boundary",
     });
 
     const dbCheck = openDb(dataDir);
     try {
       const row = dbCheck
         .prepare(
-          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?"
+          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
         )
         .get("cwfp-approve-casual") as { count: number };
       expect(row.count).toBe(0);
@@ -285,23 +289,23 @@ describe("momentum workflow run approve (NGX-325)", () => {
     {
       runId: "cwfp-approve-negated-implementation",
       boundary: "implementation",
-      phrase: "do not approve implementation"
+      phrase: "do not approve implementation",
     },
     {
       runId: "cwfp-approve-negated-full",
       boundary: "full",
-      phrase: "not full"
+      phrase: "not full",
     },
     {
       runId: "cwfp-approve-negated-no-prefix",
       boundary: "implementation",
-      phrase: "no approve implementation"
+      phrase: "no approve implementation",
     },
     {
       runId: "cwfp-approve-negated-no-target",
       boundary: "implementation",
-      phrase: "approve no implementation"
-    }
+      phrase: "approve no implementation",
+    },
   ])(
     "rejects negated approval phrasing for $boundary and creates no durable row",
     async ({ runId, boundary, phrase }) => {
@@ -310,7 +314,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       try {
         seedRun(db, {
           runId,
-          state: "running"
+          state: "running",
         });
       } finally {
         db.close();
@@ -327,77 +331,56 @@ describe("momentum workflow run approve (NGX-325)", () => {
         phrase,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ]);
       expect(result.code).toBe(1);
       const payload = JSON.parse(result.stderr) as Record<string, unknown>;
       expect(payload).toMatchObject({
         ok: false,
         command: "workflow run approve",
-        code: "invalid_boundary"
+        code: "invalid_boundary",
       });
 
       const dbCheck = openDb(dataDir);
       try {
         const row = dbCheck
           .prepare(
-            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?"
+            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
           )
           .get(runId) as { count: number };
         expect(row.count).toBe(0);
       } finally {
         dbCheck.close();
       }
-    }
+    },
   );
 
-  it("accepts no-mistakes boundary phrasing without treating the boundary as negation", async () => {
-    const dataDir = makeTempDir();
-    const runId = "cwfp-approve-no-mistakes";
-    const db = openDb(dataDir);
-    try {
-      seedRun(db, {
-        runId,
-        state: "running"
+  it.each(["no-mistakes", "through-no-mistakes"])(
+    "refuses retired approval boundary input %s",
+    async (boundary) => {
+      const dataDir = makeTempDir();
+      const result = await run([
+        "workflow",
+        "run",
+        "approve",
+        "cwfp-legacy-boundary",
+        "--approval-boundary",
+        boundary,
+        "--phrase",
+        `approve ${boundary}`,
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+      expect(result.code).toBe(1);
+      const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        ok: false,
+        command: "workflow run approve",
+        code: "invalid_boundary",
       });
-    } finally {
-      db.close();
-    }
-
-    const result = await run([
-      "workflow",
-      "run",
-      "approve",
-      runId,
-      "--approval-boundary",
-      "no-mistakes",
-      "--phrase",
-      "approve no-mistakes",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(result.code).toBe(0);
-    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      ok: true,
-      command: "workflow run approve",
-      runId,
-      boundary: "no-mistakes"
-    });
-
-    const dbCheck = openDb(dataDir);
-    try {
-      const row = dbCheck
-        .prepare(
-          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
-        )
-        .get(runId, "no-mistakes") as { count: number };
-      expect(row.count).toBe(1);
-    } finally {
-      dbCheck.close();
-    }
-  });
+    },
+  );
 
   it("persists durable approval rows and surfaces them in status and handoff", async () => {
     const dataDir = makeTempDir();
@@ -414,7 +397,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -437,7 +420,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       artifactDigest,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -463,7 +446,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       const approval = checkDb
         .prepare(
-          "SELECT boundary, actor, phrase, artifact_path, artifact_digest FROM workflow_approvals WHERE run_id = ?"
+          "SELECT boundary, actor, phrase, artifact_path, artifact_digest FROM workflow_approvals WHERE run_id = ?",
         )
         .get(runId) as {
         boundary: string;
@@ -477,7 +460,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
         actor: "calvinnwq",
         phrase,
         artifact_path: artifactPath,
-        artifact_digest: artifactDigest
+        artifact_digest: artifactDigest,
       });
     } finally {
       checkDb.close();
@@ -489,7 +472,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
     const statusPayload = JSON.parse(statusResult.stdout) as {
@@ -501,8 +484,8 @@ describe("momentum workflow run approve (NGX-325)", () => {
       expect.objectContaining({
         boundary: "through-implementation",
         actor: "calvinnwq",
-        phrase
-      })
+        phrase,
+      }),
     ]);
 
     const handoffResult = await run([
@@ -511,7 +494,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(handoffResult.code).toBe(0);
     const handoffPayload = JSON.parse(handoffResult.stdout) as {
@@ -523,8 +506,8 @@ describe("momentum workflow run approve (NGX-325)", () => {
       expect.objectContaining({
         boundary: "through-implementation",
         actor: "calvinnwq",
-        phrase
-      })
+        phrase,
+      }),
     ]);
 
     const listResult = await run([
@@ -535,7 +518,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "through-implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(listResult.code).toBe(0);
     const listPayload = JSON.parse(listResult.stdout) as {
@@ -552,10 +535,10 @@ describe("momentum workflow run approve (NGX-325)", () => {
       expect.objectContaining({
         run: expect.objectContaining({
           runId,
-          approvalBoundary: "through-implementation"
+          approvalBoundary: "through-implementation",
         }),
-        counts: expect.objectContaining({ approvals: 1 })
-      })
+        counts: expect.objectContaining({ approvals: 1 }),
+      }),
     ]);
   });
 
@@ -566,20 +549,20 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "pending"
+        state: "pending",
       });
       seedStep(db, { runId, stepId: "preflight", kind: "preflight", order: 1 });
       seedStep(db, {
         runId,
         stepId: "implementation",
         kind: "implementation",
-        order: 2
+        order: 2,
       });
       seedStep(db, {
         runId,
         stepId: "postflight",
         kind: "postflight",
-        order: 3
+        order: 3,
       });
       db.prepare(
         `UPDATE workflow_runs
@@ -588,7 +571,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
                 monitor_step = 'postflight',
                 monitor_last_seen_digest = 'stale-digest',
                 monitor_last_emitted_digest = 'stale-digest'
-          WHERE id = ?`
+          WHERE id = ?`,
       ).run(runId);
     } finally {
       db.close();
@@ -605,28 +588,30 @@ describe("momentum workflow run approve (NGX-325)", () => {
       `approve plan ${runId} through-implementation`,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
 
     const dbCheck = openDb(dataDir);
     try {
       const runRow = dbCheck
-        .prepare("SELECT state, approval_boundary FROM workflow_runs WHERE id = ?")
+        .prepare(
+          "SELECT state, approval_boundary FROM workflow_runs WHERE id = ?",
+        )
         .get(runId) as { state: string; approval_boundary: string };
       expect(runRow).toEqual({
         state: "approved",
-        approval_boundary: "through-implementation"
+        approval_boundary: "through-implementation",
       });
       const steps = dbCheck
         .prepare(
-          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       expect(steps).toEqual([
         { step_id: "preflight", state: "approved" },
         { step_id: "implementation", state: "approved" },
-        { step_id: "postflight", state: "pending" }
+        { step_id: "postflight", state: "pending" },
       ]);
     } finally {
       dbCheck.close();
@@ -636,7 +621,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       monitor_terminal: 0,
       monitor_step: "preflight",
       monitor_last_seen_digest: null,
-      monitor_last_emitted_digest: null
+      monitor_last_emitted_digest: null,
     });
 
     const statusResult = await run([
@@ -645,7 +630,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       runId,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(statusResult.code).toBe(0);
     const statusPayload = JSON.parse(statusResult.stdout) as {
@@ -653,7 +638,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     };
     expect(statusPayload.monitor.nextAction).toMatchObject({
       code: "advance_to_step",
-      stepId: "preflight"
+      stepId: "preflight",
     });
   });
 
@@ -666,7 +651,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
         runId,
         state: "blocked",
         needsManualRecovery: true,
-        manualRecoveryReason: "dispatch lease requires operator recovery"
+        manualRecoveryReason: "dispatch lease requires operator recovery",
       });
     } finally {
       db.close();
@@ -683,7 +668,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -692,14 +677,18 @@ describe("momentum workflow run approve (NGX-325)", () => {
       command: "workflow run approve",
       code: "manual_recovery_required",
       runId,
-      boundary: "implementation"
+      boundary: "implementation",
     });
 
     const dbCheck = openDb(dataDir);
     try {
-      const count = (dbCheck
-        .prepare("SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?")
-        .get(runId) as { count: number }).count;
+      const count = (
+        dbCheck
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
+          )
+          .get(runId) as { count: number }
+      ).count;
       expect(count).toBe(0);
       const runRow = dbCheck
         .prepare("SELECT approval_boundary FROM workflow_runs WHERE id = ?")
@@ -719,14 +708,14 @@ describe("momentum workflow run approve (NGX-325)", () => {
       try {
         seedRun(db, {
           runId,
-          state
+          state,
         });
         seedStep(db, {
           runId,
           stepId: "implementation",
           kind: "implementation",
           state: "pending",
-          order: 1
+          order: 1,
         });
       } finally {
         db.close();
@@ -743,7 +732,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
         "approve implementation",
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ]);
       expect(result.code).toBe(1);
       const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -752,30 +741,38 @@ describe("momentum workflow run approve (NGX-325)", () => {
         command: "workflow run approve",
         code: "invalid_state",
         runId,
-        boundary: "implementation"
+        boundary: "implementation",
       });
 
       const dbCheck = openDb(dataDir);
       try {
-        const approvalCount = (dbCheck
-          .prepare("SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?")
-          .get(runId) as { count: number }).count;
+        const approvalCount = (
+          dbCheck
+            .prepare(
+              "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
+            )
+            .get(runId) as { count: number }
+        ).count;
         expect(approvalCount).toBe(0);
         const runRow = dbCheck
-          .prepare("SELECT state, approval_boundary FROM workflow_runs WHERE id = ?")
+          .prepare(
+            "SELECT state, approval_boundary FROM workflow_runs WHERE id = ?",
+          )
           .get(runId) as { state: string; approval_boundary: string | null };
         expect(runRow).toEqual({
           state,
-          approval_boundary: null
+          approval_boundary: null,
         });
         const stepRow = dbCheck
-          .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+          )
           .get(runId, "implementation") as { state: string };
         expect(stepRow.state).toBe("pending");
       } finally {
         dbCheck.close();
       }
-    }
+    },
   );
 
   it("preserves the semantically highest recorded approval boundary", async () => {
@@ -788,17 +785,17 @@ describe("momentum workflow run approve (NGX-325)", () => {
       seedRun(db, {
         runId: lowerRunId,
         state: "running",
-        approvalBoundary: "through-merge-cleanup"
+        approvalBoundary: "through-merge-cleanup",
       });
       seedRun(db, {
         runId: batchRunId,
         state: "running",
-        approvalBoundary: "full"
+        approvalBoundary: "full",
       });
       seedRun(db, {
         runId: mergeRunId,
         state: "running",
-        approvalBoundary: "through-merge-gates"
+        approvalBoundary: "through-merge-gates",
       });
     } finally {
       db.close();
@@ -815,7 +812,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(lowerResult.code).toBe(0);
 
@@ -830,7 +827,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve plan-only",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(batchResult.code).toBe(0);
 
@@ -845,7 +842,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "approve merge-cleanup",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(mergeResult.code).toBe(0);
 
@@ -853,7 +850,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       const runRows = dbCheck
         .prepare(
-          "SELECT id, approval_boundary FROM workflow_runs WHERE id IN (?, ?, ?) ORDER BY id"
+          "SELECT id, approval_boundary FROM workflow_runs WHERE id IN (?, ?, ?) ORDER BY id",
         )
         .all(lowerRunId, batchRunId, mergeRunId) as Array<{
         id: string;
@@ -862,20 +859,20 @@ describe("momentum workflow run approve (NGX-325)", () => {
       expect(runRows).toEqual([
         {
           id: mergeRunId,
-          approval_boundary: "merge-cleanup"
+          approval_boundary: "merge-cleanup",
         },
         {
           id: batchRunId,
-          approval_boundary: "full"
+          approval_boundary: "full",
         },
         {
           id: lowerRunId,
-          approval_boundary: "through-merge-cleanup"
-        }
+          approval_boundary: "through-merge-cleanup",
+        },
       ]);
       const approvals = dbCheck
         .prepare(
-          "SELECT run_id, boundary FROM workflow_approvals WHERE run_id IN (?, ?, ?) ORDER BY run_id, boundary"
+          "SELECT run_id, boundary FROM workflow_approvals WHERE run_id IN (?, ?, ?) ORDER BY run_id, boundary",
         )
         .all(lowerRunId, batchRunId, mergeRunId) as Array<{
         run_id: string;
@@ -884,7 +881,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       expect(approvals).toEqual([
         { run_id: mergeRunId, boundary: "merge-cleanup" },
         { run_id: batchRunId, boundary: "plan-only" },
-        { run_id: lowerRunId, boundary: "implementation" }
+        { run_id: lowerRunId, boundary: "implementation" },
       ]);
     } finally {
       dbCheck.close();
@@ -900,7 +897,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -917,7 +914,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       phrase,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
@@ -935,7 +932,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       const approval = dbCheck
         .prepare(
-          "SELECT boundary, phrase FROM workflow_approvals WHERE run_id = ?"
+          "SELECT boundary, phrase FROM workflow_approvals WHERE run_id = ?",
         )
         .get(runId) as { boundary: string; phrase: string };
       expect(approval.boundary).toBe("through-implementation");
@@ -955,7 +952,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -976,21 +973,21 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "bad-digest",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "approval_digest_mismatch"
+      code: "approval_digest_mismatch",
     });
 
     const dbCheck = openDb(dataDir);
     try {
       const row = dbCheck
         .prepare(
-          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?"
+          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
         )
         .get(runId) as { count: number };
       expect(row.count).toBe(0);
@@ -1007,7 +1004,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -1026,21 +1023,21 @@ describe("momentum workflow run approve (NGX-325)", () => {
       "bad-digest",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "approval_digest_mismatch"
+      code: "approval_digest_mismatch",
     });
 
     const dbCheck = openDb(dataDir);
     try {
       const row = dbCheck
         .prepare(
-          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?"
+          "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
         )
         .get(runId) as { count: number };
       expect(row.count).toBe(0);
@@ -1056,7 +1053,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -1074,7 +1071,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       phrase,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
 
@@ -1089,25 +1086,87 @@ describe("momentum workflow run approve (NGX-325)", () => {
       phrase,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(1);
     const secondPayload = JSON.parse(second.stderr) as Record<string, unknown>;
     expect(secondPayload).toMatchObject({
       ok: false,
       command: "workflow run approve",
-      code: "duplicate_approval"
+      code: "duplicate_approval",
     });
 
     const checkDb = openDb(dataDir);
     try {
-      const count =
-        (checkDb
+      const count = (
+        checkDb
           .prepare(
-            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
           )
-          .get(runId, "implementation") as { count: number }).count;
+          .get(runId, "implementation") as { count: number }
+      ).count;
       expect(count).toBe(1);
+    } finally {
+      checkDb.close();
+    }
+  });
+
+  it("deduplicates through-validate against a frozen through-no-mistakes approval row", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-approve-legacy-boundary-duplicate";
+    const frozenPhrase = `approve plan ${runId} through-no-mistakes`;
+    const frozenDigest = crypto
+      .createHash("sha256")
+      .update(`approve:${runId}:through-no-mistakes:${frozenPhrase}`)
+      .digest("hex");
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedApproval(db, {
+        runId,
+        boundary: "through-no-mistakes",
+        phrase: frozenPhrase,
+        artifactDigest: frozenDigest,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "approve",
+      runId,
+      "--approval-boundary",
+      "through-validate",
+      "--phrase",
+      `approve plan ${runId} through-validate`,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run approve",
+      code: "duplicate_approval",
+      boundary: "through-validate",
+    });
+    const checkDb = openDb(dataDir);
+    try {
+      const rows = checkDb
+        .prepare(
+          "SELECT boundary, phrase, artifact_digest FROM workflow_approvals WHERE run_id = ?",
+        )
+        .all(runId);
+      expect(rows).toEqual([
+        {
+          boundary: "through-no-mistakes",
+          phrase: frozenPhrase,
+          artifact_digest: frozenDigest,
+        },
+      ]);
     } finally {
       checkDb.close();
     }
@@ -1123,19 +1182,22 @@ describe("momentum workflow run approve (NGX-325)", () => {
       {
         runId: "cwfp-approve-duplicate-terminal",
         state: "failed",
-        args: []
+        args: [],
       },
       {
         runId: "cwfp-approve-duplicate-recovery",
         state: "running",
         needsManualRecovery: true,
-        args: []
+        args: [],
       },
       {
         runId: "cwfp-approve-duplicate-missing-artifact",
         state: "running",
-        args: ["--artifact-path", path.join(os.tmpdir(), "missing-approval.json")]
-      }
+        args: [
+          "--artifact-path",
+          path.join(os.tmpdir(), "missing-approval.json"),
+        ],
+      },
     ];
 
     for (const testCase of cases) {
@@ -1145,11 +1207,11 @@ describe("momentum workflow run approve (NGX-325)", () => {
         seedRun(db, {
           runId: testCase.runId,
           state: testCase.state,
-          needsManualRecovery: testCase.needsManualRecovery ?? false
+          needsManualRecovery: testCase.needsManualRecovery ?? false,
         });
         seedApproval(db, {
           runId: testCase.runId,
-          boundary: "implementation"
+          boundary: "implementation",
         });
       } finally {
         db.close();
@@ -1167,24 +1229,25 @@ describe("momentum workflow run approve (NGX-325)", () => {
         ...testCase.args,
         "--data-dir",
         dataDir,
-        "--json"
+        "--json",
       ]);
       expect(result.code).toBe(1);
       const payload = JSON.parse(result.stderr) as Record<string, unknown>;
       expect(payload).toMatchObject({
         ok: false,
         command: "workflow run approve",
-        code: "duplicate_approval"
+        code: "duplicate_approval",
       });
 
       const checkDb = openDb(dataDir);
       try {
-        const count =
-          (checkDb
+        const count = (
+          checkDb
             .prepare(
-              "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+              "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ? AND boundary = ?",
             )
-            .get(testCase.runId, "implementation") as { count: number }).count;
+            .get(testCase.runId, "implementation") as { count: number }
+        ).count;
         expect(count).toBe(1);
       } finally {
         checkDb.close();
@@ -1195,13 +1258,16 @@ describe("momentum workflow run approve (NGX-325)", () => {
   it("rechecks run state inside the approval write transaction", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-approve-state-race";
-    const fifoPath = path.join(makeTempDir("momentum-approve-fifo-"), "approval");
+    const fifoPath = path.join(
+      makeTempDir("momentum-approve-fifo-"),
+      "approval",
+    );
 
     const db = openDb(dataDir);
     try {
       seedRun(db, {
         runId,
-        state: "running"
+        state: "running",
       });
     } finally {
       db.close();
@@ -1222,8 +1288,8 @@ describe("momentum workflow run approve (NGX-325)", () => {
       `,
       {
         eval: true,
-        workerData: { dataDir, fifoPath, runId }
-      }
+        workerData: { dataDir, fifoPath, runId },
+      },
     );
     const workerDone = new Promise<void>((resolve, reject) => {
       worker.once("error", reject);
@@ -1249,7 +1315,7 @@ describe("momentum workflow run approve (NGX-325)", () => {
       fifoPath,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     await workerDone;
 
@@ -1260,21 +1326,27 @@ describe("momentum workflow run approve (NGX-325)", () => {
       command: "workflow run approve",
       code: "invalid_state",
       runId,
-      boundary: "implementation"
+      boundary: "implementation",
     });
 
     const dbCheck = openDb(dataDir);
     try {
       const runRow = dbCheck
-        .prepare("SELECT state, approval_boundary FROM workflow_runs WHERE id = ?")
+        .prepare(
+          "SELECT state, approval_boundary FROM workflow_runs WHERE id = ?",
+        )
         .get(runId) as { state: string; approval_boundary: string | null };
       expect(runRow).toEqual({
         state: "failed",
-        approval_boundary: null
+        approval_boundary: null,
       });
-      const approvalCount = (dbCheck
-        .prepare("SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?")
-        .get(runId) as { count: number }).count;
+      const approvalCount = (
+        dbCheck
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_approvals WHERE run_id = ?",
+          )
+          .get(runId) as { count: number }
+      ).count;
       expect(approvalCount).toBe(0);
     } finally {
       dbCheck.close();

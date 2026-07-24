@@ -16,11 +16,13 @@ import {
 import { DAEMON_EXECUTOR_CONFIG_ENV_VAR } from "../src/core/executors/sdk/daemon-config.js";
 import { SingleShotExecutor } from "../src/core/executors/single-shot/sdk.js";
 import {
+  AGENT_LOOP_MECHANISM_SCHEMA,
   GoalLoopSdkExecutor,
   goalLoopDispatchBindingDetail,
-} from "../src/core/executors/goal-loop/sdk.js";
-import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
-import { resolveGoalLoopRoundSelection } from "../src/core/executors/goal-loop/executor.js";
+  LEGACY_GOAL_LOOP_MECHANISM_SCHEMA,
+} from "../src/core/executors/agent-loop/sdk.js";
+import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/agent-loop/mechanism.js";
+import { resolveGoalLoopRoundSelection } from "../src/core/executors/agent-loop/executor.js";
 import {
   LiveStepSdkExecutor,
   liveStepBuiltInConfigSchema,
@@ -31,6 +33,7 @@ import {
   insertExecutorAttempt,
   insertExecutorCheckpoint,
   insertExecutorRound,
+  persistExecutorDefinition,
 } from "../src/core/executors/loop/persist.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 import { validateExecutorConfig } from "../src/core/executors/sdk/config-schema.js";
@@ -61,7 +64,7 @@ const NOW = 1_700_000_000_000;
 const tempDirs: string[] = [];
 const NATIVE_ONE_SHOT_SCRIPT = `printf 'native dispatch\\n' > "$MOMENTUM_REPO_PATH/native-dispatch.txt"
 cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
-{"success":true,"summary":"native one-shot completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native one-shot","body":"","breaking":false}}
+{"success":true,"summary":"native agent-once completed","key_changes_made":["native-dispatch.txt"],"key_learnings":[],"remaining_work":[],"goal_complete":true,"commit":{"type":"test","subject":"complete native agent-once","body":"","breaking":false}}
 JSON`;
 const NATIVE_SCRIPT_COMMAND = `test "$MOMENTUM_RUN_ID" = "native-script-run" || exit 8
 test "$MOMENTUM_STEP_ID" = "preflight" || exit 9
@@ -77,7 +80,7 @@ test "$MOMENTUM_ATTEMPT" = "1" || exit 11
 test "$MOMENTUM_ITERATION_DIR" = "$PWD" || exit 12
 test "$MOMENTUM_REPO_PATH" != "$PWD" || exit 13
 printf 'native script\\n' > "$MOMENTUM_REPO_PATH/native-script.txt"`;
-const NATIVE_GOAL_LOOP_SCRIPT = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/goal-loop-count"
+const NATIVE_GOAL_LOOP_SCRIPT = `count_file="$MOMENTUM_REPO_PATH/.agent-workflows/$MOMENTUM_RUN_ID/agent-loop-count"
 count=0
 test ! -f "$count_file" || count=$(cat "$count_file")
 count=$((count + 1))
@@ -86,7 +89,7 @@ printf 'round %s\\n' "$count" > "$MOMENTUM_REPO_PATH/goal-round-$count.txt"
 goal_complete=false
 test "$count" -lt 2 || goal_complete=true
 cat > "$MOMENTUM_RESULT_PATH" <<JSON
-{"success":true,"summary":"goal-loop round $count","key_changes_made":["goal-round-$count.txt"],"key_learnings":["round $count"],"remaining_work":[],"goal_complete":$goal_complete,"commit":{"type":"test","subject":"complete goal-loop round $count","body":"","breaking":false}}
+{"success":true,"summary":"agent-loop round $count","key_changes_made":["goal-round-$count.txt"],"key_learnings":["round $count"],"remaining_work":[],"goal_complete":$goal_complete,"commit":{"type":"test","subject":"complete agent-loop round $count","body":"","breaking":false}}
 JSON`;
 
 afterEach(() => {
@@ -101,14 +104,14 @@ describe("profile-backed delegated tool dispatch", () => {
       "implementation",
     );
     expect(resolveProfileBackedDelegateToolStepKind("no-mistakes")).toBe(
-      "no-mistakes",
+      "validate",
     );
     expect(resolveProfileBackedDelegateToolStepKind("custom-tool")).toBeNull();
   });
 });
 
 describe("profile-backed built-in registration", () => {
-  it("selects the native single-shot lifecycle for one-shot and script", () => {
+  it("selects the native single-shot lifecycle for agent-once and script", () => {
     const executors = new Map(
       buildProfileBackedSdkExecutors().map((executor) => [
         executor.name,
@@ -116,23 +119,23 @@ describe("profile-backed built-in registration", () => {
       ]),
     );
 
-    expect(executors.get("one-shot")).toBeInstanceOf(SingleShotExecutor);
-    expect(executors.get("goal-loop")).toBeInstanceOf(GoalLoopSdkExecutor);
+    expect(executors.get("agent-once")).toBeInstanceOf(SingleShotExecutor);
+    expect(executors.get("agent-loop")).toBeInstanceOf(GoalLoopSdkExecutor);
     expect(executors.get("script")).toBeInstanceOf(SingleShotExecutor);
   });
 
-  it("runs one native one-shot round through production registered dispatch", async () => {
+  it("runs one native agent-once round through production registered dispatch", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeNativeDispatchProfile(tempDir());
     const definition: WorkflowDefinition = {
-      key: "native-one-shot-workflow",
+      key: "native-agent-once-workflow",
       title: "Native One-shot Workflow",
       version: 1,
       steps: [
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           config: { policyEnvelope: "native-dispatch-test" },
           order: 0,
           required: true,
@@ -143,18 +146,18 @@ describe("profile-backed built-in registration", () => {
     persistWorkflowDefinition(db, definition, { now: NOW });
     persistWorkflowRunStart(db, {
       definition,
-      runId: "native-one-shot-run",
+      runId: "native-agent-once-run",
       repoPath,
       objective: "Run one bounded native agent turn",
       now: NOW,
     });
     db.prepare(
       "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-    ).run("native-one-shot-run");
+    ).run("native-agent-once-run");
     const claim = claimRunnableWorkflowStep(db, {
-      runId: "native-one-shot-run",
+      runId: "native-agent-once-run",
       stepId: "preflight",
-      holder: "native-one-shot-worker",
+      holder: "native-agent-once-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -168,7 +171,7 @@ describe("profile-backed built-in registration", () => {
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "native-one-shot-worker",
+      workerId: "native-agent-once-worker",
       now: NOW + 1,
     });
 
@@ -177,25 +180,25 @@ describe("profile-backed built-in registration", () => {
         .prepare(
           "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
-        .get("native-one-shot-run", "preflight"),
+        .get("native-agent-once-run", "preflight"),
     ).toEqual({ state: "succeeded" });
     expect(
       db
         .prepare(
           "SELECT round_id, state, summary FROM executor_rounds WHERE workflow_run_id = ?",
         )
-        .get("native-one-shot-run"),
+        .get("native-agent-once-run"),
     ).toEqual({
-      round_id: "native-one-shot-run::preflight::attempt-1::round::0",
+      round_id: "native-agent-once-run::preflight::attempt-1::round::0",
       state: "succeeded",
-      summary: "native one-shot completed",
+      summary: "native agent-once completed",
     });
     expect(
       db
         .prepare(
           "SELECT stage FROM executor_checkpoints WHERE round_id = ? ORDER BY sequence",
         )
-        .all("native-one-shot-run::preflight::attempt-1::round::0"),
+        .all("native-agent-once-run::preflight::attempt-1::round::0"),
     ).toEqual([
       { stage: "round_started" },
       { stage: "mechanism_completed" },
@@ -215,7 +218,7 @@ describe("profile-backed built-in registration", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -269,9 +272,9 @@ describe("profile-backed built-in registration", () => {
   });
 
   it.each([
-    { family: "one-shot", config: {} },
+    { family: "agent-once", config: {} },
     { family: "script", config: { command: "sh" } },
-    { family: "goal-loop", config: {} },
+    { family: "agent-loop", config: {} },
   ] as const)(
     "resumes a roundless native $family attempt through the scheduler",
     async ({ family, config }) => {
@@ -340,7 +343,7 @@ describe("profile-backed built-in registration", () => {
     },
   );
 
-  it("forwards native coding route identity into the one-shot wrapper", async () => {
+  it("forwards native coding route identity into the agent-once wrapper", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = path.join(tempDir(), "agent-route-profile.json");
     fs.writeFileSync(
@@ -856,20 +859,20 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     },
   );
 
-  it("persists continue then complete across two native goal-loop dispatch turns with a nested result path", async () => {
+  it("persists continue then complete across two native agent-loop dispatch turns with a nested result path", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeGoalLoopDispatchProfile(tempDir(), {
       resultFile: "live/result.json",
     });
     const definition: WorkflowDefinition = {
-      key: "native-goal-loop-workflow",
+      key: "native-agent-loop-workflow",
       title: "Native Goal-loop Workflow",
       version: 1,
       steps: [
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           config: { maxRounds: 3 },
           order: 0,
           required: true,
@@ -880,18 +883,18 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     persistWorkflowDefinition(db, definition, { now: NOW });
     persistWorkflowRunStart(db, {
       definition,
-      runId: "native-goal-loop-run",
+      runId: "native-agent-loop-run",
       repoPath,
       objective: "Complete two durable native rounds",
       now: NOW,
     });
     db.prepare(
       "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-    ).run("native-goal-loop-run");
+    ).run("native-agent-loop-run");
     const claim = claimRunnableWorkflowStep(db, {
-      runId: "native-goal-loop-run",
+      runId: "native-agent-loop-run",
       stepId: "implementation",
-      holder: "native-goal-loop-worker",
+      holder: "native-agent-loop-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -905,7 +908,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "native-goal-loop-worker",
+      workerId: "native-agent-loop-worker",
       now: NOW + 1,
     });
     expect(
@@ -913,21 +916,21 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .prepare(
           "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
-        .get("native-goal-loop-run", "implementation"),
+        .get("native-agent-loop-run", "implementation"),
     ).toEqual({ state: "running" });
     expect(
       db
         .prepare(
           "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
         )
-        .get("native-goal-loop-run"),
+        .get("native-agent-loop-run"),
     ).toEqual({ state: "running" });
     expect(
       db
         .prepare(
           "SELECT classification, state, commit_sha FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
-        .all("native-goal-loop-run"),
+        .all("native-agent-loop-run"),
     ).toEqual([
       {
         classification: "continue",
@@ -938,7 +941,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "native-goal-loop-worker",
+      workerId: "native-agent-loop-worker",
       now: NOW + 2,
     });
 
@@ -947,14 +950,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         .prepare(
           "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
         )
-        .get("native-goal-loop-run", "implementation"),
+        .get("native-agent-loop-run", "implementation"),
     ).toEqual({ state: "succeeded" });
     expect(
       db
         .prepare(
           "SELECT round_index, classification, state, commit_sha FROM executor_rounds WHERE workflow_run_id = ? ORDER BY round_index",
         )
-        .all("native-goal-loop-run"),
+        .all("native-agent-loop-run"),
     ).toEqual([
       {
         round_index: 0,
@@ -973,7 +976,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       fs.readFileSync(
         path.join(
           repoPath,
-          ".agent-workflows/native-goal-loop-run/goal-loop-count",
+          ".agent-workflows/native-agent-loop-run/agent-loop-count",
         ),
         "utf8",
       ),
@@ -982,7 +985,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       fs.existsSync(
         path.join(
           repoPath,
-          ".agent-workflows/native-goal-loop-run/round-2/live/result.json",
+          ".agent-workflows/native-agent-loop-run/round-2/live/result.json",
         ),
       ),
     ).toBe(true);
@@ -996,7 +999,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     "verification.log",
     "verification.log.finalization.json",
   ] as const)(
-    "refuses a native goal-loop result file that collides with daemon artifact %s",
+    "refuses a native agent-loop result file that collides with daemon artifact %s",
     async (resultFile) => {
       const repoPath = initNativeDispatchRepo();
       const baseCommitCount = execFileSync(
@@ -1004,20 +1007,20 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         ["-C", repoPath, "rev-list", "--count", "HEAD"],
         { encoding: "utf8" },
       ).trim();
-      const runId = `native-goal-loop-artifact-collision-${resultFile.replaceAll(".", "-")}`;
+      const runId = `native-agent-loop-artifact-collision-${resultFile.replaceAll(".", "-")}`;
       const profileDir = tempDir();
       const profilePath = writeGoalLoopDispatchProfile(profileDir, {
         resultFile,
       });
       const definition: WorkflowDefinition = {
-        key: "native-goal-loop-artifact-collision-workflow",
+        key: "native-agent-loop-artifact-collision-workflow",
         title: "Native Goal-loop Artifact Collision Workflow",
         version: 1,
         steps: [
           {
             key: "implementation",
             kind: "implementation",
-            executor: "goal-loop",
+            executor: "agent-loop",
             order: 0,
             required: true,
           },
@@ -1039,7 +1042,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       const claim = claimRunnableWorkflowStep(db, {
         runId,
         stepId: "implementation",
-        holder: "native-goal-loop-artifact-collision-worker",
+        holder: "native-agent-loop-artifact-collision-worker",
         leaseExpiresAt: NOW + 30_000,
         now: NOW,
       });
@@ -1053,7 +1056,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
       await production.dispatch(claim.claim, {
         db,
-        workerId: "native-goal-loop-artifact-collision-worker",
+        workerId: "native-agent-loop-artifact-collision-worker",
         now: NOW + 1,
       });
 
@@ -1069,7 +1072,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       });
       expect(
         fs.existsSync(
-          path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+          path.join(repoPath, `.agent-workflows/${runId}/agent-loop-count`),
         ),
       ).toBe(false);
       expect(
@@ -1099,14 +1102,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       if (!repaired.ok) throw new Error(repaired.message);
       await runWorkflowSchedulerOnceAsync({
         db,
-        workerId: "native-goal-loop-artifact-collision-worker",
+        workerId: "native-agent-loop-artifact-collision-worker",
         continuationPollIntervalMs: 1,
         dispatch: repaired.dispatch,
         now: () => NOW + 3,
       });
       await runWorkflowSchedulerOnceAsync({
         db,
-        workerId: "native-goal-loop-artifact-collision-worker",
+        workerId: "native-agent-loop-artifact-collision-worker",
         continuationPollIntervalMs: 1,
         dispatch: repaired.dispatch,
         now: () => NOW + 4,
@@ -1150,19 +1153,19 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     30_000,
   );
 
-  it("rolls back a second native goal-loop round when its binding cannot be persisted", async () => {
+  it("rolls back a second native agent-loop round when its binding cannot be persisted", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeGoalLoopDispatchProfile(tempDir());
-    const runId = "atomic-second-goal-loop-round-run";
+    const runId = "atomic-second-agent-loop-round-run";
     const definition: WorkflowDefinition = {
-      key: "atomic-second-goal-loop-round-workflow",
+      key: "atomic-second-agent-loop-round-workflow",
       title: "Atomic Second Goal-loop Round Workflow",
       version: 1,
       steps: [
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           config: { maxRounds: 3 },
           order: 0,
           required: true,
@@ -1184,7 +1187,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const claim = claimRunnableWorkflowStep(db, {
       runId,
       stepId: "implementation",
-      holder: "atomic-second-goal-loop-round-worker",
+      holder: "atomic-second-agent-loop-round-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -1198,7 +1201,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "atomic-second-goal-loop-round-worker",
+      workerId: "atomic-second-agent-loop-round-worker",
       now: NOW + 1,
     });
     db.exec(`
@@ -1212,7 +1215,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "atomic-second-goal-loop-round-worker",
+      workerId: "atomic-second-agent-loop-round-worker",
       now: NOW + 2,
     });
 
@@ -1245,7 +1248,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     ).toEqual({ count: 0 });
     expect(
       fs.readFileSync(
-        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        path.join(repoPath, `.agent-workflows/${runId}/agent-loop-count`),
         "utf8",
       ),
     ).toBe("1\n");
@@ -1277,7 +1280,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -1373,19 +1376,19 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   });
 
-  it("refuses a symlinked native goal-loop round directory", async () => {
+  it("refuses a symlinked native agent-loop round directory", async () => {
     const repoPath = initNativeDispatchRepo();
     const profilePath = writeGoalLoopDispatchProfile(tempDir());
-    const runId = "symlinked-native-goal-loop-run";
+    const runId = "symlinked-native-agent-loop-run";
     const definition: WorkflowDefinition = {
-      key: "symlinked-native-goal-loop-workflow",
+      key: "symlinked-native-agent-loop-workflow",
       title: "Symlinked Native Goal-loop Workflow",
       version: 1,
       steps: [
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -1410,7 +1413,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const claim = claimRunnableWorkflowStep(db, {
       runId,
       stepId: "implementation",
-      holder: "symlinked-native-goal-loop-worker",
+      holder: "symlinked-native-agent-loop-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -1424,7 +1427,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
     await production.dispatch(claim.claim, {
       db,
-      workerId: "symlinked-native-goal-loop-worker",
+      workerId: "symlinked-native-agent-loop-worker",
       now: NOW + 1,
     });
 
@@ -1457,19 +1460,19 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       config: { agent: { harness: "portable-agent" } },
     },
   ])(
-    "fails closed before goal-loop execution on a mismatched $binding",
+    "fails closed before agent-loop execution on a mismatched $binding",
     async ({ config }) => {
       const repoPath = initNativeDispatchRepo();
       const profilePath = writeGoalLoopDispatchProfile(tempDir());
       const definition: WorkflowDefinition = {
-        key: "refused-native-goal-loop-workflow",
+        key: "refused-native-agent-loop-workflow",
         title: "Refused Native Goal-loop Workflow",
         version: 1,
         steps: [
           {
             key: "implementation",
             kind: "implementation",
-            executor: "goal-loop",
+            executor: "agent-loop",
             config,
             order: 0,
             required: true,
@@ -1480,18 +1483,18 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       persistWorkflowDefinition(db, definition, { now: NOW });
       persistWorkflowRunStart(db, {
         definition,
-        runId: "refused-native-goal-loop-run",
+        runId: "refused-native-agent-loop-run",
         repoPath,
-        objective: "Refuse mismatched native goal-loop bindings",
+        objective: "Refuse mismatched native agent-loop bindings",
         now: NOW,
       });
       db.prepare(
         "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
-      ).run("refused-native-goal-loop-run");
+      ).run("refused-native-agent-loop-run");
       const claim = claimRunnableWorkflowStep(db, {
-        runId: "refused-native-goal-loop-run",
+        runId: "refused-native-agent-loop-run",
         stepId: "implementation",
-        holder: "refused-native-goal-loop-worker",
+        holder: "refused-native-agent-loop-worker",
         leaseExpiresAt: NOW + 30_000,
         now: NOW,
       });
@@ -1505,7 +1508,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
 
       await production.dispatch(claim.claim, {
         db,
-        workerId: "refused-native-goal-loop-worker",
+        workerId: "refused-native-agent-loop-worker",
         now: NOW + 1,
       });
 
@@ -1514,7 +1517,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
           .prepare(
             "SELECT state, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
           )
-          .get("refused-native-goal-loop-run"),
+          .get("refused-native-agent-loop-run"),
       ).toEqual({
         state: "manual_recovery_required",
         recovery_code: "host_binding_mismatch",
@@ -1523,7 +1526,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         fs.existsSync(
           path.join(
             repoPath,
-            ".agent-workflows/refused-native-goal-loop-run/goal-loop-count",
+            ".agent-workflows/refused-native-agent-loop-run/agent-loop-count",
           ),
         ),
       ).toBe(false);
@@ -1531,19 +1534,19 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     },
   );
 
-  it("retries a repaired native goal-loop binding through preserved round and checkpoint id collisions", async () => {
+  it("retries a repaired native agent-loop binding through preserved round and checkpoint id collisions", async () => {
     const repoPath = initNativeDispatchRepo();
     const profileDir = tempDir();
-    const runId = "repaired-native-goal-loop-binding-run";
+    const runId = "repaired-native-agent-loop-binding-run";
     const definition: WorkflowDefinition = {
-      key: "repaired-native-goal-loop-binding-workflow",
+      key: "repaired-native-agent-loop-binding-workflow",
       title: "Repaired Native Goal-loop Binding Workflow",
       version: 1,
       steps: [
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           config: { timeoutMs: 4_000, maxRounds: 3 },
           order: 0,
           required: true,
@@ -1556,7 +1559,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       definition,
       runId,
       repoPath,
-      objective: "Repair a native goal-loop host binding",
+      objective: "Repair a native agent-loop host binding",
       now: NOW,
     });
     db.prepare(
@@ -1566,7 +1569,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const claim = claimRunnableWorkflowStep(db, {
       runId,
       stepId: "implementation",
-      holder: "repaired-native-goal-loop-binding-worker",
+      holder: "repaired-native-agent-loop-binding-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -1579,7 +1582,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!first.ok) throw new Error(first.message);
     await first.dispatch(claim.claim, {
       db,
-      workerId: "repaired-native-goal-loop-binding-worker",
+      workerId: "repaired-native-agent-loop-binding-worker",
       now: NOW + 1,
     });
 
@@ -1622,7 +1625,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       workflowRunId: collisionOwnerRunId,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       state: "succeeded",
       attemptNumber: 1,
       startedAt: NOW,
@@ -1635,7 +1638,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       workflowRunId: collisionOwnerRunId,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "succeeded",
@@ -1677,14 +1680,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!repaired.ok) throw new Error(repaired.message);
     await runWorkflowSchedulerOnceAsync({
       db,
-      workerId: "repaired-native-goal-loop-binding-worker",
+      workerId: "repaired-native-agent-loop-binding-worker",
       continuationPollIntervalMs: 1,
       dispatch: repaired.dispatch,
       now: () => NOW + 3,
     });
     await runWorkflowSchedulerOnceAsync({
       db,
-      workerId: "repaired-native-goal-loop-binding-worker",
+      workerId: "repaired-native-agent-loop-binding-worker",
       continuationPollIntervalMs: 1,
       dispatch: repaired.dispatch,
       now: () => NOW + 4,
@@ -1740,7 +1743,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     expect(
       fs.readFileSync(
-        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        path.join(repoPath, `.agent-workflows/${runId}/agent-loop-count`),
         "utf8",
       ),
     ).toBe("2\n");
@@ -1883,19 +1886,19 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   }, 15_000);
 
-  it("retries a repaired native one-shot host binding while preserving the failed attempt", async () => {
+  it("retries a repaired native agent-once host binding while preserving the failed attempt", async () => {
     const repoPath = initNativeDispatchRepo();
     const profileDir = tempDir();
-    const runId = "repaired-native-one-shot-binding-run";
+    const runId = "repaired-native-agent-once-binding-run";
     const definition: WorkflowDefinition = {
-      key: "repaired-native-one-shot-binding-workflow",
+      key: "repaired-native-agent-once-binding-workflow",
       title: "Repaired Native One-shot Binding Workflow",
       version: 1,
       steps: [
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           config: { timeoutMs: 4_000 },
           order: 0,
           required: true,
@@ -1908,7 +1911,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       definition,
       runId,
       repoPath,
-      objective: "Repair a native one-shot host binding",
+      objective: "Repair a native agent-once host binding",
       now: NOW,
     });
     db.prepare(
@@ -1918,7 +1921,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     const claim = claimRunnableWorkflowStep(db, {
       runId,
       stepId: "preflight",
-      holder: "repaired-native-one-shot-binding-worker",
+      holder: "repaired-native-agent-once-binding-worker",
       leaseExpiresAt: NOW + 30_000,
       now: NOW,
     });
@@ -1931,7 +1934,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!first.ok) throw new Error(first.message);
     await first.dispatch(claim.claim, {
       db,
-      workerId: "repaired-native-one-shot-binding-worker",
+      workerId: "repaired-native-agent-once-binding-worker",
       now: NOW + 1,
     });
     expect(
@@ -1982,7 +1985,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     if (!repaired.ok) throw new Error(repaired.message);
     await runWorkflowSchedulerOnceAsync({
       db,
-      workerId: "repaired-native-one-shot-binding-worker",
+      workerId: "repaired-native-agent-once-binding-worker",
       dispatch: repaired.dispatch,
       now: () => NOW + 3,
     });
@@ -2027,17 +2030,17 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.close();
   }, 30_000);
 
-  it("reattaches a checkpointed goal-loop mechanism without rerunning or recommitting", async () => {
+  it("reattaches a checkpointed agent-loop mechanism without rerunning or recommitting", async () => {
     const repoPath = initNativeDispatchRepo();
     const definition: WorkflowDefinition = {
-      key: "reattach-goal-loop-workflow",
+      key: "reattach-agent-loop-workflow",
       title: "Reattach Goal-loop Workflow",
       version: 1,
       steps: [
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -2047,20 +2050,20 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     persistWorkflowDefinition(db, definition, { now: NOW });
     persistWorkflowRunStart(db, {
       definition,
-      runId: "reattach-goal-loop-run",
+      runId: "reattach-agent-loop-run",
       repoPath,
       objective: "Reattach completed native work",
       now: NOW,
     });
-    const attemptId = "reattach-goal-loop-run::implementation::dispatch";
+    const attemptId = "reattach-agent-loop-run::implementation::dispatch";
     insertExecutorAttempt(
       db,
       {
         attemptId,
-        workflowRunId: "reattach-goal-loop-run",
+        workflowRunId: "reattach-agent-loop-run",
         stepRunId: "implementation",
         stepKey: "implementation",
-        executorFamily: "goal-loop",
+        executor: "agent-loop",
         state: "running",
         attemptNumber: 1,
         startedAt: NOW,
@@ -2071,7 +2074,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     );
     const artifactRoot = path.join(
       repoPath,
-      ".agent-workflows/reattach-goal-loop-run/round-1",
+      ".agent-workflows/reattach-agent-loop-run/round-1",
     );
     fs.mkdirSync(artifactRoot, { recursive: true });
     const resultFilePath = path.join(artifactRoot, "result.json");
@@ -2094,14 +2097,14 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         resultFilePath,
         JSON.stringify({
           success: true,
-          summary: "checkpointed native goal-loop work",
+          summary: "checkpointed native agent-loop work",
           key_changes_made: ["reattached.txt"],
           key_learnings: [],
           remaining_work: [],
           goal_complete: true,
           commit: {
             type: "test",
-            subject: "checkpoint native goal-loop work",
+            subject: "checkpoint native agent-loop work",
             body: "",
             breaking: false,
           },
@@ -2120,7 +2123,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       start: {
         roundId: `${attemptId}::round::0`,
         attemptId,
-        workflowRunId: "reattach-goal-loop-run",
+        workflowRunId: "reattach-agent-loop-run",
         stepRunId: "implementation",
         stepKey: "implementation",
         attemptNumber: 1,
@@ -2153,6 +2156,16 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       envelope: envelope.facade,
       signal: new AbortController().signal,
     });
+    const mechanismCheckpoint = db
+      .prepare(
+        `SELECT detail
+           FROM executor_checkpoints
+          WHERE round_id = ? AND stage = 'mechanism_completed'`,
+      )
+      .get(`${attemptId}::round::0`) as { detail: string };
+    expect(JSON.parse(mechanismCheckpoint.detail).schema).toBe(
+      AGENT_LOOP_MECHANISM_SCHEMA,
+    );
     expect(mechanisms).toBe(1);
     expect(
       execFileSync("git", ["-C", repoPath, "rev-list", "--count", "HEAD"], {
@@ -2169,6 +2182,15 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     db.prepare(
       "UPDATE executor_rounds SET attempt_number = 2 WHERE attempt_id = ?",
     ).run(attemptId);
+    const legacyMechanismDetail = JSON.parse(mechanismCheckpoint.detail) as {
+      schema: string;
+    };
+    legacyMechanismDetail.schema = LEGACY_GOAL_LOOP_MECHANISM_SCHEMA;
+    db.prepare(
+      `UPDATE executor_checkpoints
+          SET detail = ?
+        WHERE round_id = ? AND stage = 'mechanism_completed'`,
+    ).run(JSON.stringify(legacyMechanismDetail), `${attemptId}::round::0`);
     const migratedHostBindings = {
       ...hostBindings,
       start: { ...hostBindings.start, attemptNumber: 2 },
@@ -2271,7 +2293,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -2429,7 +2451,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       fs.existsSync(
         path.join(
           repoPath,
-          ".agent-workflows/native-lock-recovery-run/goal-loop-count",
+          ".agent-workflows/native-lock-recovery-run/agent-loop-count",
         ),
       ),
     ).toBe(false);
@@ -2449,7 +2471,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -2502,7 +2524,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       workflowRunId: runId,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "running" as const,
@@ -2571,7 +2593,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     ).toBe("must not replay\n");
     expect(
       fs.existsSync(
-        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        path.join(repoPath, `.agent-workflows/${runId}/agent-loop-count`),
       ),
     ).toBe(false);
     expect(
@@ -2608,7 +2630,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -2658,7 +2680,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       workflowRunId: runId,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "running",
@@ -2721,7 +2743,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
     });
     expect(
       fs.existsSync(
-        path.join(repoPath, `.agent-workflows/${runId}/goal-loop-count`),
+        path.join(repoPath, `.agent-workflows/${runId}/agent-loop-count`),
       ),
     ).toBe(false);
     db.close();
@@ -2737,7 +2759,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
         {
           key: "implementation",
           kind: "implementation",
-          executor: "goal-loop",
+          executor: "agent-loop",
           order: 0,
           required: true,
         },
@@ -2782,7 +2804,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       workflowRunId: runId,
       stepRunId: "implementation",
       stepKey: "implementation",
-      executorFamily: "goal-loop",
+      executor: "agent-loop",
       attemptNumber: 1,
       roundIndex: 0,
       state: "running",
@@ -2922,11 +2944,11 @@ function writeGoalLoopDispatchProfile(
   profileDir: string,
   options: { resultFile?: string; timeoutSec?: number } = {},
 ): string {
-  const profilePath = path.join(profileDir, "goal-loop-profile.json");
+  const profilePath = path.join(profileDir, "agent-loop-profile.json");
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "native-goal-loop-test",
+      name: "native-agent-loop-test",
       wrappers: {
         implementation: {
           command: "/bin/sh",
@@ -2992,7 +3014,7 @@ function completeRegisteredExecutorTick(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "capturing_result",
@@ -3109,10 +3131,10 @@ describe("executor registration and SDK dispatch", () => {
     expect(
       db
         .prepare(
-          "SELECT executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT executor, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .get("fixture-run"),
-    ).toEqual({ executor_family: "fixture-executor", state: "succeeded" });
+    ).toEqual({ executor: "fixture-executor", state: "succeeded" });
     expect(
       db
         .prepare(
@@ -3247,7 +3269,7 @@ describe("executor registration and SDK dispatch", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -3268,7 +3290,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "legacy-live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 1,
         startedAt: NOW,
@@ -3278,8 +3300,8 @@ describe("executor registration and SDK dispatch", () => {
       { now: NOW },
     );
     const executor = new LiveStepSdkExecutor(
-      "one-shot",
-      liveStepBuiltInConfigSchema("one-shot"),
+      "agent-once",
+      liveStepBuiltInConfigSchema("agent-once"),
     );
     let runs = 0;
     const hostBindings = {
@@ -3348,7 +3370,7 @@ describe("executor registration and SDK dispatch", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -3369,7 +3391,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 1,
         startedAt: NOW,
@@ -3380,8 +3402,8 @@ describe("executor registration and SDK dispatch", () => {
     );
     let runs = 0;
     const executor = new LiveStepSdkExecutor(
-      "one-shot",
-      liveStepBuiltInConfigSchema("one-shot"),
+      "agent-once",
+      liveStepBuiltInConfigSchema("agent-once"),
     );
     const hostBindings = {
       repoPath: "/repos/fixture",
@@ -3452,7 +3474,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 2,
         startedAt: NOW + 3,
@@ -3485,7 +3507,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 3,
         startedAt: NOW + 4,
@@ -3505,7 +3527,7 @@ describe("executor registration and SDK dispatch", () => {
       workflowRunId: "live-sdk-run",
       stepRunId: "preflight",
       stepKey: "preflight",
-      executorFamily: "one-shot",
+      executor: "agent-once",
       attemptNumber: 3,
       roundIndex: 2,
       state: "running",
@@ -3548,7 +3570,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "live-sdk-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 4,
         startedAt: NOW + 5,
@@ -3561,8 +3583,8 @@ describe("executor registration and SDK dispatch", () => {
       db,
       attemptId: "live-sdk-attempt::attempt-4",
       executor: {
-        name: "one-shot",
-        configSchema: liveStepBuiltInConfigSchema("one-shot"),
+        name: "agent-once",
+        configSchema: liveStepBuiltInConfigSchema("agent-once"),
         tick: () => ({
           roundId: "live-sdk-attempt::round-3",
           recommendation: "complete",
@@ -3619,7 +3641,7 @@ describe("executor registration and SDK dispatch", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "one-shot",
+            executor: "agent-once",
             order: 0,
             required: true,
           },
@@ -3640,7 +3662,7 @@ describe("executor registration and SDK dispatch", () => {
           workflowRunId: runId,
           stepRunId: "preflight",
           stepKey: "preflight",
-          executorFamily: "one-shot",
+          executor: "agent-once",
           state: "running",
           attemptNumber: 1,
           startedAt: NOW,
@@ -3654,8 +3676,8 @@ describe("executor registration and SDK dispatch", () => {
         db,
         attemptId,
         executor: new LiveStepSdkExecutor(
-          "one-shot",
-          liveStepBuiltInConfigSchema("one-shot"),
+          "agent-once",
+          liveStepBuiltInConfigSchema("agent-once"),
         ),
         config: {},
         hostBindings: {
@@ -3699,7 +3721,7 @@ describe("executor registration and SDK dispatch", () => {
         {
           key: "preflight",
           kind: "preflight",
-          executor: "one-shot",
+          executor: "agent-once",
           order: 0,
           required: true,
         },
@@ -3720,7 +3742,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "checkpoint-failure-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 1,
         startedAt: NOW,
@@ -3741,8 +3763,8 @@ describe("executor registration and SDK dispatch", () => {
     });
     let settledClean: boolean | undefined;
     const executor = new LiveStepSdkExecutor(
-      "one-shot",
-      liveStepBuiltInConfigSchema("one-shot"),
+      "agent-once",
+      liveStepBuiltInConfigSchema("agent-once"),
     );
     await expect(
       executor.tick({
@@ -4604,6 +4626,137 @@ describe("executor registration and SDK dispatch", () => {
     db.close();
   });
 
+  it("does not alias a missing third-party executor that claims a retired built-in name", async () => {
+    const fixture = fixtureDefinition({ message: "must not run built-in" });
+    const definition: WorkflowDefinition = {
+      ...fixture,
+      key: "claimed-retired-name-workflow",
+      steps: fixture.steps.map((step) => ({
+        ...step,
+        executor: "goal-loop",
+      })),
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistExecutorDefinition(
+      db,
+      {
+        executorKey: "goal-loop",
+        executor: "goal-loop",
+        agentProvider: null,
+        model: null,
+        effort: null,
+        timeoutMs: null,
+        maxRounds: null,
+        policyEnvelope: null,
+      },
+      { now: NOW },
+    );
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "claimed-retired-name-run",
+      repoPath: "/repos/fixture",
+      objective: "Refuse the missing third-party executor honestly",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("claimed-retired-name-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "claimed-retired-name-run",
+      stepId: "preflight",
+      holder: "fixture-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "fixture-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT executor, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("claimed-retired-name-run"),
+    ).toEqual({
+      executor: "goal-loop",
+      recovery_code: "runtime_unavailable",
+    });
+    db.close();
+  });
+
+  it("does not alias an unavailable configured executor with a retired built-in name", async () => {
+    const fixture = fixtureDefinition({ message: "must not run built-in" });
+    const definition: WorkflowDefinition = {
+      ...fixture,
+      key: "unavailable-retired-name-workflow",
+      steps: fixture.steps.map((step) => ({
+        ...step,
+        executor: "goal-loop",
+      })),
+    };
+    const db = openDb(tempDir());
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId: "unavailable-retired-name-run",
+      repoPath: "/repos/fixture",
+      objective: "Refuse the unavailable configured executor honestly",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run("unavailable-retired-name-run");
+    const claim = claimRunnableWorkflowStep(db, {
+      runId: "unavailable-retired-name-run",
+      stepId: "preflight",
+      holder: "fixture-worker",
+      leaseExpiresAt: NOW + 30_000,
+      now: NOW,
+    });
+    if (!claim.ok) throw new Error(claim.reason);
+    const configPath = path.join(tempDir(), "unavailable-executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ executors: { "goal-loop": "./missing.mjs" } }),
+    );
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_EXECUTOR_CONFIG_ENV_VAR]: configPath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    if (!production.ok) throw new Error(production.message);
+
+    await production.dispatch(claim.claim, {
+      db,
+      workerId: "fixture-worker",
+      now: NOW + 1,
+    });
+
+    expect(
+      db
+        .prepare(
+          "SELECT executor, recovery_code FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get("unavailable-retired-name-run"),
+    ).toEqual({
+      executor: "goal-loop",
+      recovery_code: "runtime_unavailable",
+    });
+    db.close();
+  });
+
   it.each([
     {
       classification: "approval_required" as const,
@@ -4683,7 +4836,7 @@ describe("executor registration and SDK dispatch", () => {
                       workflowRunId: context.state.attempt.workflowRunId,
                       stepRunId: context.state.attempt.stepRunId,
                       stepKey: context.state.attempt.stepKey,
-                      executorFamily: context.state.attempt.executorFamily,
+                      executor: context.state.attempt.executor,
                       attemptNumber: context.state.attempt.attemptNumber,
                       roundIndex: context.state.rounds.length,
                       state: "capturing_result",
@@ -4720,7 +4873,7 @@ describe("executor registration and SDK dispatch", () => {
               workflowRunId: attempt.workflowRunId,
               stepRunId: attempt.stepRunId,
               stepKey: attempt.stepKey,
-              executorFamily: attempt.executorFamily,
+              executor: attempt.executor,
               attemptNumber: attempt.attemptNumber,
               roundIndex: context.state.rounds.length,
               state: "mirroring_external_state",
@@ -4953,7 +5106,7 @@ describe("executor registration and SDK dispatch", () => {
             workflowRunId: attempt.workflowRunId,
             stepRunId: attempt.stepRunId,
             stepKey: attempt.stepKey,
-            executorFamily: attempt.executorFamily,
+            executor: attempt.executor,
             attemptNumber: attempt.attemptNumber,
             roundIndex: 0,
             state: "capturing_result",
@@ -5157,7 +5310,7 @@ describe("executor registration and SDK dispatch", () => {
         workflowRunId: "hostile-tick-run",
         stepRunId: "preflight",
         stepKey: "preflight",
-        executorFamily: "fixture-executor",
+        executor: "fixture-executor",
         state: "running",
         attemptNumber: 1,
         startedAt: NOW,

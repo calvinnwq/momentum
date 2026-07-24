@@ -127,7 +127,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         adapterKind: "linear",
         externalId: "NGX-1",
       });
-      insertEvidenceRecord(db, "ev-1", "no_mistakes_complete", "goal-1", 1000);
+      insertEvidenceRecord(db, "ev-1", "validate_complete", "goal-1", 1000);
 
       const result = evaluateGoalForSourceSatisfiedIntents(
         db,
@@ -151,7 +151,7 @@ describe("evaluateGoalForSourceSatisfiedIntents", () => {
         "linear:NGX-1:source_satisfied:goal-1",
       );
       expect(result.intent.payload).toMatchObject({
-        evidenceType: "no_mistakes_complete",
+        evidenceType: "validate_complete",
         goalState: "completed",
       });
       expect(result.sourceItem.id).toBe("si-1");

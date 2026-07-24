@@ -15,12 +15,12 @@ import {
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
   resolveGoalLoopRoundSelection,
-} from "../src/core/executors/goal-loop/executor.js";
+} from "../src/core/executors/agent-loop/executor.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 // This is the integration twin of the pure projections in
-// goal-loop-executor.test.ts: it drives a goal-loop round's start record and the
+// agent-loop-executor.test.ts: it drives a agent-loop round's start record and the
 // terminal persistence plan through the *real* executor-loop persistence layer
 // and round transition graph, proving the per-round agent/model/input evidence
 // frozen at start survives the result/verification/commit evidence written at the
@@ -40,7 +40,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-goal-loop-persistence-"),
+    path.join(os.tmpdir(), "momentum-agent-loop-persistence-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -62,7 +62,7 @@ function openRoundDb(): MomentumDb {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 1,
@@ -109,7 +109,7 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
     goal_complete: true,
     commit: {
       type: "feat",
-      scope: "goal-loop",
+      scope: "agent-loop",
       subject: "project round start",
       body: "",
       breaking: false,
@@ -137,7 +137,7 @@ const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): project round start",
+    message: "feat(agent-loop): project round start",
   },
   head: SHA_A,
 };
@@ -148,7 +148,7 @@ const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   error: "result file not found",
 };
 
-describe("goal-loop round persistence — committed completion round-trip", () => {
+describe("agent-loop round persistence — committed completion round-trip", () => {
   it("freezes agent/model/input at start and adds result/verification/commit at the end", () => {
     const db = openRoundDb();
     startRound(db);
@@ -189,7 +189,7 @@ describe("goal-loop round persistence — committed completion round-trip", () =
   });
 });
 
-describe("goal-loop round persistence — manual recovery boundary", () => {
+describe("agent-loop round persistence — manual recovery boundary", () => {
   it("routes a missing-result round from running straight to manual recovery", () => {
     const db = openRoundDb();
     startRound(db);

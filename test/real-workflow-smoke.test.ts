@@ -15,10 +15,10 @@ import {
  * NGX-372 opt-in real coding-workflow harness smoke — pure planner / classifier.
  *
  * These tests pin the CI-safe decision logic that gates the real coding-workflow
- * harness smoke (preflight / implementation (GNHF) / postflight / no-mistakes /
- * merge-cleanup / linear-refresh): skip unless explicitly opted in with a
+ * harness smoke (preflight / implementation (GNHF) / postflight / validate /
+ * merge-cleanup / tracker-refresh): skip unless explicitly opted in with a
  * configured live-wrapper profile, keep the
- * external-write family (linear-refresh) closed unless a separate write policy
+ * external-write family (tracker-refresh) closed unless a separate write policy
  * is opened, default to the safe probe-only dry-run, and map a finished harness
  * outcome into the documented failure-mode taxonomy. No process is spawned.
  */
@@ -40,8 +40,8 @@ function wrapper(overrides: RawWrapper = {}): RawWrapper {
 
 function profile(
   wrappers: Record<string, RawWrapper> = {
-    "no-mistakes": wrapper(),
-    "linear-refresh": wrapper(),
+    validate: wrapper(),
+    "tracker-refresh": wrapper(),
   },
 ): unknown {
   return { name: "smoke", wrappers };
@@ -52,7 +52,7 @@ function optedInEnv(
 ): Record<string, string | undefined> {
   return {
     [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1",
-    [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes",
+    [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "validate",
     ...overrides,
   };
 }
@@ -60,7 +60,7 @@ function optedInEnv(
 describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with not_opted_in when the opt-in flag is unset", () => {
     const plan = planWorkflowHarnessSmoke(
-      { [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "no-mistakes" },
+      { [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "validate" },
       profile(),
     );
     expect(plan.mode).toBe("skip");
@@ -120,7 +120,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with not_configured when the kind is valid but absent from the profile", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "postflight" }),
-      profile({ "no-mistakes": wrapper() }),
+      profile({ validate: wrapper() }),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -131,8 +131,8 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     const plan = planWorkflowHarnessSmoke(optedInEnv(), profile());
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
-    expect(plan.kind).toBe("no-mistakes");
-    expect(plan.family).toBe("delegate-supervisor");
+    expect(plan.kind).toBe("validate");
+    expect(plan.executor).toBe("delegate-supervisor");
     expect(plan.isExternalWrite).toBe(false);
     expect(plan.probeOnly).toBe(true);
     expect(plan.command).toBe("/usr/bin/true");
@@ -148,7 +148,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("skips with probe_unavailable when probe-only is requested but no probe is configured", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv(),
-      profile({ "no-mistakes": wrapper({ probe: undefined }) }),
+      profile({ validate: wrapper({ probe: undefined }) }),
     );
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
@@ -158,7 +158,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("plans a full harness run without a probe when the full flag is set", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({ [REAL_SMOKE_WORKFLOW_FULL_ENV_VAR]: "1" }),
-      profile({ "no-mistakes": wrapper({ probe: undefined }) }),
+      profile({ validate: wrapper({ probe: undefined }) }),
     );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
@@ -168,7 +168,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
 
   it("keeps the external-write family closed without the write opt-in", () => {
     const plan = planWorkflowHarnessSmoke(
-      optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "linear-refresh" }),
+      optedInEnv({ [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "tracker-refresh" }),
       profile(),
     );
     expect(plan.mode).toBe("skip");
@@ -179,15 +179,15 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
   it("opens the external-write family only when the separate write opt-in is set", () => {
     const plan = planWorkflowHarnessSmoke(
       optedInEnv({
-        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "linear-refresh",
+        [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "tracker-refresh",
         [REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR]: "1",
       }),
       profile(),
     );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
-    expect(plan.kind).toBe("linear-refresh");
-    expect(plan.family).toBe("external-apply");
+    expect(plan.kind).toBe("tracker-refresh");
+    expect(plan.executor).toBe("external-apply");
     expect(plan.isExternalWrite).toBe(true);
   });
 });

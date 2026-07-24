@@ -19,18 +19,22 @@
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
   listWorkflowGatesForRun,
-  type WorkflowGateRecord
+  type WorkflowGateRecord,
 } from "../gate/persist.js";
 import {
   policyForWorkflowGateRecommendedAction,
-  type WorkflowActionAuthorityPolicy
+  type WorkflowActionAuthorityPolicy,
 } from "../monitor/action-authority.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorCheckpoint,
-  type WorkflowMonitorState
+  type WorkflowMonitorState,
 } from "../monitor/state.js";
+import {
+  canonicalWorkflowApprovalBoundary,
+  canonicalWorkflowStepKind,
+} from "../definition/legacy.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
@@ -39,7 +43,7 @@ import type {
   WorkflowRunState,
   WorkflowStepKind,
   WorkflowStepRecord,
-  WorkflowStepState
+  WorkflowStepState,
 } from "./reducer.js";
 
 export type WorkflowRunRow = {
@@ -123,7 +127,7 @@ export const WORKFLOW_STATUS_FILTER_KEYS = [
   "active",
   "blocked",
   "completed",
-  "imported"
+  "imported",
 ] as const;
 export type WorkflowStatusFilterKey =
   (typeof WORKFLOW_STATUS_FILTER_KEYS)[number];
@@ -189,23 +193,23 @@ const STEP_STATE_BUCKETS: readonly WorkflowStepState[] = [
   "failed",
   "skipped",
   "blocked",
-  "canceled"
+  "canceled",
 ];
 
 const ACTIVE_RUN_STATES: readonly WorkflowRunState[] = [
   "pending",
   "approved",
-  "running"
+  "running",
 ];
 const COMPLETED_RUN_STATES: readonly WorkflowRunState[] = [
   "succeeded",
   "failed",
-  "canceled"
+  "canceled",
 ];
 
 export function listWorkflowRunSummaries(
   db: MomentumDb,
-  options: LoadWorkflowRunSummariesOptions = {}
+  options: LoadWorkflowRunSummariesOptions = {},
 ): WorkflowRunSummary[] {
   const states = resolveStateFilter(options);
   if (states !== null && states.length === 0) return [];
@@ -263,7 +267,7 @@ export function listWorkflowRunSummaries(
       ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
       ...(options.checkpointStaleMs !== undefined
         ? { checkpointStaleMs: options.checkpointStaleMs }
-        : {})
+        : {}),
     });
     summaries.push({
       run,
@@ -271,17 +275,15 @@ export function listWorkflowRunSummaries(
         steps: steps.length,
         stepsByState: countStepsByState(steps),
         approvals: approvals.length,
-        leases: leases.length
+        leases: leases.length,
       },
       monitor,
-      gates
+      gates,
     });
   }
 
   if (options.filter === "imported") {
-    return summaries.filter(
-      (entry) => entry.run.source === "agent-workflow"
-    );
+    return summaries.filter((entry) => entry.run.source === "agent-workflow");
   }
   return summaries;
 }
@@ -289,7 +291,7 @@ export function listWorkflowRunSummaries(
 export function loadWorkflowRunDetail(
   db: MomentumDb,
   runId: string,
-  options: LoadWorkflowRunDetailOptions = {}
+  options: LoadWorkflowRunDetailOptions = {},
 ): WorkflowRunDetail | null {
   const runRow = db
     .prepare("SELECT * FROM workflow_runs WHERE id = ?")
@@ -310,15 +312,15 @@ export function loadWorkflowRunDetail(
     ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
     ...(options.checkpointStaleMs !== undefined
       ? { checkpointStaleMs: options.checkpointStaleMs }
-      : {})
+      : {}),
   });
   const evidence = listEvidenceLinksForRun(db, run);
   const gates = listWorkflowGatesForRun(db, runId).map((gate) => ({
     ...gate,
     recommendedActionPolicy: policyForWorkflowGateRecommendedAction({
       gateType: gate.gateType,
-      recommendedAction: gate.recommendedAction
-    })
+      recommendedAction: gate.recommendedAction,
+    }),
   }));
   return { run, steps, approvals, leases, monitor, evidence, gates };
 }
@@ -327,7 +329,7 @@ function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
   return (
     db
       .prepare(
-        "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id"
+        "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id",
       )
       .all(runId) as StepRow[]
   ).map(parseStepRow);
@@ -335,25 +337,22 @@ function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
 
 function listApprovalsByRunId(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): WorkflowApprovalRow[] {
   return (
     db
       .prepare(
-        "SELECT * FROM workflow_approvals WHERE run_id = ? ORDER BY recorded_at, boundary"
+        "SELECT * FROM workflow_approvals WHERE run_id = ? ORDER BY recorded_at, boundary",
       )
       .all(runId) as ApprovalRow[]
   ).map(parseApprovalRow);
 }
 
-function listLeasesByRunId(
-  db: MomentumDb,
-  runId: string
-): WorkflowLeaseRow[] {
+function listLeasesByRunId(db: MomentumDb, runId: string): WorkflowLeaseRow[] {
   return (
     db
       .prepare(
-        "SELECT * FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind"
+        "SELECT * FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind",
       )
       .all(runId) as LeaseRow[]
   ).map(parseLeaseRow);
@@ -361,7 +360,7 @@ function listLeasesByRunId(
 
 function listEvidenceLinksForRun(
   db: MomentumDb,
-  run: WorkflowRunRow
+  run: WorkflowRunRow,
 ): WorkflowEvidenceLink[] {
   // Prefer the durable typed run_id linkage. Legacy rows ingested
   // before the parser populated run_id keep their null linkage, so fall back
@@ -374,12 +373,12 @@ function listEvidenceLinksForRun(
     runDir
       ? db
           .prepare(
-            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? OR (run_id IS NULL AND artifact_path LIKE ?) ORDER BY occurred_at DESC, id ASC"
+            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? OR (run_id IS NULL AND artifact_path LIKE ?) ORDER BY occurred_at DESC, id ASC",
           )
           .all(run.runId, `${runDir}%`)
       : db
           .prepare(
-            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? ORDER BY occurred_at DESC, id ASC"
+            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? ORDER BY occurred_at DESC, id ASC",
           )
           .all(run.runId)
   ) as Array<{
@@ -400,7 +399,7 @@ function listEvidenceLinksForRun(
     occurredAt: row.occurred_at,
     summary: row.summary,
     runId: row.run_id,
-    stepId: row.step_id
+    stepId: row.step_id,
   }));
 }
 
@@ -415,10 +414,9 @@ function artifactRunDir(artifactPath: string): string | null {
 }
 
 function resolveStateFilter(
-  options: LoadWorkflowRunSummariesOptions
+  options: LoadWorkflowRunSummariesOptions,
 ): WorkflowRunState[] | null {
-  const stateStates =
-    options.state !== undefined ? [options.state] : null;
+  const stateStates = options.state !== undefined ? [options.state] : null;
   const filterStates = filterToStates(options.filter);
   if (stateStates !== null && filterStates !== null) {
     return stateStates.filter((state) => filterStates.includes(state));
@@ -427,7 +425,7 @@ function resolveStateFilter(
 }
 
 function filterToStates(
-  filter: WorkflowStatusFilterKey | undefined
+  filter: WorkflowStatusFilterKey | undefined,
 ): WorkflowRunState[] | null {
   switch (filter) {
     case "active":
@@ -528,7 +526,10 @@ function parseRunRow(row: RunRow): WorkflowRunRow {
     objective: row.objective,
     issueScope: parseJsonRecord(row.issue_scope_json) ?? {},
     route: parseJsonRecord(row.route_json) ?? {},
-    approvalBoundary: row.approval_boundary as WorkflowApprovalBoundary | null,
+    approvalBoundary:
+      row.approval_boundary === null
+        ? null
+        : (canonicalWorkflowApprovalBoundary(row.approval_boundary) ?? null),
     skillRevision: row.skill_revision,
     monitorLastSeenState: row.monitor_last_seen_state,
     monitorTerminal:
@@ -547,7 +548,7 @@ function parseRunRow(row: RunRow): WorkflowRunRow {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -555,7 +556,7 @@ function parseStepRow(row: StepRow): WorkflowStepRow {
   return {
     runId: row.run_id,
     stepId: row.step_id,
-    kind: row.kind as WorkflowStepKind,
+    kind: canonicalWorkflowStepKind(row.kind) ?? (row.kind as WorkflowStepKind),
     state: row.state as WorkflowStepState,
     order: row.step_order,
     required: row.required === 1,
@@ -566,7 +567,7 @@ function parseStepRow(row: StepRow): WorkflowStepRow {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -581,7 +582,7 @@ function parseApprovalRow(row: ApprovalRow): WorkflowApprovalRow {
     recordedAt: row.recorded_at,
     dischargedAt: row.discharged_at,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -596,7 +597,7 @@ function parseLeaseRow(row: LeaseRow): WorkflowLeaseRow {
     releasedAt: row.released_at,
     stalePolicy: row.stale_policy as WorkflowLeaseStalePolicy,
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
   };
 }
 
@@ -609,7 +610,7 @@ function stripTimestamps(row: WorkflowLeaseRow): WorkflowLeaseRecord {
     expiresAt: row.expiresAt,
     heartbeatAt: row.heartbeatAt,
     releasedAt: row.releasedAt,
-    stalePolicy: row.stalePolicy
+    stalePolicy: row.stalePolicy,
   };
 }
 
@@ -619,12 +620,12 @@ function toStepRecords(rows: WorkflowStepRow[]): WorkflowStepRecord[] {
     kind: row.kind,
     state: row.state,
     order: row.order,
-    required: row.required
+    required: row.required,
   }));
 }
 
 function countStepsByState(
-  rows: WorkflowStepRow[]
+  rows: WorkflowStepRow[],
 ): Record<WorkflowStepState, number> {
   const counts: Record<WorkflowStepState, number> = {
     pending: 0,
@@ -634,7 +635,7 @@ function countStepsByState(
     failed: 0,
     skipped: 0,
     blocked: 0,
-    canceled: 0
+    canceled: 0,
   };
   for (const row of rows) {
     counts[row.state] += 1;
@@ -642,7 +643,9 @@ function countStepsByState(
   return counts;
 }
 
-function monitorAdvisoryFromRun(run: WorkflowRunRow): WorkflowMonitorAdvisory | null {
+function monitorAdvisoryFromRun(
+  run: WorkflowRunRow,
+): WorkflowMonitorAdvisory | null {
   if (
     run.monitorLastSeenState === null &&
     run.monitorTerminal === null &&
@@ -655,12 +658,12 @@ function monitorAdvisoryFromRun(run: WorkflowRunRow): WorkflowMonitorAdvisory | 
     terminal: run.monitorTerminal,
     step: run.monitorStep,
     lastSeenDigest: run.monitorLastSeenDigest,
-    lastEmittedDigest: run.monitorLastEmittedDigest
+    lastEmittedDigest: run.monitorLastEmittedDigest,
   };
 }
 
 function lastCheckpointFromSteps(
-  rows: WorkflowStepRow[]
+  rows: WorkflowStepRow[],
 ): WorkflowMonitorCheckpoint | null {
   let best: { row: WorkflowStepRow; at: number } | null = null;
   for (const row of rows) {
@@ -675,7 +678,7 @@ function lastCheckpointFromSteps(
     stepId: best.row.stepId,
     at: best.at,
     source: "ledger",
-    digest: best.row.resultDigest
+    digest: best.row.resultDigest,
   };
 }
 

@@ -32,22 +32,22 @@ describe("Momentum-owned coding workflow contract", () => {
         executor: step.executor,
       })),
     ).toEqual([
-      { key: "preflight", kind: "preflight", executor: "one-shot" },
+      { key: "preflight", kind: "preflight", executor: "agent-once" },
       {
         key: "implementation",
         kind: "implementation",
         executor: "delegate-supervisor",
       },
-      { key: "postflight", kind: "postflight", executor: "one-shot" },
+      { key: "postflight", kind: "postflight", executor: "agent-once" },
       {
-        key: "no-mistakes",
-        kind: "no-mistakes",
+        key: "validate",
+        kind: "validate",
         executor: "delegate-supervisor",
       },
       { key: "merge-cleanup", kind: "merge-cleanup", executor: "script" },
       {
-        key: "linear-refresh",
-        kind: "linear-refresh",
+        key: "tracker-refresh",
+        kind: "tracker-refresh",
         executor: "external-apply",
       },
     ]);
@@ -63,8 +63,8 @@ describe("Momentum-owned coding workflow contract", () => {
     expect([...WORKFLOW_APPROVAL_BOUNDARIES]).toEqual([
       "implementation",
       "through-implementation",
-      "no-mistakes",
-      "through-no-mistakes",
+      "validate",
+      "through-validate",
       "merge-cleanup",
       "through-merge-cleanup",
       "full",
@@ -81,11 +81,11 @@ describe("Momentum-owned coding workflow contract", () => {
       "implementation",
       "postflight",
     ]);
-    expect(workflowStepKindsForApprovalBoundary("no-mistakes")).toEqual([
+    expect(workflowStepKindsForApprovalBoundary("validate")).toEqual([
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
     ]);
     expect(
       workflowStepKindsForApprovalBoundary("through-merge-cleanup"),
@@ -93,16 +93,16 @@ describe("Momentum-owned coding workflow contract", () => {
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
     ]);
     expect(workflowStepKindsForApprovalBoundary("full")).toEqual([
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
-      "linear-refresh",
+      "tracker-refresh",
     ]);
   });
 

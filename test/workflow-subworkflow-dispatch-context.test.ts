@@ -7,21 +7,21 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
-  type WorkflowStepDispatchContext
+  type WorkflowStepDispatchContext,
 } from "../src/core/workflow/dispatch/scheduler.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import {
   deriveDispatchedSubworkflowContext,
   loadSubworkflowParentRunRow,
   resolveSubworkflowParentRunFacts,
-  type SubworkflowParentRunRow
+  type SubworkflowParentRunRow,
 } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
 
 /**
@@ -46,7 +46,7 @@ import {
  *
  * RC-4b (NGX-498) has since wired this deriver into the daemon lane
  * (`withSubworkflowDispatch` in cli.ts) and flipped `subworkflow` into
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`; the production-flip proof lives in
+ * `PHASE1_DISPATCHABLE_EXECUTORS`; the production-flip proof lives in
  * `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
 
@@ -68,11 +68,11 @@ const CHILD_DEFINITION: WorkflowDefinition = {
     {
       key: "preflight",
       kind: "preflight",
-      executor: "one-shot",
+      executor: "agent-once",
       order: 0,
-      required: true
-    }
-  ]
+      required: true,
+    },
+  ],
 };
 
 const tempRoots: string[] = [];
@@ -100,13 +100,14 @@ function openSeededDb(
     childConfig?: unknown;
     lineage?: unknown;
     withChildDefinition?: boolean;
-  } = {}
+  } = {},
 ): MomentumDb {
   const db = openDb(makeTempDir());
   persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
 
   const subworkflow: Record<string, unknown> = {};
-  if (options.childConfig !== undefined) subworkflow["child"] = options.childConfig;
+  if (options.childConfig !== undefined)
+    subworkflow["child"] = options.childConfig;
   if (options.lineage !== undefined) subworkflow["lineage"] = options.lineage;
   const route =
     Object.keys(subworkflow).length > 0 ? { subworkflow } : undefined;
@@ -117,7 +118,7 @@ function openSeededDb(
     repoPath: REPO_PATH,
     objective: "Parent run for RC-4b context deriver coverage",
     ...(route ? { route } : {}),
-    now: NOW
+    now: NOW,
   });
 
   if (options.withChildDefinition !== false) {
@@ -129,26 +130,27 @@ function openSeededDb(
 function claim(
   db: MomentumDb,
   runId: string = PARENT_RUN_ID,
-  stepId: string = STEP_ID
+  stepId: string = STEP_ID,
 ): ClaimedWorkflowStep {
   db.prepare(
-    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?",
   ).run(runId, stepId);
   const result = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
     holder: WORKER,
     leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    now: NOW,
   });
-  if (!result.ok) throw new Error(`test setup: claim failed (${result.reason})`);
+  if (!result.ok)
+    throw new Error(`test setup: claim failed (${result.reason})`);
   return result.claim;
 }
 
 const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
   db,
   workerId: WORKER,
-  now: DISPATCH_AT
+  now: DISPATCH_AT,
 });
 
 function countRuns(db: MomentumDb): number {
@@ -170,19 +172,26 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
-      }
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
     });
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
 
-    const expectedRunDir = path.join(REPO_PATH, ".agent-workflows", PARENT_RUN_ID);
+    const expectedRunDir = path.join(
+      REPO_PATH,
+      ".agent-workflows",
+      PARENT_RUN_ID,
+    );
     expect(resolution.evidence.executorLogPath).toBe(
-      path.join(expectedRunDir, "subworkflow.log")
+      path.join(expectedRunDir, "subworkflow.log"),
     );
     expect(resolution.evidence.resultJsonPath).toBe(
-      path.join(expectedRunDir, "subworkflow.json")
+      path.join(expectedRunDir, "subworkflow.json"),
     );
 
     // The deriver only builds the runner; no child run exists until it runs.
@@ -202,10 +211,13 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
-      }
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
     });
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     if (!resolution.ok) throw new Error(resolution.reason);
 
     await resolution.runSubworkflowChild();
@@ -216,9 +228,9 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
           parentRunId: PARENT_RUN_ID,
           parentStepId: STEP_ID,
           depth: 1,
-          ancestorDefinitionKeys: [CODING_WORKFLOW_DEFINITION_KEY]
-        }
-      }
+          ancestorDefinitionKeys: [CODING_WORKFLOW_DEFINITION_KEY],
+        },
+      },
     });
   });
 });
@@ -226,7 +238,10 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
 describe("deriveDispatchedSubworkflowContext — fail closed", () => {
   it("refuses when the subworkflow step carries no child config", () => {
     const db = openSeededDb();
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toMatch(/child/i);
@@ -237,10 +252,13 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CODING_WORKFLOW_DEFINITION_KEY,
-        childDefinitionVersion: CODING_WORKFLOW_DEFINITION.version
-      }
+        childDefinitionVersion: CODING_WORKFLOW_DEFINITION.version,
+      },
     });
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toMatch(/self-reference/i);
@@ -251,11 +269,14 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
+        childDefinitionVersion: CHILD_DEFINITION.version,
       },
-      lineage: { parentRunId: 42 }
+      lineage: { parentRunId: 42 },
     });
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toMatch(/lineage/i);
@@ -266,11 +287,14 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: "no-such-definition",
-        childDefinitionVersion: CHILD_DEFINITION.version
+        childDefinitionVersion: CHILD_DEFINITION.version,
       },
-      withChildDefinition: false
+      withChildDefinition: false,
     });
-    const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toContain("no-such-definition");
@@ -281,11 +305,17 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
-      }
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
     });
-    const ghostClaim: ClaimedWorkflowStep = { ...claim(db), runId: "ghost-run-xyz" };
-    const resolution = deriveDispatchedSubworkflowContext(ghostClaim, context(db));
+    const ghostClaim: ClaimedWorkflowStep = {
+      ...claim(db),
+      runId: "ghost-run-xyz",
+    };
+    const resolution = deriveDispatchedSubworkflowContext(
+      ghostClaim,
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toContain("ghost-run-xyz");
@@ -295,14 +325,17 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
-      }
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
     });
     const theClaim = claim(db);
     db.prepare("UPDATE workflow_runs SET repo_path = NULL WHERE id = ?").run(
-      PARENT_RUN_ID
+      PARENT_RUN_ID,
     );
-    const resolution = deriveDispatchedSubworkflowContext(theClaim, context(db));
+    const resolution = deriveDispatchedSubworkflowContext(
+      theClaim,
+      context(db),
+    );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
     expect(resolution.reason).toMatch(/repo/i);
@@ -316,14 +349,14 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
       subworkflow: {
         child: {
           childDefinitionKey: CHILD_DEFINITION_KEY,
-          childDefinitionVersion: CHILD_DEFINITION.version
-        }
-      }
+          childDefinitionVersion: CHILD_DEFINITION.version,
+        },
+      },
     }),
     definitionKey: CODING_WORKFLOW_DEFINITION_KEY,
     objective: "Parent objective",
     repoPath: REPO_PATH,
-    sourceArtifactPath: null
+    sourceArtifactPath: null,
   };
 
   it("parses route_json and passes through the run facts", () => {
@@ -337,16 +370,16 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
       subworkflow: {
         child: {
           childDefinitionKey: CHILD_DEFINITION_KEY,
-          childDefinitionVersion: CHILD_DEFINITION.version
-        }
-      }
+          childDefinitionVersion: CHILD_DEFINITION.version,
+        },
+      },
     });
   });
 
   it("treats a null route_json as an empty route", () => {
     const resolution = resolveSubworkflowParentRunFacts(PARENT_RUN_ID, {
       ...baseRow,
-      routeJson: null
+      routeJson: null,
     });
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
@@ -356,7 +389,7 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
   it("fails closed on corrupt route_json instead of throwing", () => {
     const resolution = resolveSubworkflowParentRunFacts(PARENT_RUN_ID, {
       ...baseRow,
-      routeJson: "{not json"
+      routeJson: "{not json",
     });
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
@@ -366,7 +399,7 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
   it("fails closed when route_json is a JSON array, not an object", () => {
     const resolution = resolveSubworkflowParentRunFacts(PARENT_RUN_ID, {
       ...baseRow,
-      routeJson: "[1,2,3]"
+      routeJson: "[1,2,3]",
     });
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
@@ -376,7 +409,7 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
   it("fails closed when the run is not linked to a definition key", () => {
     const resolution = resolveSubworkflowParentRunFacts(PARENT_RUN_ID, {
       ...baseRow,
-      definitionKey: null
+      definitionKey: null,
     });
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
@@ -386,7 +419,7 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
   it("fails closed when the run has no objective to inherit", () => {
     const resolution = resolveSubworkflowParentRunFacts(PARENT_RUN_ID, {
       ...baseRow,
-      objective: "   "
+      objective: "   ",
     });
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
@@ -399,8 +432,8 @@ describe("loadSubworkflowParentRunRow — durable run-row IO", () => {
     const db = openSeededDb({
       childConfig: {
         childDefinitionKey: CHILD_DEFINITION_KEY,
-        childDefinitionVersion: CHILD_DEFINITION.version
-      }
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
     });
     const row = loadSubworkflowParentRunRow(db, PARENT_RUN_ID);
     expect(row).toBeDefined();
@@ -411,9 +444,9 @@ describe("loadSubworkflowParentRunRow — durable run-row IO", () => {
       subworkflow: {
         child: {
           childDefinitionKey: CHILD_DEFINITION_KEY,
-          childDefinitionVersion: CHILD_DEFINITION.version
-        }
-      }
+          childDefinitionVersion: CHILD_DEFINITION.version,
+        },
+      },
     });
   });
 

@@ -56,7 +56,7 @@ import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
  * These factory tests drive a canned base dispatch that re-stamps the attempt
  * family to `subworkflow` to isolate the wrapper's branching from the base
  * dispatcher. RC-4b (NGX-498) has since flipped `subworkflow` into
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` so the real base dispatch creates that
+ * `PHASE1_DISPATCHABLE_EXECUTORS` so the real base dispatch creates that
  * same row directly; the end-to-end production-flip proof lives in
  * `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
@@ -117,7 +117,7 @@ function approveAndClaim(
 }
 
 /**
- * A base dispatch that creates the genuine production one-shot scaffold (running
+ * A base dispatch that creates the genuine production agent-once scaffold (running
  * attempt + pending round + held lease + running step) and then re-stamps the
  * attempt family to `subworkflow` — standing in for the PHASE1-wired base
  * dispatch that will create a `subworkflow` scaffold directly once the family
@@ -128,7 +128,7 @@ function subworkflowScaffoldBaseDispatch(): AsyncWorkflowStepDispatch {
     const result = executeWorkflowStepDispatch(claim, context);
     context.db
       .prepare(
-        "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
+        "UPDATE executor_attempts SET executor = 'subworkflow' WHERE attempt_id = ?",
       )
       .run(deriveDispatchAttemptId(claim.runId, claim.stepId, 1));
     return result;
@@ -211,13 +211,13 @@ const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
 });
 
 describe("createSubworkflowWorkflowDispatch — family gate", () => {
-  it("echoes a non-subworkflow (one-shot) attempt through without running the producer", async () => {
+  it("echoes a non-subworkflow (agent-once) attempt through without running the producer", async () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db);
     const runner = countingChildRunner(observe("succeeded"));
     let derives = 0;
     const dispatch = createSubworkflowWorkflowDispatch(
-      // The real base dispatch leaves a genuine `one-shot` scaffold.
+      // The real base dispatch leaves a genuine `agent-once` scaffold.
       executeWorkflowStepDispatch,
       {
         deriveSubworkflow: () => {
@@ -240,8 +240,8 @@ describe("createSubworkflowWorkflowDispatch — family gate", () => {
     expect(runner.calls()).toBe(0);
     expect(
       loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
-        ?.executorFamily,
-    ).toBe("one-shot");
+        ?.executor,
+    ).toBe("agent-once");
   });
 });
 

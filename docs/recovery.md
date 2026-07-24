@@ -34,7 +34,7 @@ ticks.
 | Repo lock (`repo_locks`) | `state = 'active'` AND `lease_expires_at < now - staleLeaseGraceMs` | Released when the owning job is terminal (`succeeded` / `failed`); emits `repo_lock.recovered` and stamps `recovery_status = 'auto_released_job_terminal'`. | `job_pending` / `job_claimed` / `job_running` / `job_missing`. |
 | Claimed/running `goal_iteration` job (`jobs`) | `state IN ('claimed', 'running')` AND `lease_expires_at < now - staleLeaseGraceMs` | Safe stale `claimed` jobs are re-pended without losing `attempt_count` or idempotency key; emits `job.recovered` with `recovery_status = 'auto_repended_stale_claim'`. `running` jobs are skipped. | `job_running` (in-flight repo writes), `daemon_active` (live owner), `lock_active` (held lock), `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` (repo-state safety refusal), `job_state_changed` (concurrent update race). |
 | Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`; finalized with `recovery_status = 'auto_recovered_stale_workflow_dispatch'` when the only owner pointer is a synthetic workflow-dispatch `active_job_id`, the matching workflow step is unambiguous, no active lock is present, and no fresh unreleased dispatch lease still proves live ownership. | `self` (caller's own run), `active_job_present` (generic active job, active lock paired with a workflow-dispatch job, or a fresh workflow dispatch lease still proves live ownership), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
-| Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. A stale dispatch lease with terminal executor evidence is reconciled first so the owning step finalizes from that evidence before release. An attempt already classified `waiting_operator` reuses or recreates its round-scoped gate from the durable decision selector and unresolved decision before the exact stale lease is released. An unclassified delegate round that already persisted a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation is made resumable so it can finish classification and gate parking. An unclassified running, capturing-result, or `mirroring_external_state` `delegate-supervisor` round with a durable handoff intent or completed handoff is released and made scheduler-resumable under the same attempt. An unclassified running or capturing-result native `goal-loop`, `one-shot`, or `script` round with durable `mechanism_completed` evidence is also resumed for classification without rerunning the mechanism. The same applies to a completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Other stale dispatch leases over a still-`running` step with no terminal dispatch evidence are parked for run-scoped manual recovery and then released so future work is not suppressed. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
+| Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. A stale dispatch lease with terminal executor evidence is reconciled first so the owning step finalizes from that evidence before release. An attempt already classified `waiting_operator` reuses or recreates its round-scoped gate from the durable decision selector and unresolved decision before the exact stale lease is released. An unclassified delegate round that already persisted a mirrored gate checkpoint, a gate-eligible decision, and a `waiting_operator` observation is made resumable so it can finish classification and gate parking. An unclassified running, capturing-result, or `mirroring_external_state` `delegate-supervisor` round with a durable handoff intent or completed handoff is released and made scheduler-resumable under the same attempt. An unclassified running or capturing-result native `agent-loop`, `agent-once`, or `script` round with durable `mechanism_completed` evidence is also resumed for classification without rerunning the mechanism. The same applies to a completed `continue` poll in `succeeded` or `failed` with a durable handoff in its history. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Other stale dispatch leases over a still-`running` step with no terminal dispatch evidence are parked for run-scoped manual recovery and then released so future work is not suppressed. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
 
 The managed `daemon start` path may run a startup-recovery pass before a new
 daemon row is registered when the existing active row is already stale, then the
@@ -210,7 +210,7 @@ to refuse until that lease condition is resolved.
 
 An `unsupported_platform` refusal is eligible for this retry preparation on any
 dispatched step after the run moves to Linux or macOS.
-When a dispatched `no-mistakes` or `merge-cleanup` live-wrapper attempt failed
+When a dispatched `validate` or `merge-cleanup` live-wrapper attempt failed
 before clean runner evidence existed because the wrapper/build path was stale or
 unavailable, or because `merge-cleanup` refused before apply on auth, target,
 PR-state readback, expected-head, cleanup-branch, or mergeability checks,
@@ -250,18 +250,18 @@ Symbolic links, oversized evidence, named pipes, missing digests, and changed re
 Finalized state must also name the exact full SHA at the repository's current `HEAD`.
 When an in-envelope terminal candidate is unavailable after reattachment, no-mistakes reloads it from the step-scoped `launched` receipt only after exact run, branch, launch-head, terminal-head, external-identity, and descendant checks pass.
 Any mismatch preserves the current worktree for inspection instead of resetting it or repeating the delegated tool.
-If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves success, operators may reconcile the failed `no-mistakes` step with either legacy `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
+If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves success, operators may reconcile the failed `validate` step with either legacy `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
 The structured record uses `schemaVersion: 1` and must carry the current workflow run id, issue scope, branch name and head SHA, pull request identity and check state when present, no-mistakes run id and successful outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
 Momentum derives the expected external identity only from the current attempt's latest legacy no-mistakes checkpoint or a delegate-supervisor checkpoint whose same-attempt handoff intent selects the no-mistakes tool.
 Older attempts and delegate checkpoints for another tool cannot authorize reconciliation.
 Momentum refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown checks, non-success outcomes, and partial phase evidence.
-This path is intentionally narrower than generic `update-step`: it only accepts a failed required `no-mistakes` step, stamps operator evidence on that row, updates stale `finished_at` to match the re-derived terminal or non-terminal run state, and re-derives the run so merge cleanup can continue.
-Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
+This path is intentionally narrower than generic `update-step`: it only accepts a failed required `validate` step, stamps operator evidence on that row, updates stale `finished_at` to match the re-derived terminal or non-terminal run state, and re-derives the run so merge cleanup can continue.
+Ordinary failed validate steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.
 Ordinary failed implementation/postflight steps still refuse guarded clear and must be retried or investigated.
 
 When the failed required step is an external-side-effect tail step
-(`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
+(`merge-cleanup` or `tracker-refresh`), the monitor view classifies it as
 `failed_external_side_effect_step` rather than the generic `failed_required_step`,
 and the recommended next action is `clear_recovery` instead of
 `rerun_failed_step`.
@@ -284,22 +284,22 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 6. If the PR is not merged and no remote branch or PR update exists, the tail step failed cleanly before any external write; treat it like a retryable failure rather than a reconciliation.
 7. Do not re-run `merge-cleanup` if the PR is already merged; that would attempt to push and merge again.
 
-**`linear-refresh` (writes Linear tracker)**
+**`tracker-refresh` (writes Linear tracker)**
 
 1. Open the Linear issue identified by the run's `--issue-scope` identifier.
 2. Confirm the durable intent evidence is either one pending Linear `status_update` intent or deterministic issue-scope/source evidence that seeded the expected `Done` status update, with a matching source item, stable idempotency marker, and exactly one valid `state` or `stateId` payload.
 3. Confirm whether the issue state and idempotency-marker comment were updated by the step.
 4. If the tracker was updated, use the Linear issue URL or a stable audit/snapshot as the evidence pointer.
 5. If no Linear update landed, the step failed before any external write; treat it like a retryable failure after fixing the missing auth/policy/issue-scope/source/deterministic-intent/payload cause.
-6. Do not re-run `linear-refresh` if the tracker is already consistent and the external-apply audit reconcile succeeded; that would attempt a duplicate write.
+6. Do not re-run `tracker-refresh` if the tracker is already consistent and the external-apply audit reconcile succeeded; that would attempt a duplicate write.
 
 **Evidence pointer**
 
 `--evidence-pointer <ref>` is **required** for evidence-backed recovery reconciliation.
 For `failed_external_side_effect_step`, its value is a free-form stable reference to the external artifact that proves the side effect landed successfully.
 For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
-For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
-For an interrupted failed `no-mistakes` step whose external no-mistakes run
+For a failed `tracker-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+For an interrupted failed `validate` step whose external no-mistakes run
 later proved success, supply either legacy `no-mistakes:<run-id>#checks-passed` proof or a readable local JSON evidence file path.
 Structured no-mistakes evidence must be deterministic and current against the durable workflow run, latest no-mistakes checkpoint identity, branch head SHA, pull request identity, unresolved finding counts, check state, and all required phase statuses.
 Without `--evidence-pointer`, `clear-recovery` refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
@@ -314,14 +314,14 @@ The ledger pointer does not affect the reconciliation outcome; it is stored on t
 
 Before clearing external-tail recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
 For interrupted no-mistakes reconciliation, monitor/status/watch advertise `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
-`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
-The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
+Ordinary failed validate steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.
+The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `validate` row.
 
 After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
 When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null`.
 Its progress tick reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null`, so monitor delivery can stop instead of retaining the earlier recovery tick.
-When downstream required work remains, such as `linear-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
+When downstream required work remains, such as `tracker-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

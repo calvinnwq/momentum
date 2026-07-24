@@ -4,15 +4,17 @@ import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION_V2,
   CODING_WORKFLOW_DEFINITION_KEY,
-  WORKFLOW_EXECUTOR_FAMILIES,
+  WORKFLOW_EXECUTORS,
   getBuiltInWorkflowDefinition,
-  isWorkflowExecutorFamily,
+  isWorkflowExecutor,
   listBuiltInWorkflowDefinitionKeys,
   selectBuiltInWorkflowDefinition,
   validateWorkflowDefinition,
   type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
+import { effectiveWorkflowDefinition } from "../src/core/workflow/definition/legacy.js";
 
 function baseValidDefinition(): WorkflowDefinition {
   return {
@@ -23,14 +25,14 @@ function baseValidDefinition(): WorkflowDefinition {
       {
         key: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 0,
         required: true,
       },
       {
         key: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "agent-loop",
         order: 1,
         required: true,
       },
@@ -38,12 +40,11 @@ function baseValidDefinition(): WorkflowDefinition {
   };
 }
 
-describe("workflow executor families", () => {
-  it("enumerates the executor-loop contract families", () => {
-    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
-      "goal-loop",
-      "one-shot",
-      "no-mistakes",
+describe("workflow executors", () => {
+  it("enumerates the executor-loop contract executors", () => {
+    expect([...WORKFLOW_EXECUTORS]).toEqual([
+      "agent-loop",
+      "agent-once",
       "delegate-supervisor",
       "script",
       "external-apply",
@@ -51,13 +52,18 @@ describe("workflow executor families", () => {
     ]);
   });
 
-  it("classifies known and unknown executor families", () => {
-    expect(isWorkflowExecutorFamily("goal-loop")).toBe(true);
-    expect(isWorkflowExecutorFamily("no-mistakes")).toBe(true);
-    expect(isWorkflowExecutorFamily("delegate-supervisor")).toBe(true);
-    expect(isWorkflowExecutorFamily("subworkflow")).toBe(true);
-    expect(isWorkflowExecutorFamily("not-a-family")).toBe(false);
-    expect(isWorkflowExecutorFamily("")).toBe(false);
+  it("classifies known and unknown executors", () => {
+    expect(isWorkflowExecutor("agent-loop")).toBe(true);
+    expect(isWorkflowExecutor("agent-once")).toBe(true);
+    expect(isWorkflowExecutor("delegate-supervisor")).toBe(true);
+    expect(isWorkflowExecutor("subworkflow")).toBe(true);
+    // Retired spellings and the legacy mirror identity live in
+    // definition/legacy.ts, never in the canonical list.
+    expect(isWorkflowExecutor("goal-loop")).toBe(false);
+    expect(isWorkflowExecutor("one-shot")).toBe(false);
+    expect(isWorkflowExecutor("no-mistakes")).toBe(false);
+    expect(isWorkflowExecutor("not-an-executor")).toBe(false);
+    expect(isWorkflowExecutor("")).toBe(false);
   });
 });
 
@@ -170,6 +176,20 @@ describe("validateWorkflowDefinition", () => {
       expect(err).toBeDefined();
       expect(err?.path).toBe("steps[1].kind");
     }
+  });
+
+  it("requires explicit opt-in for retired step kinds", () => {
+    const def = baseValidDefinition();
+    def.steps[0]!.kind = "no-mistakes" as never;
+
+    const rejected = validateWorkflowDefinition(def);
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.errors.map((e) => e.code)).toContain("step_kind_invalid");
+
+    expect(
+      validateWorkflowDefinition(def, { allowLegacyStepKinds: true }).ok,
+    ).toBe(true);
   });
 
   it("accepts registered executor names and rejects malformed identities", () => {
@@ -295,20 +315,20 @@ describe("built-in coding workflow definition", () => {
         order: step.order,
       })),
     ).toEqual([
-      { kind: "preflight", executor: "one-shot", order: 0 },
+      { kind: "preflight", executor: "agent-once", order: 0 },
       {
         kind: "implementation",
         executor: "delegate-supervisor",
         order: 1,
       },
-      { kind: "postflight", executor: "one-shot", order: 2 },
+      { kind: "postflight", executor: "agent-once", order: 2 },
       {
-        kind: "no-mistakes",
+        kind: "validate",
         executor: "delegate-supervisor",
         order: 3,
       },
       { kind: "merge-cleanup", executor: "script", order: 4 },
-      { kind: "linear-refresh", executor: "external-apply", order: 5 },
+      { kind: "tracker-refresh", executor: "external-apply", order: 5 },
     ]);
   });
 
@@ -319,9 +339,10 @@ describe("built-in coding workflow definition", () => {
       ["preflight", undefined],
       ["implementation", { tool: "gnhf" }],
       ["postflight", undefined],
-      ["no-mistakes", { tool: "no-mistakes" }],
+      // The external no-mistakes TOOL identity is unchanged by the rename.
+      ["validate", { tool: "no-mistakes" }],
       ["merge-cleanup", { command: "merge-cleanup" }],
-      ["linear-refresh", undefined],
+      ["tracker-refresh", undefined],
     ]);
   });
 
@@ -334,6 +355,84 @@ describe("built-in coding workflow definition", () => {
   it("passes validation", () => {
     const result = validateWorkflowDefinition(CODING_WORKFLOW_DEFINITION);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("retained built-in versions and the effective projection", () => {
+  it("retains V1/V2 verbatim in the pre-rename vocabulary", () => {
+    // Deliberate legacy assertions: recorded definition versions are frozen
+    // byte-for-byte in the retired spellings.
+    expect(
+      CODING_WORKFLOW_DEFINITION_V1.steps.map((step) => [
+        step.kind,
+        step.executor,
+      ]),
+    ).toEqual([
+      ["preflight", "one-shot"],
+      ["implementation", "goal-loop"],
+      ["postflight", "one-shot"],
+      ["no-mistakes", "no-mistakes"],
+      ["merge-cleanup", "script"],
+      ["linear-refresh", "external-apply"],
+    ]);
+    expect(
+      CODING_WORKFLOW_DEFINITION_V2.steps.map((step) => [
+        step.kind,
+        step.executor,
+      ]),
+    ).toEqual([
+      ["preflight", "one-shot"],
+      ["implementation", "delegate-supervisor"],
+      ["postflight", "one-shot"],
+      ["no-mistakes", "delegate-supervisor"],
+      ["merge-cleanup", "script"],
+      ["linear-refresh", "external-apply"],
+    ]);
+  });
+
+  it("projects retained V1/V2 to effective canonical vocabulary without mutating the stored definitions", () => {
+    const v1Frozen = JSON.stringify(CODING_WORKFLOW_DEFINITION_V1);
+    const v2Frozen = JSON.stringify(CODING_WORKFLOW_DEFINITION_V2);
+
+    const effectiveV1 = effectiveWorkflowDefinition(
+      CODING_WORKFLOW_DEFINITION_V1,
+    );
+    expect(
+      effectiveV1.steps.map((step) => [step.key, step.kind, step.executor]),
+    ).toEqual([
+      ["preflight", "preflight", "agent-once"],
+      ["implementation", "implementation", "agent-loop"],
+      ["postflight", "postflight", "agent-once"],
+      // The legacy no-mistakes executor identity stays dispatchable as-is;
+      // only the step kind projects to the canonical spelling.
+      ["no-mistakes", "validate", "no-mistakes"],
+      ["merge-cleanup", "merge-cleanup", "script"],
+      ["linear-refresh", "tracker-refresh", "external-apply"],
+    ]);
+
+    const effectiveV2 = effectiveWorkflowDefinition(
+      CODING_WORKFLOW_DEFINITION_V2,
+    );
+    expect(
+      effectiveV2.steps.map((step) => [step.key, step.kind, step.executor]),
+    ).toEqual([
+      ["preflight", "preflight", "agent-once"],
+      ["implementation", "implementation", "delegate-supervisor"],
+      ["postflight", "postflight", "agent-once"],
+      ["no-mistakes", "validate", "delegate-supervisor"],
+      ["merge-cleanup", "merge-cleanup", "script"],
+      ["linear-refresh", "tracker-refresh", "external-apply"],
+    ]);
+
+    // The stored definition rows stay byte-identical after projection.
+    expect(JSON.stringify(CODING_WORKFLOW_DEFINITION_V1)).toBe(v1Frozen);
+    expect(JSON.stringify(CODING_WORKFLOW_DEFINITION_V2)).toBe(v2Frozen);
+  });
+
+  it("returns the latest definition unchanged from the projection", () => {
+    expect(effectiveWorkflowDefinition(CODING_WORKFLOW_DEFINITION)).toBe(
+      CODING_WORKFLOW_DEFINITION,
+    );
   });
 });
 
@@ -351,6 +450,9 @@ describe("built-in workflow definition registry", () => {
       CODING_WORKFLOW_DEFINITION_V1,
     );
     expect(getBuiltInWorkflowDefinition("coding-workflow", 2)).toEqual(
+      CODING_WORKFLOW_DEFINITION_V2,
+    );
+    expect(getBuiltInWorkflowDefinition("coding-workflow", 3)).toEqual(
       CODING_WORKFLOW_DEFINITION,
     );
     expect(getBuiltInWorkflowDefinition("missing")).toBeUndefined();
@@ -395,7 +497,9 @@ describe("built-in workflow definition registry", () => {
 
   it("ships only definitions that pass validation", () => {
     for (const def of BUILT_IN_WORKFLOW_DEFINITIONS) {
-      const result = validateWorkflowDefinition(def);
+      const result = validateWorkflowDefinition(def, {
+        allowLegacyStepKinds: def.version < CODING_WORKFLOW_DEFINITION.version,
+      });
       expect(result.ok, `built-in ${def.key} should validate`).toBe(true);
     }
   });

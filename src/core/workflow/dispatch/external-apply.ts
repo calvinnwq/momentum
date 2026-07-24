@@ -1,7 +1,7 @@
 /**
  * Pure half of the daemon-dispatchable `external-apply` adapter.
  *
- * the external-apply seam makes the `external-apply` executor family daemon-dispatchable by
+ * the external-apply seam makes the `external-apply` executor daemon-dispatchable by
  * connecting the existing external-apply write path (`executeExternalApply`,
  * `src/core/intent/apply-execute.ts`) to the workflow dispatch/executor-evidence
  * lane — *without* inventing a second external write path and without weakening

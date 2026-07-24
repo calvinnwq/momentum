@@ -1,5 +1,5 @@
 /**
- * Daemon-lane entry point for the `subworkflow` executor family.
+ * Daemon-lane entry point for the `subworkflow` executor.
  *
  * The async sibling of `dispatch/external-apply-dispatch.ts`'s
  * {@link createExternalApplyWorkflowDispatch}: it wraps the production base
@@ -8,7 +8,7 @@
  * {@link executeAndReconcileDispatchedSubworkflowStep}. The base dispatch creates
  * the dispatch attempt scaffold; this wrapper then runs the producer
  * against it, gated on the shared dispatch-status predicate and the dispatched
- * attempt's executor family.
+ * attempt's executor identity.
  *
  * Boundary discipline (mirrors the external-apply lane so the reconciliation seam stays the single
  * finalization owner):
@@ -16,8 +16,8 @@
  *   - The producer runs only after a base dispatch that genuinely started (or
  *     re-entered) a scaffold; a fail-closed / not-startable base result already
  *     parked the run and released its lease, so the wrapper echoes it untouched.
- *   - It runs the producer ONLY for a `subworkflow`-family attempt. The
- *     registered SDK lane and the external-apply lane own the other families;
+ *   - It runs the producer ONLY for a `subworkflow` attempt. The
+ *     registered SDK lane and the external-apply lane own the other executors;
  *     routing a non-`subworkflow` attempt here would
  *     run the wrong producer against a foreign scaffold.
  *   - The child-run start/attach is derived by injection
@@ -92,7 +92,7 @@ export type SubworkflowWorkflowDispatchDeps = {
  * Wrap a base {@link AsyncWorkflowStepDispatch} so a successfully-dispatched
  * `subworkflow` step's child run is observed and reconciled in the same tick. See
  * the module doc for the boundary discipline (single finalization owner,
- * family-gated producer, fail-closed-on-refusal, verbatim base result).
+ * executor-gated producer, fail-closed-on-refusal, verbatim base result).
  */
 export function createSubworkflowWorkflowDispatch(
   baseDispatch: AsyncWorkflowStepDispatch,
@@ -107,7 +107,7 @@ export function createSubworkflowWorkflowDispatch(
       claim.runId,
       claim.stepId,
     );
-    if (attempt?.executorFamily !== "subworkflow") return result;
+    if (attempt?.executor !== "subworkflow") return result;
 
     try {
       const resolved = await deps.deriveSubworkflow(claim, context);

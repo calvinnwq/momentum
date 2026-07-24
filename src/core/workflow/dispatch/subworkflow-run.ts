@@ -1,5 +1,5 @@
 /**
- * Async dispatched-step run path for the `subworkflow` executor family
+ * Async dispatched-step run path for the `subworkflow` executor
  *.
  *
  * This is the daemon-dispatchable *producer* that makes `subworkflow` runnable by
@@ -153,10 +153,10 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
       detail: attemptId,
     };
   }
-  if (attempt.executorFamily !== "subworkflow") {
+  if (attempt.executor !== "subworkflow") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${attemptId}: ${attempt.executorFamily}`,
+      detail: `${attemptId}: ${attempt.executor}`,
     };
   }
 

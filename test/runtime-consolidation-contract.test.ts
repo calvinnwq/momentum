@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch/reconcile.js";
 import {
-  PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
+  PHASE1_DISPATCHABLE_EXECUTORS,
   WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
   planWorkflowStepDispatch,
 } from "../src/core/workflow/dispatch/dispatch.js";
@@ -18,9 +18,9 @@ describe("runtime consolidation contract", () => {
   });
 
   it("pins the phase-1 dispatchable families in code", () => {
-    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES]).toEqual([
-      "goal-loop",
-      "one-shot",
+    expect([...PHASE1_DISPATCHABLE_EXECUTORS]).toEqual([
+      "agent-loop",
+      "agent-once",
       "script",
       "no-mistakes",
       "delegate-supervisor",
@@ -31,8 +31,8 @@ describe("runtime consolidation contract", () => {
       "workflow_run_not_found",
       "workflow_definition_unlinked",
       "step_definition_not_found",
-      "unknown_executor_family",
-      "unsupported_executor_family",
+      "unknown_executor",
+      "unsupported_executor",
       "route_config_invalid",
     ]);
   });
@@ -49,10 +49,10 @@ describe("runtime consolidation contract", () => {
       gateType: "manual_recovery_required",
     });
     expect(
-      planWorkflowStepDispatch({ ok: true, executorFamily: "subworkflow" }),
+      planWorkflowStepDispatch({ ok: true, executor: "subworkflow" }),
     ).toEqual({
       action: "dispatch",
-      executorFamily: "subworkflow",
+      executor: "subworkflow",
     });
   });
 

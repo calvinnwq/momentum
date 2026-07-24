@@ -1,6 +1,6 @@
 import {
   DEFAULT_INTENT_APPLY_POLICY,
-  type UpdateIntentApplyPolicy
+  type UpdateIntentApplyPolicy,
 } from "./policy.js";
 
 export const LINEAR_EXTERNAL_APPLY_PREFLIGHT_STATUSES = Object.freeze([
@@ -10,7 +10,7 @@ export const LINEAR_EXTERNAL_APPLY_PREFLIGHT_STATUSES = Object.freeze([
   "target_missing",
   "unsafe_state",
   "unsupported",
-  "unknown"
+  "unknown",
 ] as const);
 
 export type LinearExternalApplyPreflightStatus =
@@ -45,7 +45,7 @@ export function preflightLinearExternalApply(input: {
       status: "target_missing",
       message: "Linear external-apply has no resolved issue target.",
       action:
-        "Seed exactly one pending Linear intent for the workflow issue scope before running linear-refresh."
+        "Seed exactly one pending Linear intent for the workflow issue scope before running tracker-refresh.",
     };
   }
 
@@ -54,10 +54,9 @@ export function preflightLinearExternalApply(input: {
     return {
       ok: false,
       status: "permission_missing",
-      message:
-        `Linear external-apply is blocked by intent_apply_policy=${policy}.`,
+      message: `Linear external-apply is blocked by intent_apply_policy=${policy}.`,
       action:
-        "Set intent_apply_policy: external_apply_allowed in the repo policy before authorizing external tracker writes."
+        "Set intent_apply_policy: external_apply_allowed in the repo policy before authorizing external tracker writes.",
     };
   }
 
@@ -67,7 +66,7 @@ export function preflightLinearExternalApply(input: {
   return {
     ok: true,
     status: "ready",
-    message: "Linear external-apply preflight passed."
+    message: "Linear external-apply preflight passed.",
   };
 }
 
@@ -79,16 +78,15 @@ export function preflightLinearExternalApplyAuth(input: {
     return {
       ok: false,
       status: "auth_missing",
-      message:
-        `${LINEAR_API_KEY_ENV} is not set in the workflow process environment.`,
+      message: `${LINEAR_API_KEY_ENV} is not set in the workflow process environment.`,
       action:
-        "Provide LINEAR_API_KEY to the daemon/supervisor environment; Momentum will still use the two-phase audit and idempotency path."
+        "Provide LINEAR_API_KEY to the daemon/supervisor environment; Momentum will still use the two-phase audit and idempotency path.",
     };
   }
 
   return {
     ok: true,
     status: "ready",
-    message: "Linear external-apply auth preflight passed."
+    message: "Linear external-apply auth preflight passed.",
   };
 }

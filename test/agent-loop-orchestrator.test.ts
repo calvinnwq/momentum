@@ -23,16 +23,16 @@ import {
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs,
   type PlanGoalLoopRoundStartInput,
-} from "../src/core/executors/goal-loop/executor.js";
+} from "../src/core/executors/agent-loop/executor.js";
 import {
   runGoalLoopAttempt,
   runGoalLoopRound,
   runGoalLoopStep,
-} from "../src/core/executors/goal-loop/orchestrator.js";
+} from "../src/core/executors/agent-loop/orchestrator.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
-// Drives the single-round goal-loop executor step through the *real*
+// Drives the single-round agent-loop executor step through the *real*
 // executor-loop persistence layer and round transition graph around an injected
 // bounded mechanism (the real M9 goal iteration plugs into the same seam later).
 // Proves the per-round agent/model/input evidence frozen at start composes with
@@ -54,7 +54,7 @@ afterEach(() => {
 
 function makeTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-goal-loop-round-"),
+    path.join(os.tmpdir(), "momentum-agent-loop-round-"),
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -77,7 +77,7 @@ function openRoundDb(): MomentumDb {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 1,
@@ -136,7 +136,7 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
     goal_complete: false,
     commit: {
       type: "feat",
-      scope: "goal-loop",
+      scope: "agent-loop",
       subject: "drive a bounded round",
       body: "",
       breaking: false,
@@ -152,7 +152,7 @@ const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
     ok: true,
     commitSha: SHA_A,
     parentSha: SHA_B,
-    message: "feat(goal-loop): drive a bounded round",
+    message: "feat(agent-loop): drive a bounded round",
   },
   head: SHA_A,
 };
@@ -621,7 +621,7 @@ function buildAttempt(): ExecutorAttemptRecord {
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 500,
@@ -855,11 +855,11 @@ describe("runGoalLoopAttempt — planner contract", () => {
 });
 
 // ---------------------------------------------------------------------------
-// runGoalLoopStep — the goal-loop executor adapter "below StepRun".
+// runGoalLoopStep — the agent-loop executor adapter "below StepRun".
 // ---------------------------------------------------------------------------
 //
 // The single entrypoint a daemon/scheduler calls with a StepRun identity: it
-// materializes the durable goal-loop ExecutorAttempt (deterministic id) and
+// materializes the durable agent-loop ExecutorAttempt (deterministic id) and
 // the per-round ExecutorRound identities from that StepRun + the resolved
 // selection, then drives the whole attempt through runGoalLoopAttempt. It
 // owns the deterministic, reattachable id scheme so callers never reinvent it.
@@ -920,7 +920,7 @@ describe("runGoalLoopStep — attempt/round materialization", () => {
     expect(result.attempt.attemptId).toBe(attemptId);
     expect(result.attempt.workflowRunId).toBe("run-1");
     expect(result.attempt.stepRunId).toBe("step-1");
-    expect(result.attempt.executorFamily).toBe("goal-loop");
+    expect(result.attempt.executor).toBe("agent-loop");
     expect(result.attempt.state).toBe("succeeded");
     expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
 

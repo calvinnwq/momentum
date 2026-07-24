@@ -5,7 +5,7 @@
  * `src/core/executors/smoke/linear-read.ts` owns the opt-in real Linear *read* smoke. This sibling
  * module owns the CI-safe decision logic for the opt-in real *coding-workflow
  * harness* smoke: invoking a live OpenClaw wrapper (preflight / implementation
- * (GNHF) / postflight / no-mistakes / merge-cleanup / linear-refresh) behind
+ * (GNHF) / postflight / validate / merge-cleanup / tracker-refresh) behind
  * explicit operator flags.
  * Like its read-smoke sibling it never performs I/O — it only:
  *
@@ -25,8 +25,8 @@
  *   - The smoke is **skipped unless explicitly opted in**, so default CI never
  *     spawns an expensive external agent.
  *   - Real external **reads** stay separated from real external **writes**: the
- *     external-write family (`linear-refresh` -> `external-apply`) stays closed
- *     unless a *separate* write-policy opt-in is set, so a read-family harness
+ *     external-write executor (`tracker-refresh` -> `external-apply`) stays closed
+ *     unless a *separate* write-policy opt-in is set, so a read-only harness
  *     smoke can never mutate an external system.
  *   - The default mode is the safe **probe-only dry-run**: it runs only the
  *     wrapper's cheap pre-flight probe (availability check) rather than spawning
@@ -37,8 +37,8 @@
 
 import {
   CODING_WORKFLOW_DEFINITION,
-  isWorkflowExecutorFamily,
-  type WorkflowExecutorFamily,
+  isWorkflowExecutor,
+  type WorkflowExecutor,
 } from "../../workflow/definition/definition.js";
 import {
   parseLiveWrapperProfile,
@@ -54,7 +54,7 @@ import {
 /** Master opt-in switch. The real coding-workflow harness smoke skips unless truthy. */
 export const REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR =
   "MOMENTUM_REAL_SMOKE_WORKFLOW";
-/** Selects which workflow step kind's live wrapper to smoke (e.g. "no-mistakes"). */
+/** Selects which workflow step kind's live wrapper to smoke (e.g. "validate"). */
 export const REAL_SMOKE_WORKFLOW_KIND_ENV_VAR =
   "MOMENTUM_REAL_SMOKE_WORKFLOW_KIND";
 /** Opts into spawning the full harness; default is the safe probe-only dry-run. */
@@ -78,7 +78,7 @@ export type WorkflowHarnessSmokePlan =
   | {
       mode: "run";
       kind: WorkflowStepKind;
-      family: WorkflowExecutorFamily | null;
+      executor: WorkflowExecutor | null;
       isExternalWrite: boolean;
       probeOnly: boolean;
       command: string;
@@ -146,8 +146,8 @@ export function planWorkflowHarnessSmoke(
   }
   const config = resolved.config;
 
-  const family = resolveStepKindExecutorFamily(resolved.kind);
-  const isExternalWrite = family === "external-apply";
+  const executor = resolveStepKindExecutor(resolved.kind);
+  const isExternalWrite = executor === "external-apply";
   if (
     isExternalWrite &&
     !isEnvFlagEnabled(env[REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR])
@@ -155,7 +155,7 @@ export function planWorkflowHarnessSmoke(
     return {
       mode: "skip",
       reason: "write_policy_closed",
-      detail: `Step kind "${resolved.kind}" resolves to the external-write family "${family}"; set ${REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR} to explicitly open the separate write policy before smoking a real external write.`,
+      detail: `Step kind "${resolved.kind}" resolves to the external-write executor "${executor}"; set ${REAL_SMOKE_WORKFLOW_ALLOW_WRITE_ENV_VAR} to explicitly open the separate write policy before smoking a real external write.`,
     };
   }
 
@@ -171,7 +171,7 @@ export function planWorkflowHarnessSmoke(
   return {
     mode: "run",
     kind: resolved.kind,
-    family,
+    executor,
     isExternalWrite,
     probeOnly,
     command: config.command,
@@ -309,13 +309,13 @@ export function classifyProbeSpawnResult(
   return { kind: "exited", exitCode: result.status, signal: result.signal };
 }
 
-function resolveStepKindExecutorFamily(
+function resolveStepKindExecutor(
   kind: WorkflowStepKind,
-): WorkflowExecutorFamily | null {
+): WorkflowExecutor | null {
   const step = CODING_WORKFLOW_DEFINITION.steps.find(
     (entry) => entry.kind === kind,
   );
-  return step !== undefined && isWorkflowExecutorFamily(step.executor)
+  return step !== undefined && isWorkflowExecutor(step.executor)
     ? step.executor
     : null;
 }

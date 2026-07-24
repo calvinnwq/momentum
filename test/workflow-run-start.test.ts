@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  CODING_WORKFLOW_DEFINITION_V1,
+  CODING_WORKFLOW_DEFINITION_V2,
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import {
   WORKFLOW_RUN_START_ERROR_CODES,
   WORKFLOW_RUN_START_SOURCE,
   materializeWorkflowRunStart,
-  type WorkflowRunStartInput
+  type WorkflowRunStartInput,
 } from "../src/core/workflow/run/start.js";
 
 const NOW = 1_700_000_000_000;
@@ -22,23 +24,23 @@ function twoStepDefinition(): WorkflowDefinition {
       {
         key: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "agent-loop",
         order: 1,
-        required: true
+        required: true,
       },
       {
         key: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 0,
-        required: false
-      }
-    ]
+        required: false,
+      },
+    ],
   };
 }
 
 function baseInput(
-  overrides: Partial<WorkflowRunStartInput> = {}
+  overrides: Partial<WorkflowRunStartInput> = {},
 ): WorkflowRunStartInput {
   return {
     definition: twoStepDefinition(),
@@ -46,7 +48,7 @@ function baseInput(
     repoPath: "/repos/momentum",
     objective: "Implement NGX-346",
     now: NOW,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -70,7 +72,7 @@ describe("materializeWorkflowRunStart", () => {
       definitionVersion: 3,
       createdAt: NOW,
       updatedAt: NOW,
-      startedAt: null
+      startedAt: null,
     });
   });
 
@@ -85,21 +87,21 @@ describe("materializeWorkflowRunStart", () => {
         kind: "preflight",
         state: "pending",
         order: 0,
-        required: false
+        required: false,
       },
       {
         stepId: "implementation",
         kind: "implementation",
         state: "pending",
         order: 1,
-        required: true
-      }
+        required: true,
+      },
     ]);
   });
 
   it("materializes every built-in coding workflow step", () => {
     const result = materializeWorkflowRunStart(
-      baseInput({ definition: CODING_WORKFLOW_DEFINITION })
+      baseInput({ definition: CODING_WORKFLOW_DEFINITION }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -108,30 +110,114 @@ describe("materializeWorkflowRunStart", () => {
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
-      "linear-refresh"
+      "tracker-refresh",
     ]);
     expect(result.plan.run.definitionKey).toBe("coding-workflow");
+  });
+
+  it.each([CODING_WORKFLOW_DEFINITION_V1, CODING_WORKFLOW_DEFINITION_V2])(
+    "materializes canonical step kinds for retained definition version $version",
+    (definition) => {
+      // Deliberate legacy seeds: V1/V2 are frozen with the retired step-kind
+      // spellings; new runs still materialize canonical runtime kinds while
+      // step ids keep the recorded step keys.
+      const result = materializeWorkflowRunStart(baseInput({ definition }));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.plan.steps.map((step) => [step.stepId, step.kind])).toEqual(
+        [
+          ["preflight", "preflight"],
+          ["implementation", "implementation"],
+          ["postflight", "postflight"],
+          ["no-mistakes", "validate"],
+          ["merge-cleanup", "merge-cleanup"],
+          ["linear-refresh", "tracker-refresh"],
+        ],
+      );
+      expect(result.plan.run.definitionVersion).toBe(definition.version);
+    },
+  );
+
+  it("refuses retired step kinds in a fresh custom definition", () => {
+    const result = materializeWorkflowRunStart(
+      baseInput({
+        definition: {
+          key: "fresh-custom-definition",
+          title: "Fresh Custom Definition",
+          version: 99,
+          steps: [
+            {
+              key: "validate",
+              kind: "no-mistakes",
+              executor: "agent-loop",
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        code: "definition_invalid",
+        path: "definition",
+      }),
+    ]);
+  });
+
+  it("refuses a modified definition using a retained built-in identity", () => {
+    const result = materializeWorkflowRunStart(
+      baseInput({
+        definition: {
+          key: CODING_WORKFLOW_DEFINITION_V1.key,
+          title: "Fresh Definition Using A Retained Identity",
+          version: CODING_WORKFLOW_DEFINITION_V1.version,
+          steps: [
+            {
+              key: "validate",
+              kind: "no-mistakes",
+              executor: "agent-loop",
+              order: 0,
+              required: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        code: "definition_invalid",
+        path: "definition",
+      }),
+    ]);
   });
 
   it("promotes steps inside the approval boundary to approved", () => {
     const result = materializeWorkflowRunStart(
       baseInput({
         definition: CODING_WORKFLOW_DEFINITION,
-        approvalBoundary: "implementation"
-      })
+        approvalBoundary: "implementation",
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     const byKind = new Map(
-      result.plan.steps.map((step) => [step.kind, step.state])
+      result.plan.steps.map((step) => [step.kind, step.state]),
     );
     expect(byKind.get("preflight")).toBe("approved");
     expect(byKind.get("implementation")).toBe("approved");
     expect(byKind.get("postflight")).toBe("pending");
-    expect(byKind.get("no-mistakes")).toBe("pending");
+    expect(byKind.get("validate")).toBe("pending");
     expect(result.plan.run.state).toBe("approved");
     expect(result.plan.run.approvalBoundary).toBe("implementation");
   });
@@ -140,14 +226,14 @@ describe("materializeWorkflowRunStart", () => {
     const result = materializeWorkflowRunStart(
       baseInput({
         definition: CODING_WORKFLOW_DEFINITION,
-        approvalBoundary: "plan-only"
-      })
+        approvalBoundary: "plan-only",
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     expect(result.plan.steps.every((step) => step.state === "pending")).toBe(
-      true
+      true,
     );
     expect(result.plan.run.state).toBe("approved");
     expect(result.plan.run.approvalBoundary).toBe("plan-only");
@@ -155,12 +241,12 @@ describe("materializeWorkflowRunStart", () => {
 
   it("keeps every step pending when no approval boundary is supplied", () => {
     const result = materializeWorkflowRunStart(
-      baseInput({ definition: CODING_WORKFLOW_DEFINITION })
+      baseInput({ definition: CODING_WORKFLOW_DEFINITION }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.plan.steps.every((step) => step.state === "pending")).toBe(
-      true
+      true,
     );
     expect(result.plan.run.state).toBe("pending");
   });
@@ -171,8 +257,8 @@ describe("materializeWorkflowRunStart", () => {
         issueScope: { issues: ["NGX-346"] },
         route: { channel: "discord" },
         source: "operator-cli",
-        skillRevision: "abc123"
-      })
+        skillRevision: "abc123",
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -196,7 +282,7 @@ describe("materializeWorkflowRunStart", () => {
       "objective_invalid",
       "approval_boundary_invalid",
       "issue_scope_invalid",
-      "route_invalid"
+      "route_invalid",
     ]);
   });
 
@@ -208,7 +294,9 @@ describe("materializeWorkflowRunStart", () => {
   });
 
   it("refuses an unsafe run id", () => {
-    const result = materializeWorkflowRunStart(baseInput({ runId: "../escape" }));
+    const result = materializeWorkflowRunStart(
+      baseInput({ runId: "../escape" }),
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.map((e) => e.code)).toContain("run_id_invalid");
@@ -216,7 +304,7 @@ describe("materializeWorkflowRunStart", () => {
 
   it("refuses blank repo path and objective", () => {
     const result = materializeWorkflowRunStart(
-      baseInput({ repoPath: "   ", objective: "" })
+      baseInput({ repoPath: "   ", objective: "" }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -227,12 +315,12 @@ describe("materializeWorkflowRunStart", () => {
 
   it("refuses an unknown approval boundary", () => {
     const result = materializeWorkflowRunStart(
-      baseInput({ approvalBoundary: "not-a-boundary" })
+      baseInput({ approvalBoundary: "not-a-boundary" }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.map((e) => e.code)).toContain(
-      "approval_boundary_invalid"
+      "approval_boundary_invalid",
     );
   });
 
@@ -240,8 +328,8 @@ describe("materializeWorkflowRunStart", () => {
     const result = materializeWorkflowRunStart(
       baseInput({
         issueScope: ["NGX-346"] as unknown as Record<string, unknown>,
-        route: "discord" as unknown as Record<string, unknown>
-      })
+        route: "discord" as unknown as Record<string, unknown>,
+      }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -257,7 +345,7 @@ describe("materializeWorkflowRunStart", () => {
       repoPath: "",
       objective: "",
       approvalBoundary: "bogus",
-      now: NOW
+      now: NOW,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -268,8 +356,8 @@ describe("materializeWorkflowRunStart", () => {
         "definition_invalid",
         "objective_invalid",
         "repo_path_invalid",
-        "run_id_invalid"
-      ].sort()
+        "run_id_invalid",
+      ].sort(),
     );
   });
 });

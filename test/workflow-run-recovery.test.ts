@@ -107,7 +107,7 @@ function seedStep(
 function seedRetryableDelegateRecovery(
   db: MomentumDb,
   options: {
-    executorFamily?: string;
+    executor?: string;
     recoveryCode?: string;
   } = {},
 ): {
@@ -121,21 +121,21 @@ function seedRetryableDelegateRecovery(
   const stepId = "implementation";
   const attemptId = `${runId}::${stepId}::dispatch`;
   const at = 1_730_000_500_000;
-  const executorFamily = options.executorFamily ?? "delegate-supervisor";
+  const executor = options.executor ?? "delegate-supervisor";
   const recoveryCode = options.recoveryCode ?? "delegate_handoff_failed";
   seedRun(db, runId);
   seedStep(db, runId, stepId, "running", { at });
   db.prepare(
     `INSERT INTO executor_attempts (
        attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, state, attempt_number, started_at, created_at, updated_at
+       executor, state, attempt_number, started_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     attemptId,
     runId,
     stepId,
     stepId,
-    executorFamily,
+    executor,
     "manual_recovery_required",
     2,
     at,
@@ -145,7 +145,7 @@ function seedRetryableDelegateRecovery(
   db.prepare(
     `INSERT INTO executor_rounds (
        round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt_number, round_index, state, recovery_code,
+       executor, attempt_number, round_index, state, recovery_code,
        created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -154,7 +154,7 @@ function seedRetryableDelegateRecovery(
     runId,
     stepId,
     stepId,
-    executorFamily,
+    executor,
     2,
     1,
     "manual_recovery_required",
@@ -191,7 +191,7 @@ function seedNoMistakesCheckpoint(
   runId: string,
   stepId: string,
   options: {
-    executorFamily?: "no-mistakes" | "delegate-supervisor";
+    executor?: "no-mistakes" | "delegate-supervisor";
     delegateCheckpoint?: "mirrored" | "handoff" | "handoff-terminal";
     delegateTool?: string;
     noMistakesRunId?: string;
@@ -202,7 +202,7 @@ function seedNoMistakesCheckpoint(
   } = {},
 ): void {
   const at = options.at ?? 1_730_000_000_000;
-  const executorFamily = options.executorFamily ?? "no-mistakes";
+  const executor = options.executor ?? "no-mistakes";
   const attemptId = `${runId}::${stepId}::dispatch`;
   const roundId = `${attemptId}::round-0`;
   const externalState = {
@@ -219,7 +219,7 @@ function seedNoMistakesCheckpoint(
   };
   const delegateCheckpoint = options.delegateCheckpoint ?? "mirrored";
   const checkpointStage =
-    executorFamily === "no-mistakes"
+    executor === "no-mistakes"
       ? "external_state_mirrored"
       : delegateCheckpoint === "mirrored"
         ? "delegate_external_state_mirrored"
@@ -230,7 +230,7 @@ function seedNoMistakesCheckpoint(
     headSha: externalState.headSha,
   };
   const checkpointDetail =
-    executorFamily === "no-mistakes"
+    executor === "no-mistakes"
       ? externalState
       : delegateCheckpoint === "mirrored"
         ? {
@@ -253,7 +253,7 @@ function seedNoMistakesCheckpoint(
           };
   db.prepare(
     `INSERT INTO executor_attempts (
-       attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+       attempt_id, workflow_run_id, step_run_id, step_key, executor,
        state, attempt_number, started_at, heartbeat_at, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -261,7 +261,7 @@ function seedNoMistakesCheckpoint(
     runId,
     stepId,
     stepId,
-    executorFamily,
+    executor,
     "running",
     1,
     at,
@@ -272,7 +272,7 @@ function seedNoMistakesCheckpoint(
   db.prepare(
     `INSERT INTO executor_rounds (
        round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-       executor_family, attempt_number, round_index, state, created_at, updated_at
+       executor, attempt_number, round_index, state, created_at, updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     roundId,
@@ -280,7 +280,7 @@ function seedNoMistakesCheckpoint(
     runId,
     stepId,
     stepId,
-    executorFamily,
+    executor,
     1,
     0,
     "mirroring_external_state",
@@ -295,11 +295,11 @@ function seedNoMistakesCheckpoint(
     `${roundId}::checkpoint-0`,
     roundId,
     0,
-    executorFamily === "delegate-supervisor"
+    executor === "delegate-supervisor"
       ? "delegate_handoff_intent"
       : checkpointStage,
     JSON.stringify(
-      executorFamily === "delegate-supervisor"
+      executor === "delegate-supervisor"
         ? {
             tool: options.delegateTool ?? "no-mistakes",
             attemptId,
@@ -309,7 +309,7 @@ function seedNoMistakesCheckpoint(
     ),
     at,
   );
-  if (executorFamily !== "delegate-supervisor") return;
+  if (executor !== "delegate-supervisor") return;
   db.prepare(
     `INSERT INTO executor_checkpoints (
        checkpoint_id, round_id, sequence, stage, detail, created_at
@@ -662,7 +662,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       const db = openDb(dataDir);
       try {
         const { runId } = seedRetryableDelegateRecovery(db, {
-          executorFamily: "fixture-executor",
+          executor: "fixture-executor",
           recoveryCode,
         });
         expect(
@@ -682,7 +682,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     const db = openDb(dataDir);
     try {
       const { runId } = seedRetryableDelegateRecovery(db, {
-        executorFamily: "no-mistakes",
+        executor: "no-mistakes",
         recoveryCode: "external_state_unreadable",
       });
       expect(
@@ -691,7 +691,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           stepState: "running",
         }),
       ).toMatchObject({
-        executorFamily: "no-mistakes",
+        executor: "no-mistakes",
         recoveryCode: "external_state_unreadable",
       });
     } finally {
@@ -913,7 +913,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "succeeded", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "failed", {
@@ -989,7 +989,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "succeeded", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "failed", {
@@ -1033,7 +1033,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedStep(db, "run-1", "merge-cleanup", "approved", {
@@ -1041,7 +1041,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         order: 4,
       });
       seedStep(db, "run-1", "linear-refresh", "approved", {
-        kind: "linear-refresh",
+        kind: "tracker-refresh",
         order: 5,
       });
 
@@ -1105,27 +1105,27 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
   it.each([
     {
       label: "legacy mirrored",
-      executorFamily: "no-mistakes" as const,
+      executor: "no-mistakes" as const,
       delegateCheckpoint: undefined,
     },
     {
       label: "delegate mirrored",
-      executorFamily: "delegate-supervisor" as const,
+      executor: "delegate-supervisor" as const,
       delegateCheckpoint: "mirrored" as const,
     },
     {
       label: "delegate handoff identity",
-      executorFamily: "delegate-supervisor" as const,
+      executor: "delegate-supervisor" as const,
       delegateCheckpoint: "handoff" as const,
     },
     {
       label: "delegate terminal handoff",
-      executorFamily: "delegate-supervisor" as const,
+      executor: "delegate-supervisor" as const,
       delegateCheckpoint: "handoff-terminal" as const,
     },
   ])(
     "reconciles $label no-mistakes checkpoint evidence without a new no-mistakes run",
-    ({ executorFamily, delegateCheckpoint }) => {
+    ({ executor, delegateCheckpoint }) => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);
       try {
@@ -1146,11 +1146,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           order: 2,
         });
         seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-          kind: "no-mistakes",
+          kind: "validate",
           order: 3,
         });
         seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
-          executorFamily,
+          executor,
           ...(delegateCheckpoint !== undefined ? { delegateCheckpoint } : {}),
         });
 
@@ -1226,11 +1226,11 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         delegateCheckpoint: "mirrored",
         delegateTool: "other-tool",
       });
@@ -1281,16 +1281,16 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, runId, stepId, "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedNoMistakesCheckpoint(db, runId, stepId, {
-        executorFamily: "delegate-supervisor",
+        executor: "delegate-supervisor",
         delegateCheckpoint: "mirrored",
       });
       db.prepare(
         `INSERT INTO executor_attempts (
-           attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+           attempt_id, workflow_run_id, step_run_id, step_key, executor,
            state, attempt_number, started_at, heartbeat_at, created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1310,7 +1310,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       db.prepare(
         `INSERT INTO executor_rounds (
            round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-           executor_family, attempt_number, round_index, state, created_at,
+           executor, attempt_number, round_index, state, created_at,
            updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
@@ -1385,7 +1385,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
@@ -1430,7 +1430,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
@@ -1475,7 +1475,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         issueScope: { identifiers: ["NGX-561"] },
       });
       seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
       seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
@@ -1536,7 +1536,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
 
@@ -1568,7 +1568,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         finishedAt: 1_730_000_800_000,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
 
@@ -1607,7 +1607,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         order: 2,
       });
       seedStep(db, "run-1", "no-mistakes", "failed", {
-        kind: "no-mistakes",
+        kind: "validate",
         order: 3,
       });
 

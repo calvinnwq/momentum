@@ -1,5 +1,5 @@
 /**
- * Async dispatched-step run path for the `external-apply` executor family
+ * Async dispatched-step run path for the `external-apply` executor
  *.
  *
  * This is the daemon-dispatchable *producer* that makes `external-apply`
@@ -117,7 +117,7 @@ export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
     input.runId,
     input.stepId,
   );
-  if (attempt?.executorFamily !== "external-apply") return null;
+  if (attempt?.executor !== "external-apply") return null;
   if (!isTerminalExecutorAttemptState(attempt.state)) return null;
   return reconcileTerminalDispatchedExternalApplyAttempt(input, attempt.state);
 }
@@ -145,10 +145,10 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
       detail: attemptId,
     };
   }
-  if (attempt.executorFamily !== "external-apply") {
+  if (attempt.executor !== "external-apply") {
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
-      detail: `${attemptId}: ${attempt.executorFamily}`,
+      detail: `${attemptId}: ${attempt.executor}`,
     };
   }
 

@@ -16,7 +16,7 @@
  * terminal). If it throws, the lane releases the lease." This module honours both
  * halves and never silently no-ops a claimed step:
  *
- *   - **dispatch** (a phase-1 dispatchable family): atomically advance the step
+ *   - **dispatch** (a phase-1 dispatchable executor): atomically advance the step
  *     `approved -> running` (so the lane stops re-offering it) and create the
  *     durable `executor_attempts` + first `executor_rounds` start scaffold —
  *     the contract's Round Lifecycle "create the round row before external work
@@ -27,7 +27,7 @@
  *     The dispatch lease is *held* (the executor session is in progress,
  *     not terminal), the lane's liveness token aging out under its TTL so a
  *     later stale-lease recovery reclaims it; nothing is stranded.
- *   - **fail_closed** (unresolvable, under-configured, or an unsupported family):
+ *   - **fail_closed** (unresolvable, under-configured, or an unsupported executor):
  *     a terminal outcome. Atomically flag the run `needs_manual_recovery` and open
  *     a durable, operator-visible `workflow_gates` manual-recovery row hung from
  *     the step when the run row still exists, then *release* the dispatch lease.
@@ -63,6 +63,7 @@ import {
   insertExecutorCheckpoint,
   insertExecutorAttempt,
   insertExecutorRound,
+  hasExecutorDefinition,
   loadExecutorAttempt,
   loadLatestExecutorAttemptForStep,
 } from "../../executors/loop/persist.js";
@@ -73,6 +74,10 @@ import type {
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
+import {
+  canonicalWorkflowStepKind,
+  effectiveStepExecutor,
+} from "../definition/legacy.js";
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
@@ -182,10 +187,24 @@ export function executeWorkflowStepDispatch(
     });
   }
 
+  // New attempt rows record the effective identity: a recorded name that is
+  // registered under its own raw name is preserved verbatim; an unregistered
+  // legacy spelling projects to its canonical alias.
+  const effectiveExecutor = effectiveStepExecutor(plan.executor, {
+    ...(context.isRegisteredExecutor === undefined
+      ? {}
+      : { isRegistered: context.isRegisteredExecutor }),
+    isDurablyClaimed:
+      context.isDurablyClaimedExecutor ??
+      ((executor) => hasExecutorDefinition(db, executor)),
+    ...(context.isCanonicalBuiltInExecutor === undefined
+      ? {}
+      : { isCanonicalBuiltIn: context.isCanonicalBuiltInExecutor }),
+  });
   return dispatchExecutorScaffold(
     db,
     claim,
-    plan.executorFamily,
+    effectiveExecutor,
     now,
     selection.selection,
     context.executorOwnsRounds === true,
@@ -195,13 +214,13 @@ export function executeWorkflowStepDispatch(
 
 /**
  * Advance the step and create the executor start scaffold for a dispatchable
- * family, atomically. Idempotent: a re-entry whose attempt already exists
+ * executor, atomically. Idempotent: a re-entry whose attempt already exists
  * returns without duplicating rows.
  */
 function dispatchExecutorScaffold(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
-  family: ExecutorName,
+  executor: ExecutorName,
   now: number,
   selection: CodingStepExecutorSelection,
   executorOwnsRounds: boolean,
@@ -218,13 +237,14 @@ function dispatchExecutorScaffold(
       claim,
       now,
       selection,
+      executor,
       executorOwnsRounds,
       materializeOwnedRound,
     );
     if (retried.started) {
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-        detail: `${family} ${retried.attemptId} attempt ${retried.attemptNumber}`,
+        detail: `${executor} ${retried.attemptId} attempt ${retried.attemptNumber}`,
       };
     }
     return {
@@ -253,12 +273,12 @@ function dispatchExecutorScaffold(
       };
     }
 
-    const attempt = buildAttemptScaffold(claim, family, attemptId, now);
+    const attempt = buildAttemptScaffold(claim, executor, attemptId, now);
     insertExecutorAttempt(db, attempt, { now });
     if (!executorOwnsRounds) {
       insertExecutorRound(
         db,
-        buildRoundScaffold(claim, family, attemptId, now, selection),
+        buildRoundScaffold(claim, executor, attemptId, now, selection),
         { now },
       );
     } else if (materializeOwnedRound !== undefined) {
@@ -278,7 +298,7 @@ function dispatchExecutorScaffold(
 
   return {
     status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
-    detail: `${family} ${attemptId}`,
+    detail: `${executor} ${attemptId}`,
   };
 }
 
@@ -287,6 +307,7 @@ function dispatchRetryScaffold(
   claim: ClaimedWorkflowStep,
   now: number,
   selection: CodingStepExecutorSelection,
+  executor: ExecutorName,
   executorOwnsRounds: boolean,
   materializeOwnedRound: WorkflowStepDispatchContext["materializeOwnedRound"],
 ): ReturnType<typeof startRetryableDispatchAttempt> {
@@ -307,6 +328,7 @@ function dispatchRetryScaffold(
       now,
       stepState: "running",
       selection,
+      executor,
       executorOwnsRounds,
     });
     if (!retried.started) {
@@ -458,7 +480,7 @@ function failClosedDispatch(
 
 function buildAttemptScaffold(
   claim: ClaimedWorkflowStep,
-  family: ExecutorName,
+  executor: ExecutorName,
   attemptId: string,
   now: number,
 ): ExecutorAttemptRecord {
@@ -467,7 +489,7 @@ function buildAttemptScaffold(
     workflowRunId: claim.runId,
     stepRunId: claim.stepId,
     stepKey: claim.stepId,
-    executorFamily: family,
+    executor,
     state: "running",
     attemptNumber: 1,
     startedAt: now,
@@ -478,7 +500,7 @@ function buildAttemptScaffold(
 
 function buildRoundScaffold(
   claim: ClaimedWorkflowStep,
-  family: ExecutorName,
+  executor: ExecutorName,
   attemptId: string,
   _now: number,
   selection: CodingStepExecutorSelection,
@@ -489,7 +511,7 @@ function buildRoundScaffold(
     workflowRunId: claim.runId,
     stepRunId: claim.stepId,
     stepKey: claim.stepId,
-    executorFamily: family,
+    executor,
     attemptNumber: 1,
     roundIndex: 1,
     // The contract's Round Lifecycle creates the round row before external work
@@ -590,7 +612,7 @@ export function resolveWorkflowStepDispatchRouteSelection(
     ok: true,
     selection: resolveCodingStepExecutorSelection(
       overrides.overrides,
-      claim.stepId,
+      canonicalWorkflowStepKind(claim.stepId) ?? claim.stepId,
     ),
   };
 }

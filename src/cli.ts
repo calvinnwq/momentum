@@ -39,7 +39,11 @@ import {
   type DoctorPolicyPayload,
   type DoctorSourcesPayload,
 } from "./renderers/doctor.js";
-import { isUniqueViolation, openDb } from "./adapters/db.js";
+import {
+  configuredExecutorNames,
+  isUniqueViolation,
+  openDb,
+} from "./adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "./config/data-dir.js";
 import { loadDaemonStatus } from "./core/daemon/status.js";
 import {
@@ -555,6 +559,7 @@ async function daemonStart(
       // unless its explicit fixture opt-in is set.
       workflowLane: {
         dispatch: workflowDispatchResolution.dispatch,
+        claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
         ...(workflowDispatchResolution.leaseDurationMs !== undefined
           ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }
           : {}),

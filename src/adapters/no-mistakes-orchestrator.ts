@@ -2,7 +2,7 @@
  * Legacy no-mistakes executor-mirror polling orchestrator.
  *
  * This stateful one-round mirror remains for recorded workflow definitions that
- * use the legacy `no-mistakes` executor family.
+ * use the legacy `no-mistakes` executor.
  * Current coding definitions use `delegate-supervisor` with
  * `tool: "no-mistakes"` and repeated bounded rounds instead.
  *
@@ -15,7 +15,7 @@
  * state store into a typed snapshot ({@link NoMistakesExternalStateRead}). This
  * module is the stateful seam that composes both with the real
  * executor-loop persistence layer and round transition graph, exactly the way
- * `single-shot/orchestrator.ts` and `goal-loop/orchestrator.ts` compose their pure
+ * `single-shot/orchestrator.ts` and `agent-loop/orchestrator.ts` compose their pure
  * projections around a bounded mechanism — but the mirror's "bounded mechanism" is
  * a *read*, and the round is a single long-lived poll loop rather than a one-shot
  * or a bounded round sequence:
@@ -25,7 +25,7 @@
  *   -> patch the durable round         (continue heartbeat / gate / settle)
  *   -> mirror its findings + decisions (idempotently, append-only)
  *
- * The structural difference from the single-shot / goal-loop drivers is that the
+ * The structural difference from the single-shot / agent-loop drivers is that the
  * mirror does **not** loop internally. No-mistakes owns and runs its own pipeline
  * at its own cadence, so Momentum never busy-loops on external state: a daemon
  * scheduler *ticks* {@link runNoMistakesMirrorRound} once per poll against the same
@@ -94,7 +94,7 @@ import {
 import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
-  isNoMistakesExecutorFamily,
+  isNoMistakesExecutorName,
   noMistakesRoundUpdate,
   planNoMistakesAttempt,
   planNoMistakesRoundDecisions,
@@ -108,17 +108,17 @@ import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes/
 
 export const NO_MISTAKES_MIRROR_STALL_AFTER_MS = 4 * 60 * 1000;
 
-class NoMistakesMirrorRoundFamilyError extends Error {
+class NoMistakesMirrorRoundExecutorError extends Error {
   readonly roundId: string;
-  readonly executorFamily: string;
+  readonly executor: string;
 
-  constructor(roundId: string, executorFamily: string) {
+  constructor(roundId: string, executor: string) {
     super(
-      `No-mistakes mirror cannot poll non-no-mistakes round ${roundId} with family ${executorFamily}`,
+      `No-mistakes mirror cannot poll non-no-mistakes round ${roundId} with executor ${executor}`,
     );
-    this.name = "NoMistakesMirrorRoundFamilyError";
+    this.name = "NoMistakesMirrorRoundExecutorError";
     this.roundId = roundId;
-    this.executorFamily = executorFamily;
+    this.executor = executor;
   }
 }
 
@@ -722,8 +722,8 @@ export type RunNoMistakesMirrorRoundResult = {
  * @throws {ExecutorRoundNotFoundError} if no round has `roundId` — the mirror round
  * must already exist (born at {@link runNoMistakesMirrorStep}); a poll reconciles a
  * started round, it never creates one.
- * @throws {NoMistakesMirrorRoundFamilyError} if `roundId` belongs to a
- * non-no-mistakes executor family.
+ * @throws {NoMistakesMirrorRoundExecutorError} if `roundId` belongs to a
+ * non-no-mistakes executor.
  * @throws {NoMistakesMirrorRoundTerminalError} if the round is already terminal — a poll
  * must only tick a live (`mirroring_external_state` / `waiting_operator`) round.
  * @throws {ExecutorRoundTransitionError} if persistence rejects the projected
@@ -746,8 +746,8 @@ export function runNoMistakesMirrorRound(
   if (current === undefined) {
     throw new ExecutorRoundNotFoundError(roundId);
   }
-  if (!isNoMistakesExecutorFamily(current.executorFamily)) {
-    throw new NoMistakesMirrorRoundFamilyError(roundId, current.executorFamily);
+  if (!isNoMistakesExecutorName(current.executor)) {
+    throw new NoMistakesMirrorRoundExecutorError(roundId, current.executor);
   }
   if (isTerminalExecutorRoundState(current.state)) {
     throw new NoMistakesMirrorRoundTerminalError(roundId, current.state);
@@ -874,7 +874,7 @@ export function runNoMistakesMirrorRound(
  * (`workflowRunId` / `stepRunId` / `stepKey` / `attempt`), the bounded reader, a
  * per-round runtime-input resolver, and a clock. The adapter mints the attempt
  * / round identities itself, so the caller supplies a `StepRun`, not pre-built
- * executor-loop records. There is no `family` (the mirror serves exactly
+ * executor-loop records. There is no executor field (the mirror serves exactly
  * `no-mistakes`), no selection (no-mistakes owns its own pipeline, so Momentum
  * resolves no agent/model), and no `maxRounds` (the mirror is a single long-lived
  * round, not a bounded sequence).
@@ -956,7 +956,7 @@ export function runNoMistakesMirrorStep(
       insertExecutorAttempt(db, attempt, { now: attemptStartedAt });
 
       // 2. Insert the single mirror round-start row (born in mirroring_external_state),
-      //    inheriting the attempt's identity + family and freezing the daemon's
+      //    inheriting the attempt's identity + executor and freezing the daemon's
       //    runtime inputs in.
       const roundStartedAt = now();
       const startRecord = planNoMistakesRoundStart({

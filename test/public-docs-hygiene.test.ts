@@ -29,7 +29,11 @@ function relFromRoot(p: string): string {
 const publicDocs = listPublicDocs(PUBLIC_DOCS_DIR);
 
 const publicSurfaces: { label: string; file: string; body: string }[] = [
-  { label: "README.md", file: "README.md", body: fs.readFileSync(README_PATH, "utf8") },
+  {
+    label: "README.md",
+    file: "README.md",
+    body: fs.readFileSync(README_PATH, "utf8"),
+  },
   ...publicDocs.map((file) => ({
     label: relFromRoot(file),
     file: relFromRoot(file),
@@ -52,7 +56,7 @@ describe("public docs hygiene", () => {
   describe("OpenClaw supervise examples", () => {
     it("uses the valid workflow approval flag in human action examples", () => {
       const doc = publicSurfaces.find(
-        (surface) => surface.file === "docs/openclaw-supervise.md"
+        (surface) => surface.file === "docs/openclaw-supervise.md",
       )?.body;
 
       expect(doc).toContain("--approval-boundary");
@@ -64,15 +68,15 @@ describe("public docs hygiene", () => {
   describe("no-mistakes recovery advertisement contract", () => {
     it("distinguishes clear-recovery acceptance from monitor advertising", () => {
       const recovery = publicSurfaces.find(
-        (surface) => surface.file === "docs/recovery.md"
+        (surface) => surface.file === "docs/recovery.md",
       )?.body;
       const commands = publicSurfaces.find(
-        (surface) => surface.file === "docs/workflow-commands.md"
+        (surface) => surface.file === "docs/workflow-commands.md",
       )?.body;
       const ordinaryFailure =
-        "Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.";
+        "Ordinary failed validate steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.";
       const unflaggedClear =
-        "`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.";
+        "`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.";
 
       expect(recovery).toContain(ordinaryFailure);
       expect(recovery).toContain(unflaggedClear);
@@ -87,7 +91,7 @@ describe("public docs hygiene", () => {
         const matches = surface.body.match(/\bNGX-\d+\b/g) ?? [];
         expect(
           matches,
-          `${surface.label} should not contain NGX-* identifiers; move to the personal wiki /Workspaces/Momentum`
+          `${surface.label} should not contain NGX-* identifiers; move to the personal wiki /Workspaces/Momentum`,
         ).toEqual([]);
       });
     }
@@ -113,7 +117,7 @@ describe("public docs hygiene", () => {
         }
         expect(
           hits,
-          `${surface.label} should not reference milestone planning vocabulary; move to the personal wiki /Workspaces/Momentum`
+          `${surface.label} should not reference milestone planning vocabulary; move to the personal wiki /Workspaces/Momentum`,
         ).toEqual([]);
       });
     }
@@ -123,12 +127,13 @@ describe("public docs hygiene", () => {
     for (const surface of publicSurfaces) {
       it(`${surface.label} must not link into internal/`, () => {
         const linkRe = /\]\((?:\.\/)?internal\/[^)\s]+\)/g;
-        const inlineRe = /\binternal\/(roadmap|milestones|contracts|exclusions|smoke-tests)\b/g;
+        const inlineRe =
+          /\binternal\/(roadmap|milestones|contracts|exclusions|smoke-tests)\b/g;
         const linkHits = surface.body.match(linkRe) ?? [];
         const inlineHits = surface.body.match(inlineRe) ?? [];
         expect(
           [...linkHits, ...inlineHits],
-          `${surface.label} should not reference internal/ planning paths`
+          `${surface.label} should not reference internal/ planning paths`,
         ).toEqual([]);
       });
     }
@@ -147,7 +152,7 @@ describe("public docs hygiene", () => {
         const hits = forbiddenPaths.filter((p) => surface.body.includes(p));
         expect(
           hits,
-          `${surface.label} should not reference paths that have moved to internal/`
+          `${surface.label} should not reference paths that have moved to internal/`,
         ).toEqual([]);
       });
     }
@@ -157,8 +162,14 @@ describe("public docs hygiene", () => {
     it("docs/ has no milestones/ or contracts/ subdirectories", () => {
       const milestonesDir = path.join(PUBLIC_DOCS_DIR, "milestones");
       const contractsDir = path.join(PUBLIC_DOCS_DIR, "contracts");
-      expect(fs.existsSync(milestonesDir), "docs/milestones/ should not exist").toBe(false);
-      expect(fs.existsSync(contractsDir), "docs/contracts/ should not exist").toBe(false);
+      expect(
+        fs.existsSync(milestonesDir),
+        "docs/milestones/ should not exist",
+      ).toBe(false);
+      expect(
+        fs.existsSync(contractsDir),
+        "docs/contracts/ should not exist",
+      ).toBe(false);
     });
 
     it("docs/ has no roadmap.md, exclusions.md, or smoke-tests.md", () => {

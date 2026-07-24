@@ -21,7 +21,7 @@ import {
   singleShotAttemptId,
   singleShotRoundId,
   type PlanSingleShotRoundStartInput,
-  type SingleShotExecutorFamily,
+  type SingleShotExecutorName,
   type SingleShotRoundRuntimeInputs,
 } from "../src/core/executors/single-shot/executor.js";
 import {
@@ -29,9 +29,9 @@ import {
   runSingleShotStep,
 } from "../src/core/executors/single-shot/orchestrator.js";
 
-// Drives the single-shot executor step (one-shot / script families) through the
+// Drives the single-shot executor step (agent-once / script executors) through the
 // *real* executor-loop persistence layer and round transition graph around an
-// injected bounded mechanism. Unlike the goal-loop driver there is no loop — a
+// injected bounded mechanism. Unlike the agent-loop driver there is no loop — a
 // single shot owns exactly one round — so the entrypoint inserts the attempt,
 // drives the one round, and settles the attempt directly into the round
 // decision's terminal state. Proves: the per-round agent/model/input evidence
@@ -63,7 +63,7 @@ function makeTempDir(): string {
 // real (workflow_run_id, step_run_id). Seed the minimal parent rows + an
 // attempt; the driver itself inserts the round.
 function openRoundDb(
-  family: SingleShotExecutorFamily = "one-shot",
+  executor: SingleShotExecutorName = "agent-once",
 ): MomentumDb {
   const db = openDb(makeTempDir());
   db.prepare(
@@ -78,7 +78,7 @@ function openRoundDb(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: family,
+    executor: executor,
     state: "running",
     attemptNumber: 1,
     startedAt: 1,
@@ -103,12 +103,12 @@ function openStepDb(): MomentumDb {
 }
 
 function buildStart(
-  family: SingleShotExecutorFamily = "one-shot",
+  executor: SingleShotExecutorName = "agent-once",
 ): PlanSingleShotRoundStartInput {
-  // one-shot resolves a concrete agent; the exit-code-based script family has no
+  // agent-once resolves a concrete agent; the exit-code-based script executor has no
   // agent, so its selection is naturally all-null.
   const selection =
-    family === "one-shot"
+    executor === "agent-once"
       ? resolveSingleShotRoundSelection({
           stepConfig: {
             agentProvider: "claude",
@@ -123,7 +123,7 @@ function buildStart(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    family,
+    executor,
     attemptNumber: 1,
     selection,
     inputDigest: "sha256:input",
@@ -180,13 +180,13 @@ function expectDurableDispatchBinding(db: MomentumDb): void {
   ]);
 }
 
-describe("runSingleShotRound — one-shot success", () => {
+describe("runSingleShotRound — agent-once success", () => {
   it("inserts a running round, captures the result, and persists a complete terminal round", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     let observedState: string | undefined;
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: (round) => {
         observedState = round.state;
@@ -241,11 +241,11 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("stamps terminal state after asynchronous bounded work finishes", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     let clock = 1_500;
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       now: () => clock,
       runRound: async () => {
         await Promise.resolve();
@@ -261,13 +261,13 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("atomically settles an in-flight aborted runner as cancelled", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const abort = new AbortController();
 
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         signal: abort.signal,
         runRound: async () => {
@@ -309,12 +309,12 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("lets normal runner completion win a post-run abort race", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const abort = new AbortController();
 
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       signal: abort.signal,
       runRound: () => {
@@ -329,7 +329,7 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("materializes and settles a pre-aborted direct round as cancelled", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const abort = new AbortController();
     abort.abort();
     let ran = false;
@@ -337,7 +337,7 @@ describe("runSingleShotRound — one-shot success", () => {
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         signal: abort.signal,
         runRound: () => {
@@ -356,13 +356,13 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("allocates cancellation classification after existing checkpoints", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const abort = new AbortController();
 
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         signal: abort.signal,
         runRound: (round) => {
@@ -415,13 +415,13 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("does not terminalize cancellation when an aborted runner reports cleanup failure", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const abort = new AbortController();
 
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         signal: abort.signal,
         runRound: async () => {
@@ -444,14 +444,14 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("persists the round and dispatch binding before the mechanism runs", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     let stateDuringMechanism: string | undefined;
     let checkpointsDuringMechanism: ReturnType<
       typeof listExecutorCheckpointsForRound
     > = [];
     await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => {
         stateDuringMechanism = loadExecutorRound(db, "round-1")?.state;
@@ -477,10 +477,10 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("persists the round's logs (from frozen logPaths) + reported artifact pointers", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => ({
         outcome: { ok: true },
@@ -515,10 +515,10 @@ describe("runSingleShotRound — one-shot success", () => {
   });
 
   it("keeps log artifacts aligned with the inserted round when the runner mutates its input", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: (round) => {
         round.logPaths.push("/artifacts/round-1/mutated.log");
@@ -536,11 +536,11 @@ describe("runSingleShotRound — one-shot success", () => {
     ).toEqual(["/artifacts/round-1/stdout.log"]);
   });
 
-  it("persists the one-shot lifecycle checkpoint stream including result_captured", async () => {
-    const db = openRoundDb("one-shot");
+  it("persists the agent-once lifecycle checkpoint stream including result_captured", async () => {
+    const db = openRoundDb("agent-once");
     await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
     });
@@ -563,7 +563,7 @@ describe("runSingleShotRound — script success (bare capture)", () => {
       start: buildStart("script"),
       config: { command: "test-script" },
       finishedAt: 3_000,
-      // The exit-code-based script family succeeds with no result document.
+      // The exit-code-based script executor succeeds with no result document.
       runRound: () => ({
         outcome: { ok: true },
         evidence: { verificationStatus: "passed", commitSha: SHA_A },
@@ -591,18 +591,18 @@ describe("runSingleShotRound — script success (bare capture)", () => {
   });
 });
 
-describe("runSingleShotRound — family output invariants", () => {
-  it("rejects a successful one-shot mechanism output without a result document", async () => {
-    const db = openRoundDb("one-shot");
+describe("runSingleShotRound — executor output invariants", () => {
+  it("rejects a successful agent-once mechanism output without a result document", async () => {
+    const db = openRoundDb("agent-once");
 
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         runRound: () => ({ outcome: { ok: true } }),
       }),
-    ).rejects.toThrow("one-shot");
+    ).rejects.toThrow("agent-once");
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
@@ -677,20 +677,20 @@ describe("runSingleShotRound — family output invariants", () => {
     expectDurableDispatchBinding(db);
   });
 
-  it("rejects a successful one-shot mechanism output with a failed runner result", async () => {
-    const db = openRoundDb("one-shot");
+  it("rejects a successful agent-once mechanism output with a failed runner result", async () => {
+    const db = openRoundDb("agent-once");
 
     await expect(
       runSingleShotRound({
         db,
-        start: buildStart("one-shot"),
+        start: buildStart("agent-once"),
         finishedAt: 3_000,
         runRound: () => ({
           outcome: { ok: true },
           result: runnerResult({ success: false }),
         }),
       }),
-    ).rejects.toThrow("successful one-shot");
+    ).rejects.toThrow("successful agent-once");
 
     expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
@@ -747,10 +747,10 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
   });
 
   it("does not checkpoint result capture when a failed mechanism reports a result", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => ({
         outcome: { ok: false, recoveryCode: "command_failed" },
@@ -766,10 +766,10 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
   });
 
   it("routes an auth_unavailable outcome to a blocked terminal with a credential gate", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => ({
         outcome: { ok: false, recoveryCode: "auth_unavailable" },
@@ -783,10 +783,10 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
   });
 
   it("routes a head_mismatch finalize outcome to manual recovery", async () => {
-    const db = openRoundDb("one-shot");
+    const db = openRoundDb("agent-once");
     const outcome = await runSingleShotRound({
       db,
-      start: buildStart("one-shot"),
+      start: buildStart("agent-once"),
       finishedAt: 3_000,
       runRound: () => ({
         outcome: { ok: false, recoveryCode: "head_mismatch" },
@@ -801,11 +801,11 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
 });
 
 describe("runSingleShotStep — attempt/round materialization", () => {
-  it("materializes a one-shot attempt + single round and drives to a terminal success", async () => {
+  it("materializes a agent-once attempt + single round and drives to a terminal success", async () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -822,9 +822,9 @@ describe("runSingleShotStep — attempt/round materialization", () => {
       runRound: () => ({ outcome: { ok: true }, result: runnerResult() }),
     });
 
-    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "agent-once", 1);
     expect(result.attempt.attemptId).toBe(attemptId);
-    expect(result.attempt.executorFamily).toBe("one-shot");
+    expect(result.attempt.executor).toBe("agent-once");
     expect(result.attempt.state).toBe("succeeded");
     expect(result.attempt.finishedAt).not.toBeNull();
     expect(loadExecutorAttempt(db, attemptId)).toEqual(result.attempt);
@@ -852,7 +852,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       config: { agent: { harness: "codex", model: "gpt-5" } },
       workflowRunId: "run-1",
       stepRunId: "step-1",
@@ -875,7 +875,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     let observedCommand: string | undefined;
     const result = await runSingleShotStep({
       db,
-      family: "script",
+      executor: "script",
       config: { command: "test-script" },
       workflowRunId: "run-1",
       stepRunId: "step-1",
@@ -892,9 +892,9 @@ describe("runSingleShotStep — attempt/round materialization", () => {
 
     const attemptId = singleShotAttemptId("run-1", "step-1", "script", 1);
     expect(result.attempt.attemptId).toBe(attemptId);
-    expect(result.attempt.executorFamily).toBe("script");
+    expect(result.attempt.executor).toBe("script");
     expect(result.attempt.state).toBe("succeeded");
-    expect(result.round.round.executorFamily).toBe("script");
+    expect(result.round.round.executor).toBe("script");
     expect(observedCommand).toBe("test-script");
   });
 
@@ -910,7 +910,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
       const db = openStepDb();
       const input = {
         db,
-        family: "script",
+        executor: "script",
         ...(config !== undefined ? { config } : {}),
         workflowRunId: "run-1",
         stepRunId: "step-1",
@@ -938,7 +938,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -959,45 +959,45 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     expect(count.count).toBe(0);
   });
 
-  it("rejects family-forbidden config before durable materialization", async () => {
+  it("rejects executor-forbidden config before durable materialization", async () => {
     const cases = [
       {
-        family: "script",
+        executor: "script",
         config: { command: "test-script", agent: { model: "forbidden" } },
         message: "does not allow property agent",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { command: "test-script" },
         message: "does not allow property command",
       },
       {
-        family: "script",
+        executor: "script",
         config: { command: "test-script", args: "--bad" },
         message: "does not allow property args",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { agent: null },
         message: "config.agent must be an object",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { agent: [] },
         message: "config.agent must be an object",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { agent: 1 },
         message: "config.agent must be an object",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { timeoutMs: 1_500 },
         message: "timeoutMs must be a whole number of seconds",
       },
       {
-        family: "one-shot",
+        executor: "agent-once",
         config: { timeoutMs: 2_147_454_000 },
         message: "timeoutMs must not exceed 2147453000",
       },
@@ -1007,7 +1007,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
       const db = openStepDb();
       const input = {
         db,
-        family: testCase.family,
+        executor: testCase.executor,
         config: testCase.config,
         workflowRunId: "run-1",
         stepRunId: "step-1",
@@ -1032,7 +1032,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1053,7 +1053,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1076,12 +1076,12 @@ describe("runSingleShotStep — attempt/round materialization", () => {
 
   it("inserts the materialized attempt before the round runs", async () => {
     const db = openStepDb();
-    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "agent-once", 1);
     let durableStateDuringRound:
       { attempt: string | undefined; round: string | undefined } | undefined;
     await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -1116,7 +1116,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1157,7 +1157,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1195,7 +1195,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
-      family: "script",
+      executor: "script",
       config: { command: "test-script" },
       workflowRunId: "run-1",
       stepRunId: "step-1",
@@ -1218,7 +1218,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -1241,7 +1241,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
     const db = openStepDb();
     const result = await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -1277,7 +1277,7 @@ describe("runSingleShotStep — attempt/round materialization", () => {
 // runSingleShotStep — single-owner enforcement.
 // ---------------------------------------------------------------------------
 //
-// The deterministic attempt id `(workflowRunId, stepRunId, family, attempt)`
+// The deterministic attempt id `(workflowRunId, stepRunId, executor, attempt)`
 // is the adapter's single-owner key. A non-terminal owner can reattach for crash
 // recovery; a settled duplicate cannot mint a second owner. A genuine re-run
 // uses a fresh `attempt`, minting an independent attempt.
@@ -1286,7 +1286,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
   function dispatch(db: MomentumDb, attempt: number) {
     return runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -1307,7 +1307,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
   it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", async () => {
     const db = openStepDb();
     const first = await dispatch(db, 1);
-    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "agent-once", 1);
 
     // Snapshot the durable owner + round the first dispatch settled.
     const ownerBefore = loadExecutorAttempt(db, attemptId);
@@ -1325,7 +1325,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
 
   it("refuses attempt-only reattach without a durable dispatch binding", async () => {
     const db = openStepDb();
-    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "agent-once", 1);
     insertExecutorAttempt(
       db,
       {
@@ -1333,7 +1333,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
-        executorFamily: "one-shot",
+        executor: "agent-once",
         state: "running",
         attemptNumber: 1,
         startedAt: 1,
@@ -1364,7 +1364,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1379,7 +1379,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
       }),
     ).rejects.toThrow("simulated daemon crash");
 
-    const attemptId = singleShotAttemptId("run-1", "step-1", "one-shot", 1);
+    const attemptId = singleShotAttemptId("run-1", "step-1", "agent-once", 1);
     expect(loadExecutorAttempt(db, attemptId)?.state).toBe("running");
     expect(loadExecutorRound(db, singleShotRoundId(attemptId))).toMatchObject({
       state: "capturing_result",
@@ -1390,7 +1390,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     await expect(
       runSingleShotStep({
         db,
-        family: "one-shot",
+        executor: "agent-once",
         workflowRunId: "run-1",
         stepRunId: "step-1",
         stepKey: "implementation",
@@ -1410,7 +1410,7 @@ describe("runSingleShotStep — single-owner enforcement", () => {
 
     const resumed = await runSingleShotStep({
       db,
-      family: "one-shot",
+      executor: "agent-once",
       workflowRunId: "run-1",
       stepRunId: "step-1",
       stepKey: "implementation",
@@ -1435,10 +1435,10 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     const second = await dispatch(db, 2);
 
     expect(first.attempt.attemptId).toBe(
-      singleShotAttemptId("run-1", "step-1", "one-shot", 1),
+      singleShotAttemptId("run-1", "step-1", "agent-once", 1),
     );
     expect(second.attempt.attemptId).toBe(
-      singleShotAttemptId("run-1", "step-1", "one-shot", 2),
+      singleShotAttemptId("run-1", "step-1", "agent-once", 2),
     );
     expect(first.attempt.attemptId).not.toBe(second.attempt.attemptId);
 

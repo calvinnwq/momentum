@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import {
   insertExecutorFinding,
   insertExecutorAttempt,
   insertExecutorRound,
+  persistExecutorDefinition,
 } from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
@@ -45,7 +47,10 @@ function makeTempDir(prefix = "momentum-cli-workflow-run-logs-"): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: Record<string, string | undefined> = {},
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
@@ -61,7 +66,7 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       },
     },
-    env: {},
+    env,
   });
   return { code, stdout, stderr };
 }
@@ -72,7 +77,7 @@ function makeAttempt(runId: string): ExecutorAttemptRecord {
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "running",
     attemptNumber: 1,
     startedAt: 10,
@@ -91,7 +96,7 @@ function makeRound(
     workflowRunId: runId,
     stepRunId: "implementation",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     attemptNumber: 1,
     roundIndex: 0,
     state: "succeeded",
@@ -170,6 +175,58 @@ function makeDecision(): ExecutorDecisionRecord {
     chosenAction: "retry",
     resolution: "delegated:within-envelope",
     externalRef: "nomistakes:D-1",
+  };
+}
+
+async function holdWriterLock(dbPath: string): Promise<() => Promise<void>> {
+  const readyPath = `${dbPath}.writer-ready`;
+  const releasePath = `${dbPath}.writer-release`;
+  const child = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+const fs = require("node:fs");
+const db = new DatabaseSync(process.argv[1], { timeout: 0 });
+db.exec("BEGIN IMMEDIATE");
+fs.writeFileSync(process.argv[2], "ready");
+const timer = setInterval(() => {
+  if (!fs.existsSync(process.argv[3])) return;
+  db.exec("ROLLBACK");
+  db.close();
+  clearInterval(timer);
+}, 5);`,
+      dbPath,
+      readyPath,
+      releasePath,
+    ],
+    { stdio: "ignore" },
+  );
+
+  await new Promise<void>((resolve, reject) => {
+    const poll = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 5);
+    child.once("error", (error) => {
+      clearInterval(poll);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      if (fs.existsSync(readyPath)) return;
+      clearInterval(poll);
+      reject(new Error(`writer lock process exited before locking: ${code}`));
+    });
+  });
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    fs.writeFileSync(releasePath, "release");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
   };
 }
 
@@ -299,6 +356,84 @@ describe("momentum workflow run logs", () => {
     });
   });
 
+  it("does not emit native evidence when executor ownership is unknown", async () => {
+    const dataDir = makeTempDir();
+    const executorConfigPath = path.join(dataDir, "malformed-executors.json");
+    fs.writeFileSync(executorConfigPath, "{ malformed", "utf8");
+    const db = openDb(dataDir, {
+      env: { MOMENTUM_EXECUTOR_CONFIG: executorConfigPath },
+    });
+    try {
+      seedRunWithRound(db, "cwfp-logs-unknown-ownership");
+      db.prepare(
+        "UPDATE executor_attempts SET executor = 'goal-loop' WHERE attempt_id = 'inv-1'",
+      ).run();
+      db.prepare(
+        "UPDATE executor_rounds SET executor = 'goal-loop' WHERE round_id = 'round-1'",
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "logs",
+        "cwfp-logs-unknown-ownership",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_EXECUTOR_CONFIG: executorConfigPath },
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ executor: string; nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.executor).toBe("goal-loop");
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
+  it("reads a near-current legacy database through a snapshot while another process holds a writer lock", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithRound(db, "cwfp-logs-locked-legacy");
+      db.prepare(
+        "UPDATE workflow_steps SET kind = 'no-mistakes' WHERE run_id = ?",
+      ).run("cwfp-logs-locked-legacy");
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run([
+        "workflow",
+        "run",
+        "logs",
+        "cwfp-logs-locked-legacy",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        schemaVersion: number;
+        steps: Array<{ kind: string }>;
+      };
+      expect(payload.schemaVersion).toBe(3);
+      expect(payload.steps[0]?.kind).toBe("validate");
+    } finally {
+      await releaseWriter();
+    }
+  });
+
   it("rejects an unexpected positional argument", async () => {
     const dataDir = makeTempDir();
     const result = await run([
@@ -358,7 +493,7 @@ describe("momentum workflow run logs", () => {
       attempts: Array<{
         attemptId: string;
         stepKey: string;
-        executorFamily: string;
+        executor: string;
         attemptNumber: number;
         state: string;
         startedAt: number | null;
@@ -409,7 +544,7 @@ describe("momentum workflow run logs", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow run logs");
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(Object.keys(payload).sort()).toEqual(
       [
         "approvals",
@@ -485,7 +620,7 @@ describe("momentum workflow run logs", () => {
       expect.objectContaining({
         attemptId: "inv-1",
         stepKey: "implementation",
-        executorFamily: "goal-loop",
+        executor: "agent-loop",
         attemptNumber: 1,
         state: "running",
         startedAt: 10,
@@ -497,7 +632,7 @@ describe("momentum workflow run logs", () => {
       [
         "attemptId",
         "attemptNumber",
-        "executorFamily",
+        "executor",
         "finishedAt",
         "heartbeatAt",
         "startedAt",
@@ -523,7 +658,7 @@ describe("momentum workflow run logs", () => {
         "commitSha",
         "decisions",
         "effort",
-        "executorFamily",
+        "executor",
         "executorRecommendation",
         "findings",
         "finishedAt",
@@ -562,7 +697,7 @@ describe("momentum workflow run logs", () => {
       "operator readback needs durable learnings",
     ]);
     expect(round.nativeRoundEvidence).toEqual({
-      schema: "momentum.native-goal-loop.round-result.v1",
+      schema: "momentum.native-agent-loop.round-result.v1",
       summary: "implemented the slice",
       keyChanges: ["added reader"],
       learnings: ["operator readback needs durable learnings"],
@@ -932,6 +1067,173 @@ describe("momentum workflow run logs", () => {
     });
   });
 
+  it("does not emit native evidence for a custom executor claiming goal-loop", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-custom-goal-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      persistExecutorDefinition(
+        db,
+        {
+          executorKey: "goal-loop",
+          executor: "goal-loop",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          timeoutMs: null,
+          maxRounds: null,
+          policyEnvelope: null,
+        },
+        { now: 1 },
+      );
+      insertExecutorAttempt(
+        db,
+        { ...makeAttempt(runId), executor: "goal-loop" },
+        { now: 1 },
+      );
+      insertExecutorRound(db, makeRound(runId, { executor: "goal-loop" }), {
+        now: 1,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
+  it("does not emit native evidence for a custom executor claiming agent-loop", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-custom-agent-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      persistExecutorDefinition(
+        db,
+        {
+          executorKey: "agent-loop",
+          executor: "agent-loop",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          timeoutMs: null,
+          maxRounds: null,
+          policyEnvelope: null,
+        },
+        { now: 1 },
+      );
+      insertExecutorAttempt(db, makeAttempt(runId), { now: 1 });
+      insertExecutorRound(db, makeRound(runId), { now: 1 });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]?.nativeRoundEvidence).toBeNull();
+  });
+
+  it("does not emit native evidence for a config-only unavailable goal-loop executor", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-unavailable-goal-loop";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`,
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`,
+      ).run(runId);
+      insertExecutorAttempt(
+        db,
+        { ...makeAttempt(runId), executor: "goal-loop" },
+        { now: 1 },
+      );
+      insertExecutorRound(
+        db,
+        makeRound(runId, {
+          executor: "goal-loop",
+          state: "manual_recovery_required",
+          classification: "operator_decision_required",
+          recoveryCode: "runtime_unavailable",
+        }),
+        { now: 1 },
+      );
+    } finally {
+      db.close();
+    }
+    const configPath = path.join(dataDir, "executors.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ executors: { "goal-loop": "./missing.mjs" } }),
+    );
+
+    const result = await run(
+      ["workflow", "run", "logs", runId, "--data-dir", dataDir, "--json"],
+      { MOMENTUM_EXECUTOR_CONFIG: configPath },
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ executor: string; nativeRoundEvidence: unknown }>;
+    };
+    expect(payload.rounds[0]).toMatchObject({
+      executor: "goal-loop",
+      nativeRoundEvidence: null,
+    });
+  });
+
   it("renders text output with schema version and round log lines", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -952,7 +1254,7 @@ describe("momentum workflow run logs", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow run logs: cwfp-logs-text");
-    expect(result.stdout).toContain("Schema version: 2");
+    expect(result.stdout).toContain("Schema version: 3");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("key changes: added reader");
@@ -1040,7 +1342,7 @@ describe("momentum workflow run logs", () => {
         roundId: string | null;
       }>;
     };
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(
       payload.gates.find((gate) => gate.gateId === "gate-invocation"),
     ).toEqual(

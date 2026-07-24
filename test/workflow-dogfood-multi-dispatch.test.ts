@@ -68,8 +68,8 @@ async function run(argv: string[]): Promise<RunResult> {
 
 /**
  * Start the built-in coding-workflow run and approve it through the
- * implementation boundary, leaving `preflight` (one-shot) and `implementation`
- * (goal-loop) both `approved` and runnable in order — the shipped operator path
+ * implementation boundary, leaving `preflight` (agent-once) and `implementation`
+ * (agent-loop) both `approved` and runnable in order — the shipped operator path
  * a dogfood drives, with no test-only dependency injection.
  */
 async function startApprovedCodingRun(
@@ -167,23 +167,23 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
         { step_id: "preflight", state: "succeeded" },
         { step_id: "implementation", state: "succeeded" },
         { step_id: "postflight", state: "pending" },
-        { step_id: "no-mistakes", state: "pending" },
+        { step_id: "validate", state: "pending" },
         { step_id: "merge-cleanup", state: "pending" },
-        { step_id: "linear-refresh", state: "pending" },
+        { step_id: "tracker-refresh", state: "pending" },
       ]);
 
       // Exactly one executor attempt per dispatched step — no duplicate
       // dispatch — created through the production dispatch path.
       const attempts = verifyDb
         .prepare(
-          "SELECT step_key, executor_family FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
+          "SELECT step_key, executor FROM executor_attempts WHERE workflow_run_id = ? ORDER BY created_at",
         )
-        .all(runId) as Array<{ step_key: string; executor_family: string }>;
+        .all(runId) as Array<{ step_key: string; executor: string }>;
       expect(attempts).toEqual([
-        { step_key: "preflight", executor_family: "one-shot" },
+        { step_key: "preflight", executor: "agent-once" },
         {
           step_key: "implementation",
-          executor_family: "delegate-supervisor",
+          executor: "delegate-supervisor",
         },
       ]);
 
@@ -290,7 +290,7 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
       {
         key: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 1,
         required: true,
       },
@@ -370,7 +370,7 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         db,
         deriveDispatchAttemptId(runId, "implementation", 1),
       );
-      expect(attempt?.executorFamily).toBe("subworkflow");
+      expect(attempt?.executor).toBe("subworkflow");
       expect(attempt?.state).toBe("running");
     } finally {
       db.close();

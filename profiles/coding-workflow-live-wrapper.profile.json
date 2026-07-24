@@ -73,7 +73,7 @@
         "timeout_sec": 30
       }
     },
-    "no-mistakes": {
+    "validate": {
       "command": "/usr/bin/env",
       "args": [
         "node",

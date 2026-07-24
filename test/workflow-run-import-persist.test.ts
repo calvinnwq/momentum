@@ -32,7 +32,7 @@ function writeLedger(filePath: string, lines: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(
     filePath,
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
   );
 }
 
@@ -45,7 +45,7 @@ function sha256OfFile(filePath: string): string {
 
 function basePlan(
   runId: string,
-  overrides: Record<string, unknown> = {}
+  overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     runId,
@@ -57,79 +57,81 @@ function basePlan(
     resolvedScope: {
       issues: ["NGX-314"],
       source: "explicit",
-      status: "resolved"
+      status: "resolved",
     },
     skillRevision: {
       contract: "coding-workflow-pipeline compact skill architecture",
       digest:
         "abc123def4560000000000000000000000000000000000000000000000000000",
       version: "2026.05.22.18",
-      schemaVersion: 1
+      schemaVersion: 1,
     },
     approvalsRequired: [
       "implementation",
       "postflight:1",
-      "no-mistakes",
-      "merge-cleanup"
+      "validate",
+      "merge-cleanup",
     ],
     taskFlow: {
       childTasks: [
         { stepId: "preflight" },
         { stepId: "implementation" },
         { stepId: "postflight:1" },
-        { stepId: "no-mistakes" },
-        { stepId: "merge-cleanup" }
-      ]
+        { stepId: "validate" },
+        { stepId: "merge-cleanup" },
+      ],
     },
-    ...overrides
+    ...overrides,
   };
 }
 
 function makeCompletedRunFixture(
   artifactRoot: string,
-  runId = "cwfp-persist01"
+  runId = "cwfp-persist01",
 ): { runDir: string; approvalPath: string } {
   const runDir = path.join(artifactRoot, runId);
   const planPath = path.join(runDir, "plan.json");
   const ledgerPath = path.join(runDir, "ledger.jsonl");
-  const approvalPath = path.join(
-    runDir,
-    "approval-through-merge-cleanup.json"
-  );
+  const approvalPath = path.join(runDir, "approval-through-merge-cleanup.json");
 
   writeJsonFile(planPath, basePlan(runId));
   writeLedger(ledgerPath, [
-    { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+    {
+      runId,
+      step: "preflight",
+      status: "complete",
+      ts: "2026-05-17T10:00:00Z",
+    },
     {
       runId,
       step: "implementation",
       status: "started",
-      ts: "2026-05-17T10:01:00Z"
+      ts: "2026-05-17T10:01:00Z",
     },
     {
       runId,
       step: "implementation",
       status: "complete",
-      ts: "2026-05-17T10:30:00Z"
+      ts: "2026-05-17T10:30:00Z",
     },
     {
       runId,
       step: "postflight:1",
       status: "complete",
-      ts: "2026-05-17T10:35:00Z"
+      ts: "2026-05-17T10:35:00Z",
     },
     {
       runId,
-      step: "no-mistakes",
+      step: "validate",
       status: "complete",
-      ts: "2026-05-17T10:40:00Z"
+      ts: "2026-05-17T10:40:00Z",
     },
     {
       runId,
       step: "merge-cleanup",
       status: "complete",
-      ts: "2026-05-17T10:45:00Z"
-    }
+      ts: "2026-05-17T10:45:00Z",
+    },
   ]);
   writeJsonFile(approvalPath, {
     runId,
@@ -137,7 +139,7 @@ function makeCompletedRunFixture(
     boundary: "through-merge-cleanup",
     actor: "calvin@example.com",
     phrase: "through-merge-cleanup",
-    approvedAt: "2026-05-17T09:00:00Z"
+    approvedAt: "2026-05-17T09:00:00Z",
   });
 
   return { runDir, approvalPath };
@@ -202,24 +204,21 @@ function readWorkflowRun(db: MomentumDb, runId: string): WorkflowRunRow {
   return row;
 }
 
-function readWorkflowSteps(
-  db: MomentumDb,
-  runId: string
-): WorkflowStepRow[] {
+function readWorkflowSteps(db: MomentumDb, runId: string): WorkflowStepRow[] {
   return db
     .prepare(
-      "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order ASC"
+      "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order ASC",
     )
     .all(runId) as WorkflowStepRow[];
 }
 
 function readWorkflowApprovals(
   db: MomentumDb,
-  runId: string
+  runId: string,
 ): WorkflowApprovalRow[] {
   return db
     .prepare(
-      "SELECT * FROM workflow_approvals WHERE run_id = ? ORDER BY boundary ASC"
+      "SELECT * FROM workflow_approvals WHERE run_id = ? ORDER BY boundary ASC",
     )
     .all(runId) as WorkflowApprovalRow[];
 }
@@ -228,7 +227,7 @@ function parseOrThrow(runDir: string) {
   const parsed = parseWorkflowRunImport(runDir);
   if (!parsed.ok) {
     throw new Error(
-      `expected parseWorkflowRunImport to succeed, got errorCode=${parsed.errorCode}: ${parsed.message}`
+      `expected parseWorkflowRunImport to succeed, got errorCode=${parsed.errorCode}: ${parsed.message}`,
     );
   }
   return parsed.import;
@@ -244,7 +243,9 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       const parsed = parseOrThrow(runDir);
-      const summary = persistWorkflowRunImport(db, parsed, { now: 1_700_000_000 });
+      const summary = persistWorkflowRunImport(db, parsed, {
+        now: 1_700_000_000,
+      });
 
       expect(summary).toEqual({
         runId: "cwfp-persist01",
@@ -253,7 +254,7 @@ describe("persistWorkflowRunImport", () => {
         approvalBoundary: "through-merge-cleanup",
         inserted: true,
         stepCount: 5,
-        approvalCount: 1
+        approvalCount: 1,
       });
 
       const runRow = readWorkflowRun(db, "cwfp-persist01");
@@ -262,11 +263,11 @@ describe("persistWorkflowRunImport", () => {
       expect(runRow.source_artifact_path).toBe(path.join(runDir, "plan.json"));
       expect(runRow.repo_path).toBe("/Users/test/repos/momentum");
       expect(runRow.objective).toBe(
-        "NGX-314 import current agent-workflow plans"
+        "NGX-314 import current agent-workflow plans",
       );
       expect(runRow.approval_boundary).toBe("through-merge-cleanup");
       expect(runRow.skill_revision).toBe(
-        "abc123def4560000000000000000000000000000000000000000000000000000"
+        "abc123def4560000000000000000000000000000000000000000000000000000",
       );
       expect(runRow.monitor_last_seen_state).toBeNull();
       expect(runRow.monitor_terminal).toBeNull();
@@ -279,14 +280,14 @@ describe("persistWorkflowRunImport", () => {
       expect(JSON.parse(runRow.issue_scope_json)).toEqual({
         issues: ["NGX-314"],
         source: "explicit",
-        status: "resolved"
+        status: "resolved",
       });
       expect(JSON.parse(runRow.route_json)).toEqual({
         mode: "execute-ready",
-        profile: "momentum-m7"
+        profile: "momentum-m7",
       });
       expect(JSON.parse(runRow.plan_json)).toMatchObject({
-        runId: "cwfp-persist01"
+        runId: "cwfp-persist01",
       });
 
       const stepRows = readWorkflowSteps(db, "cwfp-persist01");
@@ -294,22 +295,22 @@ describe("persistWorkflowRunImport", () => {
         "preflight",
         "implementation",
         "postflight:1",
-        "no-mistakes",
-        "merge-cleanup"
+        "validate",
+        "merge-cleanup",
       ]);
       expect(stepRows.map((r) => r.kind)).toEqual([
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
-        "merge-cleanup"
+        "validate",
+        "merge-cleanup",
       ]);
       expect(stepRows.map((r) => r.state)).toEqual([
         "succeeded",
         "succeeded",
         "succeeded",
         "succeeded",
-        "succeeded"
+        "succeeded",
       ]);
       expect(stepRows.map((r) => r.required)).toEqual([0, 1, 1, 1, 1]);
       const impl = stepRows.find((r) => r.step_id === "implementation");
@@ -343,21 +344,21 @@ describe("persistWorkflowRunImport", () => {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-29T00:00:00Z"
-      }
+        ts: "2026-05-29T00:00:00Z",
+      },
     ]);
     writeJsonFile(path.join(runDir, "monitor.json"), {
       lastSeenState: "succeeded",
       terminal: true,
       step: "implementation",
       lastSeenDigest: "stale-digest",
-      lastEmittedDigest: "emitted-digest"
+      lastEmittedDigest: "emitted-digest",
     });
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
 
       const runRow = readWorkflowRun(db, runId);
@@ -379,33 +380,33 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       const first = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       expect(first.inserted).toBe(true);
 
       const runAfterFirst = readWorkflowRun(db, "cwfp-persist01");
 
       const second = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
       expect(second.inserted).toBe(false);
       expect(second.stepCount).toBe(5);
       expect(second.approvalCount).toBe(1);
 
       const runRowsCount = (
-        db
-          .prepare("SELECT COUNT(*) AS c FROM workflow_runs")
-          .get() as { c: number }
+        db.prepare("SELECT COUNT(*) AS c FROM workflow_runs").get() as {
+          c: number;
+        }
       ).c;
       const stepRowsCount = (
-        db
-          .prepare("SELECT COUNT(*) AS c FROM workflow_steps")
-          .get() as { c: number }
+        db.prepare("SELECT COUNT(*) AS c FROM workflow_steps").get() as {
+          c: number;
+        }
       ).c;
       const approvalRowsCount = (
-        db
-          .prepare("SELECT COUNT(*) AS c FROM workflow_approvals")
-          .get() as { c: number }
+        db.prepare("SELECT COUNT(*) AS c FROM workflow_approvals").get() as {
+          c: number;
+        }
       ).c;
       expect(runRowsCount).toBe(1);
       expect(stepRowsCount).toBe(5);
@@ -429,51 +430,61 @@ describe("persistWorkflowRunImport", () => {
 
     writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
     writeLedger(ledgerPath, [
-      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+      {
+        runId,
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
       {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-17T10:01:00Z"
-      }
+        ts: "2026-05-17T10:01:00Z",
+      },
     ]);
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
 
       const beforeAdvance = readWorkflowSteps(db, runId);
       const beforeImpl = beforeAdvance.find(
-        (r) => r.step_id === "implementation"
+        (r) => r.step_id === "implementation",
       );
       expect(beforeImpl?.state).toBe("running");
       expect(beforeImpl?.finished_at).toBeNull();
 
       writeLedger(ledgerPath, [
-        { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+        {
+          runId,
+          step: "preflight",
+          status: "complete",
+          ts: "2026-05-17T10:00:00Z",
+        },
         {
           runId,
           step: "implementation",
           status: "started",
-          ts: "2026-05-17T10:01:00Z"
+          ts: "2026-05-17T10:01:00Z",
         },
         {
           runId,
           step: "implementation",
           status: "complete",
-          ts: "2026-05-17T10:30:00Z"
-        }
+          ts: "2026-05-17T10:30:00Z",
+        },
       ]);
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const afterAdvance = readWorkflowSteps(db, runId);
       const afterImpl = afterAdvance.find(
-        (r) => r.step_id === "implementation"
+        (r) => r.step_id === "implementation",
       );
       expect(afterImpl?.state).toBe("succeeded");
       expect(afterImpl?.started_at).toBe(Date.parse("2026-05-17T10:01:00Z"));
@@ -493,12 +504,17 @@ describe("persistWorkflowRunImport", () => {
     const runDir = path.join(artifactRoot, runId);
     const approvalPath = path.join(
       runDir,
-      "approval-through-merge-cleanup.json"
+      "approval-through-merge-cleanup.json",
     );
 
     writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
     writeLedger(path.join(runDir, "ledger.jsonl"), [
-      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" }
+      {
+        runId,
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
     ]);
     writeJsonFile(approvalPath, {
       runId,
@@ -506,13 +522,13 @@ describe("persistWorkflowRunImport", () => {
       boundary: "through-merge-cleanup",
       actor: "calvin@example.com",
       phrase: "through-merge-cleanup",
-      approvedAt: "2026-05-17T09:00:00Z"
+      approvedAt: "2026-05-17T09:00:00Z",
     });
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       const firstDigest = sha256OfFile(approvalPath);
       const firstApproval = readWorkflowApprovals(db, runId)[0]!;
@@ -525,12 +541,12 @@ describe("persistWorkflowRunImport", () => {
         boundary: "through-merge-cleanup",
         actor: "ops@example.com",
         phrase: "through-merge-cleanup",
-        approvedAt: "2026-05-17T09:30:00Z"
+        approvedAt: "2026-05-17T09:30:00Z",
       });
       const secondDigest = sha256OfFile(approvalPath);
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const approvalRows = readWorkflowApprovals(db, runId);
@@ -539,10 +555,65 @@ describe("persistWorkflowRunImport", () => {
       expect(secondApproval.artifact_digest).toBe(secondDigest);
       expect(secondApproval.actor).toBe("ops@example.com");
       expect(secondApproval.recorded_at).toBe(
-        Date.parse("2026-05-17T09:30:00Z")
+        Date.parse("2026-05-17T09:30:00Z"),
       );
       expect(secondApproval.created_at).toBe(firstApproval.created_at);
       expect(secondApproval.updated_at).toBe(1_700_000_500);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("deduplicates a canonical approval against a frozen legacy approval row", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-import-legacy-approval";
+    const runDir = path.join(artifactRoot, runId);
+    const legacyApprovalPath = path.join(
+      runDir,
+      "approval-through-no-mistakes.json",
+    );
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+    writeJsonFile(legacyApprovalPath, {
+      runId,
+      boundary: "through-no-mistakes",
+      actor: "legacy-operator@example.com",
+      phrase: "through-no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z",
+    });
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000,
+      });
+      const legacyDigest = sha256OfFile(legacyApprovalPath);
+
+      fs.rmSync(legacyApprovalPath);
+      writeJsonFile(path.join(runDir, "approval-through-validate.json"), {
+        runId,
+        boundary: "through-validate",
+        actor: "canonical-operator@example.com",
+        phrase: "through-validate",
+        approvedAt: "2026-05-17T10:00:00Z",
+      });
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500,
+      });
+
+      expect(readWorkflowApprovals(db, runId)).toEqual([
+        expect.objectContaining({
+          boundary: "through-no-mistakes",
+          actor: "legacy-operator@example.com",
+          artifact_digest: legacyDigest,
+        }),
+      ]);
+      expect(readWorkflowRun(db, runId).approval_boundary).toBe(
+        "through-validate",
+      );
     } finally {
       db.close();
     }
@@ -556,22 +627,27 @@ describe("persistWorkflowRunImport", () => {
 
     writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
     writeLedger(path.join(runDir, "ledger.jsonl"), [
-      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" }
+      {
+        runId,
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
     ]);
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
-        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("through-merge-cleanup", 1_700_000_100, runId);
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "through-merge-cleanup",
@@ -582,18 +658,18 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_050,
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
       expect(runRow.approval_boundary).toBe("through-merge-cleanup");
       const approvalRows = readWorkflowApprovals(db, runId);
       expect(approvalRows.map((row) => row.boundary)).toEqual([
-        "through-merge-cleanup"
+        "through-merge-cleanup",
       ]);
     } finally {
       db.close();
@@ -612,13 +688,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "through-implementation",
@@ -629,25 +705,23 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_050,
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')"
+        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')",
       ).run(1_700_000_050, runId);
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const stepRows = readWorkflowSteps(db, runId);
-      expect(
-        stepRows.map((row) => [row.kind, row.state])
-      ).toEqual([
+      expect(stepRows.map((row) => [row.kind, row.state])).toEqual([
         ["preflight", "approved"],
         ["implementation", "approved"],
         ["postflight", "pending"],
-        ["no-mistakes", "pending"],
-        ["merge-cleanup", "pending"]
+        ["validate", "pending"],
+        ["merge-cleanup", "pending"],
       ]);
     } finally {
       db.close();
@@ -666,13 +740,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "through-implementation",
@@ -683,17 +757,17 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_050,
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("through-implementation", 1_700_000_050, runId);
       db.prepare(
-        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')"
+        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')",
       ).run(1_700_000_050, runId);
 
       const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
@@ -712,7 +786,7 @@ describe("persistWorkflowRunImport", () => {
     const runDir = path.join(artifactRoot, runId);
     const approvalPath = path.join(
       runDir,
-      "approval-through-implementation.json"
+      "approval-through-implementation.json",
     );
 
     writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
@@ -723,13 +797,13 @@ describe("persistWorkflowRunImport", () => {
       boundary: "through-implementation",
       actor: "ops@example.com",
       phrase: "approve through implementation",
-      approvedAt: "2026-05-17T10:05:00Z"
+      approvedAt: "2026-05-17T10:05:00Z",
     });
 
     const db = openDb(dataDir);
     try {
       const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
@@ -737,13 +811,13 @@ describe("persistWorkflowRunImport", () => {
       expect(runRow.state).toBe("approved");
       expect(runRow.approval_boundary).toBe("through-implementation");
       expect(
-        readWorkflowSteps(db, runId).map((row) => [row.kind, row.state])
+        readWorkflowSteps(db, runId).map((row) => [row.kind, row.state]),
       ).toEqual([
         ["preflight", "approved"],
         ["implementation", "approved"],
         ["postflight", "pending"],
-        ["no-mistakes", "pending"],
-        ["merge-cleanup", "pending"]
+        ["validate", "pending"],
+        ["merge-cleanup", "pending"],
       ]);
     } finally {
       db.close();
@@ -762,13 +836,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "plan-only",
@@ -779,14 +853,14 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_050,
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("plan-only", 1_700_000_050, runId);
 
       const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
@@ -798,7 +872,7 @@ describe("persistWorkflowRunImport", () => {
         "pending",
         "pending",
         "pending",
-        "pending"
+        "pending",
       ]);
     } finally {
       db.close();
@@ -812,39 +886,44 @@ describe("persistWorkflowRunImport", () => {
     const runDir = path.join(artifactRoot, runId);
     const approvalPath = path.join(
       runDir,
-      "approval-through-merge-cleanup.json"
+      "approval-through-merge-cleanup.json",
     );
 
     writeJsonFile(
       path.join(runDir, "plan.json"),
-      basePlan(runId, { approvalsRequired: [] })
+      basePlan(runId, { approvalsRequired: [] }),
     );
     writeLedger(path.join(runDir, "ledger.jsonl"), [
-      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+      {
+        runId,
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
       {
         runId,
         step: "implementation",
         status: "complete",
-        ts: "2026-05-17T10:30:00Z"
+        ts: "2026-05-17T10:30:00Z",
       },
       {
         runId,
         step: "postflight:1",
         status: "complete",
-        ts: "2026-05-17T10:35:00Z"
+        ts: "2026-05-17T10:35:00Z",
       },
       {
         runId,
-        step: "no-mistakes",
+        step: "validate",
         status: "complete",
-        ts: "2026-05-17T10:40:00Z"
+        ts: "2026-05-17T10:40:00Z",
       },
       {
         runId,
         step: "merge-cleanup",
         status: "complete",
-        ts: "2026-05-17T10:45:00Z"
-      }
+        ts: "2026-05-17T10:45:00Z",
+      },
     ]);
     writeJsonFile(approvalPath, {
       runId,
@@ -852,7 +931,7 @@ describe("persistWorkflowRunImport", () => {
       boundary: "through-merge-cleanup",
       actor: "ops@example.com",
       phrase: "approve through merge cleanup",
-      approvedAt: "2026-05-17T09:00:00Z"
+      approvedAt: "2026-05-17T09:00:00Z",
     });
 
     const db = openDb(dataDir);
@@ -861,7 +940,7 @@ describe("persistWorkflowRunImport", () => {
       expect(parsed.run.state).toBe("succeeded");
 
       const summary = persistWorkflowRunImport(db, parsed, {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
@@ -878,7 +957,10 @@ describe("persistWorkflowRunImport", () => {
     const artifactRoot = makeTempDir();
     const runId = "cwfp-equal-rank-import-boundary";
     const runDir = path.join(artifactRoot, runId);
-    const approvalPath = path.join(runDir, "approval-through-implementation.json");
+    const approvalPath = path.join(
+      runDir,
+      "approval-through-implementation.json",
+    );
 
     writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
     writeLedger(path.join(runDir, "ledger.jsonl"), []);
@@ -886,13 +968,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "implementation",
@@ -903,10 +985,10 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_050,
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("implementation", 1_700_000_050, runId);
 
       writeJsonFile(approvalPath, {
@@ -915,19 +997,18 @@ describe("persistWorkflowRunImport", () => {
         boundary: "through-implementation",
         actor: "ops@example.com",
         phrase: "approve through implementation",
-        approvedAt: "2026-05-17T10:05:00Z"
+        approvedAt: "2026-05-17T10:05:00Z",
       });
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
       expect(runRow.approval_boundary).toBe("through-implementation");
-      expect(readWorkflowApprovals(db, runId).map((row) => row.boundary)).toEqual([
-        "implementation",
-        "through-implementation"
-      ]);
+      expect(
+        readWorkflowApprovals(db, runId).map((row) => row.boundary),
+      ).toEqual(["implementation", "through-implementation"]);
     } finally {
       db.close();
     }
@@ -946,13 +1027,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "through-implementation",
@@ -963,10 +1044,10 @@ describe("persistWorkflowRunImport", () => {
         Date.parse("2026-05-17T10:05:00Z"),
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("through-implementation", 1_700_000_050, runId);
 
       writeJsonFile(approvalPath, {
@@ -975,19 +1056,18 @@ describe("persistWorkflowRunImport", () => {
         boundary: "implementation",
         actor: "ops@example.com",
         phrase: "approve implementation",
-        approvedAt: "2026-05-17T09:00:00Z"
+        approvedAt: "2026-05-17T09:00:00Z",
       });
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const runRow = readWorkflowRun(db, runId);
       expect(runRow.approval_boundary).toBe("through-implementation");
-      expect(readWorkflowApprovals(db, runId).map((row) => row.boundary)).toEqual([
-        "implementation",
-        "through-implementation"
-      ]);
+      expect(
+        readWorkflowApprovals(db, runId).map((row) => row.boundary),
+      ).toEqual(["implementation", "through-implementation"]);
     } finally {
       db.close();
     }
@@ -1006,13 +1086,13 @@ describe("persistWorkflowRunImport", () => {
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `INSERT INTO workflow_approvals (
            run_id, boundary, actor, phrase, artifact_path, artifact_digest,
            recorded_at, discharged_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "implementation",
@@ -1023,10 +1103,10 @@ describe("persistWorkflowRunImport", () => {
         Date.parse("2026-05-17T10:05:00Z"),
         null,
         1_700_000_050,
-        1_700_000_050
+        1_700_000_050,
       );
       db.prepare(
-        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?",
       ).run("implementation", 1_700_000_050, runId);
 
       writeJsonFile(approvalPath, {
@@ -1035,11 +1115,11 @@ describe("persistWorkflowRunImport", () => {
         boundary: "implementation",
         actor: "stale@example.com",
         phrase: "stale approve implementation",
-        approvedAt: "2026-05-17T09:00:00Z"
+        approvedAt: "2026-05-17T09:00:00Z",
       });
 
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const approvalRows = readWorkflowApprovals(db, runId);
@@ -1050,7 +1130,7 @@ describe("persistWorkflowRunImport", () => {
         artifact_path: `workflow-run-approve://${runId}/implementation`,
         artifact_digest: "durable-digest",
         recorded_at: Date.parse("2026-05-17T10:05:00Z"),
-        updated_at: 1_700_000_050
+        updated_at: 1_700_000_050,
       });
     } finally {
       db.close();
@@ -1068,23 +1148,23 @@ describe("persistWorkflowRunImport", () => {
       basePlan(runId, {
         approvalsRequired: ["implementation"],
         taskFlow: {
-          childTasks: [{ stepId: "implementation" }]
-        }
-      })
+          childTasks: [{ stepId: "implementation" }],
+        },
+      }),
     );
     writeLedger(path.join(runDir, "ledger.jsonl"), [
       {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-17T10:01:00Z"
-      }
+        ts: "2026-05-17T10:01:00Z",
+      },
     ]);
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       expect(readWorkflowRun(db, runId).state).toBe("running");
       expect(readWorkflowSteps(db, runId)[0]?.state).toBe("running");
@@ -1097,7 +1177,7 @@ describe("persistWorkflowRunImport", () => {
                 operator_transition_at = ?,
                 finished_at = ?,
                 updated_at = ?
-          WHERE run_id = ? AND step_id = ?`
+          WHERE run_id = ? AND step_id = ?`,
       ).run(
         "succeeded",
         "operator verified child completion",
@@ -1106,13 +1186,14 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_250,
         1_700_000_250,
         runId,
-        "implementation"
+        "implementation",
       );
-      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
-        .run("succeeded", 1_700_000_250, runId);
+      db.prepare(
+        "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?",
+      ).run("succeeded", 1_700_000_250, runId);
 
       const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       const stepRows = readWorkflowSteps(db, runId);
@@ -1121,7 +1202,7 @@ describe("persistWorkflowRunImport", () => {
       expect(stepRows[0]).toMatchObject({
         step_id: "implementation",
         state: "succeeded",
-        finished_at: 1_700_000_250
+        finished_at: 1_700_000_250,
       });
     } finally {
       db.close();
@@ -1139,23 +1220,23 @@ describe("persistWorkflowRunImport", () => {
       basePlan(runId, {
         approvalsRequired: ["implementation"],
         taskFlow: {
-          childTasks: [{ stepId: "implementation" }]
-        }
-      })
+          childTasks: [{ stepId: "implementation" }],
+        },
+      }),
     );
     writeLedger(path.join(runDir, "ledger.jsonl"), [
       {
         runId,
         step: "implementation",
         status: "started",
-        ts: "2026-05-17T10:01:00Z"
-      }
+        ts: "2026-05-17T10:01:00Z",
+      },
     ]);
 
     const db = openDb(dataDir);
     try {
       persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_000
+        now: 1_700_000_000,
       });
       db.prepare(
         `UPDATE workflow_steps
@@ -1164,7 +1245,7 @@ describe("persistWorkflowRunImport", () => {
                 operator_transition_at = ?,
                 finished_at = ?,
                 updated_at = ?
-          WHERE run_id = ? AND step_id = ?`
+          WHERE run_id = ? AND step_id = ?`,
       ).run(
         "succeeded",
         "operator verified child completion",
@@ -1172,15 +1253,16 @@ describe("persistWorkflowRunImport", () => {
         1_700_000_250,
         1_700_000_250,
         runId,
-        "implementation"
+        "implementation",
       );
-      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
-        .run("running", 1_700_000_250, runId);
+      db.prepare(
+        "UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?",
+      ).run("running", 1_700_000_250, runId);
       db.prepare(
         `INSERT INTO workflow_leases
            (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
             released_at, stale_policy, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         runId,
         "managed-step",
@@ -1191,18 +1273,18 @@ describe("persistWorkflowRunImport", () => {
         null,
         "auto-release",
         1_700_000_200,
-        1_700_000_200
+        1_700_000_200,
       );
 
       const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
-        now: 1_700_000_500
+        now: 1_700_000_500,
       });
 
       expect(summary.state).toBe("running");
       expect(readWorkflowRun(db, runId).state).toBe("running");
       expect(readWorkflowSteps(db, runId)[0]).toMatchObject({
         step_id: "implementation",
-        state: "succeeded"
+        state: "succeeded",
       });
     } finally {
       db.close();

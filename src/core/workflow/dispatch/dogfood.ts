@@ -105,7 +105,7 @@ export function shouldTerminalizeAfterDispatch(status: string): boolean {
 export const DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR =
   "MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH";
 
-const DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES = new Set([
+const DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTORS = new Set([
   "external-apply",
   "subworkflow",
 ]);
@@ -163,16 +163,14 @@ export function createTerminalizingWorkflowDispatch(
     context: WorkflowStepDispatchContext,
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
-    const executorFamily = loadLatestExecutorAttemptForStep(
+    const executor = loadLatestExecutorAttemptForStep(
       context.db,
       claim.runId,
       claim.stepId,
-    )?.executorFamily;
+    )?.executor;
     if (
       shouldTerminalizeAfterDispatch(result.status) &&
-      !DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES.has(
-        executorFamily ?? "",
-      )
+      !DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTORS.has(executor ?? "")
     ) {
       terminalizeDispatchedStep(context.db, claim, context.now);
     }

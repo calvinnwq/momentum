@@ -14,7 +14,7 @@
  * seams: a small registry keyed by step kind, a single dispatch entrypoint that
  * validates input and traps thrown executors, and stable error codes that
  * callers can map to the workflow-run state machine without leaking GNHF /
- * postflight / no-mistakes / merge-cleanup implementation details into Momentum
+ * postflight / validate / merge-cleanup implementation details into Momentum
  * core.
  *
  * This workflow-run module owns the dispatch boundary (input validation, executor

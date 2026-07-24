@@ -154,7 +154,7 @@ function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
 /**
  * Drive the parent step through the production base dispatch, then re-stamp the
  * scaffold family to `subworkflow`. This proof reuses CODING_WORKFLOW_DEFINITION
- * (whose `preflight` step is `one-shot`), so the re-stamp stands in for a real
+ * (whose `preflight` step is `agent-once`), so the re-stamp stands in for a real
  * `subworkflow`-family step; the end-to-end flip on a genuinely `subworkflow`
  * step definition is proven in `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
@@ -166,7 +166,7 @@ function dispatchStep(db: MomentumDb): void {
     now: DISPATCH_AT,
   });
   db.prepare(
-    "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
+    "UPDATE executor_attempts SET executor = 'subworkflow' WHERE attempt_id = ?",
   ).run(deriveDispatchAttemptId(RUN_ID, STEP_ID, 1));
 }
 

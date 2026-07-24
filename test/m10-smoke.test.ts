@@ -50,7 +50,7 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     });
 
     // workflow run approve: promote preflight + implementation to approved so
-    // the first step (preflight, executor family one-shot) is runnable.
+    // the first step (preflight, executor agent-once) is runnable.
     const approve = runCliBinary([
       "workflow",
       "run",
@@ -101,17 +101,17 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     try {
       const attempts = db
         .prepare(
-          "SELECT step_key, executor_family, state FROM executor_attempts WHERE workflow_run_id = ?",
+          "SELECT step_key, executor, state FROM executor_attempts WHERE workflow_run_id = ?",
         )
         .all(runId) as Array<{
         step_key: string;
-        executor_family: string;
+        executor: string;
         state: string;
       }>;
       expect(attempts).toEqual([
         {
           step_key: "preflight",
-          executor_family: "one-shot",
+          executor: "agent-once",
           state: "manual_recovery_required",
         },
       ]);

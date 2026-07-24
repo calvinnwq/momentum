@@ -41,7 +41,7 @@ import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
 /**
  * NGX-496 (RC-3) — the async run-path producer that makes the `external-apply`
- * executor family daemon-dispatchable: it runs the existing M6
+ * executor daemon-dispatchable: it runs the existing M6
  * `executeExternalApply` write path (through an injected runner, so the daemon
  * lane owns building the apply input and there is no real `api.linear.app`
  * call), maps the M6 outcome into executor evidence via the landed pure mapping,
@@ -129,7 +129,7 @@ function approveAndClaim(
 function dispatchStep(
   db: MomentumDb,
   stepId: string = STEP_ID,
-  executor: "external-apply" | "one-shot" = "external-apply",
+  executor: "external-apply" | "agent-once" = "external-apply",
 ): void {
   db.prepare(
     `UPDATE step_definitions
@@ -372,7 +372,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(runner.calls()).toBe(1);
     expect(
       loadExecutorAttempt(db, deriveDispatchAttemptId(RUN_ID, STEP_ID, 1))
-        ?.executorFamily,
+        ?.executor,
     ).toBe("external-apply");
     expect(stepState(db)).toBe("succeeded");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
@@ -743,7 +743,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
 describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", () => {
   it("refuses a non-external-apply dispatch scaffold and never runs the external write", async () => {
     const db = openSeededDb();
-    dispatchStep(db, STEP_ID, "one-shot");
+    dispatchStep(db, STEP_ID, "agent-once");
     const runner = countingRunner(makeSuccess());
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({

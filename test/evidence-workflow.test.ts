@@ -6,7 +6,7 @@ import path from "node:path";
 import {
   WORKFLOW_EVIDENCE_FORMAT_VERSION,
   WORKFLOW_EVIDENCE_SOURCE,
-  parseWorkflowArtifact
+  parseWorkflowArtifact,
 } from "../src/core/evidence/workflow.js";
 
 const tempRoots: string[] = [];
@@ -33,7 +33,7 @@ function writeLedger(filePath: string, lines: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(
     filePath,
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
   );
 }
 
@@ -44,11 +44,198 @@ function basePlan(runId: string): Record<string, unknown> {
     mode: "execute-ready",
     profile: "momentum-m5",
     objective: "NGX-291 M5-04 workflow evidence ingestion",
-    resolvedScope: { issues: ["NGX-291"], source: "explicit", status: "resolved" }
+    resolvedScope: {
+      issues: ["NGX-291"],
+      source: "explicit",
+      status: "resolved",
+    },
   };
 }
 
 describe("parseWorkflowArtifact", () => {
+  it.each([
+    ["started", "no_mistakes_started"],
+    ["complete", "no_mistakes_complete"],
+    ["failed", "no_mistakes_failed"],
+  ])("keeps a legacy no-mistakes %s ledger event readable", (status, type) => {
+    const root = makeTempDir();
+    const ledgerPath = path.join(root, "ledger.jsonl");
+    writeLedger(ledgerPath, [
+      {
+        runId: "cwfp-legacy-ledger",
+        step: "no-mistakes",
+        status,
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(ledgerPath);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]).toMatchObject({
+      type,
+      stepId: "no-mistakes",
+      ingestKey: `agent-workflow:cwfp-legacy-ledger:no-mistakes:${status}`,
+    });
+  });
+
+  it.each([
+    [
+      "tracker-refresh",
+      "tracker_refresh_started",
+      "tracker_refresh_complete",
+      "tracker_refresh_failed",
+    ],
+    [
+      "linear-refresh",
+      "linear_refresh_started",
+      "linear_refresh_complete",
+      "linear_refresh_failed",
+    ],
+  ])("keeps %s ledger events readable", (step, started, complete, failed) => {
+    const root = makeTempDir();
+    const ledgerPath = path.join(root, "ledger.jsonl");
+    writeLedger(ledgerPath, [
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "started",
+        ts: "2026-05-17T10:00:00Z",
+      },
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "complete",
+        ts: "2026-05-17T10:01:00Z",
+      },
+      {
+        runId: "cwfp-refresh-ledger",
+        step,
+        status: "failed",
+        ts: "2026-05-17T10:02:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(ledgerPath);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.records.map((record) => record.type)).toEqual([
+      started,
+      complete,
+      failed,
+    ]);
+    expect(result.records.map((record) => record.stepId)).toEqual([
+      step,
+      step,
+      step,
+    ]);
+  });
+
+  it.each([
+    ["validate", "no-mistakes", "validate_complete"],
+    ["no-mistakes", "validate", "no_mistakes_complete"],
+  ])(
+    "links a %s plan step to its %s ledger alias",
+    (planStep, ledgerStep, type) => {
+      const root = makeTempDir();
+      const runDir = path.join(root, "cwfp-mixed-step-alias");
+      writeJsonFile(path.join(runDir, "plan.json"), {
+        ...basePlan("cwfp-mixed-step-alias"),
+        taskFlow: {
+          childTasks: [{ stepId: planStep }],
+        },
+      });
+      writeLedger(path.join(runDir, "ledger.jsonl"), [
+        {
+          runId: "cwfp-mixed-step-alias",
+          step: ledgerStep,
+          status: "complete",
+          ts: "2026-05-17T10:00:00Z",
+        },
+      ]);
+
+      const result = parseWorkflowArtifact(runDir);
+
+      expect(result.diagnostics).toEqual([]);
+      expect(result.records[1]).toMatchObject({
+        type,
+        stepId: planStep,
+        ingestKey: `agent-workflow:cwfp-mixed-step-alias:${planStep}:complete`,
+        metadata: {
+          step: ledgerStep,
+          status: "complete",
+        },
+      });
+    },
+  );
+
+  it("uses one lifecycle identity when a ledger contains both step aliases", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-duplicate-step-alias");
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      ...basePlan("cwfp-duplicate-step-alias"),
+      taskFlow: {
+        childTasks: [{ stepId: "validate" }],
+      },
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: "cwfp-duplicate-step-alias",
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+      {
+        runId: "cwfp-duplicate-step-alias",
+        step: "validate",
+        status: "complete",
+        ts: "2026-05-17T10:01:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(runDir);
+    const lifecycleRecords = result.records.filter(
+      (record) => record.type === "validate_complete",
+    );
+
+    expect(lifecycleRecords).toHaveLength(2);
+    expect(new Set(lifecycleRecords.map((record) => record.stepId))).toEqual(
+      new Set(["validate"]),
+    );
+    expect(new Set(lifecycleRecords.map((record) => record.ingestKey))).toEqual(
+      new Set(["agent-workflow:cwfp-duplicate-step-alias:validate:complete"]),
+    );
+  });
+
+  it("does not apply plan aliases to ledger rows owned by another run", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-ledger-owner");
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      ...basePlan("cwfp-different-plan-owner"),
+      taskFlow: {
+        childTasks: [{ stepId: "validate" }],
+      },
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: "cwfp-ledger-owner",
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:00:00Z",
+      },
+    ]);
+
+    const result = parseWorkflowArtifact(runDir);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.records[1]).toMatchObject({
+      type: "no_mistakes_complete",
+      stepId: "no-mistakes",
+      ingestKey: "agent-workflow:cwfp-ledger-owner:no-mistakes:complete",
+    });
+  });
+
   it("normalizes a workflow directory into plan_created + ledger lifecycle records", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-abc123def456");
@@ -61,45 +248,43 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-abc123def456",
         step: "preflight",
         status: "complete",
-        ts: "2026-05-17T10:00:00Z"
+        ts: "2026-05-17T10:00:00Z",
       },
       {
         runId: "cwfp-abc123def456",
         step: "implementation",
         status: "started",
-        ts: "2026-05-17T10:01:00Z"
+        ts: "2026-05-17T10:01:00Z",
       },
       {
         runId: "cwfp-abc123def456",
         step: "implementation",
         status: "complete",
         ts: "2026-05-17T10:30:00Z",
-        artifacts: [
-          "/tmp/.gnhf/runs/work-through-the-fro-b5f255/notes.md"
-        ]
+        artifacts: ["/tmp/.gnhf/runs/work-through-the-fro-b5f255/notes.md"],
       },
       {
         runId: "cwfp-abc123def456",
         step: "postflight:1",
         status: "failed",
-        ts: "2026-05-17T10:34:00Z"
+        ts: "2026-05-17T10:34:00Z",
       },
       {
         runId: "cwfp-abc123def456",
         step: "postflight:1",
         status: "complete",
-        ts: "2026-05-17T10:35:00Z"
+        ts: "2026-05-17T10:35:00Z",
       },
       {
         runId: "cwfp-abc123def456",
-        step: "no-mistakes",
+        step: "validate",
         status: "complete",
         ts: "2026-05-17T10:40:00Z",
         prUrl: "https://github.com/example/momentum/pull/98",
         toolRunId: "01KTEST",
         head: "abcdef0123456789",
         harness: "claude",
-        model: "opus"
+        model: "opus",
       },
       {
         runId: "cwfp-abc123def456",
@@ -111,8 +296,8 @@ describe("parseWorkflowArtifact", () => {
         branch: "gnhf/work-through-the-fro-b5f255",
         linearIssue: "NGX-291",
         linearState: "Done",
-        verification: ["pnpm test", "pnpm typecheck"]
-      }
+        verification: ["pnpm test", "pnpm typecheck"],
+      },
     ]);
 
     const result = parseWorkflowArtifact(runDir);
@@ -125,17 +310,17 @@ describe("parseWorkflowArtifact", () => {
       "implementation_complete",
       "postflight_failed",
       "postflight_complete",
-      "no_mistakes_complete",
-      "merge_complete"
+      "validate_complete",
+      "merge_complete",
     ]);
     expect(new Set(result.records.map((r) => r.source))).toEqual(
-      new Set([WORKFLOW_EVIDENCE_SOURCE])
+      new Set([WORKFLOW_EVIDENCE_SOURCE]),
     );
     expect(new Set(result.records.map((r) => r.formatVersion))).toEqual(
-      new Set([WORKFLOW_EVIDENCE_FORMAT_VERSION])
+      new Set([WORKFLOW_EVIDENCE_FORMAT_VERSION]),
     );
     expect(new Set(result.records.map((r) => r.externalId))).toEqual(
-      new Set(["cwfp-abc123def456"])
+      new Set(["cwfp-abc123def456"]),
     );
     expect(result.records.map((r) => r.ingestKey)).toEqual([
       "agent-workflow:cwfp-abc123def456:plan_created",
@@ -144,35 +329,35 @@ describe("parseWorkflowArtifact", () => {
       "agent-workflow:cwfp-abc123def456:implementation:complete",
       "agent-workflow:cwfp-abc123def456:postflight:1:failed",
       "agent-workflow:cwfp-abc123def456:postflight:1:complete",
-      "agent-workflow:cwfp-abc123def456:no-mistakes:complete",
-      "agent-workflow:cwfp-abc123def456:merge-cleanup:complete"
+      "agent-workflow:cwfp-abc123def456:validate:complete",
+      "agent-workflow:cwfp-abc123def456:merge-cleanup:complete",
     ]);
 
     const planRecord = result.records[0]!;
     expect(planRecord.summary).toBe(
-      "Plan created: NGX-291 M5-04 workflow evidence ingestion"
+      "Plan created: NGX-291 M5-04 workflow evidence ingestion",
     );
     expect(planRecord.metadata).toMatchObject({
       runId: "cwfp-abc123def456",
       objective: "NGX-291 M5-04 workflow evidence ingestion",
       mode: "execute-ready",
       profile: "momentum-m5",
-      issues: ["NGX-291"]
+      issues: ["NGX-291"],
     });
 
     const noMistakes = result.records[6]!;
     expect(noMistakes.metadata).toMatchObject({
-      step: "no-mistakes",
+      step: "validate",
       status: "complete",
       prUrl: "https://github.com/example/momentum/pull/98",
       toolRunId: "01KTEST",
       head: "abcdef0123456789",
       harness: "claude",
-      model: "opus"
+      model: "opus",
     });
-    expect(noMistakes.summary).toContain("No-mistakes complete");
+    expect(noMistakes.summary).toContain("Validate complete");
     expect(noMistakes.summary).toContain(
-      "pr=https://github.com/example/momentum/pull/98"
+      "pr=https://github.com/example/momentum/pull/98",
     );
 
     const merge = result.records[7]!;
@@ -185,18 +370,20 @@ describe("parseWorkflowArtifact", () => {
       branch: "gnhf/work-through-the-fro-b5f255",
       linearIssue: "NGX-291",
       linearState: "Done",
-      verification: ["pnpm test", "pnpm typecheck"]
+      verification: ["pnpm test", "pnpm typecheck"],
     });
     expect(merge.summary).toContain("Merge complete");
     expect(merge.summary).toContain("(NGX-291)");
-    expect(merge.summary).toContain("pr=https://github.com/example/momentum/pull/99");
+    expect(merge.summary).toContain(
+      "pr=https://github.com/example/momentum/pull/99",
+    );
     expect(merge.summary).toContain("merge=0123456789ab");
 
     const implComplete = result.records[3]!;
     expect(implComplete.metadata).toMatchObject({
       step: "implementation",
       status: "complete",
-      artifacts: ["/tmp/.gnhf/runs/work-through-the-fro-b5f255/notes.md"]
+      artifacts: ["/tmp/.gnhf/runs/work-through-the-fro-b5f255/notes.md"],
     });
 
     const kinds = new Set(result.sources.map((s) => s.kind));
@@ -217,20 +404,20 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-unknownsibling",
         step: "preflight",
         status: "complete",
-        ts: "2026-05-17T11:00:00Z"
+        ts: "2026-05-17T11:00:00Z",
       },
       {
         runId: "cwfp-unknownsibling",
         step: "mystery-step",
         status: "complete",
-        ts: "2026-05-17T11:05:00Z"
+        ts: "2026-05-17T11:05:00Z",
       },
       {
         runId: "cwfp-unknownsibling",
         step: "implementation",
         status: "weird-status",
-        ts: "2026-05-17T11:06:00Z"
-      }
+        ts: "2026-05-17T11:06:00Z",
+      },
     ]);
     fs.writeFileSync(path.join(runDir, "scratch.txt"), "manual notes");
     fs.mkdirSync(path.join(runDir, "locks"));
@@ -239,7 +426,7 @@ describe("parseWorkflowArtifact", () => {
 
     expect(result.records.map((r) => r.type)).toEqual([
       "plan_created",
-      "preflight_complete"
+      "preflight_complete",
     ]);
     const unknownReasons = result.diagnostics
       .filter((d) => d.code === "evidence_format_unknown")
@@ -247,9 +434,9 @@ describe("parseWorkflowArtifact", () => {
     expect(unknownReasons).toContain("unrecognized_filename");
     expect(unknownReasons).toContain("unsupported_subdirectory");
     expect(unknownReasons).toContain("unknown_step_or_status");
-    expect(result.diagnostics.every((d) => d.code === "evidence_format_unknown")).toBe(
-      true
-    );
+    expect(
+      result.diagnostics.every((d) => d.code === "evidence_format_unknown"),
+    ).toBe(true);
   });
 
   it("reports evidence_format_invalid for malformed plan JSON without crashing", () => {
@@ -262,7 +449,7 @@ describe("parseWorkflowArtifact", () => {
 
     expect(result.records).toEqual([]);
     const invalid = result.diagnostics.filter(
-      (d) => d.code === "evidence_format_invalid"
+      (d) => d.code === "evidence_format_invalid",
     );
     expect(invalid.length).toBeGreaterThanOrEqual(1);
     expect(invalid[0]!.reason).toBe("file_not_json");
@@ -278,16 +465,19 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-badledger",
         step: "preflight",
         status: "complete",
-        ts: "not-a-date"
+        ts: "not-a-date",
       },
       {
         runId: "cwfp-badledger",
         step: "implementation",
         status: "complete",
-        ts: "2026-05-17T11:01:00Z"
-      }
+        ts: "2026-05-17T11:01:00Z",
+      },
     ]);
-    fs.writeFileSync(`${ledgerPath}`, `${fs.readFileSync(ledgerPath, "utf8")}{ bad json line\n`);
+    fs.writeFileSync(
+      `${ledgerPath}`,
+      `${fs.readFileSync(ledgerPath, "utf8")}{ bad json line\n`,
+    );
 
     const result = parseWorkflowArtifact(ledgerPath);
 
@@ -298,24 +488,34 @@ describe("parseWorkflowArtifact", () => {
       expect.arrayContaining([
         "ledger_line_missing_required_fields",
         "ledger_line_invalid_timestamp",
-        "ledger_line_not_json"
-      ])
+        "ledger_line_not_json",
+      ]),
     );
     // The valid line is still ingested.
-    expect(result.records.map((r) => r.type)).toEqual(["implementation_complete"]);
+    expect(result.records.map((r) => r.type)).toEqual([
+      "implementation_complete",
+    ]);
   });
 
   it("normalizes approval-*.json into a step_approved record", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-approval");
-    const approvalPath = path.join(runDir, "approval-through-merge-cleanup.json");
+    const approvalPath = path.join(
+      runDir,
+      "approval-through-merge-cleanup.json",
+    );
     writeJsonFile(approvalPath, {
       runId: "cwfp-approval",
       schemaVersion: 1,
       boundary: "through-merge-cleanup",
       approvalContract: "approve plan <run-id> <boundary>",
       approvedAt: "2026-05-17T09:00:00Z",
-      allowedSteps: ["preflight", "implementation", "no-mistakes", "merge-cleanup"]
+      allowedSteps: [
+        "preflight",
+        "implementation",
+        "validate",
+        "merge-cleanup",
+      ],
     });
 
     const result = parseWorkflowArtifact(approvalPath);
@@ -324,7 +524,7 @@ describe("parseWorkflowArtifact", () => {
     const record = result.records[0]!;
     expect(record.type).toBe("step_approved");
     expect(record.ingestKey).toBe(
-      "agent-workflow:cwfp-approval:approval:through-merge-cleanup"
+      "agent-workflow:cwfp-approval:approval:through-merge-cleanup",
     );
     expect(record.occurredAt).toBe(Date.parse("2026-05-17T09:00:00Z"));
     expect(record.metadata).toMatchObject({
@@ -333,24 +533,27 @@ describe("parseWorkflowArtifact", () => {
       allowedSteps: [
         "preflight",
         "implementation",
-        "no-mistakes",
-        "merge-cleanup"
-      ]
+        "validate",
+        "merge-cleanup",
+      ],
     });
     expect(record.summary).toBe(
-      "Approval recorded: through-merge-cleanup (cwfp-approval)"
+      "Approval recorded: through-merge-cleanup (cwfp-approval)",
     );
   });
 
   it("reports evidence_format_invalid for invalid approval timestamps", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-approval-invalid-ts");
-    const approvalPath = path.join(runDir, "approval-through-merge-cleanup.json");
+    const approvalPath = path.join(
+      runDir,
+      "approval-through-merge-cleanup.json",
+    );
     writeJsonFile(approvalPath, {
       runId: "cwfp-approval-invalid-ts",
       schemaVersion: 1,
       boundary: "through-merge-cleanup",
-      approvedAt: "not-a-date"
+      approvedAt: "not-a-date",
     });
 
     const result = parseWorkflowArtifact(approvalPath);
@@ -360,8 +563,8 @@ describe("parseWorkflowArtifact", () => {
         code: "evidence_format_invalid",
         path: approvalPath,
         reason: "approval_invalid_timestamp",
-        detail: "not-a-date"
-      }
+        detail: "not-a-date",
+      },
     ]);
   });
 
@@ -374,32 +577,32 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-typedlink",
         step: "preflight",
         status: "complete",
-        ts: "2026-05-17T11:00:00Z"
+        ts: "2026-05-17T11:00:00Z",
       },
       {
         runId: "cwfp-typedlink",
         step: "implementation",
         status: "started",
-        ts: "2026-05-17T11:05:00Z"
+        ts: "2026-05-17T11:05:00Z",
       },
       {
         runId: "cwfp-typedlink",
         step: "postflight:1",
         status: "complete",
-        ts: "2026-05-17T11:10:00Z"
-      }
+        ts: "2026-05-17T11:10:00Z",
+      },
     ]);
     writeJsonFile(path.join(runDir, "approval-implementation.json"), {
       runId: "cwfp-typedlink",
       boundary: "implementation",
-      approvedAt: "2026-05-17T11:01:00Z"
+      approvedAt: "2026-05-17T11:01:00Z",
     });
 
     const result = parseWorkflowArtifact(runDir);
 
     // Every emitted record links to the owning run.
     expect(new Set(result.records.map((r) => r.runId))).toEqual(
-      new Set(["cwfp-typedlink"])
+      new Set(["cwfp-typedlink"]),
     );
 
     const byType = new Map(result.records.map((r) => [r.type, r]));
@@ -422,13 +625,13 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-link",
         step: "preflight",
         status: "complete",
-        ts: "2026-05-17T11:00:00Z"
-      }
+        ts: "2026-05-17T11:00:00Z",
+      },
     ]);
 
     const result = parseWorkflowArtifact(runDir, {
       goalId: "goal-xyz",
-      sourceItemId: "source-item-abc"
+      sourceItemId: "source-item-abc",
     });
 
     expect(result.records).toHaveLength(2);
@@ -472,25 +675,25 @@ describe("parseWorkflowArtifact", () => {
         runId: "cwfp-idempotent",
         step: "preflight",
         status: "complete",
-        ts: "2026-05-17T11:00:00Z"
+        ts: "2026-05-17T11:00:00Z",
       },
       {
         runId: "cwfp-idempotent",
         step: "implementation",
         status: "complete",
-        ts: "2026-05-17T11:30:00Z"
-      }
+        ts: "2026-05-17T11:30:00Z",
+      },
     ]);
 
     const first = parseWorkflowArtifact(runDir);
     const second = parseWorkflowArtifact(runDir);
 
     expect(first.records.map((r) => r.ingestKey)).toEqual(
-      second.records.map((r) => r.ingestKey)
+      second.records.map((r) => r.ingestKey),
     );
     // External id and source stay identical across parses for the same artifact.
     expect(new Set(first.records.map((r) => r.externalId))).toEqual(
-      new Set(["cwfp-idempotent"])
+      new Set(["cwfp-idempotent"]),
     );
   });
 });

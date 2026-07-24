@@ -12,7 +12,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition/persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
-  resolveClaimedWorkflowStepFamily,
+  resolveClaimedWorkflowStepExecutor,
   resolveWorkflowStepExecutorRuntime,
   resolveWorkflowStepDispatchPlan,
 } from "../src/core/workflow/dispatch/persist.js";
@@ -56,16 +56,16 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
   return db;
 }
 
-describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
-  it("resolves a linked step to its definition's dispatchable executor family", () => {
+describe("resolveClaimedWorkflowStepExecutor — durable resolution", () => {
+  it("resolves a linked step to its definition's dispatchable executor", () => {
     const db = openSeededDb();
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "implementation",
     });
     expect(resolution).toEqual({
       ok: true,
-      executorFamily: "delegate-supervisor",
+      executor: "delegate-supervisor",
     });
   });
 
@@ -81,17 +81,17 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     });
 
     expect(
-      resolveClaimedWorkflowStepFamily(db, {
+      resolveClaimedWorkflowStepExecutor(db, {
         runId: "native-v1",
         stepId: "implementation",
       }),
-    ).toEqual({ ok: true, executorFamily: "goal-loop" });
+    ).toEqual({ ok: true, executor: "goal-loop" });
     expect(
-      resolveClaimedWorkflowStepFamily(db, {
+      resolveClaimedWorkflowStepExecutor(db, {
         runId: "native-v1",
         stepId: "no-mistakes",
       }),
-    ).toEqual({ ok: true, executorFamily: "no-mistakes" });
+    ).toEqual({ ok: true, executor: "no-mistakes" });
     expect(
       resolveWorkflowStepExecutorRuntime(db, {
         runId: "native-v1",
@@ -109,20 +109,20 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     ).toBeUndefined();
   });
 
-  it("resolves a step to a real-but-unsupported executor family (still ok)", () => {
+  it("resolves a step to a real-but-unsupported executor (still ok)", () => {
     const db = openSeededDb();
-    // Resolution is independent of dispatchability: linear-refresh resolves to
+    // Resolution is independent of dispatchability: tracker-refresh resolves to
     // external-apply; the supportability decision is the brain's job.
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
-      stepId: "linear-refresh",
+      stepId: "tracker-refresh",
     });
-    expect(resolution).toEqual({ ok: true, executorFamily: "external-apply" });
+    expect(resolution).toEqual({ ok: true, executor: "external-apply" });
   });
 
   it("fails closed with run_not_found when the run row is gone", () => {
     const db = openSeededDb();
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: "run-does-not-exist",
       stepId: "implementation",
     });
@@ -136,7 +136,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
          SET workflow_definition_key = NULL, workflow_definition_version = NULL
        WHERE id = ?`,
     ).run(RUN_ID);
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "implementation",
     });
@@ -148,7 +148,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     db.prepare(
       `UPDATE workflow_runs SET workflow_definition_version = NULL WHERE id = ?`,
     ).run(RUN_ID);
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "implementation",
     });
@@ -157,7 +157,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
 
   it("fails closed with step_definition_not_found for an unknown step key", () => {
     const db = openSeededDb();
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "ghost-step",
     });
@@ -190,7 +190,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
        WHERE id = ?`,
     ).run(MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE, 999, RUN_ID);
 
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "implementation",
     });
@@ -204,7 +204,7 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
     }
   });
 
-  it("fails closed with unknown_executor_family when the executor identity is corrupt", () => {
+  it("fails closed with unknown_executor when the executor identity is corrupt", () => {
     const db = openSeededDb();
     db.prepare(
       `UPDATE step_definitions
@@ -216,13 +216,13 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
       CODING_WORKFLOW_DEFINITION.version,
       "implementation",
     );
-    const resolution = resolveClaimedWorkflowStepFamily(db, {
+    const resolution = resolveClaimedWorkflowStepExecutor(db, {
       runId: RUN_ID,
       stepId: "implementation",
     });
     expect(resolution.ok).toBe(false);
     if (!resolution.ok) {
-      expect(resolution.failure).toBe("unknown_executor_family");
+      expect(resolution.failure).toBe("unknown_executor");
       expect(resolution.detail).toBe("NOT A VALID EXECUTOR");
     }
   });
@@ -237,7 +237,7 @@ describe("resolveWorkflowStepDispatchPlan — composed durable decision", () => 
     });
     expect(plan).toEqual({
       action: "dispatch",
-      executorFamily: "delegate-supervisor",
+      executor: "delegate-supervisor",
     });
   });
 
@@ -245,11 +245,11 @@ describe("resolveWorkflowStepDispatchPlan — composed durable decision", () => 
     const db = openSeededDb();
     const plan = resolveWorkflowStepDispatchPlan(db, {
       runId: RUN_ID,
-      stepId: "linear-refresh",
+      stepId: "tracker-refresh",
     });
     expect(plan).toEqual({
       action: "dispatch",
-      executorFamily: "external-apply",
+      executor: "external-apply",
     });
   });
 

@@ -131,7 +131,7 @@ function round(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "preflight",
-    executorFamily: "one-shot",
+    executor: "agent-once",
     attemptNumber: 1,
     roundIndex: 0,
     state: "running",
@@ -183,11 +183,11 @@ function resultJson(value: RunnerResult): string {
 
 describe("single-shot concrete mechanisms", () => {
   it.each(["sync", "async"] as const)(
-    "refuses a %s one-shot round before repository preflight on native Windows",
+    "refuses a %s agent-once round before repository preflight on native Windows",
     async (mode) => {
       const artifactRoot = makeTempDir();
       const missingRepo = path.join(artifactRoot, "missing-repo");
-      const marker = path.join(artifactRoot, "one-shot-spawned");
+      const marker = path.join(artifactRoot, "agent-once-spawned");
       const mechanism = createOneShotLiveWrapperRoundRunner(
         {
           command: process.execPath,
@@ -231,7 +231,7 @@ describe("single-shot concrete mechanisms", () => {
       expect(fs.existsSync(marker)).toBe(false);
       expect(
         fs.readFileSync(path.join(artifactRoot, "executor.log"), "utf8"),
-      ).toContain("[single-shot-one-shot] unsupported_platform:");
+      ).toContain("[single-shot-agent-once] unsupported_platform:");
     },
   );
 
@@ -255,7 +255,7 @@ describe("single-shot concrete mechanisms", () => {
       });
       const scriptRound = round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       });
 
@@ -328,7 +328,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = await mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       {
@@ -341,7 +341,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.outcome).toEqual({ ok: true });
   });
 
-  it("preserves a settled one-shot result when cancellation arrives afterward", async () => {
+  it("preserves a settled agent-once result when cancellation arrives afterward", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const abort = new AbortController();
@@ -445,7 +445,7 @@ describe("single-shot concrete mechanisms", () => {
       mechanism(
         round({
           artifactRoot,
-          executorFamily: "script",
+          executor: "script",
           logPaths: [logPath],
         }),
         context,
@@ -489,7 +489,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -503,14 +503,14 @@ describe("single-shot concrete mechanisms", () => {
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
-  it("kills an in-flight one-shot wrapper when the SDK signal aborts", async () => {
+  it("kills an in-flight agent-once wrapper when the SDK signal aborts", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const config: LiveWrapperConfig = {
       command: "/bin/sh",
       args: [
         "-c",
-        'printf one-shot-before-cancel; printf one-shot-stderr-before-cancel >&2; printf dirty > "$MOMENTUM_REPO_PATH/cancelled-one-shot.txt"; sleep 5; printf \'{"success":true}\' > "$MOMENTUM_RESULT_PATH"',
+        'printf agent-once-before-cancel; printf agent-once-stderr-before-cancel >&2; printf dirty > "$MOMENTUM_REPO_PATH/cancelled-agent-once.txt"; sleep 5; printf \'{"success":true}\' > "$MOMENTUM_RESULT_PATH"',
       ],
       cwd: "iteration",
       timeoutSec: 10,
@@ -536,7 +536,7 @@ describe("single-shot concrete mechanisms", () => {
       hostBindings: {} as SingleShotRoundRunnerContext["hostBindings"],
       signal: abort.signal,
     };
-    const logPath = path.join(artifactRoot, "one-shot.log");
+    const logPath = path.join(artifactRoot, "agent-once.log");
     const running = mechanism(
       round({
         artifactRoot,
@@ -545,24 +545,24 @@ describe("single-shot concrete mechanisms", () => {
       context,
     );
     await waitUntil(
-      () => fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt")),
-      "one-shot cancellation marker",
+      () => fs.existsSync(path.join(repoPath, "cancelled-agent-once.txt")),
+      "agent-once cancellation marker",
     );
     abort.abort(abortReason);
 
     await expect(running).rejects.toThrow("caller requested cancellation");
     await waitMs(100);
     expect(fs.existsSync(path.join(artifactRoot, "result.json"))).toBe(false);
-    expect(fs.existsSync(path.join(repoPath, "cancelled-one-shot.txt"))).toBe(
+    expect(fs.existsSync(path.join(repoPath, "cancelled-agent-once.txt"))).toBe(
       false,
     );
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
     const cancellationLog = fs.readFileSync(logPath, "utf-8");
     expect(cancellationLog).toContain(
-      "[live-step] stdout:\none-shot-before-cancel",
+      "[live-step] stdout:\nagent-once-before-cancel",
     );
     expect(cancellationLog).toContain(
-      "[live-step] stderr:\none-shot-stderr-before-cancel",
+      "[live-step] stderr:\nagent-once-stderr-before-cancel",
     );
   });
 
@@ -589,7 +589,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -631,7 +631,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -676,7 +676,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -732,7 +732,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [logPath],
       }),
       context,
@@ -795,7 +795,7 @@ describe("single-shot concrete mechanisms", () => {
       mechanism(
         round({
           artifactRoot,
-          executorFamily: "script",
+          executor: "script",
           logPaths: [path.join(artifactRoot, "script.log")],
         }),
         context,
@@ -827,7 +827,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = await mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -876,7 +876,7 @@ describe("single-shot concrete mechanisms", () => {
     const running = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
       context,
@@ -890,7 +890,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(fs.readFileSync(marker, "utf-8")).toBe("dirty");
   });
 
-  it("rejects one-shot portable timeout and agent host mismatches before launch", async () => {
+  it("rejects agent-once portable timeout and agent host mismatches before launch", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const marker = path.join(repoPath, "should-not-launch.txt");
@@ -930,7 +930,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(fs.existsSync(marker)).toBe(false);
   });
 
-  it("runs a one-shot live wrapper, finalizes the repo, and captures the normalized result document", () => {
+  it("runs a agent-once live wrapper, finalizes the repo, and captures the normalized result document", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
@@ -939,7 +939,7 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/one-shot.txt', 'changed\\n')",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/agent-once.txt', 'changed\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
@@ -973,7 +973,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.artifacts?.resultDocument?.digest).toBe(result.resultDigest);
     expect(result.evidence?.verificationStatus).toBe("skipped");
     expect(result.evidence?.commitSha).toMatch(/^[0-9a-f]{40}$/);
-    expect(result.evidence?.changedFiles).toEqual(["one-shot.txt"]);
+    expect(result.evidence?.changedFiles).toEqual(["agent-once.txt"]);
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
       result.evidence?.commitSha,
     );
@@ -982,7 +982,7 @@ describe("single-shot concrete mechanisms", () => {
     );
   });
 
-  it("resets finalize one-shot command failures that dirty the repo", () => {
+  it("resets finalize agent-once command failures that dirty the repo", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const verificationLogPath = path.join(artifactRoot, "verify.log");
@@ -1021,7 +1021,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
-  it("rejects finalize one-shot rounds when the repo is dirty before launch", () => {
+  it("rejects finalize agent-once rounds when the repo is dirty before launch", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
@@ -1030,7 +1030,7 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\\n')",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-agent-once.txt', 'launched\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
@@ -1058,7 +1058,7 @@ describe("single-shot concrete mechanisms", () => {
       ok: false,
       recoveryCode: "git_failed",
     });
-    expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
+    expect(fs.existsSync(path.join(repoPath, "launched-agent-once.txt"))).toBe(
       false,
     );
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
@@ -1067,14 +1067,14 @@ describe("single-shot concrete mechanisms", () => {
     );
   });
 
-  it("rejects relative one-shot log paths before launching the wrapper", () => {
+  it("rejects relative agent-once log paths before launching the wrapper", () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const config: LiveWrapperConfig = {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\n')",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-agent-once.txt', 'launched\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
@@ -1090,19 +1090,19 @@ describe("single-shot concrete mechanisms", () => {
     });
 
     const result = mechanism(
-      round({ artifactRoot, logPaths: ["relative-one-shot.log"] }),
+      round({ artifactRoot, logPaths: ["relative-agent-once.log"] }),
     );
 
     expect(result.outcome).toEqual({
       ok: false,
       recoveryCode: "invalid_input",
     });
-    expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
+    expect(fs.existsSync(path.join(repoPath, "launched-agent-once.txt"))).toBe(
       false,
     );
   });
 
-  it("returns runtime_unavailable when one-shot wrapper setup throws", () => {
+  it("returns runtime_unavailable when agent-once wrapper setup throws", () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const blockedParent = path.join(artifactRoot, "blocked-parent");
@@ -1136,7 +1136,7 @@ describe("single-shot concrete mechanisms", () => {
     });
   });
 
-  it("resets finalize one-shot wrapper exceptions after the child dirties the repo", () => {
+  it("resets finalize agent-once wrapper exceptions after the child dirties the repo", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const marker = "THROW_AFTER_CHILD";
@@ -1224,7 +1224,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         agentProvider: null,
         model: null,
         logPaths: [logPath],
@@ -1285,7 +1285,7 @@ describe("single-shot concrete mechanisms", () => {
       timeoutSec: 5,
       repoSafety: { mode: "read-only" },
     });
-    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+    const result = mechanism(round({ artifactRoot, executor: "script" }));
 
     expect(result.outcome).toEqual({ ok: true });
   });
@@ -1305,7 +1305,7 @@ describe("single-shot concrete mechanisms", () => {
       repoSafety: { mode: "read-only" },
     });
 
-    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+    const result = mechanism(round({ artifactRoot, executor: "script" }));
 
     expect(result.outcome).toEqual({ ok: true });
   });
@@ -1327,7 +1327,7 @@ describe("single-shot concrete mechanisms", () => {
       repoSafety: { mode: "read-only" },
     });
 
-    const result = mechanism(round({ artifactRoot, executorFamily: "script" }));
+    const result = mechanism(round({ artifactRoot, executor: "script" }));
 
     expect(result.outcome).toEqual({
       ok: false,
@@ -1351,7 +1351,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     const scriptRound = round({
       artifactRoot,
-      executorFamily: "script",
+      executor: "script",
       logPaths: [path.join(artifactRoot, "script.log")],
     });
 
@@ -1387,10 +1387,7 @@ describe("single-shot concrete mechanisms", () => {
       signal: new AbortController().signal,
     };
 
-    const result = await mechanism(
-      round({ executorFamily: "script" }),
-      context,
-    );
+    const result = await mechanism(round({ executor: "script" }), context);
 
     expect(result.outcome).toEqual({
       ok: false,
@@ -1420,10 +1417,7 @@ describe("single-shot concrete mechanisms", () => {
       signal: new AbortController().signal,
     };
 
-    const result = await mechanism(
-      round({ executorFamily: "script" }),
-      context,
-    );
+    const result = await mechanism(round({ executor: "script" }), context);
 
     expect(result.outcome).toEqual({
       ok: false,
@@ -1458,7 +1452,7 @@ describe("single-shot concrete mechanisms", () => {
     });
 
     expect(
-      mechanism(round({ artifactRoot, executorFamily: "script" })).outcome,
+      mechanism(round({ artifactRoot, executor: "script" })).outcome,
     ).toEqual({
       ok: false,
       recoveryCode: "command_failed",
@@ -1499,7 +1493,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1547,7 +1541,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1573,7 +1567,7 @@ describe("single-shot concrete mechanisms", () => {
 
     const result = mechanism(
       round({
-        executorFamily: "script",
+        executor: "script",
         logPaths: ["relative-script.log"],
       }),
     );
@@ -1602,7 +1596,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [logPath],
       }),
     );
@@ -1634,7 +1628,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1661,7 +1655,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [logPath],
       }),
     );
@@ -1720,7 +1714,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1796,7 +1790,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1837,7 +1831,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1885,7 +1879,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1957,7 +1951,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -1984,7 +1978,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -2018,7 +2012,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -2048,7 +2042,7 @@ describe("single-shot concrete mechanisms", () => {
     const result = mechanism(
       round({
         artifactRoot,
-        executorFamily: "script",
+        executor: "script",
         logPaths: [path.join(artifactRoot, "script.log")],
       }),
     );
@@ -2060,7 +2054,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(fs.statSync(ignoredRoot).mode & 0o777).toBe(0o700);
   });
 
-  it("rejects read-only one-shot success that dirties the repo", () => {
+  it("rejects read-only agent-once success that dirties the repo", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
@@ -2068,7 +2062,7 @@ describe("single-shot concrete mechanisms", () => {
       command: process.execPath,
       args: [
         "-e",
-        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-one-shot.txt', 'dirty\\n')",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-agent-once.txt', 'dirty\\n')",
       ],
       cwd: "iteration",
       timeoutSec: 5,
@@ -2092,7 +2086,7 @@ describe("single-shot concrete mechanisms", () => {
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toContain(
-      "dirty-one-shot.txt",
+      "dirty-agent-once.txt",
     );
   });
 });

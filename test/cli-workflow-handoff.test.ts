@@ -221,7 +221,7 @@ describe("momentum workflow handoff", () => {
     };
     expect(payload.ok).toBe(true);
     expect(payload.command).toBe("workflow handoff");
-    expect(payload.schemaVersion).toBe(2);
+    expect(payload.schemaVersion).toBe(3);
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-handoff01");
     expect(payload.run.state).toBe("running");
@@ -306,7 +306,7 @@ describe("momentum workflow handoff", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Workflow handoff: cwfp-text-handoff");
-    expect(result.stdout).toContain("Schema version: 2");
+    expect(result.stdout).toContain("Schema version: 3");
     expect(result.stdout).toContain("Workflow run: cwfp-text-handoff");
     expect(result.stdout).toContain("- Next action: resume_running");
   });
@@ -323,7 +323,7 @@ describe("momentum workflow handoff", () => {
           workflowRunId: "cwfp-handoffgate",
           stepRunId: "implementation",
           stepKey: "implementation",
-          executorFamily: "goal-loop",
+          executor: "agent-loop",
           state: "running",
           attemptNumber: 1,
           startedAt: Date.now(),

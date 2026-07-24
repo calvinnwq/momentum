@@ -5,6 +5,7 @@ import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind,
 } from "../core/workflow/run/reducer.js";
+import { canonicalWorkflowStepKind } from "../core/workflow/definition/legacy.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
 
 /**
@@ -12,7 +13,7 @@ import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
  *
  * Momentum invokes live workflow steps that wrap the existing
  * OpenClaw engines (GNHF, postflight, no-mistakes, merge-cleanup,
- * linear-refresh). The runtime uses a *wrapper registry keyed by
+ * tracker-refresh). The runtime uses a *wrapper registry keyed by
  * `WorkflowStepKind`* whose entries resolve from durable per-profile
  * configuration rather than hard-coded local paths.
  *
@@ -131,14 +132,6 @@ export type LiveWrapperResolveResult =
   LiveWrapperResolveSuccess | LiveWrapperResolveError;
 
 export const DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC = 30;
-
-const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_KINDS,
-);
-
-function isWorkflowStepKind(value: string): value is WorkflowStepKind {
-  return WORKFLOW_STEP_KIND_SET.has(value);
-}
 
 export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (value === undefined || value === null) {
@@ -263,17 +256,28 @@ export function parseLiveWrapperProfile(
     );
   }
 
-  const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
+  const selectedWrappers = new Map<
+    WorkflowStepKind,
+    { rawKind: string; rawConfig: unknown }
+  >();
   for (const [kind, rawConfig] of entries) {
-    if (!isWorkflowStepKind(kind)) {
+    const canonicalKind = canonicalWorkflowStepKind(kind);
+    if (canonicalKind === undefined) {
       return profileInvalid(
         `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
       );
     }
-    const parsed = parseLiveWrapperConfig(rawConfig);
+    const existing = selectedWrappers.get(canonicalKind);
+    if (existing?.rawKind === canonicalKind) continue;
+    selectedWrappers.set(canonicalKind, { rawKind: kind, rawConfig });
+  }
+
+  const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
+  for (const [kind, selected] of selectedWrappers) {
+    const parsed = parseLiveWrapperConfig(selected.rawConfig);
     if (!parsed.ok) {
       return profileInvalid(
-        `Live wrapper profile "${name}" wrapper "${kind}" is invalid: ${parsed.error}`,
+        `Live wrapper profile "${name}" wrapper "${selected.rawKind}" is invalid: ${parsed.error}`,
       );
     }
     wrappers.set(kind, parsed.config);
@@ -286,14 +290,15 @@ export function resolveLiveWrapper(
   profile: LiveWrapperProfile,
   kind: string,
 ): LiveWrapperResolveResult {
-  if (!isWorkflowStepKind(kind)) {
+  const canonicalKind = canonicalWorkflowStepKind(kind);
+  if (canonicalKind === undefined) {
     return {
       ok: false,
       code: "live_wrapper_unsupported_kind",
       error: `Live wrapper kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
-  const config = profile.wrappers.get(kind);
+  const config = profile.wrappers.get(canonicalKind);
   if (config === undefined) {
     return {
       ok: false,
@@ -301,7 +306,7 @@ export function resolveLiveWrapper(
       error: `Live wrapper profile "${profile.name}" has no wrapper configured for step kind "${kind}".`,
     };
   }
-  return { ok: true, kind, config };
+  return { ok: true, kind: canonicalKind, config };
 }
 
 export function listConfiguredLiveWrapperKinds(

@@ -664,7 +664,7 @@ function startRound(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    executorFamily: attempt.executorFamily,
+    executor: attempt.executor,
     attemptNumber: attempt.attemptNumber,
     roundIndex: nextRoundIndex,
     state,

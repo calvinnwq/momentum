@@ -574,9 +574,9 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     ).toBe(false);
   });
 
-  it("reconciles a failed linear-refresh external-side-effect tail step from clear-recovery", async () => {
+  it("reconciles a failed tracker-refresh external-side-effect tail step from clear-recovery", async () => {
     const dataDir = makeTempDir();
-    const runId = "cwfp-linear-refresh-clear";
+    const runId = "cwfp-tracker-refresh-clear";
     const db = openDb(dataDir);
     try {
       seedRun(db, {
@@ -622,8 +622,8 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       });
       seedStep(db, {
         runId,
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         state: "failed",
         order: 5,
       });
@@ -639,7 +639,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "--evidence-pointer",
       "https://linear.app/team/issue/KEY-123",
       "--ledger-pointer",
-      ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+      ".agent-workflows/cwfp-tracker-refresh-clear/ledger.jsonl#offset=7",
       "--data-dir",
       dataDir,
       "--json",
@@ -652,22 +652,22 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       runId,
       previousReason: "failed_external_side_effect_step",
       reconciledStep: {
-        stepId: "linear-refresh",
+        stepId: "tracker-refresh",
         recoveryCode: "failed_external_side_effect_step",
         state: "succeeded",
         evidencePointer: "https://linear.app/team/issue/KEY-123",
         ledgerPointer:
-          ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+          ".agent-workflows/cwfp-tracker-refresh-clear/ledger.jsonl#offset=7",
       },
     });
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
-    expect(readStepState(dataDir, runId, "linear-refresh")).toMatchObject({
+    expect(readStepState(dataDir, runId, "tracker-refresh")).toMatchObject({
       state: "succeeded",
       operator_reason: "failed_external_side_effect_step",
       operator_actor: "workflow run clear-recovery",
       operator_evidence_pointer: "https://linear.app/team/issue/KEY-123",
       operator_ledger_pointer:
-        ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+        ".agent-workflows/cwfp-tracker-refresh-clear/ledger.jsonl#offset=7",
       error_code: null,
       error_message: null,
     });
@@ -874,8 +874,8 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       });
       seedStep(db, {
         runId,
-        stepId: "linear-refresh",
-        kind: "linear-refresh",
+        stepId: "tracker-refresh",
+        kind: "tracker-refresh",
         state: "pending",
         order: 5,
       });
@@ -913,8 +913,8 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       reportable: true,
       needsManualRecovery: false,
       runState: "pending",
-      activeStep: { stepId: "linear-refresh", state: "pending" },
-      nextAction: { code: "await_approval", stepId: "linear-refresh" },
+      activeStep: { stepId: "tracker-refresh", state: "pending" },
+      nextAction: { code: "await_approval", stepId: "tracker-refresh" },
       recovery: null,
     });
   });

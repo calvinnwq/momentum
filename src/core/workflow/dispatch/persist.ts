@@ -25,7 +25,7 @@
  *   - the `workflow_runs` row is gone               → `run_not_found`
  *   - the run has no (or a partial) definition link → `definition_unlinked`
  *   - no `step_definitions` row or built-in step matches the step → `step_definition_not_found`
- *   - the step's `executor` is not a valid identity → `unknown_executor_family`
+ *   - the step's `executor` is not a valid identity → `unknown_executor`
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
  * touches a lease. The side-effecting half of the dispatcher lives in
@@ -52,7 +52,7 @@ import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../run/start.js";
 /**
  * The durable identity of a claimed workflow step the dispatcher must resolve.
  * Structurally a subset of the scheduler's `ClaimedWorkflowStep`, so the daemon
- * lane can hand a claim straight to {@link resolveClaimedWorkflowStepFamily}.
+ * lane can hand a claim straight to {@link resolveClaimedWorkflowStepExecutor}.
  */
 export type WorkflowStepDispatchTarget = {
   runId: string;
@@ -163,7 +163,7 @@ export function resolveWorkflowStepExecutorRuntime(
  * mutates a row and always returns a {@link WorkflowStepDispatchResolution},
  * which {@link planWorkflowStepDispatch} turns into the dispatch decision.
  */
-export function resolveClaimedWorkflowStepFamily(
+export function resolveClaimedWorkflowStepExecutor(
   db: MomentumDb,
   target: WorkflowStepDispatchTarget,
 ): WorkflowStepDispatchResolution {
@@ -210,7 +210,7 @@ export function resolveClaimedWorkflowStepFamily(
           detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`,
         };
       }
-      return { ok: true, executorFamily: builtInStep.executor };
+      return { ok: true, executor: builtInStep.executor };
     }
     return {
       ok: false,
@@ -240,16 +240,16 @@ export function resolveClaimedWorkflowStepFamily(
 
   const executor = stepDefinition.executor;
   if (!isExecutorName(executor)) {
-    return { ok: false, failure: "unknown_executor_family", detail: executor };
+    return { ok: false, failure: "unknown_executor", detail: executor };
   }
 
   // The type guard has narrowed `executor` to a durable executor identity.
-  return { ok: true, executorFamily: executor };
+  return { ok: true, executor };
 }
 
 /**
  * Resolve a claimed step against durable state and decide what the production
- * workflow lane should do with it, composing {@link resolveClaimedWorkflowStepFamily}
+ * workflow lane should do with it, composing {@link resolveClaimedWorkflowStepExecutor}
  * with the pure {@link planWorkflowStepDispatch} brain. Read-only and total: the
  * returned {@link WorkflowStepDispatchPlan} is the decision only; the durable
  * dispatch / fail-closed effects are applied by a later slice.
@@ -258,5 +258,7 @@ export function resolveWorkflowStepDispatchPlan(
   db: MomentumDb,
   target: WorkflowStepDispatchTarget,
 ): WorkflowStepDispatchPlan {
-  return planWorkflowStepDispatch(resolveClaimedWorkflowStepFamily(db, target));
+  return planWorkflowStepDispatch(
+    resolveClaimedWorkflowStepExecutor(db, target),
+  );
 }

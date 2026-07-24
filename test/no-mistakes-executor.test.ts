@@ -8,16 +8,16 @@ import {
   transitionExecutorAttempt,
   transitionExecutorRound,
 } from "../src/core/executors/loop/reducer.js";
-import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
+import { isWorkflowExecutor } from "../src/core/workflow/definition/definition.js";
 import {
   NO_MISTAKES_CI_STATES,
-  NO_MISTAKES_EXECUTOR_FAMILIES,
-  NO_MISTAKES_EXECUTOR_FAMILY,
+  NO_MISTAKES_EXECUTORS,
+  NO_MISTAKES_EXECUTOR,
   NO_MISTAKES_EXTERNAL_STEP_STATUSES,
   NO_MISTAKES_RECOVERY_CODES,
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
-  isNoMistakesExecutorFamily,
+  isNoMistakesExecutorName,
   noMistakesAttemptId,
   noMistakesRoundId,
   noMistakesRoundUpdate,
@@ -66,25 +66,25 @@ function externalState(
   };
 }
 
-describe("no-mistakes executor family", () => {
-  it("serves exactly the no-mistakes executor family", () => {
-    expect(NO_MISTAKES_EXECUTOR_FAMILY).toBe("no-mistakes");
-    expect([...NO_MISTAKES_EXECUTOR_FAMILIES]).toEqual(["no-mistakes"]);
+describe("no-mistakes legacy executor", () => {
+  it("serves exactly the no-mistakes executor", () => {
+    expect(NO_MISTAKES_EXECUTOR).toBe("no-mistakes");
+    expect([...NO_MISTAKES_EXECUTORS]).toEqual(["no-mistakes"]);
   });
 
-  it("only names a real workflow executor family", () => {
-    for (const family of NO_MISTAKES_EXECUTOR_FAMILIES) {
-      expect(isWorkflowExecutorFamily(family)).toBe(true);
+  it("keeps the legacy identity outside the canonical workflow executor list", () => {
+    for (const executor of NO_MISTAKES_EXECUTORS) {
+      expect(isWorkflowExecutor(executor)).toBe(false);
     }
   });
 
-  it("recognizes the no-mistakes family and rejects the others", () => {
-    expect(isNoMistakesExecutorFamily("no-mistakes")).toBe(true);
-    expect(isNoMistakesExecutorFamily("goal-loop")).toBe(false);
-    expect(isNoMistakesExecutorFamily("one-shot")).toBe(false);
-    expect(isNoMistakesExecutorFamily("script")).toBe(false);
-    expect(isNoMistakesExecutorFamily("external-apply")).toBe(false);
-    expect(isNoMistakesExecutorFamily("subworkflow")).toBe(false);
+  it("recognizes the no-mistakes identity and rejects the others", () => {
+    expect(isNoMistakesExecutorName("no-mistakes")).toBe(true);
+    expect(isNoMistakesExecutorName("agent-loop")).toBe(false);
+    expect(isNoMistakesExecutorName("agent-once")).toBe(false);
+    expect(isNoMistakesExecutorName("script")).toBe(false);
+    expect(isNoMistakesExecutorName("external-apply")).toBe(false);
+    expect(isNoMistakesExecutorName("subworkflow")).toBe(false);
   });
 });
 
@@ -590,7 +590,7 @@ describe("planNoMistakesAttempt", () => {
     expect(attempt.workflowRunId).toBe("run1");
     expect(attempt.stepRunId).toBe("step1");
     expect(attempt.stepKey).toBe("no-mistakes");
-    expect(attempt.executorFamily).toBe("no-mistakes");
+    expect(attempt.executor).toBe("no-mistakes");
     expect(attempt.attemptNumber).toBe(0);
     expect(attempt.state).toBe("running");
     expect(attempt.startedAt).toBe(1000);
@@ -664,7 +664,7 @@ describe("planNoMistakesRoundStart", () => {
     expect(round.workflowRunId).toBe("run1");
     expect(round.stepRunId).toBe("step1");
     expect(round.stepKey).toBe("no-mistakes");
-    expect(round.executorFamily).toBe("no-mistakes");
+    expect(round.executor).toBe("no-mistakes");
     expect(round.attemptNumber).toBe(0);
     // The mirror is one long-lived round.
     expect(round.roundIndex).toBe(0);
@@ -699,14 +699,14 @@ describe("planNoMistakesRoundStart", () => {
   });
 
   it("refuses to mirror a round under a non-no-mistakes attempt", () => {
-    const foreign = { ...attempt(), executorFamily: "goal-loop" as const };
+    const foreign = { ...attempt(), executor: "agent-loop" as const };
     expect(() =>
       planNoMistakesRoundStart({
         attempt: foreign,
         runtime: { inputDigest: null, artifactRoot: null },
         startedAt: 2000,
       }),
-    ).toThrow(/non-no-mistakes family/);
+    ).toThrow(/non-no-mistakes executor/);
   });
 
   it("is born in a state from which every decided round state is reachable", () => {

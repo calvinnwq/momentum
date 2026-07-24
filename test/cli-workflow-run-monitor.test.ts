@@ -329,7 +329,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "workflow run monitor",
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       runState: "running",
       stepState: "running",
@@ -401,7 +401,7 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       seedStep(db, {
         runId,
         stepId: "no-mistakes",
-        kind: "no-mistakes",
+        kind: "validate",
         state: "failed",
         order: 1,
       });

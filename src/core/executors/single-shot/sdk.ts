@@ -38,7 +38,7 @@ import {
   resolveSingleShotRoundSelection,
   type PlanSingleShotRoundStartInput,
   type SingleShotDecision,
-  type SingleShotExecutorFamily,
+  type SingleShotExecutorName,
   type SingleShotAttemptOutcome,
   type SingleShotRoundArtifacts,
   type SingleShotRoundEvidence,
@@ -83,49 +83,49 @@ export {
 } from "../sdk/portable-command.js";
 
 export function singleShotExecutorConfigError(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   value: unknown,
 ): string | null {
   if (!isRecord(value)) {
-    return family === "script"
+    return executor === "script"
       ? "Script config requires a portable config.command identity."
-      : "One-shot config must be an object.";
+      : "Agent-once config must be an object.";
   }
   const allowed =
-    family === "script"
+    executor === "script"
       ? new Set(["command", "timeoutMs", "policyEnvelope"])
       : new Set(["agent", "timeoutMs", "policyEnvelope"]);
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown !== undefined) {
-    return `${family} config does not allow property ${unknown}.`;
+    return `${executor} config does not allow property ${unknown}.`;
   }
   if (
     value["timeoutMs"] !== undefined &&
     (!Number.isInteger(value["timeoutMs"]) ||
       (value["timeoutMs"] as number) < 1)
   ) {
-    return `${family} config.timeoutMs must be a positive integer.`;
+    return `${executor} config.timeoutMs must be a positive integer.`;
   }
   if (
     value["timeoutMs"] !== undefined &&
     (value["timeoutMs"] as number) % 1_000 !== 0
   ) {
-    return `${family} config.timeoutMs must be a whole number of seconds (a multiple of 1000).`;
+    return `${executor} config.timeoutMs must be a whole number of seconds (a multiple of 1000).`;
   }
   if (
     value["timeoutMs"] !== undefined &&
     (value["timeoutMs"] as number) > MAX_BUILT_IN_PROCESS_TIMEOUT_MS
   ) {
-    return `${family} config.timeoutMs must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_MS}.`;
+    return `${executor} config.timeoutMs must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_MS}.`;
   }
   if (
     value["policyEnvelope"] !== undefined &&
     (typeof value["policyEnvelope"] !== "string" ||
       value["policyEnvelope"].length === 0)
   ) {
-    return `${family} config.policyEnvelope must be a non-empty string.`;
+    return `${executor} config.policyEnvelope must be a non-empty string.`;
   }
-  if (family === "script") {
+  if (executor === "script") {
     if (!isPortableScriptCommandIdentity(value["command"])) {
       return "Script config requires a portable config.command identity.";
     }
@@ -133,13 +133,13 @@ export function singleShotExecutorConfigError(
   }
   if (value["agent"] === undefined) return null;
   if (!isRecord(value["agent"])) {
-    return "One-shot config.agent must be an object.";
+    return "Agent-once config.agent must be an object.";
   }
   const unknownAgent = Object.keys(value["agent"]).find(
     (key) => !["harness", "model", "effort"].includes(key),
   );
   if (unknownAgent !== undefined) {
-    return `One-shot config.agent does not allow property ${unknownAgent}.`;
+    return `Agent-once config.agent does not allow property ${unknownAgent}.`;
   }
   for (const field of ["harness", "model", "effort"] as const) {
     const fieldValue = value["agent"][field];
@@ -147,7 +147,7 @@ export function singleShotExecutorConfigError(
       fieldValue !== undefined &&
       (typeof fieldValue !== "string" || fieldValue.length === 0)
     ) {
-      return `One-shot config.agent.${field} must be a non-empty string.`;
+      return `Agent-once config.agent.${field} must be a non-empty string.`;
     }
   }
   return null;
@@ -270,7 +270,7 @@ export type SingleShotExecutorTickResult = ExecutorTickResult & {
 };
 
 /**
- * Extensible lifecycle class for the built-in `one-shot` and `script` families.
+ * Extensible lifecycle class for the built-in `agent-once` and `script` executors.
  * Supplying a {@link SingleShotRoundRunner} is the narrower runner-adapter
  * extension point; implementing {@link Executor} directly remains the full SDK.
  */
@@ -278,17 +278,17 @@ export class SingleShotExecutor implements Executor<
   SingleShotExecutorConfig,
   SingleShotExecutorHostBindings
 > {
-  readonly name: SingleShotExecutorFamily;
+  readonly name: SingleShotExecutorName;
   readonly configSchema: ExecutorConfigSchema;
   readonly #runRound: SingleShotRoundRunner;
 
   constructor(
-    family: SingleShotExecutorFamily,
+    executor: SingleShotExecutorName,
     runRound: SingleShotRoundRunner,
   ) {
-    this.name = family;
+    this.name = executor;
     this.configSchema =
-      family === "one-shot"
+      executor === "agent-once"
         ? AGENT_ONCE_EXECUTOR_CONFIG_SCHEMA
         : SCRIPT_EXECUTOR_CONFIG_SCHEMA;
     this.#runRound = runRound;
@@ -301,9 +301,9 @@ export class SingleShotExecutor implements Executor<
     >,
   ): Promise<SingleShotExecutorTickResult> {
     const attempt = context.state.attempt;
-    if (attempt.executorFamily !== this.name) {
+    if (attempt.executor !== this.name) {
       throw new Error(
-        `SingleShotExecutor ${this.name} cannot run attempt ${attempt.attemptId} for ${attempt.executorFamily}.`,
+        `SingleShotExecutor ${this.name} cannot run attempt ${attempt.attemptId} for ${attempt.executor}.`,
       );
     }
     const configError = singleShotExecutorConfigError(
@@ -339,7 +339,7 @@ export class SingleShotExecutor implements Executor<
       hostBindings.selection ?? singleShotSelectionFromSdkConfig(config);
     const start = planSingleShotRoundStart({
       ...hostBindings.start,
-      family: this.name,
+      executor: this.name,
       selection,
     });
     const frozenLogPaths = [...start.logPaths];
@@ -462,7 +462,7 @@ export class SingleShotExecutor implements Executor<
 }
 
 function loadMaterializedSingleShotRound(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   dispatchBinding: string,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
@@ -475,7 +475,7 @@ function loadMaterializedSingleShotRound(
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(
-      `SingleShotExecutor ${family} expected exactly one atomically materialized round.`,
+      `SingleShotExecutor ${executor} expected exactly one atomically materialized round.`,
     );
   }
   const snapshot = currentAttemptRounds[0];
@@ -500,7 +500,7 @@ function loadMaterializedSingleShotRound(
       `Single-shot round ${snapshot.round.roundId} is not a fresh running round.`,
     );
   }
-  assertSingleShotRoundMatchesHost(family, context, snapshot.round);
+  assertSingleShotRoundMatchesHost(executor, context, snapshot.round);
   const expectedCheckpoint = planSingleShotRoundStartedCheckpoint(
     snapshot.round.roundId,
     dispatchBinding,
@@ -540,7 +540,7 @@ const SINGLE_SHOT_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
 );
 
 function resumeCompletedSingleShotRound(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
     SingleShotExecutorHostBindings
@@ -552,7 +552,7 @@ function resumeCompletedSingleShotRound(
   );
   if (currentAttemptRounds.length !== 1) {
     throw new Error(
-      `SingleShotExecutor ${family} attempt ${context.state.attempt.attemptId} must own exactly one resumable round.`,
+      `SingleShotExecutor ${executor} attempt ${context.state.attempt.attemptId} must own exactly one resumable round.`,
     );
   }
   const snapshot = currentAttemptRounds[0];
@@ -565,8 +565,13 @@ function resumeCompletedSingleShotRound(
       `Single-shot resumable round ${round.roundId} does not match host round ${context.hostBindings.start.roundId}.`,
     );
   }
-  assertSingleShotRoundMatchesHost(family, context, round);
-  assertResumableDispatchBinding(family, context, round, snapshot.checkpoints);
+  assertSingleShotRoundMatchesHost(executor, context, round);
+  assertResumableDispatchBinding(
+    executor,
+    context,
+    round,
+    snapshot.checkpoints,
+  );
   if (round.classification !== null || isTerminalRoundState(round.state)) {
     throw new Error(
       `Single-shot round ${round.roundId} is already terminal and cannot resume classification.`,
@@ -614,7 +619,7 @@ function resumeCompletedSingleShotRound(
 }
 
 function assertSingleShotRoundMatchesHost(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
     SingleShotExecutorHostBindings
@@ -628,7 +633,7 @@ function assertSingleShotRoundMatchesHost(
     workflowRunId: host.workflowRunId,
     stepRunId: host.stepRunId,
     stepKey: host.stepKey,
-    executorFamily: family,
+    executor: executor,
     attemptNumber: host.attemptNumber,
     inputDigest: host.inputDigest,
     artifactRoot: host.artifactRoot,
@@ -654,7 +659,7 @@ function assertSingleShotRoundMatchesHost(
 }
 
 function assertResumableDispatchBinding(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   context: ExecutorTickContext<
     SingleShotExecutorConfig,
     SingleShotExecutorHostBindings
@@ -666,54 +671,79 @@ function assertResumableDispatchBinding(
   const bindingCheckpoint = checkpoints.find(
     (checkpoint) => checkpoint.stage === "round_started",
   );
-  const expectedBinding = singleShotDispatchBindingDetail(
-    family,
-    context.config,
-    host,
-    context.hostBindings.selection,
-    context.hostBindings.hostBindingIdentity,
-  );
-  const legacyBinding = legacySingleShotDispatchBindingDetail(
-    family,
-    context.config,
-    host,
-  );
   const replayAttemptNumber = executorRoundReplayAttemptNumber(round);
-  const replayBinding = singleShotDispatchBindingDetailForAttempt(
-    family,
-    context.config,
-    host,
-    context.hostBindings.selection,
-    context.hostBindings.hostBindingIdentity,
-    replayAttemptNumber,
-  );
-  const legacyReplayBinding = legacySingleShotDispatchBindingDetailForAttempt(
-    family,
-    context.config,
-    host,
-    replayAttemptNumber,
-  );
-  if (
-    bindingCheckpoint?.detail !== expectedBinding &&
-    bindingCheckpoint?.detail !== legacyBinding &&
-    bindingCheckpoint?.detail !== replayBinding &&
-    bindingCheckpoint?.detail !== legacyReplayBinding
-  ) {
+  // Binding digests recorded before the executor-value rename hashed the
+  // retired spelling; checkpoint details are immutable evidence, so reattach
+  // recomputes every accepted spelling instead of rewriting the stored digest.
+  const legacySpelling = LEGACY_EXECUTOR_BINDING_SPELLINGS[executor];
+  const spellings = [
+    executor,
+    ...(legacySpelling === undefined
+      ? []
+      : [legacySpelling as SingleShotExecutorName]),
+  ];
+  const accepted = new Set<string>();
+  for (const spelling of spellings) {
+    const start =
+      spelling === executor ? host : { ...host, executor: spelling };
+    accepted.add(
+      singleShotDispatchBindingDetail(
+        spelling,
+        context.config,
+        start,
+        context.hostBindings.selection,
+        context.hostBindings.hostBindingIdentity,
+      ),
+    );
+    accepted.add(
+      legacySingleShotDispatchBindingDetail(spelling, context.config, start),
+    );
+    accepted.add(
+      singleShotDispatchBindingDetailForAttempt(
+        spelling,
+        context.config,
+        start,
+        context.hostBindings.selection,
+        context.hostBindings.hostBindingIdentity,
+        replayAttemptNumber,
+      ),
+    );
+    accepted.add(
+      legacySingleShotDispatchBindingDetailForAttempt(
+        spelling,
+        context.config,
+        start,
+        replayAttemptNumber,
+      ),
+    );
+  }
+  const detail = bindingCheckpoint?.detail;
+  if (detail == null || !accepted.has(detail)) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
     );
   }
 }
 
+/**
+ * Retired executor-value spellings whose recorded binding digests must keep
+ * verifying. The keys never leave the local digest recomputation.
+ */
+const LEGACY_EXECUTOR_BINDING_SPELLINGS: Readonly<
+  Partial<Record<SingleShotExecutorName, string>>
+> = {
+  "agent-once": "one-shot",
+};
+
 export function singleShotDispatchBindingDetail(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
   selection?: Readonly<SingleShotRoundSelection>,
   hostBindingIdentity?: string,
 ): string {
   return singleShotDispatchBindingDetailForAttempt(
-    family,
+    executor,
     config,
     start,
     selection,
@@ -723,7 +753,7 @@ export function singleShotDispatchBindingDetail(
 }
 
 function singleShotDispatchBindingDetailForAttempt(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
   selection: Readonly<SingleShotRoundSelection> | undefined,
@@ -732,7 +762,7 @@ function singleShotDispatchBindingDetailForAttempt(
 ): string {
   const payload = canonicalJson({
     version: 2,
-    family,
+    family: executor,
     config,
     selection: selection ?? singleShotSelectionFromSdkConfig(config),
     hostBindingIdentity: hostBindingIdentity ?? null,
@@ -745,7 +775,7 @@ function singleShotDispatchBindingDetailForAttempt(
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
-      family: start.family,
+      family: start.executor,
       attempt: attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
@@ -756,12 +786,12 @@ function singleShotDispatchBindingDetailForAttempt(
 }
 
 function legacySingleShotDispatchBindingDetail(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
 ): string {
   return legacySingleShotDispatchBindingDetailForAttempt(
-    family,
+    executor,
     config,
     start,
     start.attemptNumber,
@@ -769,13 +799,13 @@ function legacySingleShotDispatchBindingDetail(
 }
 
 function legacySingleShotDispatchBindingDetailForAttempt(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   config: Readonly<SingleShotExecutorConfig>,
   start: SingleShotExecutorHostBindings["start"],
   attemptNumber: number,
 ): string {
   const payload = canonicalJson({
-    family,
+    family: executor,
     config,
     start: {
       // Frozen digest schema: the payload keys keep their pre-attempt-model
@@ -786,7 +816,7 @@ function legacySingleShotDispatchBindingDetailForAttempt(
       workflowRunId: start.workflowRunId,
       stepRunId: start.stepRunId,
       stepKey: start.stepKey,
-      family: start.family,
+      family: start.executor,
       attempt: attemptNumber,
       inputDigest: start.inputDigest,
       artifactRoot: start.artifactRoot,
@@ -899,11 +929,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Map the existing resolved selection into portable SDK config for the built-in. */
 export function singleShotSdkConfigFromSelection(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   selection: SingleShotRoundSelection,
 ): SingleShotExecutorConfig {
   const config: SingleShotExecutorConfig = {};
-  if (family === "one-shot") {
+  if (executor === "agent-once") {
     const agent: AgentExecutorConfig = {};
     if (selection.agentProvider !== null)
       agent.harness = selection.agentProvider;
@@ -938,16 +968,18 @@ export function singleShotSelectionFromSdkConfig(
 }
 
 function normalizeSingleShotMechanismResult(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   mechanism: unknown,
 ): SingleShotRoundMechanismResult {
   if (!isRecord(mechanism)) {
-    throw new Error(`Invalid ${family} mechanism output: expected an object.`);
+    throw new Error(
+      `Invalid ${executor} mechanism output: expected an object.`,
+    );
   }
   const outcome = mechanism["outcome"];
   if (!isRecord(outcome) || typeof outcome["ok"] !== "boolean") {
     throw new Error(
-      `Invalid ${family} mechanism output: outcome.ok must be a boolean.`,
+      `Invalid ${executor} mechanism output: outcome.ok must be a boolean.`,
     );
   }
   if (
@@ -956,12 +988,12 @@ function normalizeSingleShotMechanismResult(
       !SINGLE_SHOT_RECOVERY_CODE_SET.has(outcome["recoveryCode"]))
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: failed outcomes require a known recoveryCode.`,
+      `Invalid ${executor} mechanism output: failed outcomes require a known recoveryCode.`,
     );
   }
   if (outcome["ok"] === true && outcome["recoveryCode"] !== undefined) {
     throw new Error(
-      `Invalid ${family} mechanism output: successful outcomes must not carry recoveryCode.`,
+      `Invalid ${executor} mechanism output: successful outcomes must not carry recoveryCode.`,
     );
   }
   const normalizedOutcome: SingleShotAttemptOutcome =
@@ -979,7 +1011,7 @@ function normalizeSingleShotMechanismResult(
     (typeof summary !== "string" || summary.trim().length === 0)
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: summary must be a non-empty string.`,
+      `Invalid ${executor} mechanism output: summary must be a non-empty string.`,
     );
   }
   if (
@@ -988,35 +1020,37 @@ function normalizeSingleShotMechanismResult(
     (typeof resultDigest !== "string" || resultDigest.length === 0)
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: resultDigest must be a non-empty string or null.`,
+      `Invalid ${executor} mechanism output: resultDigest must be a non-empty string or null.`,
     );
   }
   const artifacts = normalizeSingleShotArtifacts(
-    family,
+    executor,
     mechanism["artifacts"],
   );
-  const evidence = normalizeSingleShotEvidence(family, mechanism["evidence"]);
+  const evidence = normalizeSingleShotEvidence(executor, mechanism["evidence"]);
   if (mechanism.resultDigest != null && mechanism.result == null) {
     throw new Error(
-      `Invalid ${family} mechanism output: resultDigest requires a result document.`,
+      `Invalid ${executor} mechanism output: resultDigest requires a result document.`,
     );
   }
-  if (family === "script" && result != null) {
+  if (executor === "script" && result != null) {
     throw new Error(
       "Invalid script mechanism output: script rounds must not capture a result document.",
     );
   }
-  if (family === "script" && artifacts?.resultDocument != null) {
+  if (executor === "script" && artifacts?.resultDocument != null) {
     throw new Error(
       "Invalid script mechanism output: script rounds must not report a result document artifact.",
     );
   }
   let normalizedResult: RunnerResult | null | undefined;
   if (result === null) normalizedResult = null;
-  if (family === "one-shot" && result !== undefined && result !== null) {
+  if (executor === "agent-once" && result !== undefined && result !== null) {
     const normalized = normalizeRunnerResult(result);
     if (!normalized.ok) {
-      throw new Error(`Invalid one-shot mechanism output: ${normalized.error}`);
+      throw new Error(
+        `Invalid agent-once mechanism output: ${normalized.error}`,
+      );
     }
     normalizedResult = normalized.value;
   }
@@ -1031,15 +1065,15 @@ function normalizeSingleShotMechanismResult(
     ...(evidence !== undefined ? { evidence } : {}),
   };
   if (!normalizedOutcome.ok) return normalizedMechanism;
-  if (family === "one-shot") {
+  if (executor === "agent-once") {
     if (result == null) {
       throw new Error(
-        "Invalid one-shot mechanism output: successful rounds require a result document.",
+        "Invalid agent-once mechanism output: successful rounds require a result document.",
       );
     }
     if (normalizedResult?.success !== true) {
       throw new Error(
-        "Invalid one-shot mechanism output: successful one-shot rounds require a successful result document.",
+        "Invalid agent-once mechanism output: successful agent-once rounds require a successful result document.",
       );
     }
     return normalizedMechanism;
@@ -1048,13 +1082,13 @@ function normalizeSingleShotMechanismResult(
 }
 
 function normalizeSingleShotArtifacts(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   value: unknown,
 ): SingleShotRoundArtifacts | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
     throw new Error(
-      `Invalid ${family} mechanism output: artifacts must be an object.`,
+      `Invalid ${executor} mechanism output: artifacts must be an object.`,
     );
   }
   const normalized: SingleShotRoundArtifacts = {};
@@ -1073,7 +1107,7 @@ function normalizeSingleShotArtifacts(
       pointer["path"].trim().length === 0
     ) {
       throw new Error(
-        `Invalid ${family} mechanism output: artifacts.${field}.path must be a non-empty string.`,
+        `Invalid ${executor} mechanism output: artifacts.${field}.path must be a non-empty string.`,
       );
     }
     for (const optional of ["digest", "description"] as const) {
@@ -1083,7 +1117,7 @@ function normalizeSingleShotArtifacts(
         typeof pointer[optional] !== "string"
       ) {
         throw new Error(
-          `Invalid ${family} mechanism output: artifacts.${field}.${optional} must be a string or null.`,
+          `Invalid ${executor} mechanism output: artifacts.${field}.${optional} must be a string or null.`,
         );
       }
     }
@@ -1101,13 +1135,13 @@ function normalizeSingleShotArtifacts(
 }
 
 function normalizeSingleShotEvidence(
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   value: unknown,
 ): SingleShotRoundEvidence | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
     throw new Error(
-      `Invalid ${family} mechanism output: evidence must be an object.`,
+      `Invalid ${executor} mechanism output: evidence must be an object.`,
     );
   }
   const verificationStatus = value["verificationStatus"];
@@ -1117,7 +1151,7 @@ function normalizeSingleShotEvidence(
     !["passed", "failed", "skipped"].includes(verificationStatus as string)
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: evidence.verificationStatus is invalid.`,
+      `Invalid ${executor} mechanism output: evidence.verificationStatus is invalid.`,
     );
   }
   const commitSha = value["commitSha"];
@@ -1127,7 +1161,7 @@ function normalizeSingleShotEvidence(
     typeof commitSha !== "string"
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: evidence.commitSha must be a string or null.`,
+      `Invalid ${executor} mechanism output: evidence.commitSha must be a string or null.`,
     );
   }
   const changedFiles = value["changedFiles"];
@@ -1137,7 +1171,7 @@ function normalizeSingleShotEvidence(
       changedFiles.some((entry) => typeof entry !== "string"))
   ) {
     throw new Error(
-      `Invalid ${family} mechanism output: evidence.changedFiles must be an array of strings.`,
+      `Invalid ${executor} mechanism output: evidence.changedFiles must be an array of strings.`,
     );
   }
   return {

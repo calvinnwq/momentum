@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CODING_WORKFLOW_DEFINITION,
-  WORKFLOW_EXECUTOR_FAMILIES,
+  WORKFLOW_EXECUTORS,
   listBuiltInWorkflowDefinitionKeys,
 } from "../src/core/workflow/definition/definition.js";
 import { readRepoFile, expectSpecSection } from "./helpers/repo-docs.js";
@@ -16,11 +16,10 @@ describe("workflow-first runtime contract", () => {
     expect(spec).toMatch(/\bworkflow-first runtime\b/i);
   });
 
-  it("pins the executor families from runtime constants", () => {
-    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
-      "goal-loop",
-      "one-shot",
-      "no-mistakes",
+  it("pins the executors from runtime constants", () => {
+    expect([...WORKFLOW_EXECUTORS]).toEqual([
+      "agent-loop",
+      "agent-once",
       "delegate-supervisor",
       "script",
       "external-apply",
@@ -34,16 +33,16 @@ describe("workflow-first runtime contract", () => {
       "preflight",
       "implementation",
       "postflight",
-      "no-mistakes",
+      "validate",
       "merge-cleanup",
-      "linear-refresh",
+      "tracker-refresh",
     ]);
     expect(
       CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor),
     ).toEqual([
-      "one-shot",
+      "agent-once",
       "delegate-supervisor",
-      "one-shot",
+      "agent-once",
       "delegate-supervisor",
       "script",
       "external-apply",

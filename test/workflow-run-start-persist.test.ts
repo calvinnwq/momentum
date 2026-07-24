@@ -6,16 +6,16 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
-  type WorkflowDefinition
+  type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
 import {
   WORKFLOW_RUN_START_SOURCE,
-  type WorkflowRunStartInput
+  type WorkflowRunStartInput,
 } from "../src/core/workflow/run/start.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
-  persistWorkflowRunStart
+  persistWorkflowRunStart,
 } from "../src/core/workflow/run/start-persist.js";
 
 const NOW = 1_700_000_000_000;
@@ -48,23 +48,23 @@ function twoStepDefinition(): WorkflowDefinition {
       {
         key: "implementation",
         kind: "implementation",
-        executor: "goal-loop",
+        executor: "agent-loop",
         order: 1,
-        required: true
+        required: true,
       },
       {
         key: "preflight",
         kind: "preflight",
-        executor: "one-shot",
+        executor: "agent-once",
         order: 0,
-        required: false
-      }
-    ]
+        required: false,
+      },
+    ],
   };
 }
 
 function baseInput(
-  overrides: Partial<WorkflowRunStartInput> = {}
+  overrides: Partial<WorkflowRunStartInput> = {},
 ): WorkflowRunStartInput {
   return {
     definition: twoStepDefinition(),
@@ -72,7 +72,7 @@ function baseInput(
     repoPath: "/repos/momentum",
     objective: "Implement NGX-346",
     now: NOW,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -97,9 +97,8 @@ type RunRow = {
 };
 
 function loadRunRow(db: MomentumDb, runId: string): RunRow | undefined {
-  return db
-    .prepare("SELECT * FROM workflow_runs WHERE id = ?")
-    .get(runId) as RunRow | undefined;
+  return db.prepare("SELECT * FROM workflow_runs WHERE id = ?").get(runId) as
+    RunRow | undefined;
 }
 
 type StepRow = {
@@ -115,7 +114,7 @@ type StepRow = {
 function loadStepRows(db: MomentumDb, runId: string): StepRow[] {
   return db
     .prepare(
-      "SELECT step_id, kind, state, step_order, required, created_at, updated_at FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id"
+      "SELECT step_id, kind, state, step_order, required, created_at, updated_at FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id",
     )
     .all(runId) as StepRow[];
 }
@@ -134,7 +133,7 @@ type ApprovalRow = {
 function loadApprovalRows(db: MomentumDb, runId: string): ApprovalRow[] {
   return db
     .prepare(
-      "SELECT run_id, boundary, actor, phrase, artifact_path, artifact_digest, recorded_at, discharged_at FROM workflow_approvals WHERE run_id = ? ORDER BY boundary"
+      "SELECT run_id, boundary, actor, phrase, artifact_path, artifact_digest, recorded_at, discharged_at FROM workflow_approvals WHERE run_id = ? ORDER BY boundary",
     )
     .all(runId) as ApprovalRow[];
 }
@@ -154,7 +153,7 @@ describe("persistWorkflowRunStart", () => {
         route: {},
         implementationEngine: null,
         stepCount: 2,
-        inserted: true
+        inserted: true,
       });
 
       const row = loadRunRow(db, "run-001");
@@ -190,27 +189,27 @@ describe("persistWorkflowRunStart", () => {
           kind: s.kind,
           state: s.state,
           step_order: s.step_order,
-          required: s.required
-        }))
+          required: s.required,
+        })),
       ).toEqual([
         {
           step_id: "preflight",
           kind: "preflight",
           state: "pending",
           step_order: 0,
-          required: 0
+          required: 0,
         },
         {
           step_id: "implementation",
           kind: "implementation",
           state: "pending",
           step_order: 1,
-          required: 1
-        }
+          required: 1,
+        },
       ]);
-      expect(steps.every((s) => s.created_at === NOW && s.updated_at === NOW)).toBe(
-        true
-      );
+      expect(
+        steps.every((s) => s.created_at === NOW && s.updated_at === NOW),
+      ).toBe(true);
     } finally {
       db.close();
     }
@@ -226,15 +225,17 @@ describe("persistWorkflowRunStart", () => {
           issueScope: { issues: ["NGX-346"] },
           route: { channel: "discord" },
           source: "operator-cli",
-          skillRevision: "abc123"
-        })
+          skillRevision: "abc123",
+        }),
       );
       expect(summary.definitionKey).toBe("coding-workflow");
       expect(summary.source).toBe("operator-cli");
       expect(summary.stepCount).toBe(CODING_WORKFLOW_DEFINITION.steps.length);
 
       const row = loadRunRow(db, "run-001");
-      expect(row?.issue_scope_json).toBe(JSON.stringify({ issues: ["NGX-346"] }));
+      expect(row?.issue_scope_json).toBe(
+        JSON.stringify({ issues: ["NGX-346"] }),
+      );
       expect(row?.route_json).toBe(JSON.stringify({ channel: "discord" }));
       expect(row?.skill_revision).toBe("abc123");
       expect(row?.source).toBe("operator-cli");
@@ -244,9 +245,9 @@ describe("persistWorkflowRunStart", () => {
         "preflight",
         "implementation",
         "postflight",
-        "no-mistakes",
+        "validate",
         "merge-cleanup",
-        "linear-refresh"
+        "tracker-refresh",
       ]);
     } finally {
       db.close();
@@ -260,8 +261,8 @@ describe("persistWorkflowRunStart", () => {
         db,
         baseInput({
           definition: CODING_WORKFLOW_DEFINITION,
-          approvalBoundary: "implementation"
-        })
+          approvalBoundary: "implementation",
+        }),
       );
       expect(summary.state).toBe("approved");
       expect(summary.approvalBoundary).toBe("implementation");
@@ -271,12 +272,12 @@ describe("persistWorkflowRunStart", () => {
       expect(row?.approval_boundary).toBe("implementation");
 
       const byKind = new Map(
-        loadStepRows(db, "run-001").map((s) => [s.kind, s.state])
+        loadStepRows(db, "run-001").map((s) => [s.kind, s.state]),
       );
       expect(byKind.get("preflight")).toBe("approved");
       expect(byKind.get("implementation")).toBe("approved");
       expect(byKind.get("postflight")).toBe("pending");
-      expect(byKind.get("no-mistakes")).toBe("pending");
+      expect(byKind.get("validate")).toBe("pending");
     } finally {
       db.close();
     }
@@ -290,8 +291,8 @@ describe("persistWorkflowRunStart", () => {
         baseInput({
           definition: CODING_WORKFLOW_DEFINITION,
           approvalBoundary: "implementation",
-          source: "operator-cli"
-        })
+          source: "operator-cli",
+        }),
       );
 
       const approvals = loadApprovalRows(db, "run-001");
@@ -303,7 +304,7 @@ describe("persistWorkflowRunStart", () => {
         phrase: "workflow run start --approval-boundary implementation",
         artifact_path: "workflow-run-start://run-001/implementation",
         recorded_at: NOW,
-        discharged_at: null
+        discharged_at: null,
       });
       expect(approvals[0]?.artifact_digest).toMatch(/^[a-f0-9]{64}$/);
     } finally {
@@ -322,7 +323,7 @@ describe("persistWorkflowRunStart", () => {
       }
       expect(thrown).toBeInstanceOf(InvalidWorkflowRunStartError);
       const codes = (thrown as InvalidWorkflowRunStartError).errors.map(
-        (e) => e.code
+        (e) => e.code,
       );
       expect(codes).toContain("definition_invalid");
       expect(codes).toContain("run_id_invalid");
@@ -345,7 +346,7 @@ describe("persistWorkflowRunStart", () => {
       try {
         persistWorkflowRunStart(
           db,
-          baseInput({ objective: "A different objective", now: NOW + 5000 })
+          baseInput({ objective: "A different objective", now: NOW + 5000 }),
         );
       } catch (error) {
         thrown = error;
@@ -362,9 +363,7 @@ describe("persistWorkflowRunStart", () => {
   });
 
   it("maps run insert uniqueness races to the run-start conflict error", () => {
-    const uniqueError = new Error(
-      "UNIQUE constraint failed: workflow_runs.id"
-    );
+    const uniqueError = new Error("UNIQUE constraint failed: workflow_runs.id");
     const fakeDb = {
       exec: vi.fn(),
       prepare: vi.fn((sql: string) => {
@@ -375,11 +374,11 @@ describe("persistWorkflowRunStart", () => {
           return {
             run: vi.fn(() => {
               throw uniqueError;
-            })
+            }),
           };
         }
         return { run: vi.fn() };
-      })
+      }),
     } as unknown as MomentumDb;
 
     let thrown: unknown;

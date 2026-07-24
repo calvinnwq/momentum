@@ -7,7 +7,7 @@
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * scheduler lane is owned separately by `src/core/workflow/dispatch/scheduler.ts`; the
- * native goal-loop and one-shot / script SDK paths plus the legacy no-mistakes
+ * native agent-loop and agent-once / script SDK paths plus the legacy no-mistakes
  * mirror and delegate-supervisor profile-backed paths layer on top of this
  * persistence spine,
  * exactly as `src/core/workflow/definition/persist.ts` is the storage twin of
@@ -304,7 +304,7 @@ export type PersistExecutorDefinitionSummary = {
  * the same `executorKey` is idempotent: `created_at` is preserved and
  * `updated_at` is bumped so callers can detect re-ingest.
  *
- * @throws {InvalidExecutorRecordError} if the record's family is unknown; no
+ * @throws {InvalidExecutorRecordError} if the record's executor is unknown; no
  * rows are written in that case.
  */
 export function persistExecutorDefinition(
@@ -329,11 +329,11 @@ export function persistExecutorDefinition(
 
     db.prepare(
       `INSERT INTO executor_definitions (
-         executor_key, family, agent_provider, model, effort,
+         executor_key, executor, agent_provider, model, effort,
          timeout_ms, max_rounds, policy_envelope, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(executor_key) DO UPDATE SET
-         family = excluded.family,
+         executor = excluded.executor,
          agent_provider = excluded.agent_provider,
          model = excluded.model,
          effort = excluded.effort,
@@ -343,7 +343,7 @@ export function persistExecutorDefinition(
          updated_at = excluded.updated_at`,
     ).run(
       record.executorKey,
-      record.family,
+      record.executor,
       record.agentProvider,
       record.model,
       record.effort,
@@ -369,7 +369,7 @@ export function loadExecutorDefinition(
 ): ExecutorDefinitionRecord | undefined {
   const row = db
     .prepare(
-      `SELECT executor_key, family, agent_provider, model, effort,
+      `SELECT executor_key, executor, agent_provider, model, effort,
               timeout_ms, max_rounds, policy_envelope
          FROM executor_definitions WHERE executor_key = ?`,
     )
@@ -377,7 +377,7 @@ export function loadExecutorDefinition(
   if (row === undefined) return undefined;
   return {
     executorKey: row.executor_key,
-    family: row.family as ExecutorName,
+    executor: row.executor as ExecutorName,
     agentProvider: row.agent_provider,
     model: row.model,
     effort: row.effort,
@@ -387,6 +387,20 @@ export function loadExecutorDefinition(
   };
 }
 
+/** Whether durable configuration claims an executor registration identity. */
+export function hasExecutorDefinition(
+  db: MomentumDb,
+  executorKey: string,
+): boolean {
+  return (
+    db
+      .prepare(
+        "SELECT 1 FROM executor_definitions WHERE executor_key = ? LIMIT 1",
+      )
+      .get(executorKey) !== undefined
+  );
+}
+
 export type InsertExecutorAttemptOptions = {
   now?: number;
 };
@@ -394,7 +408,7 @@ export type InsertExecutorAttemptOptions = {
 /**
  * Durably insert a new {@link ExecutorAttemptRecord}.
  *
- * @throws {InvalidExecutorRecordError} if the family/state is unknown.
+ * @throws {InvalidExecutorRecordError} if the executor/state is unknown.
  * @throws {ExecutorAttemptConflictError} if `attemptId` already exists; the
  * existing row is left untouched.
  */
@@ -411,7 +425,7 @@ export function insertExecutorAttempt(
   try {
     db.prepare(
       `INSERT INTO executor_attempts (
-         attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+         attempt_id, workflow_run_id, step_run_id, step_key, executor,
          state, attempt_number, started_at, heartbeat_at, finished_at,
          created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -420,7 +434,7 @@ export function insertExecutorAttempt(
       record.workflowRunId,
       record.stepRunId,
       record.stepKey,
-      record.executorFamily,
+      record.executor,
       record.state,
       record.attemptNumber,
       record.startedAt,
@@ -584,7 +598,7 @@ export type InsertExecutorRoundOptions = {
  * Lifecycle creates this row before external work runs; the result fields may be
  * empty at that point and captured later via {@link updateExecutorRound}.
  *
- * @throws {InvalidExecutorRecordError} if family/state/classification/human-gate
+ * @throws {InvalidExecutorRecordError} if executor/state/classification/human-gate
  * is unknown.
  * @throws {ExecutorRoundConflictError} if `roundId` or `(attemptId, roundIndex)`
  * already exists; the existing row is left untouched.
@@ -603,7 +617,7 @@ export function insertExecutorRound(
     db.prepare(
       `INSERT INTO executor_rounds (
          round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt_number, round_index, state, classification, executor_recommendation,
+         executor, attempt_number, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
@@ -620,7 +634,7 @@ export function insertExecutorRound(
       record.workflowRunId,
       record.stepRunId,
       record.stepKey,
-      record.executorFamily,
+      record.executor,
       record.attemptNumber,
       record.roundIndex,
       record.state,
@@ -1101,7 +1115,7 @@ export function listExecutorDecisionsForRound(
 
 type ExecutorDefinitionRow = {
   executor_key: string;
-  family: string;
+  executor: string;
   agent_provider: string | null;
   model: string | null;
   effort: string | null;
@@ -1115,7 +1129,7 @@ type ExecutorAttemptRow = {
   workflow_run_id: string;
   step_run_id: string;
   step_key: string;
-  executor_family: string;
+  executor: string;
   state: string;
   attempt_number: number;
   started_at: number | null;
@@ -1130,7 +1144,7 @@ type ExecutorRoundRow = {
   workflow_run_id: string;
   step_run_id: string;
   step_key: string;
-  executor_family: string;
+  executor: string;
   attempt_number: number;
   legacy_provenance: string | null;
   round_index: number;
@@ -1210,13 +1224,13 @@ type ExecutorDecisionRow = {
 
 const ATTEMPT_SELECT = `
   SELECT attempt_id, workflow_run_id, step_run_id, step_key,
-         executor_family, state, attempt_number, started_at, heartbeat_at,
+         executor, state, attempt_number, started_at, heartbeat_at,
          finished_at, updated_at
     FROM executor_attempts`;
 
 const ROUND_SELECT = `
   SELECT round_id, attempt_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt_number, round_index, state, classification, executor_recommendation,
+         executor, attempt_number, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
@@ -1254,7 +1268,7 @@ function rowToAttempt(row: ExecutorAttemptRow): ExecutorAttemptRecord {
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
-    executorFamily: row.executor_family as ExecutorName,
+    executor: row.executor as ExecutorName,
     state: row.state as ExecutorAttemptState,
     attemptNumber: row.attempt_number,
     startedAt: row.started_at,
@@ -1274,7 +1288,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     workflowRunId: row.workflow_run_id,
     stepRunId: row.step_run_id,
     stepKey: row.step_key,
-    executorFamily: row.executor_family as ExecutorName,
+    executor: row.executor as ExecutorName,
     attemptNumber: row.attempt_number,
     ...(legacyAttemptNumber !== undefined ? { legacyAttemptNumber } : {}),
     roundIndex: row.round_index,
@@ -1375,10 +1389,10 @@ function validateDefinitionRecord(
   record: ExecutorDefinitionRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isExecutorName(record.family)) {
+  if (!isExecutorName(record.executor)) {
     errors.push({
-      code: "executor_definition_unknown_family",
-      message: `unknown executor family: ${String(record.family)}`,
+      code: "executor_definition_unknown_executor",
+      message: `unknown executor: ${String(record.executor)}`,
     });
   }
   return errors;
@@ -1388,10 +1402,10 @@ function validateAttemptRecord(
   record: ExecutorAttemptRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isExecutorName(record.executorFamily)) {
+  if (!isExecutorName(record.executor)) {
     errors.push({
-      code: "executor_attempt_unknown_family",
-      message: `unknown executor family: ${String(record.executorFamily)}`,
+      code: "executor_attempt_unknown_executor",
+      message: `unknown executor: ${String(record.executor)}`,
     });
   }
   if (!ATTEMPT_STATE_SET.has(record.state)) {
@@ -1407,10 +1421,10 @@ function validateRoundRecord(
   record: ExecutorRoundRecord,
 ): ExecutorRecordValidationError[] {
   const errors: ExecutorRecordValidationError[] = [];
-  if (!isExecutorName(record.executorFamily)) {
+  if (!isExecutorName(record.executor)) {
     errors.push({
-      code: "executor_round_unknown_family",
-      message: `unknown executor family: ${String(record.executorFamily)}`,
+      code: "executor_round_unknown_executor",
+      message: `unknown executor: ${String(record.executor)}`,
     });
   }
   if (!ROUND_STATE_SET.has(record.state)) {

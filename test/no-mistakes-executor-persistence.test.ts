@@ -141,7 +141,7 @@ describe("no-mistakes mirror round persistence — round-start", () => {
     expect(round).not.toBeUndefined();
     // Born directly in the capture/mirror phase, not `running`.
     expect(round!.state).toBe("mirroring_external_state");
-    expect(round!.executorFamily).toBe("no-mistakes");
+    expect(round!.executor).toBe("no-mistakes");
     expect(round!.roundIndex).toBe(0);
     expect(round!.classification).toBeNull();
     // No-mistakes owns its own pipeline, so Momentum resolves no agent/model/effort

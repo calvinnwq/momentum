@@ -2,27 +2,27 @@
  * Single-shot executor adapter — decision brain and identity.
  *
  * The executor-loop contract (SPEC.md) pins two
- * single-attempt executor families that this module serves together:
+ * single-attempt executors that this module serves together:
  *
- *   - `one-shot` "runs a single result-bearing command or agent wrapper.
+ *   - `agent-once` "runs a single result-bearing command or agent wrapper.
  *     It may retry under policy, but it does not own an open-ended loop, and
  *     success requires a normalized result document."
  *   - `script` "runs deterministic local commands with explicit argv/env/cwd and
  *     bounded logs."
  *
- * Both families share the same control shape: one {@link ExecutorAttemptRecord} with
+ * Both executors share the same control shape: one {@link ExecutorAttemptRecord} with
  * exactly one {@link ExecutorRound}, no continue-loop and no round budget (a
  * retry is a fresh `attempt`, never a `continue`). They differ only in their
- * *mechanism* — `one-shot` requires a normalized {@link RunnerResult} document
+ * *mechanism* — `agent-once` requires a normalized {@link RunnerResult} document
  * (an agent/review pass) while `script` is exit-code based (a deterministic local
  * command) — which the mechanism / orchestrator twins layer on top, the same way
- * `goal-loop/mechanism.ts` / `goal-loop/orchestrator.ts` layer on
- * `goal-loop/executor.ts`. This module owns the *pure* half both
- * families share: the recovery taxonomy, the daemon classification of a single
+ * `agent-loop/mechanism.ts` / `agent-loop/orchestrator.ts` layer on
+ * `agent-loop/executor.ts`. This module owns the *pure* half both
+ * executors share: the recovery taxonomy, the daemon classification of a single
  * attempt, and the deterministic, reattachable attempt / round identity.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor attempt — exactly the discipline `goal-loop/executor.ts` and
+ * executor attempt — exactly the discipline `agent-loop/executor.ts` and
  * `loop/reducer.ts` follow.
  *
  * Classification, grounded in the contract's "Completion Classification"
@@ -50,13 +50,13 @@
  *     precise code, mirroring how `decideGoalLoopRound` treats unsafe finalize
  *     ambiguity: Momentum cannot safely proceed without operator inspection.
  *     `invalid_input` also covers pre-launch mechanism/config precondition
- *     failures such as a malformed `baseHead`, wrong executor family, or
+ *     failures such as a malformed `baseHead`, wrong executor identity, or
  *     non-absolute artifact / script paths.
  *
  * The recovery taxonomy reuses the existing vocabulary rather than inventing a
  * parallel one: the execution-time codes are exactly the live-wrapper
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}, and the unsafe-finalize codes are the
- * same strings `goal-loop/executor.ts` preserves for an unsafe finalize outcome,
+ * same strings `agent-loop/executor.ts` preserves for an unsafe finalize outcome,
  * plus `invalid_input` for rejected mechanism configuration or launch
  * preconditions.
  */
@@ -71,38 +71,37 @@ import type {
   ExecutorAttemptState,
   ExecutorRoundRecord,
   ExecutorRoundState,
-  WorkflowExecutorFamily,
+  WorkflowExecutor,
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../../adapters/live-step-wrapper.js";
 import type { RunnerResult } from "../runner/types.js";
 
 /**
- * The executor families this adapter serves: the single-attempt families from
- * the contract's "Executor Families" list. Pinned as the canonical set so the
- * mechanism / orchestrator twins and the family guard stay in sync.
+ * The executors this adapter serves: the single-attempt executors from
+ * the contract's executor list. Pinned as the canonical set so the
+ * mechanism / orchestrator twins and the executor guard stay in sync.
  */
-export const SINGLE_SHOT_EXECUTOR_FAMILIES = [
-  "one-shot",
+export const SINGLE_SHOT_EXECUTORS = [
+  "agent-once",
   "script",
-] as const satisfies readonly WorkflowExecutorFamily[];
+] as const satisfies readonly WorkflowExecutor[];
 
-export type SingleShotExecutorFamily =
-  (typeof SINGLE_SHOT_EXECUTOR_FAMILIES)[number];
+export type SingleShotExecutorName = (typeof SINGLE_SHOT_EXECUTORS)[number];
 
-const SINGLE_SHOT_FAMILY_SET: ReadonlySet<string> = new Set(
-  SINGLE_SHOT_EXECUTOR_FAMILIES,
+const SINGLE_SHOT_EXECUTOR_NAME_SET: ReadonlySet<string> = new Set(
+  SINGLE_SHOT_EXECUTORS,
 );
 
 /**
- * Whether an executor family is one this adapter drives. Lets the daemon route a
+ * Whether an executor name is one this adapter drives. Lets the daemon route a
  * `StepDefinition.executor` to the single-shot adapter without hard-coding the
  * two names at the call site.
  */
-export function isSingleShotExecutorFamily(
-  family: string,
-): family is SingleShotExecutorFamily {
-  return SINGLE_SHOT_FAMILY_SET.has(family);
+export function isSingleShotExecutorName(
+  executor: string,
+): executor is SingleShotExecutorName {
+  return SINGLE_SHOT_EXECUTOR_NAME_SET.has(executor);
 }
 
 /**
@@ -134,8 +133,8 @@ export const SINGLE_SHOT_FAILED_RECOVERY_CODES = [
  * Recovery codes that route to `manual_recovery_required`: an unsafe or
  * ambiguous repo-finalization outcome, or an invalid mechanism/config input that
  * Momentum must not retry away. Most are the same strings
- * `goal-loop/executor.ts` preserves for an unsafe finalize; `invalid_input` also
- * covers pre-launch guards such as bad family, malformed `baseHead`, or relative
+ * `agent-loop/executor.ts` preserves for an unsafe finalize; `invalid_input` also
+ * covers pre-launch guards such as bad executor, malformed `baseHead`, or relative
  * artifact / script paths.
  */
 export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
@@ -153,7 +152,7 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
  * record, partitioned by classification bucket. The execution-time codes
  * (`blocked` + `failed` buckets) are exactly the live-wrapper
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}; the manual-recovery codes are the
- * unsafe-finalize vocabulary shared with the goal-loop adapter, plus
+ * unsafe-finalize vocabulary shared with the agent-loop adapter, plus
  * `invalid_input` for rejected single-shot mechanism configuration and launch
  * preconditions.
  */
@@ -286,19 +285,19 @@ export function decideSingleShotAttempt(
 /**
  * Mint the deterministic, reattachable executor-attempt id for a single-shot
  * step run. The id embeds the `(workflowRunId, stepRunId)` step-run identity, the
- * executor `family`, and the `attempt`, so it is globally unique (the
+ * executor `executor`, and the `attempt`, so it is globally unique (the
  * `executor_attempts` primary key) yet recomputable from durable state alone
- * (contract "Heartbeat And Reattach"). Embedding the family keeps `one-shot` and
+ * (contract "Heartbeat And Reattach"). Embedding the executor keeps `agent-once` and
  * `script` ids distinct; a re-run of the same step is a fresh `attempt`, so it
  * never collides with the prior attempt.
  */
 export function singleShotAttemptId(
   workflowRunId: string,
   stepRunId: string,
-  family: SingleShotExecutorFamily,
+  executor: SingleShotExecutorName,
   attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${family}::${attemptNumber}`;
+  return `${workflowRunId}::${stepRunId}::${executor}::${attemptNumber}`;
 }
 
 /**
@@ -314,11 +313,11 @@ export function singleShotRoundId(attemptId: string): string {
 /**
  * The StepRun identity {@link planSingleShotAttempt} projects into a durable
  * single-shot {@link ExecutorAttemptRecord}: the `(workflowRunId, stepRunId)`
- * step run, the chosen single-shot `family`, the step key, the re-run `attempt`,
+ * step run, the chosen single-shot `executor`, the step key, the re-run `attempt`,
  * and the start clock the orchestrator owns.
  */
 export type PlanSingleShotAttemptInput = {
-  family: SingleShotExecutorFamily;
+  executor: SingleShotExecutorName;
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
@@ -342,13 +341,13 @@ export function planSingleShotAttempt(
     attemptId: singleShotAttemptId(
       input.workflowRunId,
       input.stepRunId,
-      input.family,
+      input.executor,
       input.attemptNumber,
     ),
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    executorFamily: input.family,
+    executor: input.executor,
     state: "running",
     attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
@@ -383,7 +382,7 @@ export type SingleShotSelectionSource =
   | "step_definition"
   | "workflow_definition"
   | "repository_policy"
-  | "executor_family_default"
+  | "executor_default"
   | "momentum_global_default";
 
 /** The winning precedence source for each resolved single-shot selection field. */
@@ -399,9 +398,9 @@ export type SingleShotSelectionFieldSources = {
  * The resolved agent / model / effort / timeout / policy a single-shot round runs
  * under (contract "Agent And Model Selection"), plus the precedence source that won
  * each field. A single shot owns no round budget, so — unlike
- * {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the `script` family
+ * {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the `script` executor
  * every field is naturally `null` (a deterministic local command has no agent); for
- * `one-shot` they carry the resolved agent attempt. The round-start record
+ * `agent-once` they carry the resolved agent attempt. The round-start record
  * freezes `agentProvider` / `model` / `effort` before the shot runs; `timeoutMs` /
  * `policyEnvelope` configure the owning attempt and its gates and are carried for
  * the mechanism / orchestrator twins. {@link resolveSingleShotRoundSelection}
@@ -418,15 +417,14 @@ export type SingleShotRoundSelection = {
 };
 
 /**
- * The single-shot executor family default selection (precedence level 4). The
- * `one-shot` / `script` families hold no opinion of their own yet — agent / model /
+ * The single-shot executor default selection (precedence level 4). The
+ * `agent-once` / `script` executors hold no opinion of their own yet — agent / model /
  * effort / timeout / policy come from the higher-precedence step / workflow / repo
  * config or fall through to the global floor below — so this is empty. It is the
- * documented hook for a future family-specific default without disturbing the
+ * documented hook for a future executor-specific default without disturbing the
  * resolver.
  */
-export const SINGLE_SHOT_FAMILY_DEFAULT_SELECTION: SingleShotSelectionConfig =
-  {};
+export const SINGLE_SHOT_DEFAULT_SELECTION: SingleShotSelectionConfig = {};
 
 /**
  * The Momentum global default selection (precedence level 5, the floor). Every
@@ -446,21 +444,21 @@ export const SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION: Required<SingleShotSelectionC
 /**
  * The layered configuration {@link resolveSingleShotRoundSelection} resolves, one
  * optional config per contract precedence level. An omitted level is treated the
- * same as an all-`undefined` config (it contributes nothing); `familyDefault` and
+ * same as an all-`undefined` config (it contributes nothing); `executorDefault` and
  * `globalDefault` fall back to the built-in single-shot defaults when omitted.
  */
 export type ResolveSingleShotRoundSelectionInput = {
   stepConfig?: SingleShotSelectionConfig;
   workflowConfig?: SingleShotSelectionConfig;
   repositoryPolicy?: SingleShotSelectionConfig;
-  familyDefault?: SingleShotSelectionConfig;
+  executorDefault?: SingleShotSelectionConfig;
   globalDefault?: SingleShotSelectionConfig;
 };
 
 /**
  * Resolve the deterministic selection a single-shot round runs under, per the
  * contract's "Agent And Model Selection" precedence (highest first):
- * step-definition > workflow-definition > repository-policy > executor-family
+ * step-definition > workflow-definition > repository-policy > executor-executor
  * default > momentum global default. Each field resolves independently to the first
  * level that provides it, where "provides" means the field is present (an explicit
  * value, including `null`); an omitted (`undefined`) field defers to the next level.
@@ -479,8 +477,8 @@ export function resolveSingleShotRoundSelection(
     { config: input.workflowConfig, source: "workflow_definition" },
     { config: input.repositoryPolicy, source: "repository_policy" },
     {
-      config: input.familyDefault ?? SINGLE_SHOT_FAMILY_DEFAULT_SELECTION,
-      source: "executor_family_default",
+      config: input.executorDefault ?? SINGLE_SHOT_DEFAULT_SELECTION,
+      source: "executor_default",
     },
     { config: input.globalDefault, source: "momentum_global_default" },
     {
@@ -513,7 +511,7 @@ export function resolveSingleShotRoundSelection(
 
 /**
  * The inputs to {@link planSingleShotRoundStart}: the daemon-owned round identity,
- * the single-shot `family`, the resolved {@link SingleShotRoundSelection}, the
+ * the single-shot `executor`, the resolved {@link SingleShotRoundSelection}, the
  * round's input digest / artifact root / optional log paths, and the start clock.
  * The orchestrator owns the ids / clock; this module owns projecting them into a
  * durable round record. A single attempt owns one round, while retry attempts use
@@ -525,7 +523,7 @@ export type PlanSingleShotRoundStartInput = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  family: SingleShotExecutorFamily;
+  executor: SingleShotExecutorName;
   attemptNumber: number;
   roundIndex?: number;
   selection: SingleShotRoundSelection;
@@ -541,8 +539,8 @@ export type PlanSingleShotRoundStartInput = {
  * external work (contract Round Lifecycle steps 2 and 4). The round starts `running`
  * at its daemon-owned global index (index 0 for a first attempt) with its agent / model / effort,
  * input digest, artifact root, and log paths copied in and empty result evidence;
- * the terminal projection fills the rest. The `family` is carried from the input —
- * unlike the goal-loop projection that hard-codes its one family — so a `one-shot`
+ * the terminal projection fills the rest. The `executor` is carried from the input —
+ * unlike the agent-loop projection that hard-codes its one executor — so a `agent-once`
  * and a `script` round are stamped distinctly. Pure: no ids or clock are invented
  * here — freezing the selection at start is the contract's "a later config edit must
  * not rewrite the historical record for an already-started round."
@@ -556,7 +554,7 @@ export function planSingleShotRoundStart(
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    executorFamily: input.family,
+    executor: input.executor,
     attemptNumber: input.attemptNumber,
     roundIndex: input.roundIndex ?? 0,
     state: "running",
@@ -599,7 +597,7 @@ export type SingleShotRoundRuntimeInputs = {
 
 /**
  * The inputs to {@link planSingleShotRoundStartForAttempt}: the materialized
- * single-shot attempt (whose identity and family the round inherits), the
+ * single-shot attempt (whose identity and executor the round inherits), the
  * resolved selection frozen into the round, the per-round runtime inputs, and the
  * round start clock. There is no round index — the single round is always index 0.
  */
@@ -614,25 +612,25 @@ export type PlanSingleShotRoundStartForAttemptInput = {
  * Project a materialized attempt + resolved selection + per-round runtime inputs
  * into the {@link PlanSingleShotRoundStartInput} for the single round. The round
  * inherits the attempt's `(workflowRunId, stepRunId, stepKey, attempt)` identity
- * and its single-shot family, takes the deterministic {@link singleShotRoundId}
+ * and its single-shot executor, takes the deterministic {@link singleShotRoundId}
  * (index 0), freezes the resolved selection, and copies in the round's input
  * digest / artifact root / log paths. Feed the result to
  * {@link planSingleShotRoundStart} to get the durable round-start record. Pure: the
  * caller owns the clock and the runtime inputs; this only wires identity. This is
  * the round-identity half of the adapter "below `StepRun`".
  *
- * @throws {Error} if the attempt's family is not a single-shot family — the round
- * must inherit a concrete `one-shot` / `script` family, never a foreign one (the
+ * @throws {Error} if the attempt's executor is not a single-shot executor — the round
+ * must inherit a concrete `agent-once` / `script` executor, never a foreign one (the
  * invariant {@link planSingleShotAttempt} establishes).
  */
 export function planSingleShotRoundStartForAttempt(
   input: PlanSingleShotRoundStartForAttemptInput,
 ): PlanSingleShotRoundStartInput {
   const { attempt, runtime } = input;
-  const family = attempt.executorFamily;
-  if (!isSingleShotExecutorFamily(family)) {
+  const executor = attempt.executor;
+  if (!isSingleShotExecutorName(executor)) {
     throw new Error(
-      `planSingleShotRoundStartForAttempt: attempt ${attempt.attemptId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`,
+      `planSingleShotRoundStartForAttempt: attempt ${attempt.attemptId} has non-single-shot executor ${executor}; the round must inherit a agent-once or script executor`,
     );
   }
   return {
@@ -641,7 +639,7 @@ export function planSingleShotRoundStartForAttempt(
     workflowRunId: attempt.workflowRunId,
     stepRunId: attempt.stepRunId,
     stepKey: attempt.stepKey,
-    family,
+    executor,
     attemptNumber: attempt.attemptNumber,
     selection: input.selection,
     inputDigest: runtime.inputDigest,
@@ -667,14 +665,14 @@ export type SingleShotArtifactPointer = {
  * The evidence pointers a finished single-shot round produced, one optional slot per
  * contract artifact class *except* `logs` — the orchestrator derives those from the
  * round-start record's frozen `logPaths`, which it already owns. The two single-shot
- * families differ in which slots they populate but share this one shape: the
- * `one-shot` family captures a normalized result document (a {@link RunnerResult}
- * file), so it fills `resultDocument`; the `script` family is exit-code based with
+ * executors differ in which slots they populate but share this one shape: the
+ * `agent-once` executor captures a normalized result document (a {@link RunnerResult}
+ * file), so it fills `resultDocument`; the `script` executor is exit-code based with
  * bounded logs and no required result file, so it typically leaves `resultDocument`
  * (and `checkpointStream`) absent and carries its evidence in `logs` and
  * `commitOrResetEvidence`. A missing/`null` slot means the round wrote no such
  * artifact; {@link planSingleShotRoundArtifacts} then records no row for that class
- * rather than inventing a path, so the projection needs no family parameter.
+ * rather than inventing a path, so the projection needs no executor parameter.
  */
 export type SingleShotRoundArtifacts = {
   resultDocument?: SingleShotArtifactPointer | null;
@@ -704,7 +702,7 @@ export type PlanSingleShotRoundArtifactsInput = {
  * are derived from the round-start record's frozen `logPaths` (the orchestrator owns
  * those); every other class comes from the pointer the mechanism reported, and an
  * absent/`null` pointer records no row rather than inventing a path — so a `script`
- * round (no result file) and a `one-shot` round (a captured result document) flow
+ * round (no result file) and a `agent-once` round (a captured result document) flow
  * through the same projection. Rows are minted with deterministic ids
  * (`<roundId>-<class>`, and `<roundId>-logs-<index>` for each bounded log) and
  * emitted in the contract {@link EXECUTOR_ARTIFACT_CLASSES} order so the durable
@@ -806,9 +804,9 @@ export type PlanSingleShotRoundCheckpointsInput = {
   roundId: string;
   outcome: SingleShotAttemptOutcome;
   /**
-   * Whether the round captured a normalized result document (the `one-shot` family
-   * does on success; the exit-code-based `script` family never does), so the
-   * projection stays family-agnostic — the caller, not a family parameter, decides.
+   * Whether the round captured a normalized result document (the `agent-once` executor
+   * does on success; the exit-code-based `script` executor never does), so the
+   * projection stays executor-agnostic — the caller, not a executor parameter, decides.
    */
   capturedResult: boolean;
   classification: ExecutorCompletionClassification;
@@ -831,18 +829,18 @@ export function planSingleShotRoundStartedCheckpoint(
  * Project a finished single-shot round's major executor stages into the durable
  * {@link ExecutorCheckpointRecord} stream the executor-loop persistence layer
  * (`insertExecutorCheckpoint`) writes — the contract "Round Lifecycle" step 7
- * "Capture ... checkpoints ..." for the single-shot families. These are the coarse
+ * "Capture ... checkpoints ..." for the single-shot executors. These are the coarse
  * stages Momentum itself drives around the bounded mechanism, so they are derived
  * mechanically (no product decision, no invented vocabulary): the round started, the
  * bounded mechanism finished (carrying its attempt outcome — `ok` or the precise
  * recovery code), the normalized result was captured (only when one was produced —
- * the `one-shot` family on success, never the exit-code-based `script` family), and
+ * the `agent-once` executor on success, never the exit-code-based `script` executor), and
  * the daemon classified the round (carrying its classification). The mechanism's own
  * fine-grained checkpoint stream is the separate `checkpoint_stream` artifact file
  * ({@link planSingleShotRoundArtifacts}); this stream is Momentum's queryable record
  * of how far the round got, useful for reattach when the round fields alone do not
  * say which stage was reached. Like {@link planSingleShotRoundArtifacts} this is
- * family-agnostic — `capturedResult` (not a family parameter) decides whether the
+ * executor-agnostic — `capturedResult` (not a executor parameter) decides whether the
  * `result_captured` stage appears. Checkpoints are minted with deterministic ids
  * (`<roundId>-checkpoint-<sequence>`) and sequenced from 0 so the `(round_id,
  * sequence)` uniqueness the persistence layer enforces always holds. Pure: no SQLite,
@@ -867,7 +865,7 @@ export function planSingleShotRoundCheckpoints(
   };
 
   // The single-shot mechanism reports either success or a precise recovery code;
-  // the mechanism stage carries that outcome the way the goal-loop stream carries
+  // the mechanism stage carries that outcome the way the agent-loop stream carries
   // its finalize outcome.
   const outcomeDetail = input.outcome.ok
     ? "attempt outcome: ok"
@@ -875,7 +873,7 @@ export function planSingleShotRoundCheckpoints(
 
   // Contract Round Lifecycle stages, in order: round created before external work,
   // bounded mechanism + normalized result, classification. A round that produced no
-  // result skips `result_captured` — the `script` family always, and any failed
+  // result skips `result_captured` — the `script` executor always, and any failed
   // round that routed straight from running to its terminal state.
   checkpoint("mechanism_completed", outcomeDetail);
   if (input.capturedResult) {
@@ -915,17 +913,17 @@ const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 
 /**
  * The inputs to {@link planSingleShotRoundPersistence}: the normalized
- * {@link SingleShotAttemptOutcome} the bounded mechanism reported, the one-shot
- * family's captured {@link RunnerResult} (omitted for the exit-code-based `script`
- * family and for any non-success outcome), the captured result's content digest,
+ * {@link SingleShotAttemptOutcome} the bounded mechanism reported, the agent-once
+ * executor's captured {@link RunnerResult} (omitted for the exit-code-based `script`
+ * executor and for any non-success outcome), the captured result's content digest,
  * and the verification / commit {@link SingleShotRoundEvidence} for the terminal
  * patch.
  */
 export type PlanSingleShotRoundPersistenceInput = {
   outcome: SingleShotAttemptOutcome;
   /**
-   * The normalized result document a one-shot success captured. The `script`
-   * family is exit-code based and captures no result document, so it omits this
+   * The normalized result document a agent-once success captured. The `script`
+   * executor is exit-code based and captures no result document, so it omits this
    * (or passes `null`); a non-success outcome captures nothing either way. Only
    * meaningful on a successful outcome — a result alongside a failure is ignored,
    * since a failed round records no capture.
@@ -953,8 +951,8 @@ export type SingleShotRoundPersistencePlan = {
   decision: SingleShotDecision;
   /**
    * The `capturing_result` patch, present on every successful outcome and `null`
-   * otherwise. The `one-shot` family fills it with the captured result; the
-   * `script` family (no result document) leaves it a bare capture transition — but
+   * otherwise. The `agent-once` executor fills it with the captured result; the
+   * `script` executor (no result document) leaves it a bare capture transition — but
    * a capture is still emitted, because the round transition graph forbids
    * `running -> succeeded` directly, so even a script success must pass through
    * `capturing_result`. A non-success outcome captures nothing and transitions from
@@ -973,14 +971,14 @@ export type SingleShotRoundPersistencePlan = {
  * Build the durable persistence plan for one finished single-shot round. Composes
  * {@link decideSingleShotAttempt} into the two round patches the orchestrator
  * applies, so the daemon decision and both patches derive from the same attempt
- * outcome (contract "Round Lifecycle" steps 7-10 for the single-shot families).
+ * outcome (contract "Round Lifecycle" steps 7-10 for the single-shot executors).
  *
  * The structural difference from `planGoalLoopRoundPersistence` is the capture
- * rule: goal-loop keys the capture on a non-null result, but a single shot keys it
- * on *success* — the exit-code-based `script` family succeeds with no result
+ * rule: agent-loop keys the capture on a non-null result, but a single shot keys it
+ * on *success* — the exit-code-based `script` executor succeeds with no result
  * document yet still needs the `capturing_result` transition to legally reach
  * `succeeded`, so a successful round always emits a capture (bare for `script`,
- * result-bearing for `one-shot`) while a non-success round emits none and
+ * result-bearing for `agent-once`) while a non-success round emits none and
  * transitions from `running` straight to its terminal abort state. Verification /
  * commit / changed-file evidence is stamped only when the mechanism reported it, so
  * a bare failure leaves the round-start record's null / empty fields in place. Pure:
@@ -1040,14 +1038,14 @@ export function planSingleShotRoundPersistence(
 
   // A successful single shot must reach `succeeded`, and the round transition graph
   // forbids running -> succeeded directly: the result must be captured first. So a
-  // success always emits a capture patch — result-bearing for the one-shot family,
-  // a bare transition for the script family (no result document). A non-success
+  // success always emits a capture patch — result-bearing for the agent-once executor,
+  // a bare transition for the script executor (no result document). A non-success
   // outcome captures nothing and transitions from running straight to its terminal.
   const captureUpdate: ExecutorRoundUpdate | null = input.outcome.ok
     ? {
         toState: "capturing_result",
         // Stamp the normalized result fields only when a result was captured (the
-        // one-shot family); a script success stays a bare capture.
+        // agent-once executor); a script success stays a bare capture.
         ...(input.result != null
           ? {
               summary: input.result.summary,

@@ -18,7 +18,7 @@ import {
  * Version 2 renamed the embedded gate anchor `invocationId` to `attemptId`
  * alongside the attempt/round model migration.
  */
-export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 2;
+export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 3;
 
 export type LoadWorkflowHandoffOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;

@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import { parseRunnerResult } from "../src/core/executors/runner/result.js";
-import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition/definition.js";
+import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
 import {
   EXECUTOR_ATTEMPT_STATES,
   EXECUTOR_ROUND_STATES,
 } from "../src/core/executors/loop/reducer.js";
 import { readRepoFile } from "./helpers/repo-docs.js";
 
-describe("native goal-loop contract docs", () => {
+describe("agent-loop contract docs", () => {
   const spec = readRepoFile("SPEC.md");
   const dataDirectory = readRepoFile("docs/data-directory.md");
   const workflowCommands = readRepoFile("docs/workflow-commands.md");
 
   it("defines attempt and round ownership below workflow steps", () => {
-    expect(spec).toContain("## Native Goal-Loop Contract");
+    expect(spec).toContain("## Agent-Loop Contract");
     expect(spec).toContain(
-      "`executor_attempt` is the whole autonomous goal-loop attempt for one workflow step",
+      "`executor_attempt` is the whole autonomous agent-loop attempt for one workflow step",
     );
     expect(spec).toContain(
       "`executor_round` is one durable iteration beneath that attempt",
@@ -53,7 +53,7 @@ describe("native goal-loop contract docs", () => {
       "cancelled",
     ]);
     expect(spec).toContain(
-      "Goal-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.",
+      "Agent-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.",
     );
     expect(spec).toContain(
       "`manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence",
@@ -71,13 +71,13 @@ describe("native goal-loop contract docs", () => {
     expect(parsed.value).toMatchObject({
       success: true,
       key_changes_made: [
-        "Added the native goal-loop runner result fixture.",
+        "Added the native agent-loop runner result fixture.",
         "Recorded durable evidence pointers for the round.",
       ],
       goal_complete: false,
       commit: {
         type: "feat",
-        scope: "goal-loop",
+        scope: "agent-loop",
         subject: "document native goal loop contract",
       },
     });
@@ -94,7 +94,7 @@ describe("native goal-loop contract docs", () => {
     expect(parsedWithoutOptionalArrays.value.key_learnings).toEqual([]);
     expect(parsedWithoutOptionalArrays.value.remaining_work).toEqual([]);
     expect(spec).toContain(
-      "The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema",
+      "The runner-authored result document consumed by the shipped agent-loop mechanism remains the normalized `RunnerResult` schema",
     );
     expect(spec).toContain(
       "`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.",
@@ -103,6 +103,9 @@ describe("native goal-loop contract docs", () => {
 
   it("freezes the post-finalization round evidence JSON fixture", () => {
     const fixture = JSON.parse(
+      readRepoFile("test/fixtures/native-agent-loop-round-evidence.json"),
+    ) as Record<string, unknown>;
+    const legacyFixture = JSON.parse(
       readRepoFile("test/fixtures/native-goal-loop-round-evidence.json"),
     ) as Record<string, unknown>;
 
@@ -122,7 +125,7 @@ describe("native goal-loop contract docs", () => {
       "remainingWork",
     ]);
     expect(fixture).toMatchObject({
-      schema: "momentum.native-goal-loop.round-result.v1",
+      schema: "momentum.native-agent-loop.round-result.v1",
       completionRecommendation: "continue",
       daemonClassification: "continue",
       verificationResult: {
@@ -137,8 +140,14 @@ describe("native goal-loop contract docs", () => {
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       recoveryReason: null,
     });
+    expect(legacyFixture.schema).toBe(
+      "momentum.native-goal-loop.round-result.v1",
+    );
     expect(spec).toContain(
-      "The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection",
+      "The canonical `momentum.native-agent-loop.round-result.v1` fixture is a post-finalization evidence projection",
+    );
+    expect(spec).toContain(
+      "The retained `momentum.native-goal-loop.round-result.v1` fixture remains readable only for frozen legacy artifacts",
     );
     expect(spec).toContain(
       "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.",
@@ -161,10 +170,10 @@ describe("native goal-loop contract docs", () => {
     }
 
     expect(dataDirectory).toContain(
-      "For native goal-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration",
+      "For native agent-loop, `executor_attempts` own the autonomous attempt and `executor_rounds` own each durable iteration",
     );
     expect(workflowCommands).toContain(
-      "Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth",
+      "Agent-loop log readers treat Momentum executor rows and child evidence as the source of truth",
     );
     expect(workflowCommands).toContain(
       "Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.",
@@ -172,15 +181,15 @@ describe("native goal-loop contract docs", () => {
   });
 
   it("preserves GNHF as source material or runner reference only", () => {
-    expect([...WORKFLOW_EXECUTOR_FAMILIES]).not.toContain("gnhf");
+    expect([...WORKFLOW_EXECUTORS]).not.toContain("gnhf");
     expect(spec).toContain(
-      "GNHF is source material, a compatibility reference, or an optional runner below `goal-loop`",
+      "GNHF is source material, a compatibility reference, or an optional runner below the legacy `goal-loop` spelling for retained definitions",
     );
     expect(spec).toContain(
       "`.gnhf/runs` is not Momentum's durable source of truth",
     );
     expect(spec).toContain(
-      "`gnhf` must not become a first-class executor family merely to reuse behavior",
+      "`gnhf` must not become a first-class executor merely to reuse behavior",
     );
   });
 });

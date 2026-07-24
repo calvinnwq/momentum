@@ -37,15 +37,15 @@ async function run(argv: string[]): Promise<RunResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -59,7 +59,7 @@ function writeLedger(filePath: string, lines: unknown[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(
     filePath,
-    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
   );
 }
 
@@ -75,68 +75,76 @@ function buildCompletedRunFixture(rootDir: string, runId: string): string {
     resolvedScope: {
       issues: ["NGX-314"],
       source: "explicit",
-      status: "resolved"
+      status: "resolved",
     },
     skillRevision: {
       contract: "coding-workflow-pipeline compact skill architecture",
       digest:
         "abc123def4560000000000000000000000000000000000000000000000000000",
       version: "2026.05.22.18",
-      schemaVersion: 1
+      schemaVersion: 1,
     },
     approvalsRequired: [
       "implementation",
       "postflight:1",
-      "no-mistakes",
-      "merge-cleanup"
+      "validate",
+      "merge-cleanup",
     ],
     taskFlow: {
       childTasks: [
         { stepId: "preflight" },
         { stepId: "implementation" },
         { stepId: "postflight:1" },
-        { stepId: "no-mistakes" },
-        { stepId: "merge-cleanup" }
-      ]
-    }
+        { stepId: "validate" },
+        { stepId: "merge-cleanup" },
+      ],
+    },
   });
   writeLedger(path.join(runDir, "ledger.jsonl"), [
-    { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+    {
+      runId,
+      step: "preflight",
+      status: "complete",
+      ts: "2026-05-17T10:00:00Z",
+    },
     {
       runId,
       step: "implementation",
       status: "started",
-      ts: "2026-05-17T10:01:00Z"
+      ts: "2026-05-17T10:01:00Z",
     },
     {
       runId,
       step: "implementation",
       status: "complete",
-      ts: "2026-05-17T10:30:00Z"
+      ts: "2026-05-17T10:30:00Z",
     },
     {
       runId,
       step: "postflight:1",
       status: "complete",
-      ts: "2026-05-17T10:35:00Z"
+      ts: "2026-05-17T10:35:00Z",
     },
     {
       runId,
-      step: "no-mistakes",
+      step: "validate",
       status: "complete",
-      ts: "2026-05-17T10:40:00Z"
+      ts: "2026-05-17T10:40:00Z",
     },
     {
       runId,
       step: "merge-cleanup",
       status: "complete",
-      ts: "2026-05-17T10:45:00Z"
-    }
+      ts: "2026-05-17T10:45:00Z",
+    },
   ]);
   return runDir;
 }
 
-function buildPendingApprovalRunFixture(rootDir: string, runId: string): string {
+function buildPendingApprovalRunFixture(
+  rootDir: string,
+  runId: string,
+): string {
   const runDir = path.join(rootDir, runId);
   writeJsonFile(path.join(runDir, "plan.json"), {
     runId,
@@ -148,19 +156,24 @@ function buildPendingApprovalRunFixture(rootDir: string, runId: string): string 
     resolvedScope: {
       issues: [],
       source: "explicit",
-      status: "resolved"
+      status: "resolved",
     },
     approvalsRequired: ["implementation"],
     taskFlow: {
       childTasks: [
         { stepId: "preflight" },
         { stepId: "implementation" },
-        { stepId: "postflight:1" }
-      ]
-    }
+        { stepId: "postflight:1" },
+      ],
+    },
   });
   writeLedger(path.join(runDir, "ledger.jsonl"), [
-    { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" }
+    {
+      runId,
+      step: "preflight",
+      status: "complete",
+      ts: "2026-05-17T10:00:00Z",
+    },
   ]);
   return runDir;
 }
@@ -180,7 +193,7 @@ describe("momentum workflow import", () => {
       "import",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -188,7 +201,7 @@ describe("momentum workflow import", () => {
       ok: false,
       command: "workflow import",
       code: "path_required",
-      diagnostics: []
+      diagnostics: [],
     });
   });
 
@@ -201,11 +214,11 @@ describe("momentum workflow import", () => {
       "--path",
       "/tmp/x",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain(
-      "Unexpected argument for workflow import: extra"
+      "Unexpected argument for workflow import: extra",
     );
   });
 
@@ -218,7 +231,7 @@ describe("momentum workflow import", () => {
       "/nonexistent/path/should/not/exist",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as Record<string, unknown>;
@@ -226,7 +239,7 @@ describe("momentum workflow import", () => {
       ok: false,
       command: "workflow import",
       code: "import_path_unreadable",
-      diagnostics: []
+      diagnostics: [],
     });
   });
 
@@ -243,7 +256,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
 
@@ -283,15 +296,15 @@ describe("momentum workflow import", () => {
       expect(runRow.source).toBe("agent-workflow");
       const stepRows = db
         .prepare(
-          "SELECT step_id FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+          "SELECT step_id FROM workflow_steps WHERE run_id = ? ORDER BY step_order",
         )
         .all(runId) as Array<{ step_id: string }>;
       expect(stepRows.map((r) => r.step_id)).toEqual([
         "preflight",
         "implementation",
         "postflight:1",
-        "no-mistakes",
-        "merge-cleanup"
+        "validate",
+        "merge-cleanup",
       ]);
     } finally {
       db.close();
@@ -311,7 +324,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(first.code).toBe(0);
     const firstPayload = JSON.parse(first.stdout) as {
@@ -328,7 +341,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(second.code).toBe(0);
     const secondPayload = JSON.parse(second.stdout) as {
@@ -342,7 +355,7 @@ describe("momentum workflow import", () => {
     try {
       const stepCount = db
         .prepare(
-          "SELECT COUNT(*) AS count FROM workflow_steps WHERE run_id = ?"
+          "SELECT COUNT(*) AS count FROM workflow_steps WHERE run_id = ?",
         )
         .get(runId) as { count: number };
       expect(stepCount.count).toBe(5);
@@ -369,7 +382,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(result.code).toBe(0);
 
@@ -398,7 +411,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(firstImport.code).toBe(0);
 
@@ -413,7 +426,7 @@ describe("momentum workflow import", () => {
       "approve implementation",
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(approval.code).toBe(0);
 
@@ -424,7 +437,7 @@ describe("momentum workflow import", () => {
       runDir,
       "--data-dir",
       dataDir,
-      "--json"
+      "--json",
     ]);
     expect(secondImport.code).toBe(0);
     const payload = JSON.parse(secondImport.stdout) as {

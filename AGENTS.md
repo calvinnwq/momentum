@@ -65,8 +65,9 @@ Momentum is a local-first runtime that makes agent-driven repo work durable for
 external users. Steps are resumable/idempotent, structured JSON and durable
 evidence beat terminal scraping, and side-effecting steps own their own
 `preflight -> apply -> reconcile` lifecycle. Every step names an executor (the
-schema still says "executor family"; the pre-1.0 nomenclature sweep drops the
-suffix and renames the values) that runs inside the same durable envelope; no
+pre-1.0 nomenclature sweep has landed: the schema says "executor" and the
+built-in values use the renamed vocabulary) that runs inside the same durable
+envelope; no
 single executor is the product identity. Each step dispatches attempts, and
 attempts accumulate rounds. Surfaces may break freely before 1.0; durable state
 always migrates in place.

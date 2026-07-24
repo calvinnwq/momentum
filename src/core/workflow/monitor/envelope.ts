@@ -45,9 +45,11 @@ import type { WorkflowRunState, WorkflowStepState } from "../run/reducer.js";
 
 /**
  * Version 2 renamed the embedded gate anchor `invocationId` to `attemptId`
- * alongside the attempt/round model migration.
+ * alongside the attempt/round model migration. Version 3 adopted the renamed
+ * built-in step-kind vocabulary (`validate`, `tracker-refresh`) and approval
+ * boundaries (`validate`, `through-validate`).
  */
-export const WORKFLOW_MONITOR_SCHEMA_VERSION = 2;
+export const WORKFLOW_MONITOR_SCHEMA_VERSION = 3;
 
 /**
  * The three decisions the monitor runner makes from one envelope:

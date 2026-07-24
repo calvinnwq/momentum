@@ -65,6 +65,36 @@ describe("persistWorkflowDefinition", () => {
     }
   });
 
+  it("re-persists a loaded retained built-in definition", () => {
+    const db = openTempDb();
+    try {
+      seedBuiltInWorkflowDefinitions(db, { now: 1000 });
+      const loaded = loadWorkflowDefinition(
+        db,
+        CODING_WORKFLOW_DEFINITION_V1.key,
+        CODING_WORKFLOW_DEFINITION_V1.version,
+      );
+
+      expect(loaded).toEqual(CODING_WORKFLOW_DEFINITION_V1);
+      expect(
+        persistWorkflowDefinition(db, loaded, { now: 2000 }),
+      ).toMatchObject({
+        key: CODING_WORKFLOW_DEFINITION_V1.key,
+        version: CODING_WORKFLOW_DEFINITION_V1.version,
+        inserted: false,
+      });
+      expect(
+        loadWorkflowDefinition(
+          db,
+          CODING_WORKFLOW_DEFINITION_V1.key,
+          CODING_WORKFLOW_DEFINITION_V1.version,
+        ),
+      ).toEqual(CODING_WORKFLOW_DEFINITION_V1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("reports inserted=true on first persist and inserted=false on re-persist", () => {
     const db = openTempDb();
     try {
@@ -177,6 +207,34 @@ describe("persistWorkflowDefinition", () => {
     }
   });
 
+  it("rejects retired step kinds on new definitions", () => {
+    const db = openTempDb();
+    try {
+      const legacy = {
+        key: "custom-legacy-workflow",
+        title: "Custom legacy workflow",
+        version: 1,
+        steps: [
+          {
+            key: "validate",
+            kind: "no-mistakes",
+            executor: "no-mistakes",
+            order: 0,
+            required: true,
+          },
+        ],
+      };
+
+      expect(() =>
+        persistWorkflowDefinition(db, legacy, { now: 1000 }),
+      ).toThrow(InvalidWorkflowDefinitionError);
+      expect(countDefinitionRows(db, legacy.key)).toBe(0);
+      expect(loadWorkflowDefinition(db, legacy.key)).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("stores distinct versions of the same key and loads the latest by default", () => {
     const db = openTempDb();
     try {
@@ -188,7 +246,7 @@ describe("persistWorkflowDefinition", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "one-shot",
+            executor: "agent-once",
             order: 0,
             required: true,
           },
@@ -220,14 +278,14 @@ describe("persistWorkflowDefinition", () => {
           {
             key: "preflight",
             kind: "preflight",
-            executor: "one-shot",
+            executor: "agent-once",
             order: 0,
             required: true,
           },
           {
             key: "implementation",
             kind: "implementation",
-            executor: "goal-loop",
+            executor: "agent-loop",
             order: 1,
             required: true,
           },
@@ -269,7 +327,7 @@ describe("seedBuiltInWorkflowDefinitions", () => {
       const second = seedBuiltInWorkflowDefinitions(db, { now: 2000 });
       expect(second.every((s) => s.inserted)).toBe(false);
 
-      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(2);
+      expect(countDefinitionRows(db, CODING_WORKFLOW_DEFINITION.key)).toBe(3);
       expect(
         loadWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION.key),
       ).toEqual(CODING_WORKFLOW_DEFINITION);
@@ -299,7 +357,7 @@ describe("listWorkflowDefinitionKeys", () => {
             {
               key: "preflight",
               kind: "preflight",
-              executor: "one-shot",
+              executor: "agent-once",
               order: 0,
               required: true,
             },
@@ -317,7 +375,7 @@ describe("listWorkflowDefinitionKeys", () => {
             {
               key: "preflight",
               kind: "preflight",
-              executor: "one-shot",
+              executor: "agent-once",
               order: 0,
               required: true,
             },

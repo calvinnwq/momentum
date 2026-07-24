@@ -32,13 +32,13 @@
  *     "Round Lifecycle"): `succeeded` is unreachable straight from `pending` /
  *     `running` and must pass through `capturing_result` /
  *     `mirroring_external_state` (with optional `finalizing`). Result-bearing
- *     families capture a normalized result or mirrored external state there;
- *     the `script` family may use `capturing_result` as a bare transition for
+ *     executors capture a normalized result or mirrored external state there;
+ *     the `script` executor may use `capturing_result` as a bare transition for
  *     exit-code-plus-log success.
  *   - An attempt must `preparing` before it can `running` (resolve agent /
  *     model / leases first), mirroring the step reducer's
  *     pending -> approved -> running ordering.
- *   - `executorFamily` reuses the {@link WorkflowExecutorFamily}
+ *   - `executor` reuses the {@link ExecutorName}
  *     vocabulary so executor-loop records stay wire-compatible with
  *     `StepDefinition.executor`.
  */
@@ -48,7 +48,7 @@ import type { TransitionResult } from "../../workflow/run/reducer.js";
 
 export type {
   ExecutorName,
-  WorkflowExecutorFamily,
+  WorkflowExecutor,
 } from "../../workflow/definition/definition.js";
 
 /**
@@ -243,7 +243,7 @@ export type ExecutorHumanGateType = (typeof EXECUTOR_HUMAN_GATE_TYPES)[number];
  * Artifact classes a round can write or mirror (contract "Required Artifacts").
  * Artifact paths are evidence pointers; SQLite stays the source of truth for
  * state and classification. One entry per contract bullet, in order: the
- * normalized result document when the family emits one (the `script` family does
+ * normalized result document when the executor emits one (the `script` executor does
  * not on success), bounded logs, the checkpoint stream, verification output,
  * commit/reset evidence after repo finalization, and the recovery note when
  * manual recovery is required.
@@ -313,8 +313,8 @@ const ROUND_ALLOWED: Readonly<
     "waiting_operator",
     ...ROUND_ABORTS,
   ],
-  // No direct `succeeded`: result-bearing families must capture a result or
-  // mirror external state first. The script family still passes through the
+  // No direct `succeeded`: result-bearing executors must capture a result or
+  // mirror external state first. The script executor still passes through the
   // capture state, but as a bare exit-code/log capture with no result document.
   running: [
     "capturing_result",
@@ -455,7 +455,7 @@ export function transitionExecutorRound(
  */
 export type ExecutorDefinitionRecord = {
   executorKey: string;
-  family: ExecutorName;
+  executor: ExecutorName;
   agentProvider: string | null;
   model: string | null;
   effort: string | null;
@@ -476,7 +476,7 @@ export type ExecutorAttemptRecord = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  executorFamily: ExecutorName;
+  executor: ExecutorName;
   state: ExecutorAttemptState;
   attemptNumber: number;
   startedAt: number | null;
@@ -502,7 +502,7 @@ export type ExecutorRoundRecord = {
   workflowRunId: string;
   stepRunId: string;
   stepKey: string;
-  executorFamily: ExecutorName;
+  executor: ExecutorName;
   attemptNumber: number;
   legacyAttemptNumber?: number;
   roundIndex: number;

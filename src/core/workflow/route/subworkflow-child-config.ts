@@ -1,6 +1,6 @@
 /**
  * Production child-definition config + recursion-safety decider for the
- * `subworkflow` executor family.
+ * `subworkflow` executor.
  *
  * The daemon-dispatchable `subworkflow` *mechanism* landed first — the
  * pure child-mirror mapping (`dispatch/subworkflow.ts`), the async producer
@@ -9,7 +9,7 @@
  * "open decision" was unresolved: *what configures a production `subworkflow`
  * step's child run, and what keeps recursion bounded?* This module owns exactly
  * that keystone decision. It does not itself touch
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; the production lane
+ * `PHASE1_DISPATCHABLE_EXECUTORS` or wire any daemon lane; the production lane
  * flipped `subworkflow` into that allowlist and wired the production
  * lane that composes this decision once the configured lane was proven.
  *
@@ -80,7 +80,7 @@ export const SUBWORKFLOW_CHILD_CONFIG_REFUSALS = [
   "missing_child_config",
   "child_definition_key_invalid",
   "child_definition_version_invalid",
-  "max_depth_invalid"
+  "max_depth_invalid",
 ] as const;
 export type SubworkflowChildConfigRefusal =
   (typeof SUBWORKFLOW_CHILD_CONFIG_REFUSALS)[number];
@@ -117,7 +117,7 @@ export type SubworkflowParentLineage = {
 export const SUBWORKFLOW_CHILD_LAUNCH_REFUSALS = [
   "self_reference",
   "ancestry_cycle",
-  "max_depth_exceeded"
+  "max_depth_exceeded",
 ] as const;
 export type SubworkflowChildLaunchRefusal =
   (typeof SUBWORKFLOW_CHILD_LAUNCH_REFUSALS)[number];
@@ -148,14 +148,14 @@ function isPositiveInteger(value: unknown): value is number {
  * `subworkflow` step can never silently dispatch without a child to run.
  */
 export function validateSubworkflowChildConfig(
-  value: unknown
+  value: unknown,
 ): SubworkflowChildConfigValidation {
   if (!isPlainObject(value)) {
     return {
       ok: false,
       refusal: "missing_child_config",
       reason:
-        "Subworkflow step has no child-definition config; routing to manual recovery."
+        "Subworkflow step has no child-definition config; routing to manual recovery.",
     };
   }
 
@@ -168,7 +168,7 @@ export function validateSubworkflowChildConfig(
       ok: false,
       refusal: "child_definition_key_invalid",
       reason:
-        "Subworkflow child config childDefinitionKey must be a non-empty string; routing to manual recovery."
+        "Subworkflow child config childDefinitionKey must be a non-empty string; routing to manual recovery.",
     };
   }
 
@@ -178,7 +178,7 @@ export function validateSubworkflowChildConfig(
       ok: false,
       refusal: "max_depth_invalid",
       reason:
-        "Subworkflow child config maxDepth must be a positive integer; routing to manual recovery."
+        "Subworkflow child config maxDepth must be a positive integer; routing to manual recovery.",
     };
   }
 
@@ -188,7 +188,7 @@ export function validateSubworkflowChildConfig(
       ok: false,
       refusal: "child_definition_version_invalid",
       reason:
-        "Subworkflow child config childDefinitionVersion must be a positive integer; routing to manual recovery."
+        "Subworkflow child config childDefinitionVersion must be a positive integer; routing to manual recovery.",
     };
   }
 
@@ -197,8 +197,8 @@ export function validateSubworkflowChildConfig(
     config: {
       childDefinitionKey: childDefinitionKey.trim(),
       childDefinitionVersion,
-      maxDepth: rawMaxDepth ?? DEFAULT_SUBWORKFLOW_MAX_DEPTH
-    }
+      maxDepth: rawMaxDepth ?? DEFAULT_SUBWORKFLOW_MAX_DEPTH,
+    },
   };
 }
 
@@ -211,7 +211,7 @@ export function validateSubworkflowChildConfig(
  */
 export function planSubworkflowChildLaunch(
   config: SubworkflowChildDefinitionConfig,
-  parentLineage: SubworkflowParentLineage
+  parentLineage: SubworkflowParentLineage,
 ): SubworkflowChildLaunchPlan {
   const { childDefinitionKey, childDefinitionVersion, maxDepth } = config;
 
@@ -221,7 +221,7 @@ export function planSubworkflowChildLaunch(
       refusal: "self_reference",
       reason:
         `Subworkflow child definition '${childDefinitionKey}' is the parent run's own ` +
-        "definition (self-reference); routing to manual recovery."
+        "definition (self-reference); routing to manual recovery.",
     };
   }
 
@@ -231,7 +231,7 @@ export function planSubworkflowChildLaunch(
       refusal: "ancestry_cycle",
       reason:
         `Subworkflow child definition '${childDefinitionKey}' already appears in the parent's ` +
-        "subworkflow ancestry (recursion cycle); routing to manual recovery."
+        "subworkflow ancestry (recursion cycle); routing to manual recovery.",
     };
   }
 
@@ -245,7 +245,7 @@ export function planSubworkflowChildLaunch(
       refusal: "max_depth_exceeded",
       reason:
         `Subworkflow child '${childDefinitionKey}' would nest to depth ${childDepth}, ` +
-        `past the configured maxDepth ${maxDepth}; routing to manual recovery.`
+        `past the configured maxDepth ${maxDepth}; routing to manual recovery.`,
     };
   }
 
@@ -254,6 +254,6 @@ export function planSubworkflowChildLaunch(
     childDefinitionKey,
     childDefinitionVersion,
     childDepth,
-    maxDepth
+    maxDepth,
   };
 }

@@ -49,7 +49,7 @@ export function createExternalApplyWorkflowDispatch(
       claim.runId,
       claim.stepId,
     );
-    if (attempt?.executorFamily !== "external-apply") return result;
+    if (attempt?.executor !== "external-apply") return result;
 
     try {
       const terminalReentry =

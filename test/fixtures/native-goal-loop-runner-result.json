@@ -2,7 +2,7 @@
   "success": true,
   "summary": "Implemented one bounded slice and verified it locally.",
   "key_changes_made": [
-    "Added the native goal-loop runner result fixture.",
+    "Added the native agent-loop runner result fixture.",
     "Recorded durable evidence pointers for the round."
   ],
   "key_learnings": [
@@ -14,7 +14,7 @@
   "goal_complete": false,
   "commit": {
     "type": "feat",
-    "scope": "goal-loop",
+    "scope": "agent-loop",
     "subject": "document native goal loop contract",
     "body": "",
     "breaking": false

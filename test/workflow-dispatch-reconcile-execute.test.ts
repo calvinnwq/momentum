@@ -147,11 +147,11 @@ function insertRetryAttemptRow(
 ): void {
   db.prepare(
     `INSERT INTO executor_attempts
-       (attempt_id, workflow_run_id, step_run_id, step_key, executor_family,
+       (attempt_id, workflow_run_id, step_run_id, step_key, executor,
         state, attempt_number, started_at, heartbeat_at, finished_at,
         created_at, updated_at)
      SELECT workflow_run_id || '::' || step_run_id || '::attempt-' || ?,
-            workflow_run_id, step_run_id, step_key, executor_family,
+            workflow_run_id, step_run_id, step_key, executor,
             ?, ?, ?, ?, ?, ?, ?
        FROM executor_attempts
       WHERE attempt_id = ?`,
@@ -366,7 +366,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_attempts SET executor_family = 'subworkflow' WHERE attempt_id = ?",
+      "UPDATE executor_attempts SET executor = 'subworkflow' WHERE attempt_id = ?",
     ).run(dispatchAttemptId("preflight"));
     driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
@@ -404,7 +404,7 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
     db.prepare(
-      "UPDATE executor_attempts SET executor_family = 'fixture-executor' WHERE attempt_id = ?",
+      "UPDATE executor_attempts SET executor = 'fixture-executor' WHERE attempt_id = ?",
     ).run(dispatchAttemptId("preflight"));
     driveAttemptTerminal(db, "preflight", "succeeded");
     const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");

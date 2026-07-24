@@ -59,9 +59,9 @@ export async function driveExecutorTicks(
   if (initial === undefined) {
     throw new Error(`Executor attempt not found: ${input.attemptId}`);
   }
-  if (initial.executorFamily !== input.executor.name) {
+  if (initial.executor !== input.executor.name) {
     throw new Error(
-      `Registered executor ${input.executor.name} cannot drive attempt for ${initial.executorFamily}.`,
+      `Registered executor ${input.executor.name} cannot drive attempt for ${initial.executor}.`,
     );
   }
   const envelope = createDurableExecutorEnvelope({
@@ -127,7 +127,7 @@ export async function driveExecutorTicks(
               workflowRunId: afterThrow.attempt.workflowRunId,
               stepRunId: afterThrow.attempt.stepRunId,
               stepKey: afterThrow.attempt.stepKey,
-              executorFamily: afterThrow.attempt.executorFamily,
+              executor: afterThrow.attempt.executor,
               attemptNumber: afterThrow.attempt.attemptNumber,
               roundIndex: nextExecutorRoundIndex(
                 afterThrow.rounds.map((snapshot) => snapshot.round),

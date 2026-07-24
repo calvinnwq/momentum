@@ -1,8 +1,8 @@
 /**
- * Goal-loop executor adapter — round decision brain.
+ * Agent-loop executor adapter - round decision brain.
  *
  * The executor-loop contract (SPEC.md) pins the
- * `goal-loop` family as "bounded autonomous implementation rounds. It may
+ * `agent-loop` executor as "bounded autonomous implementation rounds. It may
  * continue across multiple rounds, but each round must have a normalized result,
  * finalization decision, and daemon classification." This module owns the
  * *daemon classification* half of one such round: given the executor's own
@@ -16,7 +16,7 @@
  * executor attempt - exactly the discipline `loop/reducer.ts` and
  * `shared/step-finalize.ts` follow. The durable orchestrator that creates the
  * attempt, inserts the round, runs the bounded mechanism, runs finalization,
- * and persists this decision is layered on top in `goal-loop/orchestrator.ts`,
+ * and persists this decision is layered on top in `agent-loop/orchestrator.ts`,
  * composed around the shared `shared/step-finalize.ts` transaction.
  *
  * Beyond the classification, this module also projects a finished round into the
@@ -35,7 +35,7 @@
  * already projects. {@link resolveGoalLoopRoundSelection} resolves the contract's
  * deterministic agent / model / effort / timeout / round-budget / policy
  * selection ("Agent And Model Selection") through the fixed precedence
- * step-definition > workflow-definition > repository-policy > executor-family
+ * step-definition > workflow-definition > repository-policy > executor
  * default > momentum global default, tracking the winning source per field so the
  * historical record is explainable. {@link planGoalLoopRoundStart} then projects
  * the resolved selection into the durable round-start {@link ExecutorRoundRecord}
@@ -78,14 +78,14 @@ import {
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundVerificationResult,
-  type WorkflowExecutorFamily,
+  type WorkflowExecutor,
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
 import type { FinalizeWorkflowStepFromResultFileResult } from "../shared/step-finalize.js";
 import type { RunnerResult } from "../runner/types.js";
 
 /**
- * The finalize outcomes a goal-loop round consumes: exactly the discriminant of
+ * The finalize outcomes a agent-loop round consumes: exactly the discriminant of
  * the shared `finalizeWorkflowStepFromResultFile` result, so the adapter and the
  * finalization transaction can never drift out of sync.
  */
@@ -144,7 +144,7 @@ export type DecideGoalLoopRoundInput = {
 };
 
 /**
- * The daemon's decision for one completed goal-loop round. `roundState` is the
+ * The daemon's decision for one completed agent-loop round. `roundState` is the
  * terminal state for the round attempt itself; `classification` is the contract
  * completion decision that drives the owning attempt/step; `continueLoop` is
  * the daemon's go/no-go for another round under the same attempt.
@@ -192,7 +192,7 @@ export type PlanGoalLoopRoundPersistenceInput = {
 };
 
 /**
- * A pure, durable persistence plan for one finished goal-loop round. The
+ * A pure, durable persistence plan for one finished agent-loop round. The
  * orchestrator applies {@link captureUpdate} (when present) then
  * {@link terminalUpdate} through `updateExecutorRound`, in that lifecycle order.
  * The decision and both patches are derived from a single finalize result, so
@@ -241,7 +241,7 @@ export type GoalLoopSelectionSource =
   | "step_definition"
   | "workflow_definition"
   | "repository_policy"
-  | "executor_family_default"
+  | "executor_default"
   | "momentum_global_default";
 
 /** The winning precedence source for each resolved selection field. */
@@ -274,14 +274,14 @@ export type GoalLoopRoundSelection = {
 /**
  * The layered configuration {@link resolveGoalLoopRoundSelection} resolves, one
  * optional config per contract precedence level. An omitted level is treated the
- * same as an all-`undefined` config (it contributes nothing); `familyDefault`
- * and `globalDefault` fall back to the built-in goal-loop defaults when omitted.
+ * same as an all-`undefined` config (it contributes nothing); `executorDefault`
+ * and `globalDefault` fall back to the built-in agent-loop defaults when omitted.
  */
 export type ResolveGoalLoopRoundSelectionInput = {
   stepConfig?: GoalLoopSelectionConfig;
   workflowConfig?: GoalLoopSelectionConfig;
   repositoryPolicy?: GoalLoopSelectionConfig;
-  familyDefault?: GoalLoopSelectionConfig;
+  executorDefault?: GoalLoopSelectionConfig;
   globalDefault?: GoalLoopSelectionConfig;
 };
 
@@ -308,7 +308,7 @@ export type PlanGoalLoopRoundStartInput = {
 
 /**
  * The StepRun identity {@link planGoalLoopAttempt} projects into a durable
- * goal-loop {@link ExecutorAttemptRecord}. This is the "below `StepRun`" half of
+ * agent-loop {@link ExecutorAttemptRecord}. This is the "below `StepRun`" half of
  * the adapter: one configured executor session for a `(workflowRunId, stepRunId)`
  * step run, materialized before any round runs. `attempt` distinguishes a re-run of
  * the same step (a fresh attempt, never a mutated one).
@@ -410,17 +410,17 @@ export type PlanGoalLoopRoundCheckpointsInput = {
   classification: ExecutorCompletionClassification;
 };
 
-/** The executor family this adapter implements. */
-const GOAL_LOOP_EXECUTOR_FAMILY: WorkflowExecutorFamily = "goal-loop";
+/** The executor identity this adapter implements. */
+const AGENT_LOOP_EXECUTOR: WorkflowExecutor = "agent-loop";
 
 /**
- * The goal-loop executor family default selection (precedence level 4). The
- * family holds no opinion of its own yet — agent/model/effort/timeout/budget come
+ * The agent-loop executor default selection (precedence level 4). The
+ * executor holds no opinion of its own yet — agent/model/effort/timeout/budget come
  * from the higher-precedence step / workflow / repo config or fall through to the
  * global floor below — so this is empty. It is the documented hook for a future
- * family-specific default without disturbing the resolver.
+ * executor-specific default without disturbing the resolver.
  */
-export const GOAL_LOOP_FAMILY_DEFAULT_SELECTION: GoalLoopSelectionConfig = {};
+export const GOAL_LOOP_DEFAULT_SELECTION: GoalLoopSelectionConfig = {};
 
 /**
  * The Momentum global default selection (precedence level 5, the floor). Every
@@ -454,7 +454,7 @@ const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
 ]);
 
 /**
- * Project a normalized runner result into the goal-loop recommendation. The
+ * Project a normalized runner result into the agent-loop recommendation. The
  * bounded round writes a {@link RunnerResult}; the daemon only needs its
  * `success` flag and `goal_complete` completion recommendation to classify.
  */
@@ -465,9 +465,9 @@ export function goalLoopRecommendationFromResult(
 }
 
 /**
- * Resolve the deterministic selection a goal-loop round runs under, per the
+ * Resolve the deterministic selection a agent-loop round runs under, per the
  * contract's "Agent And Model Selection" precedence (highest first):
- * step-definition > workflow-definition > repository-policy > executor-family
+ * step-definition > workflow-definition > repository-policy > executor
  * default > momentum global default. Each field resolves independently to the
  * first level that provides it, where "provides" means the field is present (an
  * explicit value, including `null`); an omitted (`undefined`) field defers to the
@@ -485,8 +485,8 @@ export function resolveGoalLoopRoundSelection(
     { config: input.workflowConfig, source: "workflow_definition" },
     { config: input.repositoryPolicy, source: "repository_policy" },
     {
-      config: input.familyDefault ?? GOAL_LOOP_FAMILY_DEFAULT_SELECTION,
-      source: "executor_family_default",
+      config: input.executorDefault ?? GOAL_LOOP_DEFAULT_SELECTION,
+      source: "executor_default",
     },
     { config: input.globalDefault, source: "momentum_global_default" },
     {
@@ -540,7 +540,7 @@ export function planGoalLoopRoundStart(
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    executorFamily: GOAL_LOOP_EXECUTOR_FAMILY,
+    executor: AGENT_LOOP_EXECUTOR,
     attemptNumber: input.attemptNumber,
     roundIndex: input.roundIndex,
     state: "running",
@@ -568,9 +568,9 @@ export function planGoalLoopRoundStart(
 }
 
 /**
- * Mint the deterministic, reattachable executor-attempt id for a goal-loop
+ * Mint the deterministic, reattachable executor-attempt id for a agent-loop
  * step run. The id embeds the `(workflowRunId, stepRunId)` step-run identity, the
- * `goal-loop` family, and the `attempt`, so it is globally unique (the
+ * `agent-loop` executor, and the `attempt`, so it is globally unique (the
  * `executor_attempts` primary key) yet recomputable from durable state alone —
  * the daemon can reattach to an in-flight attempt without a side table
  * (contract "Heartbeat And Reattach"). A re-run of the same step is a fresh
@@ -581,12 +581,12 @@ export function goalLoopAttemptId(
   stepRunId: string,
   attemptNumber: number,
 ): string {
-  return `${workflowRunId}::${stepRunId}::${GOAL_LOOP_EXECUTOR_FAMILY}::${attemptNumber}`;
+  return `${workflowRunId}::${stepRunId}::${AGENT_LOOP_EXECUTOR}::${attemptNumber}`;
 }
 
 /**
  * Mint the deterministic, reattachable round id for a 0-based round index under a
- * goal-loop attempt. The id embeds the attempt id and the index so it is
+ * agent-loop attempt. The id embeds the attempt id and the index so it is
  * globally unique (the `executor_rounds` primary key) and consistent with the
  * `(attempt_id, round_index)` uniqueness the persistence layer enforces.
  */
@@ -595,7 +595,7 @@ export function goalLoopRoundId(attemptId: string, roundIndex: number): string {
 }
 
 /**
- * Project a `StepRun` identity into the durable goal-loop
+ * Project a `StepRun` identity into the durable agent-loop
  * {@link ExecutorAttemptRecord} the orchestrator inserts before any round runs
  * (contract "State Model": `StepRun -> ExecutorAttempt -> ExecutorRound[]`).
  * This is the start of the adapter "below `StepRun`": one configured executor
@@ -615,7 +615,7 @@ export function planGoalLoopAttempt(
     workflowRunId: input.workflowRunId,
     stepRunId: input.stepRunId,
     stepKey: input.stepKey,
-    executorFamily: GOAL_LOOP_EXECUTOR_FAMILY,
+    executor: AGENT_LOOP_EXECUTOR,
     state: "running",
     attemptNumber: input.attemptNumber,
     startedAt: input.startedAt,
@@ -743,7 +743,7 @@ export function planGoalLoopRoundArtifacts(
  * Project a finished round's major executor stages into the durable
  * {@link ExecutorCheckpointRecord} stream the persistence layer
  * (`insertExecutorCheckpoint`) writes — the contract "Round Lifecycle" step 7
- * "Capture ... checkpoints ..." for the goal-loop family. These are the coarse
+ * "Capture ... checkpoints ..." for the agent-loop executor. These are the coarse
  * stages Momentum itself drives around the bounded mechanism, so they are derived
  * mechanically (no product decision, no invented vocabulary): the round started,
  * the bounded mechanism finished (carrying its finalize outcome), the normalized
@@ -790,7 +790,7 @@ export function planGoalLoopRoundCheckpoints(
 }
 
 /**
- * Build the durable persistence plan for one finished goal-loop round. Composes
+ * Build the durable persistence plan for one finished agent-loop round. Composes
  * {@link goalLoopRecommendationFromResult}, {@link decideGoalLoopRound}, and
  * {@link goalLoopFinalizeEvidenceFromResult} so the daemon decision and the two
  * round patches all derive from the same finalize result. See
@@ -881,7 +881,7 @@ function verificationResultsFromFinalize(
 }
 
 /**
- * Classify one completed goal-loop round. See the module doc for the boundaries
+ * Classify one completed agent-loop round. See the module doc for the boundaries
  * preserved. Pure: the same inputs always yield the same decision.
  *
  * @throws {Error} if `roundIndex` is not a non-negative integer, or `maxRounds`
@@ -906,7 +906,7 @@ export function decideGoalLoopRound(
       recoveryCode,
       humanGate: "manual_recovery_required",
       continueLoop: false,
-      reason: `goal-loop round finalize outcome ${finalizeOutcome} (${recoveryCode}) requires manual recovery before any further round`,
+      reason: `agent-loop round finalize outcome ${finalizeOutcome} (${recoveryCode}) requires manual recovery before any further round`,
     };
   }
 
@@ -928,7 +928,7 @@ export function decideGoalLoopRound(
         recoveryCode: null,
         humanGate: null,
         continueLoop: false,
-        reason: "goal-loop round committed and recommended completion",
+        reason: "agent-loop round committed and recommended completion",
       };
     }
     return continueOrExhaust({
@@ -976,7 +976,7 @@ function continueOrExhaust(input: {
       recoveryCode: null,
       humanGate: null,
       continueLoop: true,
-      reason: `goal-loop round ${progress}; another round remains in budget`,
+      reason: `agent-loop round ${progress}; another round remains in budget`,
     };
   }
   return {
@@ -985,7 +985,7 @@ function continueOrExhaust(input: {
     recoveryCode: null,
     humanGate: "quota_exhausted",
     continueLoop: false,
-    reason: `goal-loop round ${progress} and exhausted its round budget; operator decision required`,
+    reason: `agent-loop round ${progress} and exhausted its round budget; operator decision required`,
   };
 }
 
@@ -1017,7 +1017,7 @@ function resolveSelectionField<T extends string | number>(
 }
 
 /**
- * The recovery code a goal-loop round records for an unsafe finalize outcome.
+ * The recovery code a agent-loop round records for an unsafe finalize outcome.
  * `manual_recovery_required` is only ever raised by the finalizer's moved-HEAD
  * guard (`head_mismatch`); every other unsafe outcome already names its own code.
  */

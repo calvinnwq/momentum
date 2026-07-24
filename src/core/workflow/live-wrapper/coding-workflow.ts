@@ -7,7 +7,7 @@
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
  * executes the configured child command, and writes a normalized `RunnerResult`
- * to `MOMENTUM_RESULT_PATH`. The no-mistakes step additionally requires an
+ * to `MOMENTUM_RESULT_PATH`. The validate step additionally requires an
  * explicit selected-agent runner profile and validates the filtered environment,
  * executable path, and `HOME/.no-mistakes/config.yaml` YAML config before spawn.
  * Child commands report by exit status; this seam synthesizes durable
@@ -42,6 +42,7 @@ import {
   isExternalSideEffectTailStepKind,
   type WorkflowStepKind,
 } from "../run/reducer.js";
+import { canonicalWorkflowStepKind } from "../definition/legacy.js";
 
 export const CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR =
   "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG";
@@ -264,7 +265,7 @@ export function runCodingWorkflowLiveWrapper(
   }
 
   const childEnv = buildCodingWorkflowChildEnv(deps.env, stepConfig.envAllow);
-  if (stepKind === "no-mistakes") {
+  if (stepKind === "validate") {
     const runnerProfilePreflight = preflightNoMistakesRunnerProfile(
       stepConfig,
       childEnv,
@@ -382,7 +383,7 @@ export function classifyRecoverableNoMistakesRunnerFailure(
     "stdout" | "stderr" | "error" | "signal"
   >,
 ): string | null {
-  if (kind !== "no-mistakes") return null;
+  if (kind !== "validate") return null;
   if (result.error !== undefined || result.signal !== null) return null;
 
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -512,7 +513,7 @@ export function classifyTerminalNoMistakesWorkflowSuccess(
     "stdout" | "stderr" | "error" | "signal"
   >,
 ): string | null {
-  if (kind !== "no-mistakes") return null;
+  if (kind !== "validate") return null;
   if (result.error !== undefined || result.signal !== null) return null;
 
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -2130,20 +2131,31 @@ export function parseCodingWorkflowWrapperConfig(
     Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>
   > = {};
   if (isRecord(rawSteps)) {
-    for (const [kind, rawStep] of Object.entries(rawSteps)) {
-      if (!WORKFLOW_STEP_KIND_SET.has(kind)) {
+    const selectedSteps = new Map<
+      WorkflowStepKind,
+      { rawKind: string; rawStep: unknown }
+    >();
+    for (const [rawKind, rawStep] of Object.entries(rawSteps)) {
+      const kind = canonicalWorkflowStepKind(rawKind);
+      if (kind === undefined) {
         return {
           ok: false,
-          error: `Unsupported workflow step kind ${kind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`,
+          error: `Unsupported workflow step kind ${rawKind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`,
         };
       }
-      const parsedStep = parseStepConfig(
-        kind as WorkflowStepKind,
-        rawStep,
-        source,
-      );
+      const existing = selectedSteps.get(kind);
+      if (
+        existing !== undefined &&
+        (existing.rawKind === kind || rawKind !== kind)
+      ) {
+        continue;
+      }
+      selectedSteps.set(kind, { rawKind, rawStep });
+    }
+    for (const [kind, selected] of selectedSteps) {
+      const parsedStep = parseStepConfig(kind, selected.rawStep, source);
       if (!parsedStep.ok) return parsedStep;
-      steps[kind as WorkflowStepKind] = parsedStep.config;
+      steps[kind] = parsedStep.config;
     }
   }
 
@@ -2280,7 +2292,7 @@ function preflightNoMistakesRunnerProfile(
     return {
       ok: false,
       error:
-        "No no-mistakes runner profile is configured. Set wrapper config steps.no-mistakes.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes.",
+        "No no-mistakes runner profile is configured. Set wrapper config steps.validate.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes.",
     };
   }
 
@@ -2298,7 +2310,7 @@ function preflightNoMistakesRunnerProfile(
   if (!isExecutableFile(profile.agentPath)) {
     return {
       ok: false,
-      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.no-mistakes.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`,
+      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.validate.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`,
     };
   }
 
@@ -3075,18 +3087,18 @@ function readNoMistakesRunnerProfile(
 ):
   { ok: true; value?: NoMistakesRunnerProfile } | { ok: false; error: string } {
   if (value === undefined || value === null) {
-    if (kind !== "no-mistakes") return { ok: true };
+    if (kind !== "validate") return { ok: true };
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile` is required for the no-mistakes step.",
+        "Wrapper config `runner_profile` is required for the validate step.",
     };
   }
-  if (kind !== "no-mistakes") {
+  if (kind !== "validate") {
     return {
       ok: false,
       error:
-        "Wrapper config `runner_profile` is only supported for the no-mistakes step.",
+        "Wrapper config `runner_profile` is only supported for the validate step.",
     };
   }
   if (!isRecord(value)) {
@@ -3107,7 +3119,7 @@ function readNoMistakesRunnerProfile(
     value,
     allowed,
     {},
-    "steps.no-mistakes.runner_profile",
+    "steps.validate.runner_profile",
   );
   if (!unknown.ok) return unknown;
 
@@ -3318,12 +3330,12 @@ function defaultCommitType(kind: WorkflowStepKind): CommitType {
   switch (kind) {
     case "preflight":
     case "postflight":
-    case "no-mistakes":
+    case "validate":
       return "test";
     case "implementation":
       return "chore";
     case "merge-cleanup":
-    case "linear-refresh":
+    case "tracker-refresh":
       return "chore";
   }
 }

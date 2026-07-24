@@ -145,8 +145,8 @@ function makeDefinition(
   overrides: Partial<ExecutorDefinitionRecord> = {},
 ): ExecutorDefinitionRecord {
   return {
-    executorKey: "coding-goal-loop",
-    family: "goal-loop",
+    executorKey: "coding-agent-loop",
+    executor: "agent-loop",
     agentProvider: "claude",
     model: "claude-opus-4-8",
     effort: "high",
@@ -165,7 +165,7 @@ function makeAttempt(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     state: "pending",
     attemptNumber: 1,
     startedAt: null,
@@ -184,7 +184,7 @@ function makeRound(
     workflowRunId: "run-1",
     stepRunId: "step-1",
     stepKey: "implementation",
-    executorFamily: "goal-loop",
+    executor: "agent-loop",
     attemptNumber: 1,
     roundIndex: 0,
     state: "pending",
@@ -276,10 +276,10 @@ describe("persistExecutorDefinition", () => {
       const record = makeDefinition();
       const summary = persistExecutorDefinition(db, record, { now: 1000 });
       expect(summary).toEqual({
-        executorKey: "coding-goal-loop",
+        executorKey: "coding-agent-loop",
         inserted: true,
       });
-      expect(loadExecutorDefinition(db, "coding-goal-loop")).toEqual(record);
+      expect(loadExecutorDefinition(db, "coding-agent-loop")).toEqual(record);
     } finally {
       db.close();
     }
@@ -319,14 +319,14 @@ describe("persistExecutorDefinition", () => {
         .prepare(
           "SELECT count(*) AS c FROM executor_definitions WHERE executor_key = ?",
         )
-        .get("coding-goal-loop") as { c: number };
+        .get("coding-agent-loop") as { c: number };
       expect(rows.c).toBe(1);
 
       const row = db
         .prepare(
           "SELECT created_at, updated_at, model FROM executor_definitions WHERE executor_key = ?",
         )
-        .get("coding-goal-loop") as {
+        .get("coding-agent-loop") as {
         created_at: number;
         updated_at: number;
         model: string;
@@ -352,12 +352,13 @@ describe("persistExecutorDefinition", () => {
     const db = openTempDb();
     try {
       const bad = makeDefinition({
-        family: "NOT A VALID EXECUTOR" as ExecutorDefinitionRecord["family"],
+        executor:
+          "NOT A VALID EXECUTOR" as ExecutorDefinitionRecord["executor"],
       });
       expect(() => persistExecutorDefinition(db, bad)).toThrow(
         InvalidExecutorRecordError,
       );
-      expect(loadExecutorDefinition(db, "coding-goal-loop")).toBeUndefined();
+      expect(loadExecutorDefinition(db, "coding-agent-loop")).toBeUndefined();
     } finally {
       db.close();
     }
