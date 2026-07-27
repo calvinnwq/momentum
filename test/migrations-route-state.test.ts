@@ -17,7 +17,9 @@ import {
   projectLegacyWorkflowRunRoute,
 } from "../src/adapters/db/route-projection.js";
 import {
+  assertWorkflowRouteStatePlanCurrent,
   createRouteStateDestinations,
+  preScanRouteState,
   RouteStateMigrationError,
 } from "../src/adapters/db/route-state.js";
 import { canonicalWorkflowStepKind } from "../src/core/workflow/definition/legacy.js";
@@ -422,6 +424,44 @@ describe("workflow route-state migration", () => {
       ]);
     } finally {
       db.close();
+    }
+  });
+
+  it("preserves imported subworkflow lineage through canonical projection", () => {
+    const dataDir = seedReleasedFixture();
+    const expectedRoute = {
+      mode: "implementation",
+      profile: "fixture-import",
+      risk: "medium",
+      quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+      subworkflow: {
+        lineage: {
+          parentRunId: "subworkflow-parent",
+          parentStepId: "child-one",
+          depth: 1,
+          ancestorDefinitionKeys: ["fixture-parent"],
+        },
+      },
+    };
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = 'cwfp-imported'",
+      ).run(JSON.stringify(expectedRoute));
+    });
+
+    const migrated = openDb(dataDir);
+    migrated.close();
+    const canonical = openDb(dataDir);
+    try {
+      expect(
+        projectLegacyWorkflowRunRoute(canonical, "cwfp-imported", {
+          source: "agent-workflow",
+          definitionKey: null,
+          definitionVersion: null,
+        }),
+      ).toEqual(expectedRoute);
+    } finally {
+      canonical.close();
     }
   });
 
@@ -971,6 +1011,57 @@ describe("workflow route-state migration", () => {
     });
   });
 
+  it("refuses invalid route state before unrelated additive migration writes", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.exec("ALTER TABLE workflow_runs DROP COLUMN monitor_last_emitted_at");
+      db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = 'native-simple'",
+      ).run('{"unknown":true}');
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "native-simple",
+      jsonPath: "$.unknown",
+      code: "route_state_unknown_key",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(columnNames(after, "workflow_runs")).not.toContain(
+        "monitor_last_emitted_at",
+      );
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses a route plan whose source state changed after preflight", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      const plan = preScanRouteState(db);
+      const concurrent = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        concurrent
+          .prepare(
+            "UPDATE workflow_runs SET source = 'agent-workflow' WHERE id = 'native-simple'",
+          )
+          .run();
+      } finally {
+        concurrent.close();
+      }
+      let refusal: unknown;
+      try {
+        assertWorkflowRouteStatePlanCurrent(db, plan);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({
+        runId: "<database>",
+        jsonPath: "$",
+        code: "route_state_canonical_conflict",
+      });
+    });
+  });
+
   it("refuses malformed all-present destination schema before writes", () => {
     const dataDir = seedReleasedFixture();
     withRawDb(dataDir, (db) => {
@@ -1006,6 +1097,24 @@ describe("workflow route-state migration", () => {
       runId: "cwfp-imported",
       jsonPath: "$",
       code: "route_state_canonical_conflict",
+    });
+  });
+
+  it("refuses incomplete canonical subworkflow child fan-out", () => {
+    const dataDir = seedReleasedFixture();
+    const migrated = openDb(dataDir);
+    migrated.close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `UPDATE workflow_steps
+            SET executor_config_json = '{}'
+          WHERE run_id = 'subworkflow-parent' AND step_id = 'child-two'`,
+      ).run();
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "subworkflow-parent",
+      jsonPath: "$.subworkflow.child",
+      code: "route_state_projection_mismatch",
     });
   });
 });

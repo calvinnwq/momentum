@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   LEGACY_ROUTE_TOP_LEVEL_KEYS,
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
-  projectLegacyWorkflowRunRoute,
+  projectLegacyWorkflowRunRoutes,
   RouteStateProjectionError,
 } from "./route-projection.js";
 
@@ -217,6 +217,7 @@ type RouteRunPlan = {
 
 export type WorkflowRouteStatePlan = {
   runs: RouteRunPlan[];
+  dataVersion?: number;
 };
 
 export function validateWorkflowRouteShape(input: {
@@ -400,11 +401,13 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
         "all canonical destination objects already exist while legacy route_json still carries state",
     });
   }
+  validateCanonicalRouteState(db);
   return false;
 }
 
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
-  if (!hasRouteStateBaseTables(db)) return { runs: [] };
+  const dataVersion = databaseDataVersion(db);
+  if (!hasRouteStateBaseTables(db)) return { runs: [], dataVersion };
   const state = destinationSchemaState(db);
   if (
     state.malformed.length > 0 ||
@@ -423,13 +426,28 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
           "canonical destinations and non-empty legacy route state coexist",
       });
     }
-    return { runs: [] };
+    validateCanonicalRouteState(db);
+    return { runs: [], dataVersion };
   }
 
+  const definitionKeySelect = columnExists(
+    db,
+    "workflow_runs",
+    "workflow_definition_key",
+  )
+    ? "workflow_definition_key"
+    : "NULL AS workflow_definition_key";
+  const definitionVersionSelect = columnExists(
+    db,
+    "workflow_runs",
+    "workflow_definition_version",
+  )
+    ? "workflow_definition_version"
+    : "NULL AS workflow_definition_version";
   const rows = db
     .prepare(
-      `SELECT id, source, route_json, workflow_definition_key,
-              workflow_definition_version, created_at, updated_at
+      `SELECT id, source, route_json, ${definitionKeySelect},
+              ${definitionVersionSelect}, created_at, updated_at
          FROM workflow_runs
         ORDER BY id`,
     )
@@ -437,9 +455,27 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const plan = {
     runs: rows.map((row) => planRun(db, row, undefined, undefined, rowsById)),
+    dataVersion,
   };
   validateLineagePlans(db, plan, rowsById);
   return plan;
+}
+
+export function assertWorkflowRouteStatePlanCurrent(
+  db: MomentumDb,
+  plan: WorkflowRouteStatePlan,
+): void {
+  if (
+    plan.dataVersion !== undefined &&
+    databaseDataVersion(db) !== plan.dataVersion
+  ) {
+    throw new RouteStateMigrationError({
+      runId: "<database>",
+      jsonPath: "$",
+      code: "route_state_canonical_conflict",
+      detail: "database state changed after route migration preflight",
+    });
+  }
 }
 
 export function refreshWorkflowRouteStatePlan(
@@ -1272,12 +1308,17 @@ function assertProjectionEquivalence(
   db: MomentumDb,
   plan: WorkflowRouteStatePlan,
 ): void {
-  for (const item of plan.runs) {
-    const projected = projectLegacyWorkflowRunRoute(db, item.run.id, {
+  const projectedByRunId = projectLegacyWorkflowRunRoutes(
+    db,
+    plan.runs.map((item) => ({
+      runId: item.run.id,
       source: item.run.source,
       definitionKey: item.run.workflow_definition_key,
       definitionVersion: item.run.workflow_definition_version,
-    });
+    })),
+  );
+  for (const item of plan.runs) {
+    const projected = projectedByRunId.get(item.run.id);
     if (!isDeepStrictEqual(projected, item.parsedRoute)) {
       throw new RouteStateMigrationError({
         runId: item.run.id,
@@ -1286,6 +1327,34 @@ function assertProjectionEquivalence(
         detail: "canonical destinations do not reconstruct the legacy route",
       });
     }
+  }
+}
+
+function validateCanonicalRouteState(db: MomentumDb): void {
+  const runs = db
+    .prepare(
+      `SELECT id, source, workflow_definition_key, workflow_definition_version
+         FROM workflow_runs
+        ORDER BY id`,
+    )
+    .all() as Array<{
+    id: string;
+    source: string;
+    workflow_definition_key: string | null;
+    workflow_definition_version: number | null;
+  }>;
+  try {
+    projectLegacyWorkflowRunRoutes(
+      db,
+      runs.map((run) => ({
+        runId: run.id,
+        source: run.source,
+        definitionKey: run.workflow_definition_key,
+        definitionVersion: run.workflow_definition_version,
+      })),
+    );
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
   }
 }
 
@@ -1418,6 +1487,11 @@ function firstNonEmptyRoute(
         LIMIT 1`,
     )
     .get() as { id: string; route_json: string | null } | undefined;
+}
+
+function databaseDataVersion(db: MomentumDb): number {
+  return (db.prepare("PRAGMA data_version").get() as { data_version: number })
+    .data_version;
 }
 
 function hasRouteStateBaseTables(db: MomentumDb): boolean {

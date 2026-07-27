@@ -2,8 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 
 import {
   applyWorkflowRouteStateMigrationInTransaction,
+  assertWorkflowRouteStatePlanCurrent,
   preScanRouteState,
   refreshWorkflowRouteStatePlan,
+  type WorkflowRouteStatePlan,
 } from "./route-state.js";
 
 type MomentumDb = DatabaseSync;
@@ -1736,14 +1738,13 @@ function withNoMistakesMigrationProvenance(
 function migrateWorkflowVocabulary(
   db: MomentumDb,
   options: QueueMigrationOptions,
-  migrateRouteState = false,
+  routeStatePlan?: WorkflowRouteStatePlan,
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
-    const routeStatePlan = migrateRouteState
-      ? preScanRouteState(db)
-      : undefined;
-
+    if (routeStatePlan !== undefined) {
+      assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
+    }
     mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_definitions", "family");
@@ -2185,6 +2186,7 @@ export function applyQueueMigrations(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
 ): void {
+  const routeStatePlan = preScanRouteState(db);
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
   migrateLegacyExecutorInvocationSchema(db, options);
@@ -2268,7 +2270,7 @@ export function applyQueueMigrations(
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
   migratePartialLegacyExecutorInvocationSchema(db, options);
-  migrateWorkflowVocabulary(db, options, true);
+  migrateWorkflowVocabulary(db, options, routeStatePlan);
 }
 
 type PragmaColumnRow = { name: string };

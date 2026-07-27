@@ -88,8 +88,32 @@ export function projectLegacyWorkflowRunRoute(
            FROM workflow_run_import_metadata
           WHERE run_id = ?`,
       )
-      .get(runId) as ImportMetadataRow | undefined;
-    return projectImportedRouteFromRow(runId, row);
+      .get(runId) as Omit<ImportMetadataRow, "run_id"> | undefined;
+    const stepRows = db
+      .prepare(
+        `SELECT ws.step_id, ws.kind, ws.agent_config_json,
+                ws.executor_config_json,
+                CASE WHEN sd.executor = 'subworkflow' THEN 1 ELSE 0 END AS is_subworkflow
+           FROM workflow_steps AS ws
+           LEFT JOIN step_definitions AS sd
+             ON sd.definition_key = ?
+            AND sd.definition_version = ?
+            AND sd.step_key = ws.step_id
+          WHERE ws.run_id = ?
+          ORDER BY ws.step_order, ws.step_id`,
+      )
+      .all(run.definitionKey, run.definitionVersion, runId) as Array<
+      Omit<NativeStepRow, "run_id">
+    >;
+    const lineage = db
+      .prepare(
+        `SELECT parent_run_id, parent_step_id, depth,
+                ancestor_definition_keys_json
+           FROM workflow_run_lineage
+          WHERE run_id = ?`,
+      )
+      .get(runId) as Omit<LineageRow, "run_id"> | undefined;
+    return projectImportedRouteFromRows(runId, run, row, stepRows, lineage);
   }
 
   const compatibility = db
@@ -189,9 +213,12 @@ export function projectLegacyWorkflowRunRoutes(
     if (run.source === "agent-workflow") {
       projected.set(
         run.runId,
-        projectImportedRouteFromRow(
+        projectImportedRouteFromRows(
           run.runId,
+          run,
           importMetadataByRunId.get(run.runId),
+          stepRowsByRunId.get(run.runId) ?? [],
+          lineageByRunId.get(run.runId),
         ),
       );
       continue;
@@ -256,22 +283,31 @@ function projectNativeRouteFromRows(
   return route;
 }
 
-function projectImportedRouteFromRow(
+function projectImportedRouteFromRows(
   runId: string,
-  row: ImportMetadataRow | undefined,
+  run: WorkflowRunRouteProjectionSource,
+  row: Omit<ImportMetadataRow, "run_id"> | ImportMetadataRow | undefined,
+  stepRows: ReadonlyArray<Omit<NativeStepRow, "run_id"> | NativeStepRow>,
+  lineage: Omit<LineageRow, "run_id"> | LineageRow | undefined,
 ): Record<string, unknown> {
-  if (row === undefined) return {};
   const route: Record<string, unknown> = {};
-  if (row.mode !== null) route["mode"] = row.mode;
-  if (row.profile !== null) route["profile"] = row.profile;
-  if (row.risk !== null) route["risk"] = row.risk;
-  if (row.quota_policy_json !== null) {
+  if (row?.mode != null) route["mode"] = row.mode;
+  if (row?.profile != null) route["profile"] = row.profile;
+  if (row?.risk != null) route["risk"] = row.risk;
+  if (row?.quota_policy_json != null) {
     route["quotaPolicy"] = parseObject(
       row.quota_policy_json,
       runId,
       "$.quotaPolicy",
     );
   }
+  const subworkflow = projectSubworkflowNamespace(
+    runId,
+    run,
+    stepRows,
+    lineage,
+  );
+  if (subworkflow !== undefined) route["subworkflow"] = subworkflow;
   return route;
 }
 
@@ -293,6 +329,7 @@ function projectSubworkflowNamespace(
     | undefined,
 ): Record<string, unknown> | undefined {
   let child: unknown;
+  let missingChild = false;
   if (run.definitionKey !== null && run.definitionVersion !== null) {
     for (const row of stepRows) {
       if (row.is_subworkflow !== 1) continue;
@@ -301,7 +338,10 @@ function projectSubworkflowNamespace(
         runId,
         `$.subworkflow.child`,
       );
-      if (!Object.hasOwn(config, "child")) continue;
+      if (!Object.hasOwn(config, "child")) {
+        missingChild = true;
+        continue;
+      }
       if (child === undefined) {
         child = config["child"];
       } else if (JSON.stringify(child) !== JSON.stringify(config["child"])) {
@@ -312,6 +352,13 @@ function projectSubworkflowNamespace(
         );
       }
     }
+  }
+  if (child !== undefined && missingChild) {
+    throw new RouteStateProjectionError(
+      runId,
+      "$.subworkflow.child",
+      "canonical subworkflow steps are missing required child config",
+    );
   }
 
   if (child === undefined && lineage === undefined) return undefined;
