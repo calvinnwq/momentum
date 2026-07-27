@@ -115,6 +115,7 @@ const LINEAGE_KEYS = new Set([
   "depth",
   "ancestorDefinitionKeys",
 ]);
+const VALIDATION_QUERY_CHUNK_SIZE = 500;
 
 export const ROUTE_STATE_MIGRATION_ERROR_CODES = [
   "route_state_schema_partial",
@@ -1453,27 +1454,56 @@ function loadCanonicalValidationRunClosure(
   db: MomentumDb,
   requestedIds: ReadonlySet<string>,
 ): Map<string, RunRow> {
-  const selectRun = db.prepare(
-    `SELECT id, source, route_json, workflow_definition_key,
-            workflow_definition_version, created_at, updated_at
-       FROM workflow_runs
-      WHERE id = ?`,
-  );
-  const selectParent = db.prepare(
-    "SELECT parent_run_id FROM workflow_run_lineage WHERE run_id = ?",
-  );
+  const loadedRowsById = new Map<string, RunRow>();
+  const parentRunIdsById = new Map<string, string | null>();
+  const runIds = [...requestedIds];
+  for (
+    let offset = 0;
+    offset < runIds.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = runIds.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `WITH RECURSIVE route_run_closure(run_id) AS (
+           SELECT id
+             FROM workflow_runs
+            WHERE id IN (${placeholders})
+           UNION
+           SELECT lineage.parent_run_id
+             FROM workflow_run_lineage AS lineage
+             JOIN route_run_closure AS closure
+               ON closure.run_id = lineage.run_id
+         )
+         SELECT wr.id, wr.source, wr.route_json,
+                wr.workflow_definition_key,
+                wr.workflow_definition_version, wr.created_at, wr.updated_at,
+                lineage.parent_run_id
+           FROM workflow_runs AS wr
+           JOIN route_run_closure AS closure
+             ON closure.run_id = wr.id
+           LEFT JOIN workflow_run_lineage AS lineage
+             ON lineage.run_id = wr.id
+          ORDER BY wr.id`,
+      )
+      .all(...chunk) as Array<RunRow & { parent_run_id: string | null }>;
+    for (const row of rows) {
+      loadedRowsById.set(row.id, row);
+      parentRunIdsById.set(row.id, row.parent_run_id);
+    }
+  }
   const rowsById = new Map<string, RunRow>();
   const pending = [...requestedIds];
   while (pending.length > 0) {
     const runId = pending.pop()!;
     if (rowsById.has(runId)) continue;
-    const run = selectRun.get(runId) as RunRow | undefined;
+    const run = loadedRowsById.get(runId);
     if (run === undefined) continue;
     rowsById.set(runId, run);
-    const lineage = selectParent.get(runId) as
-      { parent_run_id: string } | undefined;
-    if (lineage !== undefined && !rowsById.has(lineage.parent_run_id)) {
-      pending.push(lineage.parent_run_id);
+    const parentRunId = parentRunIdsById.get(runId);
+    if (parentRunId !== undefined && parentRunId !== null) {
+      pending.push(parentRunId);
     }
   }
   return rowsById;
@@ -1484,14 +1514,20 @@ function validateProjectedCanonicalRoutes(
   rowsById: ReadonlyMap<string, RunRow>,
   projectedByRunId: ReadonlyMap<string, Record<string, unknown>>,
 ): void {
-  const marker = db.prepare(
-    "SELECT 1 FROM workflow_run_coding_compatibility WHERE run_id = ?",
+  const nativeRunIds = new Set(
+    [...rowsById.values()]
+      .filter((run) => run.source === "momentum-native-coding")
+      .map((run) => run.id),
+  );
+  const compatibilityRunIds = loadCanonicalCompatibilityRunIds(
+    db,
+    nativeRunIds,
   );
   const projectedRunsById = new Map<string, RunRow>();
   for (const run of rowsById.values()) {
     if (
       run.source === "momentum-native-coding" &&
-      marker.get(run.id) === undefined
+      !compatibilityRunIds.has(run.id)
     ) {
       throw new RouteStateMigrationError({
         runId: run.id,
@@ -1529,6 +1565,31 @@ function validateProjectedCanonicalRoutes(
       );
     }
   }
+}
+
+function loadCanonicalCompatibilityRunIds(
+  db: MomentumDb,
+  runIds: ReadonlySet<string>,
+): Set<string> {
+  const compatibilityRunIds = new Set<string>();
+  const ids = [...runIds];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT run_id
+           FROM workflow_run_coding_compatibility
+          WHERE run_id IN (${placeholders})`,
+      )
+      .all(...chunk) as Array<{ run_id: string }>;
+    for (const row of rows) compatibilityRunIds.add(row.run_id);
+  }
+  return compatibilityRunIds;
 }
 
 function clearMigratedRouteJson(
