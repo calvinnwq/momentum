@@ -344,6 +344,7 @@ Behaviour:
 
 `dataDir` and `runId` are included whenever they are known at the point of failure.
 Structural preflight failures may also include `preflightEvidence`, a compact array of `{ checkId, status, severity, path, key, message, recommendedAction }` entries that identify the failed setup check and the corrective action.
+When opening an existing database refuses route-state migration, the failure code is the stable route-state refusal code and the envelope also includes `jsonPath` and `repair` guidance; see [Data directory layout](data-directory.md) for the migration contract.
 The `invalid_run_start` refusal additionally carries an `errors` array of `{ code, message, path? }` entries from the run-start materialization taxonomy:
 
 ```json
@@ -388,7 +389,7 @@ The `invalid_run_start` refusal additionally carries an `errors` array of `{ cod
 | `executor_config_invalid` | `MOMENTUM_EXECUTOR_CONFIG` is unreadable or invalid, a configured module cannot be loaded or violates the SDK contract, a third-party executor is not registered, or a registered executor rejects its step config; the command writes no workflow-run rows and schema failures carry structural `preflightEvidence`. |
 | `invalid_run_start` | Run-start materialization rejected the inputs; carries an `errors` array. |
 | `run_exists` | A workflow run with `--run-id` already exists; the existing run is left untouched. |
-| `route_config_invalid` | `--profile` was supplied but blank, or a coding door received an unsupported `--implementation-engine`; invalid profile failures carry structural `preflightEvidence` and write nothing. |
+| `route_config_invalid` | `--profile` was supplied but blank, or a coding door received an unsupported `--implementation-engine` or an invalid `--steps-json`; invalid profile and step-selection failures carry structural `preflightEvidence` and write nothing. |
 | `route_config_not_allowed` | `--implementation-engine` or `--steps-json` was supplied to the generic start; coding route options are only accepted on `workflow run start-coding` / `workflow run preview-coding`. |
 
 The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `definition_invalid`, `run_id_invalid`, `repo_path_invalid`, `objective_invalid`, `approval_boundary_invalid`, `issue_scope_invalid`, `route_invalid`.
@@ -719,6 +720,7 @@ Each `diagnostics` entry has the shape:
 ```
 
 `dataDir` and `path` are emitted whenever they are known at the point of failure. `path_required` is the only code that omits both (no `--path` was supplied and data-dir resolution has not been attempted). `data_dir_failed` omits `dataDir` (resolution itself failed) but includes `path`. All other codes include both.
+If opening the data directory refuses route-state migration, the shared failure envelope uses the stable route-state refusal code and adds `runId`, `jsonPath`, and `repair` alongside the import `path`.
 
 Error codes:
 
