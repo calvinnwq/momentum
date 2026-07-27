@@ -384,20 +384,30 @@ export function writeCanonicalWorkflowRunRouteState(
   },
 ): void {
   validateWorkflowRouteShape(input);
+  const run: RunRow = {
+    id: input.runId,
+    source: input.source,
+    route_json: JSON.stringify(input.route),
+    workflow_definition_key: input.definitionKey,
+    workflow_definition_version: input.definitionVersion,
+    created_at: input.createdAt,
+    updated_at: input.updatedAt,
+  };
+  const subworkflow = input.route["subworkflow"];
+  const lineageRuns =
+    isPlainObject(subworkflow) && subworkflow["lineage"] !== undefined
+      ? loadLineageValidationRuns(db, run)
+      : undefined;
   const plan = planRun(
     db,
-    {
-      id: input.runId,
-      source: input.source,
-      route_json: JSON.stringify(input.route),
-      workflow_definition_key: input.definitionKey,
-      workflow_definition_version: input.definitionVersion,
-      created_at: input.createdAt,
-      updated_at: input.updatedAt,
-    },
+    run,
     input.definitionAgentConfigs,
     input.definitionExecutorConfigs,
+    lineageRuns,
   );
+  if (plan.lineage !== null && lineageRuns !== undefined) {
+    validateLineagePlans(db, { runs: [plan] }, lineageRuns);
+  }
   db.prepare(
     "DELETE FROM workflow_run_coding_compatibility WHERE run_id = ?",
   ).run(input.runId);
@@ -1041,7 +1051,12 @@ function validateLineagePlans(
   plan: WorkflowRouteStatePlan,
   lineageRuns: ReadonlyMap<string, RunRow>,
 ): void {
-  const parentFacts = loadLineageParentFacts(db, lineageRuns);
+  const canonicalLineageByRunId = loadCanonicalLineageFields(db);
+  const parentFacts = loadLineageParentFacts(
+    db,
+    lineageRuns,
+    canonicalLineageByRunId,
+  );
   for (const item of plan.runs) {
     if (item.lineage === null) continue;
     validateLineageChain(
@@ -1050,6 +1065,7 @@ function validateLineagePlans(
       item.lineage,
       lineageRuns,
       parentFacts,
+      canonicalLineageByRunId,
     );
   }
 }
@@ -1057,10 +1073,11 @@ function validateLineagePlans(
 function loadLineageParentFacts(
   db: MomentumDb,
   lineageRuns: ReadonlyMap<string, RunRow>,
+  canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
 ): Map<string, LineageParentFact> {
   const parentRunIds = new Set<string>();
   for (const run of lineageRuns.values()) {
-    const lineage = readLineageFields(run);
+    const lineage = readLineageFields(run, canonicalLineageByRunId);
     if (lineage !== null) parentRunIds.add(lineage.parentRunId);
   }
 
@@ -1111,6 +1128,7 @@ function validateLineageChain(
   lineage: LineageFields,
   lineageRuns: ReadonlyMap<string, RunRow>,
   parentFacts: ReadonlyMap<string, LineageParentFact>,
+  canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
 ): void {
   let currentRun = childRun;
   let currentLineage = lineage;
@@ -1170,7 +1188,10 @@ function validateLineageChain(
       );
     }
 
-    const parentLineage = readLineageFields(parentRun);
+    const parentLineage = readLineageFields(
+      parentRun,
+      canonicalLineageByRunId,
+    );
     const expectedAncestors =
       parentLineage === null
         ? [parent.parent_definition_key]
@@ -1202,12 +1223,17 @@ function lineageParentFactKey(runId: string, stepId: string): string {
   return JSON.stringify([runId, stepId]);
 }
 
-function readLineageFields(run: RunRow): LineageFields | null {
+function readLineageFields(
+  run: RunRow,
+  canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
+): LineageFields | null {
   const route = parseRoute(run);
   validateKnownKeys(run.id, "$", route, new Set(LEGACY_ROUTE_TOP_LEVEL_KEYS));
   const raw = route["subworkflow"];
   validateSubworkflowShape(run.id, raw);
-  if (!isPlainObject(raw) || raw["lineage"] === undefined) return null;
+  if (!isPlainObject(raw) || raw["lineage"] === undefined) {
+    return canonicalLineageByRunId.get(run.id) ?? null;
+  }
   const value = raw["lineage"];
   if (!isPlainObject(value)) {
     invalidLineage(
@@ -1237,6 +1263,105 @@ function readLineageFields(run: RunRow): LineageFields | null {
     ),
     ancestorDefinitionKeys: value["ancestorDefinitionKeys"] as string[],
   };
+}
+
+function loadLineageValidationRuns(
+  db: MomentumDb,
+  currentRun: RunRow,
+): Map<string, RunRow> {
+  const rows = db
+    .prepare(
+      `SELECT id, source, route_json, workflow_definition_key,
+              workflow_definition_version, created_at, updated_at
+         FROM workflow_runs`,
+    )
+    .all() as RunRow[];
+  const lineageRuns = new Map(rows.map((row) => [row.id, row]));
+  lineageRuns.set(currentRun.id, currentRun);
+  return lineageRuns;
+}
+
+function loadCanonicalLineageFields(
+  db: MomentumDb,
+): Map<string, LineageFields> {
+  if (!tableExists(db, "workflow_run_lineage")) return new Map();
+  const rows = db
+    .prepare(
+      `SELECT run_id, parent_run_id, parent_step_id, depth,
+              ancestor_definition_keys_json
+         FROM workflow_run_lineage`,
+    )
+    .all() as Array<{
+    run_id: string;
+    parent_run_id: string;
+    parent_step_id: string;
+    depth: number;
+    ancestor_definition_keys_json: string;
+  }>;
+  return new Map(
+    rows.map((row) => {
+      let ancestors: unknown;
+      try {
+        ancestors = JSON.parse(row.ancestor_definition_keys_json);
+      } catch {
+        invalidLineage(
+          row.run_id,
+          "$.subworkflow.lineage.ancestorDefinitionKeys",
+          "canonical lineage ancestorDefinitionKeys is not valid JSON",
+        );
+      }
+      if (
+        !Array.isArray(ancestors) ||
+        !ancestors.every(
+          (key) => typeof key === "string" && key.trim().length > 0,
+        )
+      ) {
+        invalidLineage(
+          row.run_id,
+          "$.subworkflow.lineage.ancestorDefinitionKeys",
+          "canonical lineage ancestorDefinitionKeys must be an array of non-blank strings",
+        );
+      }
+      if (row.depth !== ancestors.length) {
+        invalidLineage(
+          row.run_id,
+          "$.subworkflow.lineage.depth",
+          "canonical lineage depth must equal ancestorDefinitionKeys.length",
+        );
+      }
+      if (new Set(ancestors).size !== ancestors.length) {
+        invalidLineage(
+          row.run_id,
+          "$.subworkflow.lineage.ancestorDefinitionKeys",
+          "canonical lineage ancestorDefinitionKeys must not repeat a definition",
+        );
+      }
+      return [
+        row.run_id,
+        {
+          parentRunId: requiredNonBlankString(
+            row.run_id,
+            "$.subworkflow.lineage.parentRunId",
+            row.parent_run_id,
+            true,
+          ),
+          parentStepId: requiredNonBlankString(
+            row.run_id,
+            "$.subworkflow.lineage.parentStepId",
+            row.parent_step_id,
+            true,
+          ),
+          depth: requiredPositiveInteger(
+            row.run_id,
+            "$.subworkflow.lineage.depth",
+            row.depth,
+            true,
+          ),
+          ancestorDefinitionKeys: ancestors as string[],
+        },
+      ] as const;
+    }),
+  );
 }
 
 function validateSubworkflowShape(runId: string, raw: unknown): void {
@@ -1618,7 +1743,12 @@ function validateProjectedCanonicalRoutes(
       route_json: JSON.stringify(projectedRoute),
     });
   }
-  const parentFacts = loadLineageParentFacts(db, projectedRunsById);
+  const canonicalLineageByRunId = loadCanonicalLineageFields(db);
+  const parentFacts = loadLineageParentFacts(
+    db,
+    projectedRunsById,
+    canonicalLineageByRunId,
+  );
   for (const run of projectedRunsById.values()) {
     const route = parseRoute(run);
     const subworkflow = planSubworkflow(
@@ -1634,6 +1764,7 @@ function validateProjectedCanonicalRoutes(
         subworkflow.lineage,
         projectedRunsById,
         parentFacts,
+        canonicalLineageByRunId,
       );
     }
   }

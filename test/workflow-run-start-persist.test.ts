@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { RouteStateMigrationError } from "../src/adapters/db/route-state.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import {
   WORKFLOW_RUN_START_SOURCE,
   type WorkflowRunStartInput,
@@ -58,6 +60,23 @@ function twoStepDefinition(): WorkflowDefinition {
         executor: "agent-once",
         order: 0,
         required: false,
+      },
+    ],
+  };
+}
+
+function subworkflowDefinition(key: string): WorkflowDefinition {
+  return {
+    key,
+    title: `${key} definition`,
+    version: 1,
+    steps: [
+      {
+        key: "dispatch",
+        kind: "implementation",
+        executor: "subworkflow",
+        order: 0,
+        required: true,
       },
     ],
   };
@@ -446,6 +465,76 @@ describe("persistWorkflowRunStart", () => {
             "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
           )
           .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses fresh lineage that disagrees with a canonical parent chain", () => {
+    const db = openTempDb();
+    try {
+      const grandparentDefinition = subworkflowDefinition(
+        "grandparent-workflow",
+      );
+      const parentDefinition = subworkflowDefinition("parent-workflow");
+      persistWorkflowDefinition(db, grandparentDefinition, { now: NOW });
+      persistWorkflowDefinition(db, parentDefinition, { now: NOW });
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition: grandparentDefinition,
+          runId: "grandparent-run",
+        }),
+      );
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition: parentDefinition,
+          runId: "parent-run",
+          route: {
+            subworkflow: {
+              lineage: {
+                parentRunId: "grandparent-run",
+                parentStepId: "dispatch",
+                depth: 1,
+                ancestorDefinitionKeys: ["grandparent-workflow"],
+              },
+            },
+          },
+        }),
+      );
+
+      expect(() =>
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            runId: "child-run",
+            route: {
+              subworkflow: {
+                lineage: {
+                  parentRunId: "parent-run",
+                  parentStepId: "dispatch",
+                  depth: 2,
+                  ancestorDefinitionKeys: [
+                    "grandparent-workflow",
+                    "wrong-workflow",
+                  ],
+                },
+              },
+            },
+          }),
+        ),
+      ).toThrowError(
+        expect.objectContaining<RouteStateMigrationError>({
+          code: "route_state_lineage_invalid",
+          jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get("child-run"),
       ).toEqual({ count: 0 });
     } finally {
       db.close();
