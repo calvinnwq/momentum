@@ -445,7 +445,16 @@ export function projectValidatedLegacyWorkflowRunRoutes(
 }
 
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
-  if (!hasRouteStateBaseTables(db)) return false;
+  const baseState = routeStateBaseSchemaState(db);
+  if (baseState.present === 0) return false;
+  if (hasBlockingBaseSchemaMalformation(baseState)) {
+    throw routeBaseSchemaError(baseState);
+  }
+  if (baseState.present < baseState.total) {
+    const route = firstNonEmptyBaseRoute(db);
+    if (route === undefined) return false;
+    throw routeBaseSchemaError(baseState, route.id);
+  }
   const state = destinationSchemaState(db);
   if (
     state.malformed.length > 0 ||
@@ -471,21 +480,15 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
   const dataVersion = databaseDataVersion(db);
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return { runs: [], dataVersion };
+  if (hasBlockingBaseSchemaMalformation(baseState)) {
+    throw routeBaseSchemaError(baseState);
+  }
   if (baseState.present < baseState.total) {
-    const route = columnExists(db, "workflow_runs", "route_json")
-      ? firstNonEmptyRoute(db)
-      : undefined;
+    const route = firstNonEmptyBaseRoute(db);
     if (route === undefined) {
       return { runs: [], dataVersion, deferredUntilBaseComplete: true };
     }
-    throw new RouteStateMigrationError({
-      runId: route.id,
-      jsonPath: "$schema.routeState",
-      code: "route_state_schema_partial",
-      detail:
-        `route migration base schema is partial; existing: ${baseState.existing.join(", ")}; ` +
-        `missing: ${baseState.missing.join(", ")}`,
-    });
+    throw routeBaseSchemaError(baseState, route.id);
   }
   assertRouteDestinationForeignKeysEmpty(db, ["workflow_steps"]);
   const state = destinationSchemaState(db);
@@ -507,7 +510,7 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
       });
     }
     assertRouteDestinationForeignKeysEmpty(db);
-    assertCanonicalCompatibilityMarkers(db);
+    auditCanonicalRouteState(db);
     return { runs: [], dataVersion };
   }
 
@@ -1246,6 +1249,13 @@ function validateSubworkflowShape(runId: string, raw: unknown): void {
         "depth must equal ancestorDefinitionKeys.length",
       );
     }
+    if (new Set(ancestors).size !== ancestors.length) {
+      invalidLineage(
+        runId,
+        `${at}.ancestorDefinitionKeys`,
+        "ancestorDefinitionKeys must not repeat a definition",
+      );
+    }
   }
 }
 
@@ -1514,6 +1524,7 @@ function validateProjectedCanonicalRoutes(
   rowsById: ReadonlyMap<string, RunRow>,
   projectedByRunId: ReadonlyMap<string, Record<string, unknown>>,
 ): void {
+  assertCanonicalRowsMatchRunSources(db, rowsById);
   const nativeRunIds = new Set(
     [...rowsById.values()]
       .filter((run) => run.source === "momentum-native-coding")
@@ -1563,6 +1574,61 @@ function validateProjectedCanonicalRoutes(
         subworkflow.lineage,
         projectedRunsById,
       );
+    }
+  }
+}
+
+function assertCanonicalRowsMatchRunSources(
+  db: MomentumDb,
+  rowsById: ReadonlyMap<string, RunRow>,
+): void {
+  const ids = [...rowsById.keys()];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const incompatibleCompatibility = db
+      .prepare(
+        `SELECT cc.run_id
+           FROM workflow_run_coding_compatibility AS cc
+           JOIN workflow_runs AS wr ON wr.id = cc.run_id
+          WHERE cc.run_id IN (${placeholders})
+            AND wr.source = 'agent-workflow'
+          ORDER BY cc.run_id
+          LIMIT 1`,
+      )
+      .get(...chunk) as { run_id: string } | undefined;
+    if (incompatibleCompatibility !== undefined) {
+      throw new RouteStateMigrationError({
+        runId: incompatibleCompatibility.run_id,
+        jsonPath: "$canonical.workflow_run_coding_compatibility",
+        code: "route_state_source_conflict",
+        detail:
+          "coding compatibility state cannot attach to an imported agent-workflow run",
+      });
+    }
+    const incompatibleImport = db
+      .prepare(
+        `SELECT metadata.run_id
+           FROM workflow_run_import_metadata AS metadata
+           JOIN workflow_runs AS wr ON wr.id = metadata.run_id
+          WHERE metadata.run_id IN (${placeholders})
+            AND wr.source <> 'agent-workflow'
+          ORDER BY metadata.run_id
+          LIMIT 1`,
+      )
+      .get(...chunk) as { run_id: string } | undefined;
+    if (incompatibleImport !== undefined) {
+      throw new RouteStateMigrationError({
+        runId: incompatibleImport.run_id,
+        jsonPath: "$canonical.workflow_run_import_metadata",
+        code: "route_state_source_conflict",
+        detail:
+          "import metadata cannot attach to a run whose source is not agent-workflow",
+      });
     }
   }
 }
@@ -1631,28 +1697,6 @@ function assertRouteDestinationForeignKeysEmpty(
       detail: `${table} contains ${rows.length} invalid foreign-key reference(s)`,
     });
   }
-}
-
-function assertCanonicalCompatibilityMarkers(db: MomentumDb): void {
-  const missing = db
-    .prepare(
-      `SELECT wr.id
-         FROM workflow_runs AS wr
-         LEFT JOIN workflow_run_coding_compatibility AS cc
-           ON cc.run_id = wr.id
-        WHERE wr.source = 'momentum-native-coding'
-          AND cc.run_id IS NULL
-        ORDER BY wr.id
-        LIMIT 1`,
-    )
-    .get() as { id: string } | undefined;
-  if (missing === undefined) return;
-  throw new RouteStateMigrationError({
-    runId: missing.id,
-    jsonPath: "$canonical.workflow_run_coding_compatibility",
-    code: "route_state_canonical_conflict",
-    detail: "native coding run is missing its compatibility marker row",
-  });
 }
 
 function destinationSchemaState(db: MomentumDb): {
@@ -1764,6 +1808,22 @@ function firstNonEmptyRoute(
     .get() as { id: string; route_json: string | null } | undefined;
 }
 
+function firstNonEmptyBaseRoute(
+  db: MomentumDb,
+): { id: string; route_json: string | null } | undefined {
+  if (!columnExists(db, "workflow_runs", "route_json")) return undefined;
+  if (columnExists(db, "workflow_runs", "id")) return firstNonEmptyRoute(db);
+  const route = db
+    .prepare(
+      `SELECT route_json
+         FROM workflow_runs
+        WHERE route_json IS NOT NULL AND route_json <> '{}'
+        LIMIT 1`,
+    )
+    .get() as { route_json: string | null } | undefined;
+  return route === undefined ? undefined : { id: "<schema>", ...route };
+}
+
 function databaseDataVersion(db: MomentumDb): number {
   return (db.prepare("PRAGMA data_version").get() as { data_version: number })
     .data_version;
@@ -1779,15 +1839,67 @@ function routeStateBaseSchemaState(db: MomentumDb): {
   total: number;
   existing: string[];
   missing: string[];
+  malformed: string[];
 } {
-  const names = ["workflow_runs", "workflow_steps", "step_definitions"];
-  const existing = names.filter((name) => tableExists(db, name));
+  const contracts = [
+    {
+      name: "workflow_runs",
+      columns: ["id", "source", "route_json", "created_at", "updated_at"],
+    },
+    {
+      name: "workflow_steps",
+      columns: ["run_id", "step_id", "kind", "step_order"],
+    },
+    {
+      name: "step_definitions",
+      columns: ["definition_key", "definition_version", "step_key", "executor"],
+    },
+  ] as const;
+  const existing = contracts
+    .filter((contract) => tableExists(db, contract.name))
+    .map((contract) => contract.name);
+  const malformed = contracts.flatMap((contract) =>
+    existing.includes(contract.name)
+      ? contract.columns
+          .filter((column) => !columnExists(db, contract.name, column))
+          .map((column) => `${contract.name}.${column}`)
+      : [],
+  );
   return {
     present: existing.length,
-    total: names.length,
+    total: contracts.length,
     existing,
-    missing: names.filter((name) => !existing.includes(name)),
+    missing: contracts
+      .map((contract) => contract.name)
+      .filter((name) => !existing.includes(name)),
+    malformed,
   };
+}
+
+function routeBaseSchemaError(
+  state: ReturnType<typeof routeStateBaseSchemaState>,
+  runId = "<schema>",
+): RouteStateMigrationError {
+  const details = [
+    `existing: ${state.existing.join(", ") || "none"}`,
+    `missing: ${state.missing.join(", ") || "none"}`,
+    `malformed: ${state.malformed.join(", ") || "none"}`,
+  ];
+  return new RouteStateMigrationError({
+    runId,
+    jsonPath: "$schema.routeState",
+    code: "route_state_schema_partial",
+    detail: `route migration base schema is partial or malformed; ${details.join("; ")}`,
+  });
+}
+
+function hasBlockingBaseSchemaMalformation(
+  state: ReturnType<typeof routeStateBaseSchemaState>,
+): boolean {
+  return state.malformed.some(
+    (column) =>
+      state.present === state.total || column !== "workflow_runs.route_json",
+  );
 }
 
 function tableExists(db: MomentumDb, name: string): boolean {

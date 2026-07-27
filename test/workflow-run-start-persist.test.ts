@@ -417,6 +417,41 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("refuses duplicate lineage ancestors before writing a run", () => {
+    const db = openTempDb();
+    try {
+      expect(() =>
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            route: {
+              subworkflow: {
+                lineage: {
+                  parentRunId: "parent-run",
+                  parentStepId: "child",
+                  depth: 2,
+                  ancestorDefinitionKeys: [
+                    "parent-workflow",
+                    "parent-workflow",
+                  ],
+                },
+              },
+            },
+          }),
+        ),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists the built-in coding workflow with honoured scope, route, and skill revision", () => {
     const db = openTempDb();
     try {

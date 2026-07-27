@@ -241,6 +241,34 @@ type ParsedFlags = {
   error?: string;
 };
 
+type RouteAwareWorkflowFailure = {
+  code: string;
+  message: string;
+  runId?: string;
+  jsonPath?: string;
+  repair?: string;
+};
+
+function normalizeWorkflowFailure(
+  error: unknown,
+  fallbackRunId?: string,
+): RouteAwareWorkflowFailure {
+  if (error instanceof RouteStateMigrationError) {
+    return {
+      code: error.code,
+      message: error.message,
+      runId: error.runId,
+      jsonPath: error.jsonPath,
+      repair: error.repair,
+    };
+  }
+  return {
+    code: "data_dir_failed",
+    message: error instanceof Error ? error.message : String(error),
+    ...(fallbackRunId === undefined ? {} : { runId: fallbackRunId }),
+  };
+}
+
 export type CliDeps = DaemonWorkflowDispatchDeps;
 
 export function workflow(
@@ -405,10 +433,8 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
       });
     }
     return emitWorkflowRunEventsFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: error instanceof Error ? error.message : String(error),
+      ...normalizeWorkflowFailure(error, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -886,15 +912,10 @@ async function runWorkflowStartCommand(
   try {
     db = openDb(dataDir);
   } catch (error) {
-    if (!(error instanceof RouteStateMigrationError)) throw error;
     return emitWorkflowRunStartFailure(parsed, io, {
       command,
-      code: error.code,
-      message: error.message,
+      ...normalizeWorkflowFailure(error, runId),
       dataDir,
-      runId: error.runId,
-      jsonPath: error.jsonPath,
-      repair: error.repair,
     });
   }
   try {
@@ -1171,15 +1192,10 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
   try {
     db = openDb(dataDir);
   } catch (error) {
-    if (!(error instanceof RouteStateMigrationError)) throw error;
     return emitWorkflowImportFailure(parsed, io, {
-      code: error.code,
-      message: error.message,
+      ...normalizeWorkflowFailure(error),
       dataDir,
-      runId: error.runId,
       path: artifactPath,
-      jsonPath: error.jsonPath,
-      repair: error.repair,
     });
   }
   let summary: PersistWorkflowRunImportSummary;
@@ -1275,10 +1291,8 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     } catch (err) {
       return emitWorkflowStatusFailure(parsed, io, {
         command: "workflow status",
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     } finally {
       db?.close();
@@ -1320,8 +1334,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err),
       dataDir,
     });
   } finally {
@@ -1436,8 +1449,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err),
       dataDir,
     });
   } finally {
@@ -1536,7 +1548,17 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
   let approvalArtifactDigest = "";
   let recordedAt = 0;
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+      boundary,
+    });
+  }
   try {
     const existingRun = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
@@ -1839,7 +1861,17 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
     resolutionNote: parsed.note ?? null,
   };
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      ...normalizeWorkflowFailure(error),
+      dataDir,
+      gateId,
+    });
+  }
   try {
     const resolved = resolveWorkflowGateAndResumeRegisteredExecutor(
       db,
@@ -1968,7 +2000,17 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
 
   let resultPayload: Record<string, unknown> | null = null;
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+      stepId,
+    });
+  }
   try {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -2289,7 +2331,15 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+    });
+  }
   let result: ClearWorkflowRunManualRecoveryGuardedResult;
   try {
     const clearInput: ClearWorkflowRunManualRecoveryGuardedInput = { runId };
@@ -2354,10 +2404,8 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     envelope = db === undefined ? null : loadWorkflowMonitorEnvelope(db, runId);
   } catch (err) {
     return emitWorkflowRunMonitorFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -2426,10 +2474,8 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
         );
     } catch (err) {
       return emitWorkflowRunMonitorFailure(parsed, io, {
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     } finally {
       writeDb?.close();
@@ -2527,10 +2573,8 @@ async function workflowRunWatch(
   } catch (err) {
     if (!isSqliteBusyError(err)) {
       return emitWorkflowRunWatchFailure(parsed, io, {
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     }
     try {
@@ -2543,13 +2587,8 @@ async function workflowRunWatch(
       readOnlyFallback = true;
     } catch (fallbackError) {
       return emitWorkflowRunWatchFailure(parsed, io, {
-        code: "data_dir_failed",
-        message:
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : String(fallbackError),
+        ...normalizeWorkflowFailure(fallbackError, runId),
         dataDir,
-        runId,
       });
     }
   } finally {
@@ -2625,10 +2664,8 @@ async function workflowRunWatch(
     appendWorkflowWatchAdvisoryEvent(writeDb, envelope, progress, advisory);
   } catch (err) {
     return emitWorkflowRunWatchFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     writeDb?.close();
@@ -2745,10 +2782,8 @@ async function workflowRunWatchStream(
       });
     }
     return emitStreamFailure({
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     if (signalCapable) process.removeListener("SIGINT", onSigint);
@@ -2999,10 +3034,8 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
           });
   } catch (err) {
     return emitWorkflowRunLogsFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -3179,10 +3212,8 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowHandoffFailure(parsed, io, {
       command: "workflow handoff",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();

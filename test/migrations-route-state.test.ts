@@ -1148,39 +1148,53 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses partial route base schema before bootstrap writes", () => {
-    const dataDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "momentum-partial-route-base-"),
-    );
-    tempRoots.push(dataDir);
-    withRawDb(dataDir, (db) => {
-      db.exec(`
-        CREATE TABLE workflow_runs (
-          id TEXT PRIMARY KEY,
-          source TEXT NOT NULL,
-          route_json TEXT NOT NULL DEFAULT '{}',
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        ) STRICT;
-        INSERT INTO workflow_runs
-          (id, source, route_json, created_at, updated_at)
-        VALUES
-          ('partial-run', 'momentum-native-coding', '{"implementationEngine":"gnhf"}', 1, 1);
-      `);
-    });
+  for (const readOnly of [false, true]) {
+    it(`refuses partial route base schema with real route state on ${readOnly ? "read-only" : "writable"} open`, () => {
+      const dataDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "momentum-partial-route-base-"),
+      );
+      tempRoots.push(dataDir);
+      withRawDb(dataDir, (db) => {
+        db.exec(`
+          CREATE TABLE workflow_runs (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            route_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+          INSERT INTO workflow_runs
+            (id, source, route_json, created_at, updated_at)
+          VALUES
+            ('partial-run', 'momentum-native-coding', '{"implementationEngine":"gnhf"}', 1, 1);
+        `);
+      });
 
-    expectRouteRefusal(dataDir, {
-      runId: "partial-run",
-      jsonPath: "$schema.routeState",
-      code: "route_state_schema_partial",
+      if (readOnly) {
+        const before = databaseHash(dataDir);
+        expect(() => openExistingDbMigratedReadOnly(dataDir)).toThrowError(
+          expect.objectContaining({
+            runId: "partial-run",
+            jsonPath: "$schema.routeState",
+            code: "route_state_schema_partial",
+          }),
+        );
+        expect(databaseHash(dataDir)).toBe(before);
+      } else {
+        expectRouteRefusal(dataDir, {
+          runId: "partial-run",
+          jsonPath: "$schema.routeState",
+          code: "route_state_schema_partial",
+        });
+      }
+      const after = openExistingDbReadOnly(dataDir)!;
+      try {
+        expect(tableNames(after)).toEqual(["workflow_runs"]);
+      } finally {
+        after.close();
+      }
     });
-    const after = openExistingDbReadOnly(dataDir)!;
-    try {
-      expect(tableNames(after)).toEqual(["workflow_runs"]);
-    } finally {
-      after.close();
-    }
-  });
+  }
 
   it("refuses an empty route plan whose database changed after preflight", () => {
     const dataDir = fs.mkdtempSync(
@@ -1402,7 +1416,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses invalid canonical agent config in an explicit audit", () => {
+  it("refuses invalid canonical agent config on writable open before bootstrap mutation", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
     withRawDb(dataDir, (db) => {
@@ -1411,12 +1425,19 @@ describe("workflow route-state migration", () => {
             SET agent_config_json = '{"model":" "}'
           WHERE run_id = 'native-full' AND step_id = 'implementation'`,
       ).run();
+      db.exec("DROP TABLE events");
     });
-    expectCanonicalAuditRefusal(dataDir, {
+    expectRouteRefusal(dataDir, {
       runId: "native-full",
       jsonPath: "$.steps.implementation.model",
       code: "route_state_value_invalid",
     });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
   });
 
   it("refuses invalid canonical agent config when serving a read-only compatibility route", () => {
@@ -1443,7 +1464,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses cyclic canonical lineage in an explicit audit", () => {
+  it("refuses cyclic canonical lineage on writable open before bootstrap mutation", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
     withRawDb(dataDir, (db) => {
@@ -1454,11 +1475,142 @@ describe("workflow route-state migration", () => {
          VALUES ('subworkflow-parent', 'subworkflow-child', 'nested-child', 2,
                  '["fixture-parent","fixture-nested"]', 1, 1)`,
       ).run();
+      db.exec("DROP TABLE events");
     });
-    expectCanonicalAuditRefusal(dataDir, {
+    expectRouteRefusal(dataDir, {
       runId: "subworkflow-child",
       jsonPath: "$.subworkflow.lineage.parentRunId",
       code: "route_state_lineage_invalid",
     });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
+  });
+
+  for (const readOnly of [false, true]) {
+    it(`refuses malformed route base columns on ${readOnly ? "read-only" : "writable"} production open`, () => {
+      const dataDir = seedReleasedFixture();
+      openDb(dataDir).close();
+      withRawDb(dataDir, (db) => {
+        db.exec("ALTER TABLE workflow_runs DROP COLUMN source");
+      });
+      const before = databaseHash(dataDir);
+      let refusal: unknown;
+      try {
+        const db = readOnly
+          ? openExistingDbMigratedReadOnly(dataDir)
+          : openDb(dataDir);
+        db?.close();
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({
+        runId: "<schema>",
+        jsonPath: "$schema.routeState",
+        code: "route_state_schema_partial",
+      });
+      expect(databaseHash(dataDir)).toBe(before);
+    });
+  }
+
+  for (const readOnly of [false, true]) {
+    it(`refuses malformed partial route base columns on ${readOnly ? "read-only" : "writable"} production open`, () => {
+      const dataDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "momentum-route-partial-malformed-"),
+      );
+      tempRoots.push(dataDir);
+      withRawDb(dataDir, (db) => {
+        db.exec(`
+          CREATE TABLE workflow_runs (
+            id TEXT PRIMARY KEY,
+            route_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+        `);
+      });
+      const before = databaseHash(dataDir);
+      let refusal: unknown;
+      try {
+        const db = readOnly
+          ? openExistingDbMigratedReadOnly(dataDir)
+          : openDb(dataDir);
+        db?.close();
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({
+        runId: "<schema>",
+        jsonPath: "$schema.routeState",
+        code: "route_state_schema_partial",
+      });
+      expect(databaseHash(dataDir)).toBe(before);
+    });
+  }
+
+  it("refuses coding compatibility attached to an imported run before mutation", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `INSERT INTO workflow_run_coding_compatibility
+           (run_id, implementation_engine, selected_profile, created_at, updated_at)
+         VALUES ('cwfp-imported', 'gnhf', NULL, 1, 1)`,
+      ).run();
+      db.exec("DROP TABLE events");
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "cwfp-imported",
+      jsonPath: "$canonical.workflow_run_coding_compatibility",
+      code: "route_state_source_conflict",
+    });
+  });
+
+  it("refuses import metadata attached to a native run before mutation", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `INSERT INTO workflow_run_import_metadata
+           (run_id, mode, profile, risk, quota_policy_json, created_at, updated_at)
+         VALUES ('native-simple', 'execute-ready', NULL, NULL, NULL, 1, 1)`,
+      ).run();
+      db.exec("DROP TABLE events");
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "native-simple",
+      jsonPath: "$canonical.workflow_run_import_metadata",
+      code: "route_state_source_conflict",
+    });
+  });
+
+  it("keeps batch compatibility step properties in durable step order", () => {
+    const dataDir = seedReleasedFixture();
+    const db = openDb(dataDir);
+    try {
+      const run = {
+        runId: "native-full",
+        source: "momentum-native-coding",
+        definitionKey: "coding-workflow",
+        definitionVersion: 3,
+      };
+      const single = projectLegacyWorkflowRunRoute(db, run.runId, run);
+      const batch = projectLegacyWorkflowRunRoutes(db, [run]).get(run.runId);
+      expect(Object.keys(single.steps as Record<string, unknown>)).toEqual([
+        "implementation",
+        "postflight",
+        "validate",
+        "merge-cleanup",
+        "tracker-refresh",
+      ]);
+      expect(Object.keys(batch?.steps as Record<string, unknown>)).toEqual(
+        Object.keys(single.steps as Record<string, unknown>),
+      );
+    } finally {
+      db.close();
+    }
   });
 });

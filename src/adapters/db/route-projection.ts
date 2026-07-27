@@ -195,6 +195,7 @@ export function projectLegacyWorkflowRunRoutes(
           AND sd.step_key = ws.step_id
         WHERE ws.run_id`,
       runIds,
+      " ORDER BY ws.run_id, ws.step_order, ws.step_id",
     ),
   );
   const lineageByRunId = new Map(
@@ -384,6 +385,7 @@ function queryRunScopedRows<T>(
   db: MomentumDb,
   query: string,
   runIds: readonly string[],
+  orderBy = "",
 ): T[] {
   const rows: T[] = [];
   for (
@@ -394,7 +396,7 @@ function queryRunScopedRows<T>(
     const chunk = runIds.slice(offset, offset + RUN_ID_QUERY_CHUNK_SIZE);
     rows.push(
       ...(db
-        .prepare(`${query} IN (${chunk.map(() => "?").join(", ")})`)
+        .prepare(`${query} IN (${chunk.map(() => "?").join(", ")})${orderBy}`)
         .all(...chunk) as T[]),
     );
   }

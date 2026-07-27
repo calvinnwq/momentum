@@ -685,6 +685,21 @@ describe("momentum workflow status", () => {
     });
   });
 
+  it("preserves the run id in text failures unrelated to route state", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-missing",
+      "--data-dir",
+      dataDir,
+    ]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "Workflow run not found: cwfp-missing\nRun ID: cwfp-missing\n",
+    );
+  });
+
   it("returns detail with steps, approvals, leases, and monitor next-action", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

@@ -355,6 +355,25 @@ describe("momentum workflow run start (NGX-346)", () => {
     });
   });
 
+  it("keeps unrelated text failures on their single-line envelope", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      "run-text",
+      "--objective",
+      "no repo",
+      "--data-dir",
+      dataDir,
+    ]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "Missing required --repo <path> for workflow run start.\n",
+    );
+  });
+
   it("refuses when --objective is missing", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

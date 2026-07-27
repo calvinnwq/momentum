@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, openExistingDbMigratedReadOnly } from "../src/adapters/db.js";
-import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
+import {
+  applyQueueMigrations,
+  applyWorkflowVocabularyMigration,
+} from "../src/adapters/db/migrations.js";
 import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
 import { selectRunnableWorkflowWork } from "../src/core/workflow/dispatch/scheduler.js";
 
@@ -3764,7 +3767,7 @@ VALUES
     }
   });
 
-  it("migrates workflow vocabulary in a partial read-only database", () => {
+  it("migrates workflow vocabulary directly in a partial database", () => {
     const dataDir = makeTempDir("momentum-nam02-partial-readonly-");
     const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
@@ -3793,11 +3796,11 @@ VALUES
       writable.close();
     }
 
-    const db = openExistingDbMigratedReadOnly(dataDir);
-    expect(db).toBeDefined();
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
+      applyWorkflowVocabularyMigration(db);
       expect(
-        db!
+        db
           .prepare(
             `SELECT approval_boundary, route_json
                FROM workflow_runs WHERE id = 'partial-vocab-run'`,
@@ -3808,7 +3811,7 @@ VALUES
         route_json: '{"steps":{"validate":{"harness":"careful"}}}',
       });
       expect(
-        db!
+        db
           .prepare(
             `SELECT step_id, kind
                FROM workflow_steps WHERE run_id = 'partial-vocab-run'`,
@@ -3816,7 +3819,7 @@ VALUES
           .get(),
       ).toEqual({ step_id: "no-mistakes", kind: "validate" });
     } finally {
-      db?.close();
+      db.close();
     }
   });
 
@@ -3877,9 +3880,9 @@ VALUES
       writable.close();
     }
 
-    const db = openExistingDbMigratedReadOnly(dataDir);
-    expect(db).toBeDefined();
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
+      applyWorkflowVocabularyMigration(db);
       expect(
         db
           ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
@@ -3896,7 +3899,7 @@ VALUES
         route_json: '{"steps":{"tracker-refresh":{"model":"tracker"}}}',
       });
     } finally {
-      db?.close();
+      db.close();
     }
   });
 

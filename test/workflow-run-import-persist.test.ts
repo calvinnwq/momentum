@@ -234,6 +234,42 @@ function parseOrThrow(runDir: string) {
 }
 
 describe("persistWorkflowRunImport", () => {
+  it("refuses duplicate lineage ancestors before writing imported rows", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-duplicate-ancestors",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {
+      ...imported.run.route,
+      subworkflow: {
+        lineage: {
+          parentRunId: "parent-run",
+          parentStepId: "child",
+          depth: 2,
+          ancestorDefinitionKeys: ["parent-workflow", "parent-workflow"],
+        },
+      },
+    };
+    const db = openDb(dataDir);
+    try {
+      expect(() => persistWorkflowRunImport(db, imported)).toThrowError(
+        expect.objectContaining({
+          jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get(imported.run.runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("inserts workflow_runs, workflow_steps, and workflow_approvals rows from a parsed import", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();
