@@ -122,8 +122,16 @@ export function emitWorkflowRunStartFailure(
     command?: WorkflowRunStartCommand;
   },
 ): number {
+  const preserveSingleLineText =
+    !parsed.json &&
+    failure.jsonPath === undefined &&
+    failure.repair === undefined;
+  const { runId: _runId, ...failureWithoutRunId } = failure;
+  const failureToRender = preserveSingleLineText
+    ? failureWithoutRunId
+    : failure;
   return emitWorkflowFailure(parsed, io, {
-    ...failure,
+    ...failureToRender,
     command: failure.command ?? "workflow run start",
   });
 }
