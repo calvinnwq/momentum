@@ -202,6 +202,14 @@ type LineageFields = {
   ancestorDefinitionKeys: string[];
 };
 
+type LineageParentFact = {
+  parent_definition_key: string | null;
+  parent_definition_version: number | null;
+  step_definition_key: string | null;
+  step_definition_version: number | null;
+  step_executor: string | null;
+};
+
 type StepConfigPlan = {
   stepId: string;
   agentConfigJson: string;
@@ -1018,24 +1026,76 @@ function validateLineagePlans(
   plan: WorkflowRouteStatePlan,
   lineageRuns: ReadonlyMap<string, RunRow>,
 ): void {
+  const parentFacts = loadLineageParentFacts(db, lineageRuns);
   for (const item of plan.runs) {
     if (item.lineage === null) continue;
     validateLineageChain(
-      db,
       item.run,
       "$.subworkflow.lineage",
       item.lineage,
       lineageRuns,
+      parentFacts,
     );
   }
 }
 
-function validateLineageChain(
+function loadLineageParentFacts(
   db: MomentumDb,
+  lineageRuns: ReadonlyMap<string, RunRow>,
+): Map<string, LineageParentFact> {
+  const parentRunIds = new Set<string>();
+  for (const run of lineageRuns.values()) {
+    const lineage = readLineageFields(run);
+    if (lineage !== null) parentRunIds.add(lineage.parentRunId);
+  }
+
+  const facts = new Map<string, LineageParentFact>();
+  const ids = [...parentRunIds];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT wr.id AS parent_run_id, ws.step_id AS parent_step_id,
+                wr.workflow_definition_key AS parent_definition_key,
+                wr.workflow_definition_version AS parent_definition_version,
+                sd.definition_key AS step_definition_key,
+                sd.definition_version AS step_definition_version,
+                sd.executor AS step_executor
+           FROM workflow_runs AS wr
+           JOIN workflow_steps AS ws ON ws.run_id = wr.id
+           LEFT JOIN step_definitions AS sd
+             ON sd.definition_key = wr.workflow_definition_key
+            AND sd.definition_version = wr.workflow_definition_version
+            AND sd.step_key = ws.step_id
+          WHERE wr.id IN (${placeholders})`,
+      )
+      .all(...chunk) as Array<
+      LineageParentFact & {
+        parent_run_id: string;
+        parent_step_id: string;
+      }
+    >;
+    for (const row of rows) {
+      facts.set(
+        lineageParentFactKey(row.parent_run_id, row.parent_step_id),
+        row,
+      );
+    }
+  }
+  return facts;
+}
+
+function validateLineageChain(
   childRun: RunRow,
   path: string,
   lineage: LineageFields,
   lineageRuns: ReadonlyMap<string, RunRow>,
+  parentFacts: ReadonlyMap<string, LineageParentFact>,
 ): void {
   let currentRun = childRun;
   let currentLineage = lineage;
@@ -1061,31 +1121,12 @@ function validateLineageChain(
     }
     visited.add(parentRun.id);
 
-    const parent = db
-      .prepare(
-        `SELECT wr.workflow_definition_key AS parent_definition_key,
-                wr.workflow_definition_version AS parent_definition_version,
-                sd.definition_key AS step_definition_key,
-                sd.definition_version AS step_definition_version,
-                sd.executor AS step_executor
-           FROM workflow_runs AS wr
-           JOIN workflow_steps AS ws
-             ON ws.run_id = wr.id AND ws.step_id = ?
-           LEFT JOIN step_definitions AS sd
-             ON sd.definition_key = wr.workflow_definition_key
-            AND sd.definition_version = wr.workflow_definition_version
-            AND sd.step_key = ws.step_id
-          WHERE wr.id = ?`,
-      )
-      .get(currentLineage.parentStepId, currentLineage.parentRunId) as
-      | {
-          parent_definition_key: string | null;
-          parent_definition_version: number | null;
-          step_definition_key: string | null;
-          step_definition_version: number | null;
-          step_executor: string | null;
-        }
-      | undefined;
+    const parent = parentFacts.get(
+      lineageParentFactKey(
+        currentLineage.parentRunId,
+        currentLineage.parentStepId,
+      ),
+    );
     if (parent === undefined) {
       throw new RouteStateMigrationError({
         runId: currentRun.id,
@@ -1140,6 +1181,10 @@ function validateLineageChain(
     currentLineage = parentLineage;
     currentPath = "$.subworkflow.lineage";
   }
+}
+
+function lineageParentFactKey(runId: string, stepId: string): string {
+  return JSON.stringify([runId, stepId]);
 }
 
 function readLineageFields(run: RunRow): LineageFields | null {
@@ -1558,6 +1603,7 @@ function validateProjectedCanonicalRoutes(
       route_json: JSON.stringify(projectedRoute),
     });
   }
+  const parentFacts = loadLineageParentFacts(db, projectedRunsById);
   for (const run of projectedRunsById.values()) {
     const route = parseRoute(run);
     const subworkflow = planSubworkflow(
@@ -1568,11 +1614,11 @@ function validateProjectedCanonicalRoutes(
     );
     if (subworkflow.lineage !== null) {
       validateLineageChain(
-        db,
         run,
         "$.subworkflow.lineage",
         subworkflow.lineage,
         projectedRunsById,
+        parentFacts,
       );
     }
   }

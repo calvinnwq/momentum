@@ -379,6 +379,39 @@ describe("persistWorkflowRunImport", () => {
     }
   });
 
+  it("clears stale workflow-definition links on imported upsert", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(artifactRoot);
+    const db = openDb(dataDir);
+    try {
+      const imported = parseOrThrow(runDir);
+      persistWorkflowRunImport(db, imported, { now: 1_700_000_000 });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET workflow_definition_key = ?, workflow_definition_version = ?
+          WHERE id = ?`,
+      ).run("stale-definition", 9, imported.run.runId);
+
+      persistWorkflowRunImport(db, imported, { now: 1_700_000_500 });
+
+      expect(
+        db
+          .prepare(
+            `SELECT workflow_definition_key, workflow_definition_version
+               FROM workflow_runs
+              WHERE id = ?`,
+          )
+          .get(imported.run.runId),
+      ).toEqual({
+        workflow_definition_key: null,
+        workflow_definition_version: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists monitor advisory fields for durable status loaders", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();

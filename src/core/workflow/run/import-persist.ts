@@ -162,6 +162,8 @@ export function persistWorkflowRunImport(
          objective = excluded.objective,
          issue_scope_json = excluded.issue_scope_json,
          route_json = excluded.route_json,
+         workflow_definition_key = NULL,
+         workflow_definition_version = NULL,
          approval_boundary = excluded.approval_boundary,
          skill_revision = excluded.skill_revision,
          monitor_last_seen_state = excluded.monitor_last_seen_state,
