@@ -1345,7 +1345,7 @@ describe("momentum workflow run logs", () => {
       "--json",
     ]);
 
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     const payload = JSON.parse(result.stdout) as {
       schemaVersion: number;
       gates: Array<{

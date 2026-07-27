@@ -1743,7 +1743,10 @@ function migrateWorkflowVocabulary(
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (routeStatePlan !== undefined && routeStatePlan.runs.length > 0) {
+    if (
+      routeStatePlan !== undefined &&
+      routeStatePlan.deferredUntilBaseComplete !== true
+    ) {
       assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
     }
     mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
@@ -1964,6 +1967,9 @@ function migrateWorkflowVocabulary(
       convertRounds!.run(candidate.attempt_id);
     }
 
+    if (routeStatePlan?.deferredUntilBaseComplete === true) {
+      routeStatePlan = preScanRouteState(db);
+    }
     if (routeStatePlan !== undefined && routeStateMigrationNeeded(db)) {
       refreshWorkflowRouteStatePlan(db, routeStatePlan);
       applyWorkflowRouteStateMigrationInTransaction(db, routeStatePlan);

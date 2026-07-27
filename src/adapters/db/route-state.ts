@@ -6,6 +6,8 @@ import {
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
   projectLegacyWorkflowRunRoutes,
   RouteStateProjectionError,
+  type WorkflowRunRouteProjectionInput,
+  type WorkflowRunRouteProjectionSource,
 } from "./route-projection.js";
 
 type MomentumDb = DatabaseSync;
@@ -65,8 +67,7 @@ CREATE TABLE IF NOT EXISTS workflow_run_coding_compatibility (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   CHECK (implementation_engine IS NULL OR trim(implementation_engine) <> ''),
-  CHECK (selected_profile IS NULL OR trim(selected_profile) <> ''),
-  CHECK (implementation_engine IS NOT NULL OR selected_profile IS NOT NULL)
+  CHECK (selected_profile IS NULL OR trim(selected_profile) <> '')
 ) STRICT`,
   },
   {
@@ -218,6 +219,7 @@ type RouteRunPlan = {
 export type WorkflowRouteStatePlan = {
   runs: RouteRunPlan[];
   dataVersion?: number;
+  deferredUntilBaseComplete?: boolean;
 };
 
 export function validateWorkflowRouteShape(input: {
@@ -381,6 +383,47 @@ export function writeCanonicalWorkflowRunRouteState(
   applyRouteStatePlan(db, { runs: [plan] });
 }
 
+export function projectValidatedLegacyWorkflowRunRoute(
+  db: MomentumDb,
+  runId: string,
+  run: WorkflowRunRouteProjectionSource,
+): Record<string, unknown> {
+  return (
+    projectValidatedLegacyWorkflowRunRoutes(db, [{ runId, ...run }]).get(
+      runId,
+    ) ?? {}
+  );
+}
+
+export function projectValidatedLegacyWorkflowRunRoutes(
+  db: MomentumDb,
+  runs: ReadonlyArray<WorkflowRunRouteProjectionInput>,
+): Map<string, Record<string, unknown>> {
+  if (runs.length === 0) return new Map();
+  const requestedIds = new Set(runs.map((run) => run.runId));
+  const rowsById = loadCanonicalValidationRunClosure(db, requestedIds);
+  try {
+    const projectedByRunId = projectLegacyWorkflowRunRoutes(
+      db,
+      [...rowsById.values()].map((run) => ({
+        runId: run.id,
+        source: run.source,
+        definitionKey: run.workflow_definition_key,
+        definitionVersion: run.workflow_definition_version,
+      })),
+    );
+    validateProjectedCanonicalRoutes(db, rowsById, projectedByRunId);
+    return new Map(
+      [...requestedIds].map((runId) => [
+        runId,
+        projectedByRunId.get(runId) ?? {},
+      ]),
+    );
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
+  }
+}
+
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
   if (!hasRouteStateBaseTables(db)) return false;
   const state = destinationSchemaState(db);
@@ -406,7 +449,25 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
 
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
   const dataVersion = databaseDataVersion(db);
-  if (!hasRouteStateBaseTables(db)) return { runs: [], dataVersion };
+  const baseState = routeStateBaseSchemaState(db);
+  if (baseState.present === 0) return { runs: [], dataVersion };
+  if (baseState.present < baseState.total) {
+    const route = columnExists(db, "workflow_runs", "route_json")
+      ? firstNonEmptyRoute(db)
+      : undefined;
+    if (route === undefined) {
+      return { runs: [], dataVersion, deferredUntilBaseComplete: true };
+    }
+    throw new RouteStateMigrationError({
+      runId: route.id,
+      jsonPath: "$schema.routeState",
+      code: "route_state_schema_partial",
+      detail:
+        `route migration base schema is partial; existing: ${baseState.existing.join(", ")}; ` +
+        `missing: ${baseState.missing.join(", ")}`,
+    });
+  }
+  assertRouteDestinationForeignKeysEmpty(db, ["workflow_steps"]);
   const state = destinationSchemaState(db);
   if (
     state.malformed.length > 0 ||
@@ -425,6 +486,7 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
           "canonical destinations and non-empty legacy route state coexist",
       });
     }
+    assertRouteDestinationForeignKeysEmpty(db);
     validateCanonicalRouteState(db);
     return { runs: [], dataVersion };
   }
@@ -464,6 +526,16 @@ export function assertWorkflowRouteStatePlanCurrent(
   db: MomentumDb,
   plan: WorkflowRouteStatePlan,
 ): void {
+  if (plan.runs.length === 0) {
+    const current = preScanRouteState(db);
+    if (current.runs.length === 0) return;
+    throw new RouteStateMigrationError({
+      runId: "<database>",
+      jsonPath: "$",
+      code: "route_state_canonical_conflict",
+      detail: "database route state changed after route migration preflight",
+    });
+  }
   if (
     plan.dataVersion !== undefined &&
     databaseDataVersion(db) !== plan.dataVersion
@@ -534,7 +606,7 @@ export function applyWorkflowRouteStateMigrationInTransaction(
     applyRouteStatePlan(db, routeStatePlan);
     assertProjectionEquivalence(db, routeStatePlan);
     clearMigratedRouteJson(db, routeStatePlan);
-    assertForeignKeyCheckEmpty(db);
+    assertRouteDestinationForeignKeysEmpty(db);
   } catch (error) {
     throw normalizeRouteStateMigrationError(error);
   }
@@ -592,7 +664,12 @@ function planRun(
   }
   const mode = optionalNonBlankString(run.id, "$.mode", parsedRoute["mode"]);
   const risk = optionalNonBlankString(run.id, "$.risk", parsedRoute["risk"]);
-  const steps = planStepAgentConfigs(db, run, parsedRoute["steps"]);
+  const steps = planStepAgentConfigs(
+    db,
+    run,
+    parsedRoute["steps"],
+    definitionAgentConfigs,
+  );
   const subworkflow = planSubworkflow(
     db,
     run,
@@ -619,8 +696,9 @@ function planRun(
   }
 
   const compatibility =
-    run.source !== "agent-workflow" &&
-    (implementationEngine !== null || profile !== null)
+    run.source === "momentum-native-coding" ||
+    (run.source !== "agent-workflow" &&
+      (implementationEngine !== null || profile !== null))
       ? { implementationEngine, selectedProfile: profile }
       : null;
   const importMetadata =
@@ -676,6 +754,7 @@ function planStepAgentConfigs(
   db: MomentumDb,
   run: RunRow,
   raw: unknown,
+  definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
 ): Map<string, string> {
   const result = new Map<string, string>();
   const routeKinds = new Map<string, string>();
@@ -736,7 +815,7 @@ function planStepAgentConfigs(
         detail: `no persisted step has canonical kind '${canonicalKind}'`,
       });
     }
-    if (matches.length > 1) {
+    if (matches.length > 1 && definitionAgentConfigs === undefined) {
       throw new RouteStateMigrationError({
         runId: run.id,
         jsonPath: at,
@@ -744,7 +823,9 @@ function planStepAgentConfigs(
         detail: `multiple persisted steps have canonical kind '${canonicalKind}'`,
       });
     }
-    result.set(matches[0]!.step_id, JSON.stringify(config));
+    for (const match of matches) {
+      result.set(match.step_id, JSON.stringify(config));
+    }
   }
   return result;
 }
@@ -1338,51 +1419,96 @@ function validateCanonicalRouteState(db: MomentumDb): void {
         ORDER BY id`,
     )
     .all() as RunRow[];
-  try {
-    const projectedByRunId = projectLegacyWorkflowRunRoutes(
-      db,
-      runs.map((run) => ({
+  projectValidatedLegacyWorkflowRunRoutes(
+    db,
+    runs.map((run) => ({
+      runId: run.id,
+      source: run.source,
+      definitionKey: run.workflow_definition_key,
+      definitionVersion: run.workflow_definition_version,
+    })),
+  );
+}
+
+function loadCanonicalValidationRunClosure(
+  db: MomentumDb,
+  requestedIds: ReadonlySet<string>,
+): Map<string, RunRow> {
+  const selectRun = db.prepare(
+    `SELECT id, source, route_json, workflow_definition_key,
+            workflow_definition_version, created_at, updated_at
+       FROM workflow_runs
+      WHERE id = ?`,
+  );
+  const selectParent = db.prepare(
+    "SELECT parent_run_id FROM workflow_run_lineage WHERE run_id = ?",
+  );
+  const rowsById = new Map<string, RunRow>();
+  const pending = [...requestedIds];
+  while (pending.length > 0) {
+    const runId = pending.pop()!;
+    if (rowsById.has(runId)) continue;
+    const run = selectRun.get(runId) as RunRow | undefined;
+    if (run === undefined) continue;
+    rowsById.set(runId, run);
+    const lineage = selectParent.get(runId) as
+      { parent_run_id: string } | undefined;
+    if (lineage !== undefined && !rowsById.has(lineage.parent_run_id)) {
+      pending.push(lineage.parent_run_id);
+    }
+  }
+  return rowsById;
+}
+
+function validateProjectedCanonicalRoutes(
+  db: MomentumDb,
+  rowsById: ReadonlyMap<string, RunRow>,
+  projectedByRunId: ReadonlyMap<string, Record<string, unknown>>,
+): void {
+  const marker = db.prepare(
+    "SELECT 1 FROM workflow_run_coding_compatibility WHERE run_id = ?",
+  );
+  const projectedRunsById = new Map<string, RunRow>();
+  for (const run of rowsById.values()) {
+    if (
+      run.source === "momentum-native-coding" &&
+      marker.get(run.id) === undefined
+    ) {
+      throw new RouteStateMigrationError({
         runId: run.id,
-        source: run.source,
-        definitionKey: run.workflow_definition_key,
-        definitionVersion: run.workflow_definition_version,
-      })),
-    );
-    const projectedRuns = runs.map((run) => {
-      const projectedRoute = projectedByRunId.get(run.id) ?? {};
-      validateWorkflowRouteShape({
-        runId: run.id,
-        source: run.source,
-        route: projectedRoute,
+        jsonPath: "$canonical.workflow_run_coding_compatibility",
+        code: "route_state_canonical_conflict",
+        detail: "native coding run is missing its compatibility marker row",
       });
-      return {
-        ...run,
-        route_json: JSON.stringify(projectedRoute),
-      };
+    }
+    const projectedRoute = projectedByRunId.get(run.id) ?? {};
+    validateWorkflowRouteShape({
+      runId: run.id,
+      source: run.source,
+      route: projectedRoute,
     });
-    const projectedRunsById = new Map(
-      projectedRuns.map((run) => [run.id, run]),
+    projectedRunsById.set(run.id, {
+      ...run,
+      route_json: JSON.stringify(projectedRoute),
+    });
+  }
+  for (const run of projectedRunsById.values()) {
+    const route = parseRoute(run);
+    const subworkflow = planSubworkflow(
+      db,
+      run,
+      route["subworkflow"],
+      projectedRunsById,
     );
-    for (const run of projectedRuns) {
-      const route = parseRoute(run);
-      const subworkflow = planSubworkflow(
+    if (subworkflow.lineage !== null) {
+      validateLineageChain(
         db,
         run,
-        route["subworkflow"],
+        "$.subworkflow.lineage",
+        subworkflow.lineage,
         projectedRunsById,
       );
-      if (subworkflow.lineage !== null) {
-        validateLineageChain(
-          db,
-          run,
-          "$.subworkflow.lineage",
-          subworkflow.lineage,
-          projectedRunsById,
-        );
-      }
     }
-  } catch (error) {
-    throw normalizeRouteStateMigrationError(error);
   }
 }
 
@@ -1396,14 +1522,33 @@ function clearMigratedRouteJson(
   for (const item of plan.runs) clear.run(item.run.id);
 }
 
-function assertForeignKeyCheckEmpty(db: MomentumDb): void {
-  const rows = db.prepare("PRAGMA foreign_key_check").all();
-  if (rows.length > 0) {
+function assertRouteDestinationForeignKeysEmpty(
+  db: MomentumDb,
+  tables: readonly string[] = [
+    "workflow_steps",
+    ...DESTINATION_TABLES.map((contract) => contract.name),
+  ],
+): void {
+  for (const table of tables) {
+    if (!tableExists(db, table)) continue;
+    const rows = db
+      .prepare(`PRAGMA foreign_key_check(${quoteIdentifier(table)})`)
+      .all() as Array<{ rowid: number | null }>;
+    if (rows.length === 0) continue;
+    const first = rows[0]!;
+    const row =
+      first.rowid === null
+        ? undefined
+        : (db
+            .prepare(
+              `SELECT run_id FROM ${quoteIdentifier(table)} WHERE rowid = ?`,
+            )
+            .get(first.rowid) as { run_id: string } | undefined);
     throw new RouteStateMigrationError({
-      runId: "<database>",
-      jsonPath: "$schema.foreignKeys",
+      runId: row?.run_id ?? "<database>",
+      jsonPath: `$canonical.${table}.run_id`,
       code: "route_state_foreign_key_invalid",
-      detail: `PRAGMA foreign_key_check returned ${rows.length} row(s)`,
+      detail: `${table} contains ${rows.length} invalid foreign-key reference(s)`,
     });
   }
 }
@@ -1523,11 +1668,24 @@ function databaseDataVersion(db: MomentumDb): number {
 }
 
 function hasRouteStateBaseTables(db: MomentumDb): boolean {
-  return (
-    tableExists(db, "workflow_runs") &&
-    tableExists(db, "workflow_steps") &&
-    tableExists(db, "step_definitions")
-  );
+  const state = routeStateBaseSchemaState(db);
+  return state.present === state.total;
+}
+
+function routeStateBaseSchemaState(db: MomentumDb): {
+  present: number;
+  total: number;
+  existing: string[];
+  missing: string[];
+} {
+  const names = ["workflow_runs", "workflow_steps", "step_definitions"];
+  const existing = names.filter((name) => tableExists(db, name));
+  return {
+    present: existing.length,
+    total: names.length,
+    existing,
+    missing: names.filter((name) => !existing.includes(name)),
+  };
 }
 
 function tableExists(db: MomentumDb, name: string): boolean {

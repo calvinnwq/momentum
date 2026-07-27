@@ -1,6 +1,21 @@
 import type { MomentumDb } from "../../src/adapters/db.js";
 import { projectLegacyWorkflowRunRoute } from "../../src/adapters/db/route-projection.js";
 
+export function seedCanonicalCodingCompatibilityMarker(
+  db: MomentumDb,
+  runId: string,
+  now: number,
+): void {
+  db.prepare(
+    `INSERT INTO workflow_run_coding_compatibility
+       (run_id, implementation_engine, selected_profile, created_at, updated_at)
+     SELECT id, NULL, NULL, ?, ?
+       FROM workflow_runs
+      WHERE id = ? AND source = 'momentum-native-coding'
+     ON CONFLICT(run_id) DO NOTHING`,
+  ).run(now, now, runId);
+}
+
 export function loadCanonicalWorkflowRunRoute(
   db: MomentumDb,
   runId: string,

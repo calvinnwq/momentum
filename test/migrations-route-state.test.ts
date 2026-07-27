@@ -10,6 +10,7 @@ import {
   openExistingDbMigratedReadOnly,
   openExistingDbReadOnly,
 } from "../src/adapters/db.js";
+import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
 import {
   LEGACY_ROUTE_TOP_LEVEL_KEYS,
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
@@ -298,6 +299,11 @@ describe("workflow route-state migration", () => {
           implementation_engine: "gnhf",
           selected_profile: null,
         },
+        {
+          run_id: "v1-aliases",
+          implementation_engine: null,
+          selected_profile: null,
+        },
       ]);
       expect(
         db
@@ -506,6 +512,47 @@ describe("workflow route-state migration", () => {
           validate: { harness: "codex" },
           "merge-cleanup": { model: "cleanup-model" },
           "tracker-refresh": { effort: "low" },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projects structurally equal subworkflow child config regardless of property order", () => {
+    const dataDir = seedReleasedFixture();
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `UPDATE workflow_steps
+            SET executor_config_json = ?
+          WHERE run_id = 'subworkflow-parent' AND step_id = ?`,
+      ).run(
+        '{"child":{"childDefinitionKey":"fixture-nested","childDefinitionVersion":1,"maxDepth":3}}',
+        "child-one",
+      );
+      db.prepare(
+        `UPDATE workflow_steps
+            SET executor_config_json = ?
+          WHERE run_id = 'subworkflow-parent' AND step_id = ?`,
+      ).run(
+        '{"child":{"maxDepth":3,"childDefinitionVersion":1,"childDefinitionKey":"fixture-nested"}}',
+        "child-two",
+      );
+
+      expect(
+        projectLegacyWorkflowRunRoute(db, "subworkflow-parent", {
+          source: "workflow-definition",
+          definitionKey: "fixture-parent",
+          definitionVersion: 1,
+        }),
+      ).toEqual({
+        subworkflow: {
+          child: {
+            childDefinitionKey: "fixture-nested",
+            childDefinitionVersion: 1,
+            maxDepth: 3,
+          },
         },
       });
     } finally {
@@ -1058,6 +1105,121 @@ describe("workflow route-state migration", () => {
     }
   });
 
+  it("refuses partial route base schema before bootstrap writes", () => {
+    const dataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "momentum-partial-route-base-"),
+    );
+    tempRoots.push(dataDir);
+    withRawDb(dataDir, (db) => {
+      db.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          route_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        INSERT INTO workflow_runs
+          (id, source, route_json, created_at, updated_at)
+        VALUES
+          ('partial-run', 'momentum-native-coding', '{"implementationEngine":"gnhf"}', 1, 1);
+      `);
+    });
+
+    expectRouteRefusal(dataDir, {
+      runId: "partial-run",
+      jsonPath: "$schema.routeState",
+      code: "route_state_schema_partial",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).toEqual(["workflow_runs"]);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses an empty route plan whose database changed after preflight", () => {
+    const dataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "momentum-empty-route-plan-race-"),
+    );
+    tempRoots.push(dataDir);
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const plan = preScanRouteState(db);
+      const concurrent = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        concurrent.exec(fs.readFileSync(fixturePath, "utf8"));
+      } finally {
+        concurrent.close();
+      }
+      const before = databaseHash(dataDir);
+      let refusal: unknown;
+      try {
+        applyQueueMigrations(db, {}, plan);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({
+        runId: "<database>",
+        jsonPath: "$",
+        code: "route_state_canonical_conflict",
+      });
+      expect(databaseHash(dataDir)).toBe(before);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses route-owned canonical foreign-key corruption before bootstrap writes", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.prepare(
+        `INSERT INTO workflow_run_coding_compatibility
+           (run_id, implementation_engine, selected_profile, created_at, updated_at)
+         VALUES ('missing-run', 'gnhf', NULL, 1, 1)`,
+      ).run();
+      db.exec("DROP TABLE events");
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "missing-run",
+      jsonPath: "$canonical.workflow_run_coding_compatibility.run_id",
+      code: "route_state_foreign_key_invalid",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses workflow step foreign-key corruption before bootstrap writes", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.prepare(
+        `UPDATE workflow_steps
+            SET run_id = 'missing-run'
+          WHERE run_id = 'native-simple'`,
+      ).run();
+      db.exec("DROP TABLE events");
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "missing-run",
+      jsonPath: "$canonical.workflow_steps.run_id",
+      code: "route_state_foreign_key_invalid",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
+  });
+
   it("refuses a route plan whose source state changed after preflight", () => {
     const dataDir = seedReleasedFixture();
     withRawDb(dataDir, (db) => {
@@ -1142,6 +1304,61 @@ describe("workflow route-state migration", () => {
     });
   });
 
+  it("persists an empty compatibility marker for native coding routes that project to empty", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        "UPDATE workflow_runs SET route_json = '{}' WHERE id = 'native-simple'",
+      ).run();
+    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        db
+          .prepare(
+            `SELECT implementation_engine, selected_profile
+               FROM workflow_run_coding_compatibility
+              WHERE run_id = 'native-simple'`,
+          )
+          .get(),
+      ).toEqual({
+        implementation_engine: null,
+        selected_profile: null,
+      });
+      expect(
+        projectLegacyWorkflowRunRoute(db, "native-simple", {
+          source: "momentum-native-coding",
+          definitionKey: "coding-workflow",
+          definitionVersion: 3,
+        }),
+      ).toEqual({});
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a missing native coding compatibility marker before writable mutation", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        "DELETE FROM workflow_run_coding_compatibility WHERE run_id = 'native-simple'",
+      ).run();
+      db.exec("DROP TABLE events");
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "native-simple",
+      jsonPath: "$canonical.workflow_run_coding_compatibility",
+      code: "route_state_canonical_conflict",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
+  });
+
   it("refuses invalid canonical agent config on writable open", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
@@ -1159,6 +1376,30 @@ describe("workflow route-state migration", () => {
     });
   });
 
+  it("refuses invalid canonical agent config when serving a read-only compatibility route", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `UPDATE workflow_steps
+            SET agent_config_json = '{"model":" "}'
+          WHERE run_id = 'native-full' AND step_id = 'implementation'`,
+      ).run();
+    });
+    const db = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(() => loadWorkflowRunDetail(db, "native-full")).toThrowError(
+        expect.objectContaining({
+          runId: "native-full",
+          jsonPath: "$.steps.implementation.model",
+          code: "route_state_value_invalid",
+        }),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses cyclic canonical lineage on writable open", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
@@ -1173,7 +1414,7 @@ describe("workflow route-state migration", () => {
     });
     expectRouteRefusal(dataDir, {
       runId: "subworkflow-child",
-      jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+      jsonPath: "$.subworkflow.lineage.parentRunId",
       code: "route_state_lineage_invalid",
     });
   });

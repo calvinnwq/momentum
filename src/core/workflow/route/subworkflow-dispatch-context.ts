@@ -58,9 +58,9 @@ import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
-  projectLegacyWorkflowRunRoute,
-  RouteStateProjectionError,
-} from "../../../adapters/db/route-projection.js";
+  projectValidatedLegacyWorkflowRunRoute,
+  RouteStateMigrationError,
+} from "../../../adapters/db/route-state.js";
 import { resolveDispatchedStepExecutorContext } from "../live-wrapper/daemon-exec-context.js";
 import type {
   ClaimedWorkflowStep,
@@ -87,6 +87,8 @@ export type SubworkflowParentRunRow = {
   repoPath: string | null;
   /** The imported run's source artifact path (run-dir layout for imported runs). */
   sourceArtifactPath: string | null;
+  /** Stable canonical-route refusal detail when the adapter rejects projection. */
+  routeStateError?: string;
 };
 
 /**
@@ -125,6 +127,14 @@ export function resolveSubworkflowParentRunFacts(
   runId: string,
   row: SubworkflowParentRunRow,
 ): SubworkflowParentRunFactsResolution {
+  if (row.routeStateError !== undefined) {
+    return {
+      ok: false,
+      reason:
+        `Subworkflow parent run ${runId} has a corrupt route at ${row.routeStateError}; ` +
+        "routing to manual recovery.",
+    };
+  }
   if (!nonBlank(row.definitionKey)) {
     return {
       ok: false,
@@ -199,17 +209,19 @@ export function loadSubworkflowParentRunRow(
     | undefined;
   if (row === undefined) return undefined;
   let routeJson: string;
+  let routeStateError: string | undefined;
   try {
     routeJson = JSON.stringify(
-      projectLegacyWorkflowRunRoute(db, runId, {
+      projectValidatedLegacyWorkflowRunRoute(db, runId, {
         source: row.source,
         definitionKey: row.workflow_definition_key,
         definitionVersion: row.workflow_definition_version,
       }),
     );
   } catch (error) {
-    if (!(error instanceof RouteStateProjectionError)) throw error;
-    routeJson = "{";
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    routeJson = "{}";
+    routeStateError = error.jsonPath;
   }
   return {
     routeJson,
@@ -217,6 +229,7 @@ export function loadSubworkflowParentRunRow(
     objective: row.objective,
     repoPath: row.repo_path,
     sourceArtifactPath: row.source_artifact_path,
+    ...(routeStateError !== undefined ? { routeStateError } : {}),
   };
 }
 

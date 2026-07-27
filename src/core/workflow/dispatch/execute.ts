@@ -58,9 +58,9 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
-  projectLegacyWorkflowRunRoute,
-  RouteStateProjectionError,
-} from "../../../adapters/db/route-projection.js";
+  projectValidatedLegacyWorkflowRunRoute,
+  RouteStateMigrationError,
+} from "../../../adapters/db/route-state.js";
 import {
   allocateExecutorCheckpointId,
   allocateExecutorRoundId,
@@ -584,16 +584,18 @@ export function resolveWorkflowStepDispatchRouteSelection(
 
   let route: Record<string, unknown>;
   try {
-    route = projectLegacyWorkflowRunRoute(db, claim.runId, {
+    route = projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
       source: row.source,
       definitionKey: row.workflow_definition_key,
       definitionVersion: row.workflow_definition_version,
     });
   } catch (error) {
-    if (!(error instanceof RouteStateProjectionError)) throw error;
+    if (!(error instanceof RouteStateMigrationError)) throw error;
     return {
       ok: false,
-      reason: `Native coding run ${claim.runId} route is corrupt; routing to manual recovery.`,
+      reason:
+        `Native coding run ${claim.runId} route is corrupt at ${error.jsonPath}; ` +
+        "routing to manual recovery.",
     };
   }
   const implementationEngine = readCodingImplementationEngine(

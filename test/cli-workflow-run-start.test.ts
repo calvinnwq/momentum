@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +45,23 @@ function makeTempDir(prefix = "momentum-cli-workflow-run-start-"): string {
   return fs.realpathSync(dir);
 }
 
+function seedRouteRefusal(dataDir: string): void {
+  const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+  try {
+    db.exec(
+      fs.readFileSync(
+        path.join(repoRoot, "test", "fixtures", "v0220-route-state.sql"),
+        "utf8",
+      ),
+    );
+    db.prepare(
+      "UPDATE workflow_runs SET route_json = ? WHERE id = 'native-simple'",
+    ).run('{"unknown":true}');
+  } finally {
+    db.close();
+  }
+}
+
 async function run(argv: string[]): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
@@ -84,6 +102,40 @@ function startArgs(input: StartArgs): string[] {
 }
 
 describe("momentum workflow run start (NGX-346)", () => {
+  for (const json of [true, false]) {
+    it(`renders route-state open refusals in the stable ${json ? "JSON" : "text"} envelope`, async () => {
+      const dataDir = makeTempDir();
+      const repoDir = makeTempDir();
+      seedRouteRefusal(dataDir);
+      const argv = startArgs({
+        dataDir,
+        repoDir,
+        runId: "route-refusal-start",
+        objective: "Must not bypass the CLI envelope",
+      });
+      if (!json) argv.splice(argv.indexOf("--json"), 1);
+
+      const result = await run(argv);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      if (json) {
+        expect(JSON.parse(result.stderr)).toMatchObject({
+          ok: false,
+          command: "workflow run start",
+          code: "route_state_unknown_key",
+          runId: "native-simple",
+          jsonPath: "$.unknown",
+          repair: expect.stringContaining("manually repair"),
+        });
+      } else {
+        expect(result.stderr).toContain("route_state_unknown_key");
+        expect(result.stderr).toContain("native-simple");
+        expect(result.stderr).toContain("$.unknown");
+        expect(result.stderr).toContain("manually repair");
+      }
+    });
+  }
+
   it("starts a run from the built-in coding workflow definition", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

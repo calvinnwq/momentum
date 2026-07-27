@@ -80,6 +80,26 @@ const OTHER_DEFINITION: WorkflowDefinition = {
   title: "Other Child Workflow",
 };
 
+const PARENT_DEFINITION: WorkflowDefinition = {
+  ...CODING_WORKFLOW_DEFINITION,
+  key: "parent-workflow",
+  title: "Parent Workflow",
+  steps: CODING_WORKFLOW_DEFINITION.steps.map((step) =>
+    step.key === STEP_ID
+      ? {
+          ...step,
+          executor: "subworkflow",
+          config: {
+            child: {
+              childDefinitionKey: CHILD_DEFINITION_KEY,
+              childDefinitionVersion: 1,
+            },
+          },
+        }
+      : step,
+  ),
+};
+
 /** A propagated child route, as iteration 2's `deriveChildSubworkflowRoute` builds. */
 const CHILD_ROUTE = {
   subworkflow: {
@@ -87,7 +107,7 @@ const CHILD_ROUTE = {
       parentRunId: PARENT_RUN_ID,
       parentStepId: STEP_ID,
       depth: 1,
-      ancestorDefinitionKeys: ["coding-workflow"],
+      ancestorDefinitionKeys: [PARENT_DEFINITION.key],
     },
   },
 };
@@ -112,9 +132,9 @@ function openSeededDb(
   options: { withChildDefinition?: boolean } = {},
 ): MomentumDb {
   const db = openDb(makeTempDir());
-  persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+  persistWorkflowDefinition(db, PARENT_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
-    definition: CODING_WORKFLOW_DEFINITION,
+    definition: PARENT_DEFINITION,
     runId: PARENT_RUN_ID,
     repoPath: "/repos/momentum",
     objective: "Parent run for RC-4b child-runner coverage",

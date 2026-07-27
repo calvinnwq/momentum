@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import { insertExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import {
@@ -187,6 +188,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     now,
     input.updatedAt ?? now,
   );
+  seedCanonicalCodingCompatibilityMarker(db, input.runId, now);
 }
 
 function seedStep(db: MomentumDb, runId: string, input: SeedStepInput): void {

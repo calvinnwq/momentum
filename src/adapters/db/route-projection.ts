@@ -344,7 +344,7 @@ function projectSubworkflowNamespace(
       }
       if (child === undefined) {
         child = config["child"];
-      } else if (JSON.stringify(child) !== JSON.stringify(config["child"])) {
+      } else if (!isDeepStrictEqual(child, config["child"])) {
         throw new RouteStateProjectionError(
           runId,
           "$.subworkflow.child",

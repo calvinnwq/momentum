@@ -277,6 +277,53 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("persists equal agent configs for repeated step kinds", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = { harness: "codex" };
+      definition.steps[1]!.kind = "implementation";
+      definition.steps[1]!.agentConfig = { harness: "codex" };
+
+      expect(
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            definition,
+            route: {
+              steps: {
+                implementation: { model: "gpt-5.6", effort: "medium" },
+              },
+            },
+          }),
+        ).inserted,
+      ).toBe(true);
+      expect(
+        db
+          .prepare(
+            `SELECT step_id, agent_config_json
+               FROM workflow_steps
+              WHERE run_id = 'run-001'
+              ORDER BY step_id`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          step_id: "implementation",
+          agent_config_json:
+            '{"harness":"codex","model":"gpt-5.6","effort":"medium"}',
+        },
+        {
+          step_id: "preflight",
+          agent_config_json:
+            '{"harness":"codex","model":"gpt-5.6","effort":"medium"}',
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses canonical and legacy route aliases before writing", () => {
     const db = openTempDb();
     try {

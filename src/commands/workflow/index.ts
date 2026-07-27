@@ -17,6 +17,7 @@ import {
   openExistingDbReadOnly,
   type MomentumDb,
 } from "../../adapters/db.js";
+import { RouteStateMigrationError } from "../../adapters/db/route-state.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
@@ -881,7 +882,21 @@ async function runWorkflowStartCommand(
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    return emitWorkflowRunStartFailure(parsed, io, {
+      command,
+      code: error.code,
+      message: error.message,
+      dataDir,
+      runId: error.runId,
+      jsonPath: error.jsonPath,
+      repair: error.repair,
+    });
+  }
   try {
     const definition = options.coding
       ? codingDefinition
@@ -1152,7 +1167,21 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    return emitWorkflowImportFailure(parsed, io, {
+      code: error.code,
+      message: error.message,
+      dataDir,
+      runId: error.runId,
+      path: artifactPath,
+      jsonPath: error.jsonPath,
+      repair: error.repair,
+    });
+  }
   let summary: PersistWorkflowRunImportSummary;
   let recovery: ReconcileWorkflowRunManualRecoveryResult;
   let recoveryState: WorkflowRunManualRecoveryState | undefined;
