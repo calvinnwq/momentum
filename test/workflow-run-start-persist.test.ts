@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { RouteStateMigrationError } from "../src/adapters/db/route-state.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition,
@@ -526,7 +525,7 @@ describe("persistWorkflowRunStart", () => {
           }),
         ),
       ).toThrowError(
-        expect.objectContaining<RouteStateMigrationError>({
+        expect.objectContaining({
           code: "route_state_lineage_invalid",
           jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
         }),
