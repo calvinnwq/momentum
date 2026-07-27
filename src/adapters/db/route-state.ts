@@ -503,23 +503,20 @@ function planRun(
   lineageRuns?: ReadonlyMap<string, RunRow>,
   validated?: ReturnType<typeof validateWorkflowRoute>,
 ): RouteRunPlan {
-  const route = validated ?? validateWorkflowRoute({
-    runId: run.id,
-    source: run.source,
-    route: parseWorkflowRoute(run.id, run.route_json),
-  });
+  const route =
+    validated ??
+    validateWorkflowRoute({
+      runId: run.id,
+      source: run.source,
+      route: parseWorkflowRoute(run.id, run.route_json),
+    });
   const steps = planStepAgentConfigs(
     db,
     run,
     route.stepAgentConfigs,
     definitionAgentConfigs,
   );
-  const subworkflow = planSubworkflow(
-    db,
-    run,
-    route,
-    lineageRuns,
-  );
+  const subworkflow = planSubworkflow(db, run, route, lineageRuns);
   const compatibility =
     run.source === "momentum-native-coding" ||
     (run.source !== "agent-workflow" &&
@@ -1269,12 +1266,7 @@ function validateProjectedCanonicalRoutes(
   for (const run of projectedRunsById.values()) {
     const route = validatedRoutes.get(run.id);
     if (route === undefined) continue;
-    const subworkflow = planSubworkflow(
-      db,
-      run,
-      route,
-      projectedRunsById,
-    );
+    const subworkflow = planSubworkflow(db, run, route, projectedRunsById);
     if (subworkflow.lineage !== null) {
       validateLineageChain(
         run,
