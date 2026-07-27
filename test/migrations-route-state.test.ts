@@ -142,11 +142,14 @@ function expectRouteRefusal(
 ): RouteStateMigrationError {
   const before = databaseHash(dataDir);
   let refusal: RouteStateMigrationError | undefined;
+  let opened: DatabaseSync | undefined;
   try {
-    openDb(dataDir);
+    opened = openDb(dataDir);
   } catch (error) {
     expect(error).toBeInstanceOf(RouteStateMigrationError);
     refusal = error as RouteStateMigrationError;
+  } finally {
+    opened?.close();
   }
   expect(refusal).toMatchObject(expected);
   expect(refusal?.repair).toContain("manually repair");
@@ -1034,6 +1037,27 @@ describe("workflow route-state migration", () => {
     }
   });
 
+  it("refuses invalid released route state before bootstrap schema writes", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.exec("DROP TABLE events");
+      db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = 'native-simple'",
+      ).run('{"unknown":true}');
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "native-simple",
+      jsonPath: "$.unknown",
+      code: "route_state_unknown_key",
+    });
+    const after = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(tableNames(after)).not.toContain("events");
+    } finally {
+      after.close();
+    }
+  });
+
   it("refuses a route plan whose source state changed after preflight", () => {
     const dataDir = seedReleasedFixture();
     withRawDb(dataDir, (db) => {
@@ -1115,6 +1139,42 @@ describe("workflow route-state migration", () => {
       runId: "subworkflow-parent",
       jsonPath: "$.subworkflow.child",
       code: "route_state_projection_mismatch",
+    });
+  });
+
+  it("refuses invalid canonical agent config on writable open", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `UPDATE workflow_steps
+            SET agent_config_json = '{"model":" "}'
+          WHERE run_id = 'native-full' AND step_id = 'implementation'`,
+      ).run();
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "native-full",
+      jsonPath: "$.steps.implementation.model",
+      code: "route_state_value_invalid",
+    });
+  });
+
+  it("refuses cyclic canonical lineage on writable open", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `INSERT INTO workflow_run_lineage
+           (run_id, parent_run_id, parent_step_id, depth,
+            ancestor_definition_keys_json, created_at, updated_at)
+         VALUES ('subworkflow-parent', 'subworkflow-child', 'nested-child', 2,
+                 '["fixture-parent","fixture-nested"]', 1, 1)`,
+      ).run();
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "subworkflow-child",
+      jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+      code: "route_state_lineage_invalid",
     });
   });
 });

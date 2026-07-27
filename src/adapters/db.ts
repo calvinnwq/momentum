@@ -7,7 +7,10 @@ import {
   applyQueueMigrations,
   applyWorkflowVocabularyMigration,
 } from "./db/migrations.js";
-import { routeStateMigrationNeeded } from "./db/route-state.js";
+import {
+  preScanRouteState,
+  routeStateMigrationNeeded,
+} from "./db/route-state.js";
 
 export type MomentumDb = DatabaseSync;
 
@@ -75,12 +78,17 @@ export function openDb(
     timeout: options.timeoutMs ?? SQLITE_BUSY_TIMEOUT_MS,
   });
   try {
+    const routeStatePlan = preScanRouteState(db);
     db.exec(SCHEMA);
     const executorClaims = configuredExecutorClaims(options.env ?? process.env);
-    applyQueueMigrations(db, {
-      claimedExecutorNames: executorClaims.names,
-      executorClaimsKnown: executorClaims.known,
-    });
+    applyQueueMigrations(
+      db,
+      {
+        claimedExecutorNames: executorClaims.names,
+        executorClaimsKnown: executorClaims.known,
+      },
+      routeStatePlan,
+    );
     return db;
   } catch (error) {
     db.close();

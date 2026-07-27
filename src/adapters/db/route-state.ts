@@ -1332,18 +1332,14 @@ function assertProjectionEquivalence(
 function validateCanonicalRouteState(db: MomentumDb): void {
   const runs = db
     .prepare(
-      `SELECT id, source, workflow_definition_key, workflow_definition_version
+      `SELECT id, source, route_json, workflow_definition_key,
+              workflow_definition_version, created_at, updated_at
          FROM workflow_runs
         ORDER BY id`,
     )
-    .all() as Array<{
-    id: string;
-    source: string;
-    workflow_definition_key: string | null;
-    workflow_definition_version: number | null;
-  }>;
+    .all() as RunRow[];
   try {
-    projectLegacyWorkflowRunRoutes(
+    const projectedByRunId = projectLegacyWorkflowRunRoutes(
       db,
       runs.map((run) => ({
         runId: run.id,
@@ -1352,6 +1348,39 @@ function validateCanonicalRouteState(db: MomentumDb): void {
         definitionVersion: run.workflow_definition_version,
       })),
     );
+    const projectedRuns = runs.map((run) => {
+      const projectedRoute = projectedByRunId.get(run.id) ?? {};
+      validateWorkflowRouteShape({
+        runId: run.id,
+        source: run.source,
+        route: projectedRoute,
+      });
+      return {
+        ...run,
+        route_json: JSON.stringify(projectedRoute),
+      };
+    });
+    const projectedRunsById = new Map(
+      projectedRuns.map((run) => [run.id, run]),
+    );
+    for (const run of projectedRuns) {
+      const route = parseRoute(run);
+      const subworkflow = planSubworkflow(
+        db,
+        run,
+        route["subworkflow"],
+        projectedRunsById,
+      );
+      if (subworkflow.lineage !== null) {
+        validateLineageChain(
+          db,
+          run,
+          "$.subworkflow.lineage",
+          subworkflow.lineage,
+          projectedRunsById,
+        );
+      }
+    }
   } catch (error) {
     throw normalizeRouteStateMigrationError(error);
   }

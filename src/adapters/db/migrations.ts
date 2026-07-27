@@ -2186,8 +2186,9 @@ function mergeOrRenameExecutorColumn(
 export function applyQueueMigrations(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
+  validatedRouteStatePlan?: WorkflowRouteStatePlan,
 ): void {
-  const routeStatePlan = preScanRouteState(db);
+  const routeStatePlan = validatedRouteStatePlan ?? preScanRouteState(db);
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
   migrateLegacyExecutorInvocationSchema(db, options);
