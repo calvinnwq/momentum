@@ -58,6 +58,10 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  projectLegacyWorkflowRunRoute,
+  RouteStateProjectionError,
+} from "../../../adapters/db/route-projection.js";
+import {
   allocateExecutorCheckpointId,
   allocateExecutorRoundId,
   insertExecutorCheckpoint,
@@ -548,7 +552,7 @@ export type WorkflowStepDispatchRouteSelectionResolution =
 type DispatchRouteRow = {
   source: string;
   workflow_definition_key: string | null;
-  route_json: string | null;
+  workflow_definition_version: number | null;
 };
 
 const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
@@ -563,7 +567,7 @@ export function resolveWorkflowStepDispatchRouteSelection(
 ): WorkflowStepDispatchRouteSelectionResolution {
   const row = db
     .prepare(
-      `SELECT source, workflow_definition_key, route_json
+      `SELECT source, workflow_definition_key, workflow_definition_version
          FROM workflow_runs
         WHERE id = ?`,
     )
@@ -578,13 +582,23 @@ export function resolveWorkflowStepDispatchRouteSelection(
     return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
   }
 
-  const route = parseRouteJson(claim.runId, row.route_json);
-  if (!route.ok) {
-    return { ok: false, reason: route.reason };
+  let route: Record<string, unknown>;
+  try {
+    route = projectLegacyWorkflowRunRoute(db, claim.runId, {
+      source: row.source,
+      definitionKey: row.workflow_definition_key,
+      definitionVersion: row.workflow_definition_version,
+    });
+  } catch (error) {
+    if (!(error instanceof RouteStateProjectionError)) throw error;
+    return {
+      ok: false,
+      reason: `Native coding run ${claim.runId} route is corrupt; routing to manual recovery.`,
+    };
   }
   const implementationEngine = readCodingImplementationEngine(
     claim.runId,
-    route.route,
+    route,
   );
   if (!implementationEngine.ok) {
     return { ok: false, reason: implementationEngine.reason };
@@ -599,7 +613,7 @@ export function resolveWorkflowStepDispatchRouteSelection(
     };
   }
 
-  const overrides = readCodingStepRouteOverrides(route.route);
+  const overrides = readCodingStepRouteOverrides(route);
   if (!overrides.ok) {
     return {
       ok: false,
@@ -641,30 +655,6 @@ function readCodingImplementationEngine(
     };
   }
   return { ok: true, engine: normalized };
-}
-
-function parseRouteJson(
-  runId: string,
-  routeJson: string | null,
-):
-  { ok: true; route: Record<string, unknown> } | { ok: false; reason: string } {
-  if (routeJson === null) return { ok: true, route: {} };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(routeJson);
-  } catch {
-    return {
-      ok: false,
-      reason: `Native coding run ${runId} route is corrupt; routing to manual recovery.`,
-    };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {
-      ok: false,
-      reason: `Native coding run ${runId} route is not an object; routing to manual recovery.`,
-    };
-  }
-  return { ok: true, route: parsed as Record<string, unknown> };
 }
 
 function deriveDispatchRoundId(attemptId: string): string {

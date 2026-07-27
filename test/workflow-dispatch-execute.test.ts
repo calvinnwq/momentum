@@ -1091,9 +1091,14 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
   it("routes corrupt native coding route overrides to manual recovery", () => {
     const db = openNativeCodingDbWithRoute({
       steps: {
-        preflight: { model: "opus" },
+        implementation: { model: "opus" },
       },
     });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET agent_config_json = '{"unexpected":"value"}'
+        WHERE run_id = ? AND step_id = 'implementation'`,
+    ).run(RUN_ID);
     const claim = approveAndClaim(db, "implementation");
 
     const result = executeWorkflowStepDispatch(claim, {
@@ -1112,7 +1117,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       evidence: "route_config_invalid",
       resolvedAt: null,
     });
-    expect(gates[0]?.reason).toContain("preflight");
+    expect(gates[0]?.reason).toContain("steps.implementation.unexpected");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);

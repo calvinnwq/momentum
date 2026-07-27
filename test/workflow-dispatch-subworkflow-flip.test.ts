@@ -25,6 +25,7 @@ import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workfl
 import { deriveDispatchedSubworkflowContext } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 /**
  * NGX-498 (RC-4b) — the production flip proof.
@@ -204,10 +205,10 @@ describe("subworkflow production flip — configured step dispatches through dae
 
       // The child run carries the propagated recursion lineage so its own
       // subworkflow steps can detect a cycle / depth bound.
-      const childRow = db
-        .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-        .get(childRunId(runId)) as { route_json: string | null } | undefined;
-      const childRoute = JSON.parse(childRow?.route_json ?? "{}") as {
+      const childRoute = loadCanonicalWorkflowRunRoute(
+        db,
+        childRunId(runId),
+      ) as {
         subworkflow?: { lineage?: Record<string, unknown> };
       };
       expect(childRoute.subworkflow?.lineage).toMatchObject({

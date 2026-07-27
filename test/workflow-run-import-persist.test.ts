@@ -282,9 +282,20 @@ describe("persistWorkflowRunImport", () => {
         source: "explicit",
         status: "resolved",
       });
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(runRow.route_json).toBe("{}");
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json
+               FROM workflow_run_import_metadata
+              WHERE run_id = 'cwfp-persist01'`,
+          )
+          .get(),
+      ).toEqual({
         mode: "execute-ready",
         profile: "momentum-m7",
+        risk: null,
+        quota_policy_json: null,
       });
       expect(JSON.parse(runRow.plan_json)).toMatchObject({
         runId: "cwfp-persist01",

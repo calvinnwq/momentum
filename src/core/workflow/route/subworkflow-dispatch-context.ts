@@ -56,6 +56,10 @@
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import {
+  projectLegacyWorkflowRunRoute,
+  RouteStateProjectionError,
+} from "../../../adapters/db/route-projection.js";
 import { resolveDispatchedStepExecutorContext } from "../live-wrapper/daemon-exec-context.js";
 import type {
   ClaimedWorkflowStep,
@@ -178,21 +182,36 @@ export function loadSubworkflowParentRunRow(
 ): SubworkflowParentRunRow | undefined {
   const row = db
     .prepare(
-      `SELECT route_json, workflow_definition_key, objective, repo_path, source_artifact_path
+      `SELECT source, workflow_definition_key, workflow_definition_version,
+              objective, repo_path, source_artifact_path
          FROM workflow_runs WHERE id = ?`,
     )
     .get(runId) as
     | {
-        route_json: string | null;
+        source: string;
         workflow_definition_key: string | null;
+        workflow_definition_version: number | null;
         objective: string | null;
         repo_path: string | null;
         source_artifact_path: string | null;
       }
     | undefined;
   if (row === undefined) return undefined;
+  let routeJson: string;
+  try {
+    routeJson = JSON.stringify(
+      projectLegacyWorkflowRunRoute(db, runId, {
+        source: row.source,
+        definitionKey: row.workflow_definition_key,
+        definitionVersion: row.workflow_definition_version,
+      }),
+    );
+  } catch (error) {
+    if (!(error instanceof RouteStateProjectionError)) throw error;
+    routeJson = "{";
+  }
   return {
-    routeJson: row.route_json,
+    routeJson,
     definitionKey: row.workflow_definition_key,
     objective: row.objective,
     repoPath: row.repo_path,

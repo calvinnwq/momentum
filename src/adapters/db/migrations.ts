@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import {
+  applyWorkflowRouteStateMigration,
+  preScanRouteState,
+} from "./route-state.js";
+
 type MomentumDb = DatabaseSync;
 
 export type QueueMigrationOptions = {
@@ -2250,7 +2255,12 @@ export function applyQueueMigrations(
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
   migratePartialLegacyExecutorInvocationSchema(db, options);
+  // Validate the original released route state before the vocabulary migration
+  // can re-key legacy step aliases. The route-state migration scans again after
+  // that normalization to build the canonical write plan.
+  preScanRouteState(db);
   migrateWorkflowVocabulary(db, options);
+  applyWorkflowRouteStateMigration(db);
 }
 
 type PragmaColumnRow = { name: string };

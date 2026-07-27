@@ -35,6 +35,11 @@
 import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
+import {
+  RouteStateMigrationError,
+  validateWorkflowRouteShape,
+  writeCanonicalWorkflowRunRouteState,
+} from "../../../adapters/db/route-state.js";
 import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
   materializeWorkflowRunStart,
@@ -42,6 +47,7 @@ import {
   type WorkflowRunStartInput,
 } from "./start.js";
 import type { WorkflowApprovalBoundary, WorkflowRunState } from "./reducer.js";
+import type { WorkflowDefinition } from "../definition/definition.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not
@@ -105,6 +111,23 @@ export function persistWorkflowRunStart(
     throw new InvalidWorkflowRunStartError(result.errors);
   }
   const { run, steps } = result.plan;
+  const definition = input.definition as WorkflowDefinition;
+  try {
+    validateWorkflowRouteShape({
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+    });
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    throw new InvalidWorkflowRunStartError([
+      {
+        code: "route_invalid",
+        message: error.message,
+        path: error.jsonPath,
+      },
+    ]);
+  }
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -131,7 +154,7 @@ export function persistWorkflowRunStart(
       run.repoPath,
       run.objective,
       JSON.stringify(run.issueScope),
-      JSON.stringify(run.route),
+      "{}",
       run.approvalBoundary,
       run.skillRevision,
       run.definitionKey,
@@ -159,6 +182,28 @@ export function persistWorkflowRunStart(
         run.updatedAt,
       );
     }
+
+    writeCanonicalWorkflowRunRouteState(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      definitionAgentConfigs: new Map(
+        definition.steps.flatMap((step) =>
+          step.agentConfig === undefined
+            ? []
+            : [[step.key, step.agentConfig] as const],
+        ),
+      ),
+      definitionExecutorConfigs: new Map(
+        definition.steps.flatMap((step) =>
+          step.config === undefined ? [] : [[step.key, step.config] as const],
+        ),
+      ),
+    });
 
     if (run.approvalBoundary !== null) {
       const phrase = `workflow run start --approval-boundary ${run.approvalBoundary}`;

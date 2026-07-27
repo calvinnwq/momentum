@@ -215,6 +215,63 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("freezes definition and route config into explicit step destinations", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = {
+        harness: "codex",
+        model: "gpt-5.6",
+      };
+      definition.steps[0]!.config = { command: "implement" };
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition,
+          route: {
+            steps: {
+              implementation: { model: "gpt-5.6-codex", effort: "medium" },
+            },
+          },
+        }),
+      );
+
+      expect(
+        db
+          .prepare(
+            `SELECT agent_config_json, executor_config_json
+               FROM workflow_steps
+              WHERE run_id = 'run-001' AND step_id = 'implementation'`,
+          )
+          .get(),
+      ).toEqual({
+        agent_config_json:
+          '{"harness":"codex","model":"gpt-5.6-codex","effort":"medium"}',
+        executor_config_json: '{"command":"implement"}',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses unknown route keys before writing a run", () => {
+    const db = openTempDb();
+    try {
+      expect(() =>
+        persistWorkflowRunStart(db, baseInput({ route: { unknown: "value" } })),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists the built-in coding workflow with honoured scope, route, and skill revision", () => {
     const db = openTempDb();
     try {
@@ -223,22 +280,34 @@ describe("persistWorkflowRunStart", () => {
         baseInput({
           definition: CODING_WORKFLOW_DEFINITION,
           issueScope: { issues: ["NGX-346"] },
-          route: { channel: "discord" },
-          source: "operator-cli",
+          route: { profile: "fixture-profile" },
+          source: "workflow-definition",
           skillRevision: "abc123",
         }),
       );
       expect(summary.definitionKey).toBe("coding-workflow");
-      expect(summary.source).toBe("operator-cli");
+      expect(summary.source).toBe("workflow-definition");
       expect(summary.stepCount).toBe(CODING_WORKFLOW_DEFINITION.steps.length);
 
       const row = loadRunRow(db, "run-001");
       expect(row?.issue_scope_json).toBe(
         JSON.stringify({ issues: ["NGX-346"] }),
       );
-      expect(row?.route_json).toBe(JSON.stringify({ channel: "discord" }));
+      expect(row?.route_json).toBe("{}");
       expect(row?.skill_revision).toBe("abc123");
-      expect(row?.source).toBe("operator-cli");
+      expect(row?.source).toBe("workflow-definition");
+      expect(
+        db
+          .prepare(
+            `SELECT implementation_engine, selected_profile
+               FROM workflow_run_coding_compatibility
+              WHERE run_id = 'run-001'`,
+          )
+          .get(),
+      ).toEqual({
+        implementation_engine: null,
+        selected_profile: "fixture-profile",
+      });
 
       const steps = loadStepRows(db, "run-001");
       expect(steps.map((s) => s.kind)).toEqual([

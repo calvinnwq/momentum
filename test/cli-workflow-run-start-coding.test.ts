@@ -8,6 +8,7 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -168,10 +169,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-568-current-engine") as { route_json: string };
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(
+        loadCanonicalWorkflowRunRoute(db, "ngx-568-current-engine"),
+      ).toEqual({
         implementationEngine: "current-gnhf-cwfp",
       });
     } finally {
@@ -466,10 +466,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-508-profile") as { route_json: string };
-      expect(JSON.parse(runRow.route_json)).toMatchObject({
+      expect(
+        loadCanonicalWorkflowRunRoute(db, "ngx-508-profile"),
+      ).toMatchObject({
         profile: "coding-workflow-live-wrapper",
       });
     } finally {
@@ -507,10 +506,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-508-no-profile") as { route_json: string };
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(loadCanonicalWorkflowRunRoute(db, "ngx-508-no-profile")).toEqual({
         implementationEngine: "gnhf",
       });
     } finally {
@@ -976,18 +972,16 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-510-steps") as { route_json: string };
       // Trimmed, and normalized to canonical step + field order (byte-stable).
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      const route = loadCanonicalWorkflowRunRoute(db, "ngx-510-steps");
+      expect(route).toEqual({
         implementationEngine: "gnhf",
         steps: {
           implementation: { harness: "gnhf", model: "claude-opus-4-8" },
           validate: { effort: "high" },
         },
       });
-      expect(runRow.route_json).toContain(
+      expect(JSON.stringify(route)).toContain(
         '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"validate":{"effort":"high"}}',
       );
     } finally {
@@ -1030,10 +1024,9 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-510-profile-steps") as { route_json: string };
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(
+        loadCanonicalWorkflowRunRoute(db, "ngx-510-profile-steps"),
+      ).toEqual({
         implementationEngine: "gnhf",
         profile: "coding-workflow-live-wrapper",
         steps: { postflight: { harness: "claude" } },
@@ -1077,10 +1070,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
 
     const db = openDb(dataDir);
     try {
-      const runRow = db
-        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
-        .get("ngx-510-model-alias") as { route_json: string };
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(loadCanonicalWorkflowRunRoute(db, "ngx-510-model-alias")).toEqual({
         implementationEngine: "gnhf",
         steps: {
           implementation: {

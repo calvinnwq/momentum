@@ -17,6 +17,7 @@
  * surfacing.
  */
 import type { MomentumDb } from "../../../adapters/db.js";
+import { projectLegacyWorkflowRunRoute } from "../../../adapters/db/route-projection.js";
 import {
   listWorkflowGatesForRun,
   type WorkflowGateRecord,
@@ -247,7 +248,16 @@ export function listWorkflowRunSummaries(
   if (options.limit !== undefined && options.limit >= 0) {
     query += ` LIMIT ${Math.floor(options.limit)}`;
   }
-  const runs = (db.prepare(query).all(...params) as RunRow[]).map(parseRunRow);
+  const runs = (db.prepare(query).all(...params) as RunRow[]).map((row) =>
+    parseRunRow(
+      row,
+      projectLegacyWorkflowRunRoute(db, row.id, {
+        source: row.source,
+        definitionKey: row.workflow_definition_key,
+        definitionVersion: row.workflow_definition_version,
+      }),
+    ),
+  );
   if (runs.length === 0) return [];
 
   const now = options.now ?? Date.now();
@@ -297,7 +307,14 @@ export function loadWorkflowRunDetail(
     .prepare("SELECT * FROM workflow_runs WHERE id = ?")
     .get(runId) as RunRow | undefined;
   if (!runRow) return null;
-  const run = parseRunRow(runRow);
+  const run = parseRunRow(
+    runRow,
+    projectLegacyWorkflowRunRoute(db, runRow.id, {
+      source: runRow.source,
+      definitionKey: runRow.workflow_definition_key,
+      definitionVersion: runRow.workflow_definition_version,
+    }),
+  );
   const steps = listStepsByRunId(db, runId);
   const approvals = listApprovalsByRunId(db, runId);
   const leases = listLeasesByRunId(db, runId);
@@ -451,6 +468,8 @@ type RunRow = {
   objective: string | null;
   issue_scope_json: string;
   route_json: string;
+  workflow_definition_key: string | null;
+  workflow_definition_version: number | null;
   approval_boundary: string | null;
   skill_revision: string | null;
   monitor_last_seen_state: string | null;
@@ -515,7 +534,10 @@ type LeaseRow = {
   updated_at: number;
 };
 
-function parseRunRow(row: RunRow): WorkflowRunRow {
+function parseRunRow(
+  row: RunRow,
+  projectedRoute: Record<string, unknown>,
+): WorkflowRunRow {
   return {
     runId: row.id,
     state: row.state as WorkflowRunState,
@@ -525,7 +547,7 @@ function parseRunRow(row: RunRow): WorkflowRunRow {
     repoPath: row.repo_path,
     objective: row.objective,
     issueScope: parseJsonRecord(row.issue_scope_json) ?? {},
-    route: parseJsonRecord(row.route_json) ?? {},
+    route: projectedRoute,
     approvalBoundary:
       row.approval_boundary === null
         ? null

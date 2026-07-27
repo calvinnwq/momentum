@@ -107,6 +107,11 @@ export type StepDefinition = {
   kind: StepDefinitionKind;
   executor: ExecutorName;
   config?: Record<string, unknown>;
+  agentConfig?: {
+    harness?: string;
+    model?: string;
+    effort?: string;
+  };
   order: number;
   required: boolean;
 };
@@ -134,6 +139,7 @@ export const WORKFLOW_DEFINITION_VALIDATION_ERROR_CODES = [
   "step_kind_invalid",
   "step_executor_invalid",
   "step_config_invalid",
+  "step_agent_config_invalid",
   "step_order_invalid",
   "step_order_duplicate",
   "step_required_invalid",
@@ -307,6 +313,25 @@ function validateSteps(
         message: `Step ${index} config must be a JSON-compatible object.`,
         path: `${at}.config`,
       });
+    }
+
+    if (rawStep["agentConfig"] !== undefined) {
+      const agentConfig = rawStep["agentConfig"];
+      const valid =
+        isPlainObject(agentConfig) &&
+        Object.keys(agentConfig).every((key) =>
+          ["harness", "model", "effort"].includes(key),
+        ) &&
+        Object.values(agentConfig).every(
+          (entry) => typeof entry === "string" && entry.trim().length > 0,
+        );
+      if (!valid) {
+        errors.push({
+          code: "step_agent_config_invalid",
+          message: `Step ${index} agentConfig must contain only non-blank harness, model, and effort strings.`,
+          path: `${at}.agentConfig`,
+        });
+      }
     }
 
     const order = rawStep["order"];

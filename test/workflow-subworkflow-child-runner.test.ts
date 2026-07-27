@@ -13,6 +13,7 @@ import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.
 import { markWorkflowRunNeedsManualRecovery } from "../src/core/workflow/run/recovery.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import { buildDispatchedSubworkflowChildRunner } from "../src/core/workflow/route/subworkflow-child-runner.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 /**
  * NGX-498 (RC-4b) — focused coverage for the *production* start-or-attach child
@@ -131,14 +132,6 @@ function countRuns(db: MomentumDb): number {
   ).n;
 }
 
-function childRouteJson(db: MomentumDb): unknown {
-  const row = db
-    .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-    .get(CHILD_RUN_ID) as { route_json: string | null } | undefined;
-  if (row?.route_json == null) return null;
-  return JSON.parse(row.route_json) as unknown;
-}
-
 function buildRunner(
   db: MomentumDb,
   overrides: {
@@ -190,7 +183,9 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
 
     await resolution.run();
 
-    expect(childRouteJson(db)).toEqual(CHILD_ROUTE);
+    expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual(
+      CHILD_ROUTE,
+    );
   });
 
   it("starts the child workflow run from the configured definition version", async () => {

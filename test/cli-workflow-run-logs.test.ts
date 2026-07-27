@@ -1284,9 +1284,22 @@ describe("momentum workflow run logs", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithRound(db, "cwfp-logs-engine");
-      db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
-        JSON.stringify({ implementationEngine: "native-goal-loop" }),
+      db.prepare(
+        `UPDATE workflow_runs
+            SET source = 'momentum-native-coding',
+                workflow_definition_key = 'coding-workflow',
+                workflow_definition_version = 3
+          WHERE id = ?`,
+      ).run("cwfp-logs-engine");
+      db.prepare(
+        `INSERT INTO workflow_run_coding_compatibility (
+           run_id, implementation_engine, selected_profile, created_at, updated_at
+         ) VALUES (?, ?, NULL, ?, ?)`,
+      ).run(
         "cwfp-logs-engine",
+        "native-goal-loop",
+        1_700_000_000_000,
+        1_700_000_000_000,
       );
     } finally {
       db.close();

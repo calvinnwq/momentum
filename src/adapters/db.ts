@@ -7,6 +7,7 @@ import {
   applyQueueMigrations,
   applyWorkflowVocabularyMigration,
 } from "./db/migrations.js";
+import { routeStateMigrationNeeded } from "./db/route-state.js";
 
 export type MomentumDb = DatabaseSync;
 
@@ -159,10 +160,9 @@ export function openExistingDbMigratedReadOnly(
   let requiresFullMigration = false;
   let migrationBusy = false;
   try {
-    requiresFullMigration = databaseTableExists(
-      migrationDb,
-      "executor_invocations",
-    );
+    requiresFullMigration =
+      databaseTableExists(migrationDb, "executor_invocations") ||
+      routeStateMigrationNeeded(migrationDb);
     if (!requiresFullMigration) {
       const executorClaims = configuredExecutorClaims(
         options.env ?? process.env,

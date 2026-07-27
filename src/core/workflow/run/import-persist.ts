@@ -33,6 +33,10 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import {
+  validateWorkflowRouteShape,
+  writeCanonicalWorkflowRunRouteState,
+} from "../../../adapters/db/route-state.js";
 import type {
   WorkflowRunImport,
   WorkflowRunImportApproval,
@@ -78,13 +82,25 @@ export function persistWorkflowRunImport(
   const { run, steps, approvals, monitor } = result;
   const monitorTerminal =
     monitor?.terminal == null ? null : monitor.terminal ? 1 : 0;
+  validateWorkflowRouteShape({
+    runId: run.runId,
+    source: run.source,
+    route: run.route,
+  });
 
   db.exec("BEGIN");
   try {
     const existing = db
-      .prepare("SELECT id, approval_boundary FROM workflow_runs WHERE id = ?")
+      .prepare(
+        "SELECT id, approval_boundary, created_at FROM workflow_runs WHERE id = ?",
+      )
       .get(run.runId) as
-      { id: string; approval_boundary: string | null } | undefined;
+      | {
+          id: string;
+          approval_boundary: string | null;
+          created_at: number;
+        }
+      | undefined;
     const inserted = existing === undefined;
     const existingApprovalRows = db
       .prepare(
@@ -162,7 +178,7 @@ export function persistWorkflowRunImport(
       run.repoPath,
       run.objective,
       JSON.stringify(run.issueScope),
-      JSON.stringify(run.route),
+      "{}",
       approvalBoundary,
       run.skillRevision,
       monitor?.runState ?? null,
@@ -214,6 +230,16 @@ export function persistWorkflowRunImport(
     for (const step of persistedSteps) {
       runStepUpsert(stepStmt, run.runId, step, now);
     }
+
+    writeCanonicalWorkflowRunRouteState(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: null,
+      definitionVersion: null,
+      createdAt: existing?.created_at ?? now,
+      updatedAt: now,
+    });
 
     const approvalStmt = db.prepare(
       `INSERT INTO workflow_approvals (
