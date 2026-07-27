@@ -301,6 +301,51 @@ describe("persistWorkflowRunImport", () => {
     }
   });
 
+  it("refuses missing imported lineage before the run upsert", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-missing-parent",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {
+      ...imported.run.route,
+      subworkflow: {
+        lineage: {
+          parentRunId: "missing-parent",
+          parentStepId: "child",
+          depth: 1,
+          ancestorDefinitionKeys: ["parent-workflow"],
+        },
+      },
+    };
+    const db = openDb(dataDir);
+    try {
+      db.exec(`
+        CREATE TRIGGER reject_imported_run_insert
+        BEFORE INSERT ON workflow_runs
+        WHEN NEW.id = 'cwfp-missing-parent'
+        BEGIN
+          SELECT RAISE(FAIL, 'workflow run insert reached');
+        END
+      `);
+      expect(() => persistWorkflowRunImport(db, imported)).toThrowError(
+        expect.objectContaining({
+          code: "route_state_lineage_parent_missing",
+          jsonPath: "$.subworkflow.lineage.parentRunId",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get(imported.run.runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("inserts workflow_runs, workflow_steps, and workflow_approvals rows from a parsed import", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();

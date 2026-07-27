@@ -504,7 +504,16 @@ describe("persistWorkflowRunStart", () => {
         }),
       );
 
-      expect(() =>
+      db.exec(`
+        CREATE TRIGGER reject_child_run_insert
+        BEFORE INSERT ON workflow_runs
+        WHEN NEW.id = 'child-run'
+        BEGIN
+          SELECT RAISE(FAIL, 'workflow run insert reached');
+        END
+      `);
+      let refusal: InvalidWorkflowRunStartError | undefined;
+      try {
         persistWorkflowRunStart(
           db,
           baseInput({
@@ -523,11 +532,16 @@ describe("persistWorkflowRunStart", () => {
               },
             },
           }),
-        ),
-      ).toThrowError(
+        );
+      } catch (error) {
+        if (error instanceof InvalidWorkflowRunStartError) refusal = error;
+        else throw error;
+      }
+      expect(refusal).toBeDefined();
+      expect(refusal?.errors).toContainEqual(
         expect.objectContaining({
-          code: "route_state_lineage_invalid",
-          jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+          code: "route_invalid",
+          path: "$.subworkflow.lineage.ancestorDefinitionKeys",
         }),
       );
       expect(

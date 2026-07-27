@@ -369,6 +369,51 @@ export function validateWorkflowRouteStepProjection(input: {
   }
 }
 
+export function validateWorkflowRouteLineage(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    source: string;
+    route: Record<string, unknown>;
+    definitionKey: string | null;
+    definitionVersion: number | null;
+    createdAt: number;
+    updatedAt: number;
+  },
+): void {
+  validateWorkflowRouteShape(input);
+  const subworkflow = input.route["subworkflow"];
+  if (!isPlainObject(subworkflow) || subworkflow["lineage"] === undefined) {
+    return;
+  }
+  const run: RunRow = {
+    id: input.runId,
+    source: input.source,
+    route_json: JSON.stringify(input.route),
+    workflow_definition_key: input.definitionKey,
+    workflow_definition_version: input.definitionVersion,
+    created_at: input.createdAt,
+    updated_at: input.updatedAt,
+  };
+  const lineageRuns = loadLineageValidationRuns(db, run);
+  const canonicalLineageByRunId = loadCanonicalLineageFields(db);
+  const lineage = readLineageFields(run, canonicalLineageByRunId);
+  if (lineage === null) return;
+  const parentFacts = loadLineageParentFacts(
+    db,
+    lineageRuns,
+    canonicalLineageByRunId,
+  );
+  validateLineageChain(
+    run,
+    "$.subworkflow.lineage",
+    lineage,
+    lineageRuns,
+    parentFacts,
+    canonicalLineageByRunId,
+  );
+}
+
 export function writeCanonicalWorkflowRunRouteState(
   db: MomentumDb,
   input: {

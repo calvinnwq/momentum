@@ -35,6 +35,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  validateWorkflowRouteLineage,
   validateWorkflowRouteShape,
   writeCanonicalWorkflowRunRouteState,
 } from "../../../adapters/db/route-state.js";
@@ -88,9 +89,27 @@ export function persistWorkflowRunImport(
     source: run.source,
     route: run.route,
   });
+  validateWorkflowRouteLineage(db, {
+    runId: run.runId,
+    source: run.source,
+    route: run.route,
+    definitionKey: null,
+    definitionVersion: null,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   db.exec("BEGIN");
   try {
+    validateWorkflowRouteLineage(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: null,
+      definitionVersion: null,
+      createdAt: now,
+      updatedAt: now,
+    });
     const existing = db
       .prepare(
         "SELECT id, approval_boundary, created_at FROM workflow_runs WHERE id = ?",

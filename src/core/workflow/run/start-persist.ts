@@ -39,6 +39,7 @@ import crypto from "node:crypto";
 import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
 import {
   RouteStateMigrationError,
+  validateWorkflowRouteLineage,
   validateWorkflowRouteShape,
   validateWorkflowRouteStepProjection,
   writeCanonicalWorkflowRunRouteState,
@@ -136,6 +137,15 @@ export function persistWorkflowRunStart(
         agentConfig: definitionAgentConfigs.get(step.stepId),
       })),
     });
+    validateWorkflowRouteLineage(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    });
   } catch (error) {
     if (!(error instanceof RouteStateMigrationError)) throw error;
     throw new InvalidWorkflowRunStartError([
@@ -149,6 +159,15 @@ export function persistWorkflowRunStart(
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    validateWorkflowRouteLineage(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    });
     const existing = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
       .get(run.runId) as { id: string } | undefined;
@@ -249,6 +268,15 @@ export function persistWorkflowRunStart(
     safeRollback(db);
     if (isUniqueViolation(error)) {
       throw new WorkflowRunStartConflictError(run.runId);
+    }
+    if (error instanceof RouteStateMigrationError) {
+      throw new InvalidWorkflowRunStartError([
+        {
+          code: "route_invalid",
+          message: error.message,
+          path: error.jsonPath,
+        },
+      ]);
     }
     throw error;
   }
