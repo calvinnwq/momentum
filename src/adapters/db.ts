@@ -168,10 +168,16 @@ export function openExistingDbMigratedReadOnly(
   let requiresFullMigration = false;
   let migrationBusy = false;
   try {
-    requiresFullMigration =
-      databaseTableExists(migrationDb, "executor_invocations") ||
-      routeStateMigrationNeeded(migrationDb);
-    if (!requiresFullMigration) {
+    try {
+      requiresFullMigration =
+        databaseTableExists(migrationDb, "executor_invocations") ||
+        routeStateMigrationNeeded(migrationDb);
+    } catch (error) {
+      if (!isSqliteBusyError(error)) throw error;
+      migrationBusy = true;
+      requiresFullMigration = true;
+    }
+    if (!requiresFullMigration && !migrationBusy) {
       const executorClaims = configuredExecutorClaims(
         options.env ?? process.env,
       );
