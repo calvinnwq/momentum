@@ -237,6 +237,44 @@ describe("momentum workflow import", () => {
     });
   }
 
+  it("renders imported route validation failures in the stable JSON envelope", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-workflow-import-runs-");
+    const runDir = buildCompletedRunFixture(
+      workflowRoot,
+      "invalid-import-route",
+    );
+    const planPath = path.join(runDir, "plan.json");
+    const plan = JSON.parse(fs.readFileSync(planPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    plan["mode"] = " ";
+    writeJsonFile(planPath, plan);
+
+    const result = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow import",
+      code: "route_state_value_invalid",
+      runId: "invalid-import-route",
+      jsonPath: "$.mode",
+      path: runDir,
+      repair: expect.stringContaining("manually repair"),
+    });
+  });
+
   it("rejects unknown workflow subcommand", async () => {
     const dataDir = makeTempDir();
     const result = await run(["workflow", "nope", "--data-dir", dataDir]);

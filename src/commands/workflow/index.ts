@@ -1209,6 +1209,12 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
       artifactRunDir: artifactPath,
     });
     recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
+  } catch (error) {
+    return emitWorkflowImportFailure(parsed, io, {
+      ...normalizeWorkflowFailure(error, parseResult.import.run.runId),
+      dataDir,
+      path: artifactPath,
+    });
   } finally {
     db.close();
   }
