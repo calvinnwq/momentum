@@ -945,6 +945,25 @@ describe("workflow route-state migration", () => {
     });
   });
 
+  it("refuses malformed all-present destination schema before writes", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.prepare("UPDATE workflow_runs SET route_json = '{}'").run();
+      createRouteStateDestinations(db);
+      db.exec(`
+        DROP TABLE workflow_run_coding_compatibility;
+        CREATE TABLE workflow_run_coding_compatibility (
+          run_id INTEGER PRIMARY KEY
+        ) STRICT;
+      `);
+    });
+    expectRouteRefusal(dataDir, {
+      runId: "<schema>",
+      jsonPath: "$schema.routeState",
+      code: "route_state_schema_partial",
+    });
+  });
+
   it("refuses canonical schema coexisting with legacy route state", () => {
     const dataDir = seedReleasedFixture();
     withRawDb(dataDir, (db) => {

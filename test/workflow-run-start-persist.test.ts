@@ -254,6 +254,29 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("refuses divergent agent configs for repeated step kinds before writing", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = { harness: "codex" };
+      definition.steps[1]!.kind = "implementation";
+      definition.steps[1]!.agentConfig = { harness: "claude" };
+
+      expect(() =>
+        persistWorkflowRunStart(db, baseInput({ definition })),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses unknown route keys before writing a run", () => {
     const db = openTempDb();
     try {

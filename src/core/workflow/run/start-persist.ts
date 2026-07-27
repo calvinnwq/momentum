@@ -38,6 +38,7 @@ import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
 import {
   RouteStateMigrationError,
   validateWorkflowRouteShape,
+  validateWorkflowRouteStepProjection,
   writeCanonicalWorkflowRunRouteState,
 } from "../../../adapters/db/route-state.js";
 import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
@@ -112,11 +113,26 @@ export function persistWorkflowRunStart(
   }
   const { run, steps } = result.plan;
   const definition = input.definition as WorkflowDefinition;
+  const definitionAgentConfigs = new Map(
+    definition.steps.flatMap((step) =>
+      step.agentConfig === undefined
+        ? []
+        : [[step.key, step.agentConfig] as const],
+    ),
+  );
   try {
     validateWorkflowRouteShape({
       runId: run.runId,
       source: run.source,
       route: run.route,
+    });
+    validateWorkflowRouteStepProjection({
+      runId: run.runId,
+      route: run.route,
+      steps: steps.map((step) => ({
+        kind: step.kind,
+        agentConfig: definitionAgentConfigs.get(step.stepId),
+      })),
     });
   } catch (error) {
     if (!(error instanceof RouteStateMigrationError)) throw error;
@@ -191,13 +207,7 @@ export function persistWorkflowRunStart(
       definitionVersion: run.definitionVersion,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
-      definitionAgentConfigs: new Map(
-        definition.steps.flatMap((step) =>
-          step.agentConfig === undefined
-            ? []
-            : [[step.key, step.agentConfig] as const],
-        ),
-      ),
+      definitionAgentConfigs,
       definitionExecutorConfigs: new Map(
         definition.steps.flatMap((step) =>
           step.config === undefined ? [] : [[step.key, step.config] as const],

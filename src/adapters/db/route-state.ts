@@ -10,15 +10,82 @@ import {
 
 type MomentumDb = DatabaseSync;
 
-const DESTINATION_TABLES = [
-  "workflow_run_lineage",
-  "workflow_run_coding_compatibility",
-  "workflow_run_import_metadata",
-] as const;
 const DESTINATION_COLUMNS = [
-  ["step_definitions", "agent_config_json"],
-  ["workflow_steps", "agent_config_json"],
-  ["workflow_steps", "executor_config_json"],
+  {
+    table: "step_definitions",
+    column: "agent_config_json",
+    definition: "TEXT",
+    notNull: 0,
+    defaultValue: null,
+    primaryKey: 0,
+  },
+  {
+    table: "workflow_steps",
+    column: "agent_config_json",
+    definition: "TEXT NOT NULL DEFAULT '{}'",
+    notNull: 1,
+    defaultValue: "'{}'",
+    primaryKey: 0,
+  },
+  {
+    table: "workflow_steps",
+    column: "executor_config_json",
+    definition: "TEXT NOT NULL DEFAULT '{}'",
+    notNull: 1,
+    defaultValue: "'{}'",
+    primaryKey: 0,
+  },
+] as const;
+const DESTINATION_TABLES = [
+  {
+    name: "workflow_run_lineage",
+    definition: `
+CREATE TABLE IF NOT EXISTS workflow_run_lineage (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+  parent_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  parent_step_id TEXT NOT NULL,
+  depth INTEGER NOT NULL,
+  ancestor_definition_keys_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (parent_run_id, parent_step_id)
+    REFERENCES workflow_steps(run_id, step_id),
+  CHECK (depth > 0),
+  CHECK (run_id <> parent_run_id)
+) STRICT`,
+  },
+  {
+    name: "workflow_run_coding_compatibility",
+    definition: `
+CREATE TABLE IF NOT EXISTS workflow_run_coding_compatibility (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+  implementation_engine TEXT,
+  -- Historical native profile compatibility, never host-binding authority.
+  selected_profile TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK (implementation_engine IS NULL OR trim(implementation_engine) <> ''),
+  CHECK (selected_profile IS NULL OR trim(selected_profile) <> ''),
+  CHECK (implementation_engine IS NOT NULL OR selected_profile IS NOT NULL)
+) STRICT`,
+  },
+  {
+    name: "workflow_run_import_metadata",
+    definition: `
+CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+  mode TEXT,
+  profile TEXT,
+  risk TEXT,
+  quota_policy_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK (mode IS NULL OR trim(mode) <> ''),
+  CHECK (profile IS NULL OR trim(profile) <> ''),
+  CHECK (risk IS NULL OR trim(risk) <> ''),
+  CHECK (COALESCE(mode, profile, risk, quota_policy_json) IS NOT NULL)
+) STRICT`,
+  },
 ] as const;
 const IMPLEMENTATION_ENGINES = new Set([
   "gnhf",
@@ -213,6 +280,54 @@ export function validateWorkflowRouteShape(input: {
   }
 }
 
+export function validateWorkflowRouteStepProjection(input: {
+  runId: string;
+  route: Record<string, unknown>;
+  steps: ReadonlyArray<{
+    kind: string;
+    agentConfig: Readonly<Record<string, string>> | undefined;
+  }>;
+}): void {
+  const routeSteps = isPlainObject(input.route["steps"])
+    ? input.route["steps"]
+    : {};
+  const routeConfigsByKind = new Map<string, Record<string, unknown>>();
+  for (const [kind, config] of Object.entries(routeSteps)) {
+    const canonicalKind =
+      LEGACY_WORKFLOW_STEP_KIND_ALIASES[
+        kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
+      ] ?? kind;
+    if (isPlainObject(config)) routeConfigsByKind.set(canonicalKind, config);
+  }
+  const configsByKind = new Map<string, Record<string, string>>();
+  for (const step of input.steps) {
+    const canonicalKind =
+      LEGACY_WORKFLOW_STEP_KIND_ALIASES[
+        step.kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
+      ] ?? step.kind;
+    const routeConfig = routeConfigsByKind.get(canonicalKind);
+    const projectedConfig = {
+      ...step.agentConfig,
+      ...routeConfig,
+    } as Record<string, string>;
+    if (Object.keys(projectedConfig).length === 0) continue;
+    const existing = configsByKind.get(canonicalKind);
+    if (
+      existing !== undefined &&
+      !isDeepStrictEqual(existing, projectedConfig)
+    ) {
+      throw new RouteStateMigrationError({
+        runId: input.runId,
+        jsonPath: `$.steps.${canonicalKind}`,
+        code: "route_state_step_target_ambiguous",
+        detail:
+          "multiple persisted steps would have the same projected route kind with different agent config",
+      });
+    }
+    configsByKind.set(canonicalKind, projectedConfig);
+  }
+}
+
 export function writeCanonicalWorkflowRunRouteState(
   db: MomentumDb,
   input: {
@@ -257,7 +372,10 @@ export function writeCanonicalWorkflowRunRouteState(
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
   if (!hasRouteStateBaseTables(db)) return false;
   const state = destinationSchemaState(db);
-  if (state.present > 0 && state.present < state.total) {
+  if (
+    state.malformed.length > 0 ||
+    (state.present > 0 && state.present < state.total)
+  ) {
     throw schemaPartialError(state);
   }
   if (state.present === 0) return true;
@@ -277,7 +395,10 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
   if (!hasRouteStateBaseTables(db)) return { runs: [] };
   const state = destinationSchemaState(db);
-  if (state.present > 0 && state.present < state.total) {
+  if (
+    state.malformed.length > 0 ||
+    (state.present > 0 && state.present < state.total)
+  ) {
     throw schemaPartialError(state);
   }
   if (state.present === state.total) {
@@ -310,60 +431,16 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
 }
 
 export function createRouteStateDestinations(db: MomentumDb): void {
-  if (!columnExists(db, "step_definitions", "agent_config_json")) {
-    db.exec("ALTER TABLE step_definitions ADD COLUMN agent_config_json TEXT");
+  for (const contract of DESTINATION_COLUMNS) {
+    if (!columnExists(db, contract.table, contract.column)) {
+      db.exec(
+        `ALTER TABLE ${quoteIdentifier(contract.table)} ADD COLUMN ${quoteIdentifier(contract.column)} ${contract.definition}`,
+      );
+    }
   }
-  if (!columnExists(db, "workflow_steps", "agent_config_json")) {
-    db.exec(
-      "ALTER TABLE workflow_steps ADD COLUMN agent_config_json TEXT NOT NULL DEFAULT '{}'",
-    );
-  }
-  if (!columnExists(db, "workflow_steps", "executor_config_json")) {
-    db.exec(
-      "ALTER TABLE workflow_steps ADD COLUMN executor_config_json TEXT NOT NULL DEFAULT '{}'",
-    );
-  }
-  db.exec(`
-CREATE TABLE IF NOT EXISTS workflow_run_lineage (
-  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
-  parent_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
-  parent_step_id TEXT NOT NULL,
-  depth INTEGER NOT NULL,
-  ancestor_definition_keys_json TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (parent_run_id, parent_step_id)
-    REFERENCES workflow_steps(run_id, step_id),
-  CHECK (depth > 0),
-  CHECK (run_id <> parent_run_id)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS workflow_run_coding_compatibility (
-  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
-  implementation_engine TEXT,
-  -- Historical native profile compatibility, never host-binding authority.
-  selected_profile TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  CHECK (implementation_engine IS NULL OR trim(implementation_engine) <> ''),
-  CHECK (selected_profile IS NULL OR trim(selected_profile) <> ''),
-  CHECK (implementation_engine IS NOT NULL OR selected_profile IS NOT NULL)
-) STRICT;
-
-CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
-  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
-  mode TEXT,
-  profile TEXT,
-  risk TEXT,
-  quota_policy_json TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  CHECK (mode IS NULL OR trim(mode) <> ''),
-  CHECK (profile IS NULL OR trim(profile) <> ''),
-  CHECK (risk IS NULL OR trim(risk) <> ''),
-  CHECK (COALESCE(mode, profile, risk, quota_policy_json) IS NOT NULL)
-) STRICT;
-`);
+  db.exec(
+    DESTINATION_TABLES.map((contract) => contract.definition).join(";\n"),
+  );
 }
 
 export function applyWorkflowRouteStateMigration(db: MomentumDb): void {
@@ -1195,15 +1272,18 @@ function destinationSchemaState(db: MomentumDb): {
   total: number;
   missing: string[];
   existing: string[];
+  malformed: string[];
 } {
   const states = [
-    ...DESTINATION_TABLES.map((table) => ({
-      name: table,
-      present: tableExists(db, table),
+    ...DESTINATION_TABLES.map((contract) => ({
+      name: contract.name,
+      present: tableExists(db, contract.name),
+      valid: destinationTableMatchesContract(db, contract),
     })),
-    ...DESTINATION_COLUMNS.map(([table, column]) => ({
-      name: `${table}.${column}`,
-      present: columnExists(db, table, column),
+    ...DESTINATION_COLUMNS.map((contract) => ({
+      name: `${contract.table}.${contract.column}`,
+      present: columnExists(db, contract.table, contract.column),
+      valid: destinationColumnMatchesContract(db, contract),
     })),
   ];
   return {
@@ -1214,6 +1294,9 @@ function destinationSchemaState(db: MomentumDb): {
       .map((state) => state.name),
     existing: states
       .filter((state) => state.present)
+      .map((state) => state.name),
+    malformed: states
+      .filter((state) => state.present && !state.valid)
       .map((state) => state.name),
   };
 }
@@ -1227,8 +1310,56 @@ function schemaPartialError(
     code: "route_state_schema_partial",
     detail:
       `destination schema is partial; existing: ${state.existing.join(", ") || "none"}; ` +
-      `missing: ${state.missing.join(", ") || "none"}`,
+      `missing: ${state.missing.join(", ") || "none"}; ` +
+      `malformed: ${state.malformed.join(", ") || "none"}`,
   });
+}
+
+function destinationTableMatchesContract(
+  db: MomentumDb,
+  contract: (typeof DESTINATION_TABLES)[number],
+): boolean {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(contract.name) as { sql: string | null } | undefined;
+  return (
+    row?.sql !== null &&
+    row?.sql !== undefined &&
+    normalizeSchemaSql(row.sql) === normalizeSchemaSql(contract.definition)
+  );
+}
+
+function destinationColumnMatchesContract(
+  db: MomentumDb,
+  contract: (typeof DESTINATION_COLUMNS)[number],
+): boolean {
+  if (!tableExists(db, contract.table)) return false;
+  const row = (
+    db
+      .prepare(`PRAGMA table_info(${quoteIdentifier(contract.table)})`)
+      .all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>
+  ).find((candidate) => candidate.name === contract.column);
+  return (
+    row !== undefined &&
+    row.type.toUpperCase() === "TEXT" &&
+    row.notnull === contract.notNull &&
+    row.dflt_value === contract.defaultValue &&
+    row.pk === contract.primaryKey
+  );
+}
+
+function normalizeSchemaSql(sql: string): string {
+  return sql
+    .replaceAll(/--[^\n]*/g, "")
+    .replace(/^(\s*CREATE TABLE) IF NOT EXISTS/i, "$1")
+    .replaceAll(/\s+/g, " ")
+    .trim();
 }
 
 function firstNonEmptyRoute(
