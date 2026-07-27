@@ -2,13 +2,29 @@ import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 
 import {
-  LEGACY_ROUTE_TOP_LEVEL_KEYS,
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
   projectLegacyWorkflowRunRoutes,
   RouteStateProjectionError,
   type WorkflowRunRouteProjectionInput,
   type WorkflowRunRouteProjectionSource,
 } from "./route-projection.js";
+import { RouteStateMigrationError } from "./route-state-errors.js";
+import {
+  isPlainObject,
+  parseWorkflowRoute,
+  validateWorkflowRoute,
+  type ValidatedRouteLineage,
+} from "./route-state-validation.js";
+
+export {
+  ROUTE_STATE_MIGRATION_ERROR_CODES,
+  RouteStateMigrationError,
+  type RouteStateMigrationErrorCode,
+} from "./route-state-errors.js";
+export {
+  validateWorkflowRouteShape,
+  validateWorkflowRouteStepProjection,
+} from "./route-state-validation.js";
 
 type MomentumDb = DatabaseSync;
 
@@ -87,82 +103,7 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
 ) STRICT`,
   },
 ] as const;
-const IMPLEMENTATION_ENGINES = new Set([
-  "gnhf",
-  "native-goal-loop",
-  "current-gnhf-cwfp",
-]);
-const STEP_ROUTE_KEYS = new Set([
-  "implementation",
-  "postflight",
-  "validate",
-  "merge-cleanup",
-  "tracker-refresh",
-  "no-mistakes",
-  "linear-refresh",
-]);
-const AGENT_CONFIG_KEYS = new Set(["harness", "model", "effort"]);
-const SUBWORKFLOW_KEYS = new Set(["child", "lineage"]);
-const CHILD_KEYS = new Set([
-  "childDefinitionKey",
-  "childDefinitionVersion",
-  "maxDepth",
-]);
-const LINEAGE_KEYS = new Set([
-  "parentRunId",
-  "parentStepId",
-  "depth",
-  "ancestorDefinitionKeys",
-]);
 const VALIDATION_QUERY_CHUNK_SIZE = 500;
-
-export const ROUTE_STATE_MIGRATION_ERROR_CODES = [
-  "route_state_schema_partial",
-  "route_state_canonical_conflict",
-  "route_state_json_malformed",
-  "route_state_not_object",
-  "route_state_unknown_key",
-  "route_state_value_invalid",
-  "route_state_source_conflict",
-  "route_state_profile_ambiguous",
-  "route_state_step_target_missing",
-  "route_state_step_target_ambiguous",
-  "route_state_subworkflow_target_missing",
-  "route_state_lineage_invalid",
-  "route_state_lineage_parent_missing",
-  "route_state_projection_mismatch",
-  "route_state_foreign_key_invalid",
-] as const;
-export type RouteStateMigrationErrorCode =
-  (typeof ROUTE_STATE_MIGRATION_ERROR_CODES)[number];
-
-export class RouteStateMigrationError extends Error {
-  readonly runId: string;
-  readonly jsonPath: string;
-  readonly code: RouteStateMigrationErrorCode;
-  readonly repair: string;
-
-  constructor(input: {
-    runId: string;
-    jsonPath: string;
-    code: RouteStateMigrationErrorCode;
-    detail: string;
-    repair?: string;
-  }) {
-    const repair =
-      input.repair ??
-      "Restore this database from backup or manually repair the named route value before reopening Momentum.";
-    super(
-      `Route-state migration refused for run '${input.runId}' at ${input.jsonPath} ` +
-        `[${input.code}]: ${input.detail} ${repair}`,
-    );
-    this.name = "RouteStateMigrationError";
-    this.runId = input.runId;
-    this.jsonPath = input.jsonPath;
-    this.code = input.code;
-    this.repair = repair;
-  }
-}
 
 type RunRow = {
   id: string;
@@ -194,12 +135,7 @@ type LineagePlan = {
   ancestorDefinitionKeysJson: string;
 };
 
-type LineageFields = {
-  parentRunId: string;
-  parentStepId: string;
-  depth: number;
-  ancestorDefinitionKeys: string[];
-};
+type LineageFields = ValidatedRouteLineage;
 
 type LineageParentFact = {
   parent_definition_key: string | null;
@@ -217,6 +153,7 @@ type StepConfigPlan = {
 
 type RouteRunPlan = {
   run: RunRow;
+  validatedRoute: ReturnType<typeof validateWorkflowRoute>;
   parsedRoute: Record<string, unknown>;
   compatibility: CodingCompatibilityPlan | null;
   importMetadata: ImportMetadataPlan | null;
@@ -230,145 +167,6 @@ export type WorkflowRouteStatePlan = {
   deferredUntilBaseComplete?: boolean;
 };
 
-export function validateWorkflowRouteShape(input: {
-  runId: string;
-  source: string;
-  route: Record<string, unknown>;
-}): void {
-  const { runId, source, route } = input;
-  validateKnownKeys(runId, "$", route, new Set(LEGACY_ROUTE_TOP_LEVEL_KEYS));
-  const implementationEngine = optionalNonBlankString(
-    runId,
-    "$.implementationEngine",
-    route["implementationEngine"],
-  );
-  if (
-    implementationEngine !== null &&
-    !IMPLEMENTATION_ENGINES.has(implementationEngine)
-  ) {
-    invalidValue(
-      runId,
-      "$.implementationEngine",
-      "implementation engine is not a recognized compatibility label",
-    );
-  }
-  const profile = optionalNonBlankString(runId, "$.profile", route["profile"]);
-  if (
-    profile !== null &&
-    ![
-      "workflow-definition",
-      "momentum-native-coding",
-      "agent-workflow",
-    ].includes(source)
-  ) {
-    throw new RouteStateMigrationError({
-      runId,
-      jsonPath: "$.profile",
-      code: "route_state_profile_ambiguous",
-      detail:
-        "profile cannot be classified without a recognized durable run source",
-    });
-  }
-  const mode = optionalNonBlankString(runId, "$.mode", route["mode"]);
-  const risk = optionalNonBlankString(runId, "$.risk", route["risk"]);
-  validateStepRouteShape(runId, route["steps"]);
-  validateSubworkflowShape(runId, route["subworkflow"]);
-  const quotaPolicyJson = planQuotaPolicy(runId, route["quotaPolicy"]);
-  const hasNativeMarker =
-    implementationEngine !== null || route["steps"] !== undefined;
-  const hasImportMarker =
-    mode !== null || risk !== null || quotaPolicyJson !== null;
-  if (
-    (source === "agent-workflow" && hasNativeMarker) ||
-    (source !== "agent-workflow" && hasImportMarker)
-  ) {
-    throw new RouteStateMigrationError({
-      runId,
-      jsonPath: "$",
-      code: "route_state_source_conflict",
-      detail:
-        "route markers conflict with the durable workflow_runs.source value",
-    });
-  }
-}
-
-export function validateWorkflowRouteStepProjection(input: {
-  runId: string;
-  route: Record<string, unknown>;
-  steps: ReadonlyArray<{
-    kind: string;
-    agentConfig: Readonly<Record<string, string>> | undefined;
-  }>;
-}): void {
-  const routeSteps = isPlainObject(input.route["steps"])
-    ? input.route["steps"]
-    : {};
-  const routeConfigsByKind = new Map<string, Record<string, unknown>>();
-  const routeKindsByCanonicalKind = new Map<string, string>();
-  for (const [kind, config] of Object.entries(routeSteps)) {
-    const canonicalKind =
-      LEGACY_WORKFLOW_STEP_KIND_ALIASES[
-        kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
-      ] ?? kind;
-    if (isPlainObject(config)) {
-      if (routeConfigsByKind.has(canonicalKind)) {
-        throw new RouteStateMigrationError({
-          runId: input.runId,
-          jsonPath: `$.steps.${kind}`,
-          code: "route_state_step_target_ambiguous",
-          detail: `route defines multiple keys for canonical step kind '${canonicalKind}'`,
-        });
-      }
-      routeConfigsByKind.set(canonicalKind, config);
-      routeKindsByCanonicalKind.set(canonicalKind, kind);
-    }
-  }
-  const materializedKinds = new Set<string>(
-    input.steps.map(
-      (step) =>
-        LEGACY_WORKFLOW_STEP_KIND_ALIASES[
-          step.kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
-        ] ?? step.kind,
-    ),
-  );
-  for (const [canonicalKind, kind] of routeKindsByCanonicalKind) {
-    if (materializedKinds.has(canonicalKind)) continue;
-    throw new RouteStateMigrationError({
-      runId: input.runId,
-      jsonPath: `$.steps.${kind}`,
-      code: "route_state_step_target_missing",
-      detail: `no materialized step has canonical kind '${canonicalKind}'`,
-    });
-  }
-  const configsByKind = new Map<string, Record<string, string>>();
-  for (const step of input.steps) {
-    const canonicalKind =
-      LEGACY_WORKFLOW_STEP_KIND_ALIASES[
-        step.kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
-      ] ?? step.kind;
-    const routeConfig = routeConfigsByKind.get(canonicalKind);
-    const projectedConfig = {
-      ...step.agentConfig,
-      ...routeConfig,
-    } as Record<string, string>;
-    if (Object.keys(projectedConfig).length === 0) continue;
-    const existing = configsByKind.get(canonicalKind);
-    if (
-      existing !== undefined &&
-      !isDeepStrictEqual(existing, projectedConfig)
-    ) {
-      throw new RouteStateMigrationError({
-        runId: input.runId,
-        jsonPath: `$.steps.${canonicalKind}`,
-        code: "route_state_step_target_ambiguous",
-        detail:
-          "multiple persisted steps would have the same projected route kind with different agent config",
-      });
-    }
-    configsByKind.set(canonicalKind, projectedConfig);
-  }
-}
-
 export function validateWorkflowRouteLineage(
   db: MomentumDb,
   input: {
@@ -381,9 +179,8 @@ export function validateWorkflowRouteLineage(
     updatedAt: number;
   },
 ): void {
-  validateWorkflowRouteShape(input);
-  const subworkflow = input.route["subworkflow"];
-  if (!isPlainObject(subworkflow) || subworkflow["lineage"] === undefined) {
+  const validated = validateWorkflowRoute(input);
+  if (validated.lineage === null) {
     return;
   }
   const run: RunRow = {
@@ -397,17 +194,16 @@ export function validateWorkflowRouteLineage(
   };
   const lineageRuns = loadLineageValidationRuns(db, run);
   const canonicalLineageByRunId = loadCanonicalLineageFields(db);
-  const lineage = readLineageFields(run, canonicalLineageByRunId);
-  if (lineage === null) return;
   const parentFacts = loadLineageParentFacts(
     db,
     lineageRuns,
     canonicalLineageByRunId,
+    new Map([[run.id, validated]]),
   );
   validateLineageChain(
     run,
     "$.subworkflow.lineage",
-    lineage,
+    validated.lineage,
     lineageRuns,
     parentFacts,
     canonicalLineageByRunId,
@@ -428,7 +224,7 @@ export function writeCanonicalWorkflowRunRouteState(
     definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>;
   },
 ): void {
-  validateWorkflowRouteShape(input);
+  const validated = validateWorkflowRoute(input);
   const run: RunRow = {
     id: input.runId,
     source: input.source,
@@ -438,17 +234,15 @@ export function writeCanonicalWorkflowRunRouteState(
     created_at: input.createdAt,
     updated_at: input.updatedAt,
   };
-  const subworkflow = input.route["subworkflow"];
   const lineageRuns =
-    isPlainObject(subworkflow) && subworkflow["lineage"] !== undefined
-      ? loadLineageValidationRuns(db, run)
-      : undefined;
+    validated.lineage === null ? undefined : loadLineageValidationRuns(db, run);
   const plan = planRun(
     db,
     run,
     input.definitionAgentConfigs,
     input.definitionExecutorConfigs,
     lineageRuns,
+    validated,
   );
   if (plan.lineage !== null && lineageRuns !== undefined) {
     validateLineagePlans(db, { runs: [plan] }, lineageRuns);
@@ -651,7 +445,11 @@ export function refreshWorkflowRouteStatePlan(
     const routeJson = routes.get(item.run.id);
     if (routeJson === undefined) continue;
     item.run.route_json = routeJson;
-    item.parsedRoute = canonicalizeEmptyStepConfigs(parseRoute(item.run));
+    item.parsedRoute = validateWorkflowRoute({
+      runId: item.run.id,
+      source: item.run.source,
+      route: parseWorkflowRoute(item.run.id, routeJson),
+    }).route;
   }
 }
 
@@ -703,97 +501,47 @@ function planRun(
   definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
   definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>,
   lineageRuns?: ReadonlyMap<string, RunRow>,
+  validated?: ReturnType<typeof validateWorkflowRoute>,
 ): RouteRunPlan {
-  const parsedRoute = parseRoute(run);
-  validateKnownKeys(
-    run.id,
-    "$",
-    parsedRoute,
-    new Set(LEGACY_ROUTE_TOP_LEVEL_KEYS),
-  );
-  const implementationEngine = optionalNonBlankString(
-    run.id,
-    "$.implementationEngine",
-    parsedRoute["implementationEngine"],
-  );
-  if (
-    implementationEngine !== null &&
-    !IMPLEMENTATION_ENGINES.has(implementationEngine)
-  ) {
-    invalidValue(
-      run.id,
-      "$.implementationEngine",
-      "implementation engine is not a recognized compatibility label",
-    );
-  }
-  const profile = optionalNonBlankString(
-    run.id,
-    "$.profile",
-    parsedRoute["profile"],
-  );
-  if (
-    profile !== null &&
-    ![
-      "workflow-definition",
-      "momentum-native-coding",
-      "agent-workflow",
-    ].includes(run.source)
-  ) {
-    throw new RouteStateMigrationError({
-      runId: run.id,
-      jsonPath: "$.profile",
-      code: "route_state_profile_ambiguous",
-      detail:
-        "profile cannot be classified without a recognized durable run source",
-    });
-  }
-  const mode = optionalNonBlankString(run.id, "$.mode", parsedRoute["mode"]);
-  const risk = optionalNonBlankString(run.id, "$.risk", parsedRoute["risk"]);
+  const route = validated ?? validateWorkflowRoute({
+    runId: run.id,
+    source: run.source,
+    route: parseWorkflowRoute(run.id, run.route_json),
+  });
   const steps = planStepAgentConfigs(
     db,
     run,
-    parsedRoute["steps"],
+    route.stepAgentConfigs,
     definitionAgentConfigs,
   );
   const subworkflow = planSubworkflow(
     db,
     run,
-    parsedRoute["subworkflow"],
+    route,
     lineageRuns,
   );
-  const quotaPolicyJson = planQuotaPolicy(run.id, parsedRoute["quotaPolicy"]);
-
-  const hasNativeMarker =
-    implementationEngine !== null || parsedRoute["steps"] !== undefined;
-  const hasImportMarker =
-    mode !== null || risk !== null || quotaPolicyJson !== null;
-  if (
-    (run.source === "agent-workflow" && hasNativeMarker) ||
-    (run.source !== "agent-workflow" && hasImportMarker)
-  ) {
-    throw new RouteStateMigrationError({
-      runId: run.id,
-      jsonPath: "$",
-      code: "route_state_source_conflict",
-      detail:
-        "route markers conflict with the durable workflow_runs.source value",
-    });
-  }
-
   const compatibility =
     run.source === "momentum-native-coding" ||
     (run.source !== "agent-workflow" &&
-      (implementationEngine !== null || profile !== null))
-      ? { implementationEngine, selectedProfile: profile }
+      (route.implementationEngine !== null || route.profile !== null))
+      ? {
+          implementationEngine: route.implementationEngine,
+          selectedProfile: route.profile,
+        }
       : null;
   const importMetadata =
     run.source === "agent-workflow"
-      ? { mode, profile, risk, quotaPolicyJson }
+      ? {
+          mode: route.mode,
+          profile: route.profile,
+          risk: route.risk,
+          quotaPolicyJson: route.quotaPolicyJson,
+        }
       : null;
-  const canonicalRoute = canonicalizeEmptyStepConfigs(parsedRoute);
   return {
     run,
-    parsedRoute: canonicalRoute,
+    validatedRoute: route,
+    parsedRoute: route.route,
     compatibility,
     importMetadata,
     lineage: subworkflow.lineage,
@@ -808,91 +556,14 @@ function planRun(
   };
 }
 
-function parseRoute(run: RunRow): Record<string, unknown> {
-  if (run.route_json === null) return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(run.route_json);
-  } catch {
-    throw new RouteStateMigrationError({
-      runId: run.id,
-      jsonPath: "$",
-      code: "route_state_json_malformed",
-      detail: "route_json is not valid JSON",
-    });
-  }
-  if (!isPlainObject(parsed)) {
-    throw new RouteStateMigrationError({
-      runId: run.id,
-      jsonPath: "$",
-      code: "route_state_not_object",
-      detail: "route_json must contain a JSON object",
-    });
-  }
-  return parsed;
-}
-
-function canonicalizeEmptyStepConfigs(
-  route: Record<string, unknown>,
-): Record<string, unknown> {
-  const rawSteps = route["steps"];
-  if (!isPlainObject(rawSteps)) return route;
-  const steps = Object.fromEntries(
-    Object.entries(rawSteps).filter(
-      ([, config]) => isPlainObject(config) && Object.keys(config).length > 0,
-    ),
-  );
-  const canonical = { ...route };
-  if (Object.keys(steps).length === 0) {
-    delete canonical["steps"];
-  } else {
-    canonical["steps"] = steps;
-  }
-  return canonical;
-}
-
 function planStepAgentConfigs(
   db: MomentumDb,
   run: RunRow,
-  raw: unknown,
+  agentConfigs: ReadonlyMap<string, string>,
   definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
 ): Map<string, string> {
   const result = new Map<string, string>();
-  const routeKinds = new Map<string, string>();
-  if (raw === undefined) return result;
-  if (!isPlainObject(raw))
-    invalidValue(run.id, "$.steps", "steps must be an object");
-  for (const [kind, config] of Object.entries(raw)) {
-    const at = `$.steps.${kind}`;
-    if (!STEP_ROUTE_KEYS.has(kind)) unknownKey(run.id, at);
-    if (!isPlainObject(config))
-      invalidValue(run.id, at, "step config must be an object");
-    validateKnownKeys(run.id, at, config, AGENT_CONFIG_KEYS);
-    for (const [key, value] of Object.entries(config)) {
-      if (typeof value !== "string" || value.trim().length === 0) {
-        invalidValue(
-          run.id,
-          `${at}.${key}`,
-          "agent config values must be non-blank strings",
-        );
-      }
-    }
-    const canonicalKind =
-      LEGACY_WORKFLOW_STEP_KIND_ALIASES[
-        kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
-      ] ?? kind;
-    const existingRouteKind = routeKinds.get(canonicalKind);
-    if (existingRouteKind !== undefined) {
-      throw new RouteStateMigrationError({
-        runId: run.id,
-        jsonPath: at,
-        code: "route_state_step_target_ambiguous",
-        detail:
-          `route defines both '${existingRouteKind}' and '${kind}', which map to ` +
-          `canonical step kind '${canonicalKind}'`,
-      });
-    }
-    routeKinds.set(canonicalKind, kind);
+  for (const [canonicalKind, config] of agentConfigs) {
     const matches = (
       db
         .prepare(
@@ -911,7 +582,7 @@ function planStepAgentConfigs(
     if (matches.length === 0) {
       throw new RouteStateMigrationError({
         runId: run.id,
-        jsonPath: at,
+        jsonPath: `$.steps.${canonicalKind}`,
         code: "route_state_step_target_missing",
         detail: `no persisted step has canonical kind '${canonicalKind}'`,
       });
@@ -919,71 +590,26 @@ function planStepAgentConfigs(
     if (matches.length > 1 && definitionAgentConfigs === undefined) {
       throw new RouteStateMigrationError({
         runId: run.id,
-        jsonPath: at,
+        jsonPath: `$.steps.${canonicalKind}`,
         code: "route_state_step_target_ambiguous",
         detail: `multiple persisted steps have canonical kind '${canonicalKind}'`,
       });
     }
     for (const match of matches) {
-      result.set(match.step_id, JSON.stringify(config));
+      result.set(match.step_id, config);
     }
   }
   return result;
 }
 
-function validateStepRouteShape(runId: string, raw: unknown): void {
-  if (raw === undefined) return;
-  if (!isPlainObject(raw))
-    invalidValue(runId, "$.steps", "steps must be an object");
-  for (const [kind, config] of Object.entries(raw)) {
-    const at = `$.steps.${kind}`;
-    if (!STEP_ROUTE_KEYS.has(kind)) unknownKey(runId, at);
-    if (!isPlainObject(config))
-      invalidValue(runId, at, "step config must be an object");
-    validateKnownKeys(runId, at, config, AGENT_CONFIG_KEYS);
-    for (const [key, value] of Object.entries(config)) {
-      if (typeof value !== "string" || value.trim().length === 0) {
-        invalidValue(
-          runId,
-          `${at}.${key}`,
-          "agent config values must be non-blank strings",
-        );
-      }
-    }
-  }
-}
-
 function planSubworkflow(
   db: MomentumDb,
   run: RunRow,
-  raw: unknown,
+  route: ReturnType<typeof validateWorkflowRoute>,
   lineageRuns?: ReadonlyMap<string, RunRow>,
 ): { child: Record<string, unknown> | null; lineage: LineagePlan | null } {
-  if (raw === undefined) return { child: null, lineage: null };
-  if (!isPlainObject(raw)) {
-    invalidValue(run.id, "$.subworkflow", "subworkflow must be an object");
-  }
-  validateKnownKeys(run.id, "$.subworkflow", raw, SUBWORKFLOW_KEYS);
-  let child: Record<string, unknown> | null = null;
-  if (raw["child"] !== undefined) {
+  if (route.child !== null) {
     const at = "$.subworkflow.child";
-    if (!isPlainObject(raw["child"]))
-      invalidValue(run.id, at, "child must be an object");
-    child = raw["child"];
-    validateKnownKeys(run.id, at, child, CHILD_KEYS);
-    requiredNonBlankString(
-      run.id,
-      `${at}.childDefinitionKey`,
-      child["childDefinitionKey"],
-    );
-    requiredPositiveInteger(
-      run.id,
-      `${at}.childDefinitionVersion`,
-      child["childDefinitionVersion"],
-    );
-    if (child["maxDepth"] !== undefined) {
-      requiredPositiveInteger(run.id, `${at}.maxDepth`, child["maxDepth"]);
-    }
     if (
       run.workflow_definition_key === null ||
       run.workflow_definition_version === null
@@ -1005,90 +631,33 @@ function planSubworkflow(
       });
     }
   }
-
-  let lineage: LineagePlan | null = null;
-  if (raw["lineage"] !== undefined) {
-    const at = "$.subworkflow.lineage";
-    const value = raw["lineage"];
-    if (!isPlainObject(value))
-      invalidLineage(run.id, at, "lineage must be an object");
-    validateKnownKeys(run.id, at, value, LINEAGE_KEYS);
-    const parentRunId = requiredNonBlankString(
-      run.id,
-      `${at}.parentRunId`,
-      value["parentRunId"],
-      true,
-    );
-    const parentStepId = requiredNonBlankString(
-      run.id,
-      `${at}.parentStepId`,
-      value["parentStepId"],
-      true,
-    );
-    if (parentRunId === run.id) {
-      invalidLineage(
-        run.id,
-        `${at}.parentRunId`,
-        "parentRunId must differ from the child run id",
-      );
-    }
-    const depth = requiredPositiveInteger(
-      run.id,
-      `${at}.depth`,
-      value["depth"],
-      true,
-    );
-    const ancestors = value["ancestorDefinitionKeys"];
-    if (
-      !Array.isArray(ancestors) ||
-      !ancestors.every(
-        (key) => typeof key === "string" && key.trim().length > 0,
-      )
-    ) {
-      invalidLineage(
-        run.id,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must be an array of non-blank strings",
-      );
-    }
-    if (depth !== ancestors.length) {
-      invalidLineage(
-        run.id,
-        `${at}.depth`,
-        "depth must equal ancestorDefinitionKeys.length",
-      );
-    }
-    if (new Set(ancestors).size !== ancestors.length) {
-      invalidLineage(
-        run.id,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must not repeat a definition",
-      );
-    }
-    if (lineageRuns === undefined) {
-      const parent = db
-        .prepare(
-          "SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?",
-        )
-        .get(parentRunId, parentStepId);
-      if (parent === undefined) {
-        throw new RouteStateMigrationError({
-          runId: run.id,
-          jsonPath: `${at}.parentStepId`,
-          code: "route_state_lineage_parent_missing",
-          detail: "parent run step does not exist",
-        });
-      }
-    }
-    lineage = {
-      parentRunId,
-      parentStepId,
-      depth,
-      ancestorDefinitionKeys: ancestors,
-      ancestorDefinitionKeysJson: JSON.stringify(ancestors),
-    };
+  if (route.lineage === null) {
+    return { child: route.child, lineage: null };
   }
-  return { child, lineage };
+  const lineage = route.lineage;
+  if (lineageRuns === undefined) {
+    const at = "$.subworkflow.lineage";
+    const parent = db
+      .prepare("SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+      .get(lineage.parentRunId, lineage.parentStepId);
+    if (parent === undefined) {
+      throw new RouteStateMigrationError({
+        runId: run.id,
+        jsonPath: `${at}.parentStepId`,
+        code: "route_state_lineage_parent_missing",
+        detail: "parent run step does not exist",
+      });
+    }
+  }
+  return {
+    child: route.child,
+    lineage: {
+      ...lineage,
+      ancestorDefinitionKeysJson: JSON.stringify(
+        lineage.ancestorDefinitionKeys,
+      ),
+    },
+  };
 }
 
 function validateLineagePlans(
@@ -1096,11 +665,15 @@ function validateLineagePlans(
   plan: WorkflowRouteStatePlan,
   lineageRuns: ReadonlyMap<string, RunRow>,
 ): void {
+  const validatedRoutes = new Map(
+    plan.runs.map((item) => [item.run.id, item.validatedRoute]),
+  );
   const canonicalLineageByRunId = loadCanonicalLineageFields(db);
   const parentFacts = loadLineageParentFacts(
     db,
     lineageRuns,
     canonicalLineageByRunId,
+    validatedRoutes,
   );
   for (const item of plan.runs) {
     if (item.lineage === null) continue;
@@ -1119,10 +692,18 @@ function loadLineageParentFacts(
   db: MomentumDb,
   lineageRuns: ReadonlyMap<string, RunRow>,
   canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
+  validatedRoutes: ReadonlyMap<
+    string,
+    ReturnType<typeof validateWorkflowRoute>
+  > = new Map(),
 ): Map<string, LineageParentFact> {
   const parentRunIds = new Set<string>();
   for (const run of lineageRuns.values()) {
-    const lineage = readLineageFields(run, canonicalLineageByRunId);
+    const lineage = readLineageFields(
+      run,
+      canonicalLineageByRunId,
+      validatedRoutes,
+    );
     if (lineage !== null) parentRunIds.add(lineage.parentRunId);
   }
 
@@ -1268,43 +849,19 @@ function lineageParentFactKey(runId: string, stepId: string): string {
 function readLineageFields(
   run: RunRow,
   canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
+  validatedRoutes: ReadonlyMap<
+    string,
+    ReturnType<typeof validateWorkflowRoute>
+  > = new Map(),
 ): LineageFields | null {
-  const route = parseRoute(run);
-  validateKnownKeys(run.id, "$", route, new Set(LEGACY_ROUTE_TOP_LEVEL_KEYS));
-  const raw = route["subworkflow"];
-  validateSubworkflowShape(run.id, raw);
-  if (!isPlainObject(raw) || raw["lineage"] === undefined) {
-    return canonicalLineageByRunId.get(run.id) ?? null;
-  }
-  const value = raw["lineage"];
-  if (!isPlainObject(value)) {
-    invalidLineage(
-      run.id,
-      "$.subworkflow.lineage",
-      "lineage must be an object",
-    );
-  }
-  return {
-    parentRunId: requiredNonBlankString(
-      run.id,
-      "$.subworkflow.lineage.parentRunId",
-      value["parentRunId"],
-      true,
-    ),
-    parentStepId: requiredNonBlankString(
-      run.id,
-      "$.subworkflow.lineage.parentStepId",
-      value["parentStepId"],
-      true,
-    ),
-    depth: requiredPositiveInteger(
-      run.id,
-      "$.subworkflow.lineage.depth",
-      value["depth"],
-      true,
-    ),
-    ancestorDefinitionKeys: value["ancestorDefinitionKeys"] as string[],
-  };
+  const validated =
+    validatedRoutes.get(run.id) ??
+    validateWorkflowRoute({
+      runId: run.id,
+      source: run.source,
+      route: parseWorkflowRoute(run.id, run.route_json),
+    });
+  return validated.lineage ?? canonicalLineageByRunId.get(run.id) ?? null;
 }
 
 function loadLineageValidationRuns(
@@ -1404,94 +961,6 @@ function loadCanonicalLineageFields(
       ] as const;
     }),
   );
-}
-
-function validateSubworkflowShape(runId: string, raw: unknown): void {
-  if (raw === undefined) return;
-  if (!isPlainObject(raw)) {
-    invalidValue(runId, "$.subworkflow", "subworkflow must be an object");
-  }
-  validateKnownKeys(runId, "$.subworkflow", raw, SUBWORKFLOW_KEYS);
-  if (raw["child"] !== undefined) {
-    const at = "$.subworkflow.child";
-    const child = raw["child"];
-    if (!isPlainObject(child))
-      invalidValue(runId, at, "child must be an object");
-    validateKnownKeys(runId, at, child, CHILD_KEYS);
-    requiredNonBlankString(
-      runId,
-      `${at}.childDefinitionKey`,
-      child["childDefinitionKey"],
-    );
-    requiredPositiveInteger(
-      runId,
-      `${at}.childDefinitionVersion`,
-      child["childDefinitionVersion"],
-    );
-    if (child["maxDepth"] !== undefined) {
-      requiredPositiveInteger(runId, `${at}.maxDepth`, child["maxDepth"]);
-    }
-  }
-  if (raw["lineage"] !== undefined) {
-    const at = "$.subworkflow.lineage";
-    const lineage = raw["lineage"];
-    if (!isPlainObject(lineage))
-      invalidLineage(runId, at, "lineage must be an object");
-    validateKnownKeys(runId, at, lineage, LINEAGE_KEYS);
-    requiredNonBlankString(
-      runId,
-      `${at}.parentRunId`,
-      lineage["parentRunId"],
-      true,
-    );
-    requiredNonBlankString(
-      runId,
-      `${at}.parentStepId`,
-      lineage["parentStepId"],
-      true,
-    );
-    const depth = requiredPositiveInteger(
-      runId,
-      `${at}.depth`,
-      lineage["depth"],
-      true,
-    );
-    const ancestors = lineage["ancestorDefinitionKeys"];
-    if (
-      !Array.isArray(ancestors) ||
-      !ancestors.every(
-        (key) => typeof key === "string" && key.trim().length > 0,
-      )
-    ) {
-      invalidLineage(
-        runId,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must be an array of non-blank strings",
-      );
-    }
-    if (depth !== ancestors.length) {
-      invalidLineage(
-        runId,
-        `${at}.depth`,
-        "depth must equal ancestorDefinitionKeys.length",
-      );
-    }
-    if (new Set(ancestors).size !== ancestors.length) {
-      invalidLineage(
-        runId,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must not repeat a definition",
-      );
-    }
-  }
-}
-
-function planQuotaPolicy(runId: string, raw: unknown): string | null {
-  if (raw === undefined) return null;
-  if (!isPlainObject(raw)) {
-    invalidValue(runId, "$.quotaPolicy", "quotaPolicy must be an object");
-  }
-  return JSON.stringify(raw);
 }
 
 function mergeStepPlans(
@@ -1762,6 +1231,10 @@ function validateProjectedCanonicalRoutes(
     nativeRunIds,
   );
   const projectedRunsById = new Map<string, RunRow>();
+  const validatedRoutes = new Map<
+    string,
+    ReturnType<typeof validateWorkflowRoute>
+  >();
   for (const run of rowsById.values()) {
     if (
       run.source === "momentum-native-coding" &&
@@ -1775,11 +1248,12 @@ function validateProjectedCanonicalRoutes(
       });
     }
     const projectedRoute = projectedByRunId.get(run.id) ?? {};
-    validateWorkflowRouteShape({
+    const validated = validateWorkflowRoute({
       runId: run.id,
       source: run.source,
       route: projectedRoute,
     });
+    validatedRoutes.set(run.id, validated);
     projectedRunsById.set(run.id, {
       ...run,
       route_json: JSON.stringify(projectedRoute),
@@ -1790,13 +1264,15 @@ function validateProjectedCanonicalRoutes(
     db,
     projectedRunsById,
     canonicalLineageByRunId,
+    validatedRoutes,
   );
   for (const run of projectedRunsById.values()) {
-    const route = parseRoute(run);
+    const route = validatedRoutes.get(run.id);
+    if (route === undefined) continue;
     const subworkflow = planSubworkflow(
       db,
       run,
-      route["subworkflow"],
+      route,
       projectedRunsById,
     );
     if (subworkflow.lineage !== null) {
@@ -2197,26 +1673,6 @@ function parseOptionalConfig(
   return value;
 }
 
-function validateKnownKeys(
-  runId: string,
-  jsonPath: string,
-  value: Record<string, unknown>,
-  keys: ReadonlySet<string>,
-): void {
-  for (const key of Object.keys(value)) {
-    if (!keys.has(key)) unknownKey(runId, `${jsonPath}.${key}`);
-  }
-}
-
-function optionalNonBlankString(
-  runId: string,
-  jsonPath: string,
-  value: unknown,
-): string | null {
-  if (value === undefined) return null;
-  return requiredNonBlankString(runId, jsonPath, value);
-}
-
 function requiredNonBlankString(
   runId: string,
   jsonPath: string,
@@ -2245,15 +1701,6 @@ function requiredPositiveInteger(
   return value;
 }
 
-function unknownKey(runId: string, jsonPath: string): never {
-  throw new RouteStateMigrationError({
-    runId,
-    jsonPath,
-    code: "route_state_unknown_key",
-    detail: "route key is not recognized",
-  });
-}
-
 function invalidValue(runId: string, jsonPath: string, detail: string): never {
   throw new RouteStateMigrationError({
     runId,
@@ -2274,10 +1721,6 @@ function invalidLineage(
     code: "route_state_lineage_invalid",
     detail,
   });
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeRouteStateMigrationError(
