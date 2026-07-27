@@ -5,7 +5,9 @@
  * materializes it through {@link materializeWorkflowRunStart}, and writes the
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
- * approval boundary. This is the storage twin of the pure materializer:
+ * approval boundary, and persists route state through the adapter-owned canonical
+ * destinations while leaving `workflow_runs.route_json` empty.
+ * This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
  * is owned separately by `dispatch/scheduler.ts`; the native agent-loop,
  * agent-once / script SDK paths and the legacy no-mistakes mirror /
