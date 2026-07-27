@@ -67,7 +67,8 @@ A single `momentum.db` per data directory backs durable state across all goals:
   The digest and timestamp advisory columns are also the native progress-monitor suppression baseline: `workflow run monitor --advance` and `workflow run watch --once` can refresh `monitor_last_seen_digest` / `monitor_last_seen_at` and, only when a meaningful tick or throttled supervisor advisory emits, `monitor_last_emitted_digest` / `monitor_last_emitted_at` for `momentum-native-coding` runs.
   New writes keep `route_json` as the literal empty object.
   Current status, handoff, monitor, logs, watch, and dispatch output reconstructs the existing `route` shape through one read-only compatibility projection over the explicit destinations below.
-  Upgrades migrate recognized legacy route values into those destinations atomically and fail closed before any destination schema or data is committed when a value is malformed, ambiguous, or unsupported.
+  Upgrades migrate recognized legacy route values into those destinations atomically and fail closed before any destination schema or data is committed for partial schema or canonical state, malformed JSON, unknown keys, conflicting aliases, ambiguous or unmappable values, invalid lineage, or foreign-key failures.
+  Refusals identify the affected run or database, stable JSON path, stable route-state code, detail, and repair guidance.
   A pre-upgrade backup is required to return to a binary that expects legacy values in `route_json`.
   Native implementation engine and selected profile compatibility are stored in `workflow_run_coding_compatibility`.
   `selected_profile` is historical native compatibility recorded by generic and coding starts, never authority for machine-local host binding.
@@ -101,7 +102,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   Retained definition versions keep their recorded legacy vocabulary byte-for-byte and are projected only when read for preview, materialization, or dispatch; the legacy `no-mistakes` executor remains dispatchable for those definitions.
   Retired executor values use the non-mutating projection and raw-identity claim rule defined in [SPEC.md](../SPEC.md).
   Definitions may also name a third-party SDK registration.
-  Opening an older database adds nullable `config_json` in place and preserves existing step rows with null config.
+  Opening an older database adds nullable `config_json` and `agent_config_json` in place and preserves existing step rows with null config.
   The current coding definition stores GNHF and no-mistakes as `tool` config on `delegate-supervisor` steps, while versions 1 and 2 retain their recorded legacy vocabulary.
   The persisted step set mirrors its definition exactly: re-persisting drops steps the definition no longer declares, preserves retained steps' `created_at`, and bumps `updated_at`.
 - `executor_definitions` — durable executor recipes keyed by `executor_key`, carrying the executor identity in `executor`, display name, optional agent / model / effort policy, and lifecycle timestamps.

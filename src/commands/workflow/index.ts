@@ -443,12 +443,13 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
- *   - it records the coding implementation engine under
+ *   - it builds the coding implementation engine compatibility value exposed as
  *     `route.implementationEngine`, defaulting to the honest `gnhf` label while
  *     retaining persisted `native-goal-loop` compatibility and
  *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
- *   - it accepts the coding-only `--steps-json` route override and records
- *     validated per-step harness/model/effort selections under `route.steps`,
+ *   - it accepts the coding-only `--steps-json` route override and builds
+ *     validated per-step harness/model/effort selections for canonical
+ *     persistence, exposed through the compatibility `route.steps` projection,
  *     with provider-aware model aliases normalized before persistence; and
  *   - it runs structural preflight for built-in definition lookup, route
  *     profile, route steps, and run-start shape before any durable write.
@@ -637,9 +638,9 @@ async function runWorkflowStartCommand(
   // Native per-step coding route reconfiguration: an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
   // --steps-json. The validated, normalized overrides, including provider-aware
-  // model alias rewrites for known harness mappings, are embedded durably under
-  // route.steps so status/handoff/logs can audit the selection and so execution
-  // can read it (or fail closed). The per-step namespace is coding-door specific,
+  // model alias rewrites for known harness mappings, are handed to canonical
+  // persistence and exposed through route.steps so status/handoff/logs can audit
+  // the selection and execution can read it (or fail closed). The per-step namespace is coding-door specific,
   // so the generic `workflow run start` refuses it rather than silently dropping
   // a coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
@@ -1089,11 +1090,12 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the durable run route from the recorded implementation engine
-  // (route.implementationEngine), operator profile (route.profile), and validated
-  // per-step overrides (route.steps). The engine marker is written for native
-  // coding starts even when profile and per-step overrides are omitted, so readback
-  // can distinguish the selected implementation path from the compatibility route.
+  // Compose the compatibility route projection from the recorded implementation
+  // engine (route.implementationEngine), operator profile (route.profile), and
+  // validated per-step overrides (route.steps). Canonical persistence owns the
+  // destination rows; the engine marker is still built for native coding starts
+  // even when profile and per-step overrides are omitted, so readback can
+  // distinguish the selected implementation path from the compatibility route.
   let route: Record<string, unknown> = {};
   if (coding) {
     route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;

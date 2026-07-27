@@ -12,28 +12,29 @@
  *   - iteration 1 (`route/subworkflow-child-config.ts`): the child-config shape +
  *     recursion-safety deciders;
  *   - iteration 2 (`route/subworkflow.ts`): {@link planSubworkflowChildLaunchFromRoute},
- *     which sources the child config from `route.subworkflow.child` and the durable
- *     recursion lineage from `route.subworkflow.lineage`, returning a launch plan
+ *     which sources the child config from the projected `route.subworkflow.child`
+ *     and the canonical recursion lineage projected as `route.subworkflow.lineage`, returning a launch plan
  *     (child definition key, deterministic child run id, propagated child route) or
  *     a typed fail-closed refusal;
  *   - iteration 3 (`route/subworkflow-child-runner.ts`):
  *     {@link buildDispatchedSubworkflowChildRunner}, which resolves the child
  *     definition by key and returns the production start-or-attach runner.
  *
- * The deriver reads the parent run's durable facts (its `route`, definition key,
- * objective, and repo) from the `workflow_runs` row, runs the iteration-2 launch
- * plan over them, derives the parent-run-dir evidence paths, builds the iteration-3
- * runner, and returns the {@link DispatchedSubworkflowContextResolution} the
- * factory forwards into the producer (or routes to manual recovery on any refusal).
+ * The deriver reads the parent run's durable facts and adapter-owned compatibility
+ * route projection, definition key, objective, and repo, runs the iteration-2
+ * launch plan over them, derives the parent-run-dir evidence paths, builds the
+ * iteration-3 runner, and returns the {@link DispatchedSubworkflowContextResolution}
+ * the factory forwards into the producer (or routes to manual recovery on any refusal).
  *
  * Discipline (the pure-decision / injected-IO split `live-wrapper/daemon-exec-context.ts`
  * uses, and total so the factory never has to handle a thrown derivation specially):
  *
  *   - {@link resolveSubworkflowParentRunFacts} is the pure half: it validates the
  *     raw run-row columns the launch plan needs (a definition-linked run, a
- *     non-blank inherited objective) and parses `route_json` — failing closed on a
- *     corrupt route rather than throwing, the same posture the route module takes
- *     for a corrupt lineage. `repo_path` is passed through and owned by the reused
+ *     non-blank inherited objective) and parses the projected compatibility route
+ *     JSON — failing closed on a corrupt route rather than throwing, the same
+ *     posture the route module takes for a corrupt lineage. `repo_path` is passed
+ *     through and owned by the reused
  *     {@link resolveDispatchedStepExecutorContext} run-dir resolver, which already
  *     refuses a run with no repo to host a child.
  *   - {@link loadSubworkflowParentRunRow} is the injected IO half: it reads the
@@ -76,7 +77,7 @@ import { planSubworkflowChildLaunchFromRoute } from "./subworkflow.js";
  * refusal.
  */
 export type SubworkflowParentRunRow = {
-  /** The run's free-form `route` JSON (carries the subworkflow config + lineage). */
+  /** The projected compatibility `route` JSON (canonical config and lineage live in adapter destinations). */
   routeJson: string | null;
   /** The run's own workflow definition key (the recursion self-reference anchor). */
   definitionKey: string | null;
@@ -116,8 +117,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Validate a parent run row into the facts the child launch needs. Pure and total:
  * a definition-unlinked or objectiveless run is refused, and a corrupt / non-object
- * `route_json` fails closed rather than throwing (a `null` route is the legitimate
- * empty-route case). `repoPath` / `sourceArtifactPath` pass through to the run-dir
+ * projected route JSON fails closed rather than throwing (a `null` route is the
+ * legitimate empty-route case). `repoPath` / `sourceArtifactPath` pass through to the run-dir
  * resolver, which owns the "no repo to host a child" refusal.
  */
 export function resolveSubworkflowParentRunFacts(

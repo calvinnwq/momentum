@@ -139,9 +139,11 @@ workflow run's observed state into defer / mirror evidence,
 runner and reconciles the parent only after terminal child evidence,
 `dispatch/subworkflow-dispatch.ts` provides the daemon-lane entry-point factory, and
 `dispatch/scheduler.ts` can recheck a deferred child run by heartbeating or reacquiring
-the parent dispatch lease. The production deriver sources child config and
-lineage from `route.subworkflow`, resolves the child definition by key, refuses
-unsafe recursion / unsupported attachment, and keeps manual-recovery behavior for
+the parent dispatch lease. The production deriver reads the adapter-owned
+compatibility projection of child config and lineage from `route.subworkflow`,
+whose canonical sources are `workflow_steps.executor_config_json` and
+`workflow_run_lineage`; it resolves the child definition by key, refuses unsafe
+recursion / unsupported attachment, and keeps manual-recovery behavior for
 missing or ambiguous child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
@@ -168,7 +170,7 @@ Renderer next-action shapes expose this as `actionClass: "reconcile_external_tai
 Ordinary failed validate steps remain `retry_failed_step` with `recoveryDetail: null`, even though guarded `clear-recovery` can still accept explicit checks-passed or structured deterministic evidence for an unflagged failed validate step.
 
 `workflow run start-coding` is the explicit Momentum-native start door.
-It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, stores the selected implementation path under `route.implementationEngine`, and keeps CWFP/default switching explicit.
+It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores native compatibility in the adapter-owned coding destination projected as `route.profile` and `route.implementationEngine`, and keeps CWFP/default switching explicit.
 The coding doors accept `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`, and default to persisted `gnhf`; execution semantics are owned by [Daemon commands](../../../docs/daemon.md#workflow-live-wrapper-profile).
 The current built-in definition classifies implementation and validate as `delegate-supervisor` with their tool in portable step config.
 Versions 1 and 2 remain registered unchanged for recorded runs with their legacy vocabulary.
@@ -178,10 +180,10 @@ Native dispatch projects the portable merge-cleanup command for those V1 runs wi
 It shares the `start-coding` preconditions, built-in definition resolution, and configured executor module/schema preflight but writes no Momentum state, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run/start.ts` after those checks pass.
 The resulting plan is a pure projection of the version-pinned built-in definition plus inputs, including `route.implementationEngine` and each step's optional portable config, so a later `start-coding` from the same inputs persists a matching run.
 
-`route/coding.ts` is the pure keystone for native per-step coding route/config overrides: it validates, normalizes, reads, writes, and projects operator `harness`/`model`/`effort` selections per configurable coding step (`implementation`, `postflight`, `validate`, `merge-cleanup`) under a byte-stable `route.steps` namespace on the run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`.
-The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and embeds them in the durable run route (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
+`route/coding.ts` is the pure keystone for native per-step coding route/config overrides: it validates, normalizes, reads, writes, and projects operator `harness`/`model`/`effort` selections per configurable coding step (`implementation`, `postflight`, `validate`, `merge-cleanup`) under a byte-stable `route.steps` compatibility namespace; canonical run state lives in `workflow_steps.agent_config_json`, alongside the projected `route.implementationEngine` and `route.profile` compatibility values.
+The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and hands them to canonical persistence (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
-Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
+Status, handoff, monitor, and logs expose the selected `route.steps` through the read-only compatibility projection, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; corrupt canonical step config fails closed to manual recovery instead of silently falling back.
 
 `preflight/structural.ts` is the pure structural preflight seam for workflow setup.
 The start and preview doors use it to validate built-in definition lookup, required run shape, approval boundary, issue scope, route profile, route steps, registered executor presence, and portable config against each registered declaration before durable writes.

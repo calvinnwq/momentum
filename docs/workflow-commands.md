@@ -286,12 +286,12 @@ Behaviour:
 - **Execution**: `workflow run start` only materializes durable run state.
   Approved steps are claimed by bounded `daemon start --max-*`, which dispatches valid executor identities into durable `executor_attempts` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
   The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them.
-  Native coding runs with `route.steps` freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; a corrupt persisted `route.steps` namespace routes to manual recovery with `route_config_invalid` instead of silently falling back.
+  Native coding runs with the canonical `workflow_steps.agent_config_json` selections freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; corrupt canonical step config routes to manual recovery with `route_config_invalid` instead of silently falling back.
   The `external-apply` executor is filled by the daemon itself for the built-in `tracker-refresh` step: it proves `LINEAR_API_KEY`, repo `intent_apply_policy: external_apply_allowed`, the run issue scope, a matching source item, and either one pending Linear `status_update` intent or enough unique issue-scope/source evidence to seed the expected pending `status_update` intent with a `Done` payload deterministically.
   The resulting intent must have a valid one-of `state` / `stateId` payload and a stable idempotency marker before the daemon reuses the policy-gated `intent apply --external-apply` write path.
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
-  Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
+  Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's canonical `workflow_steps.executor_config_json`, recursion lineage is bounded through `workflow_run_lineage`, the read-only `route.subworkflow` projection preserves the existing reader shape, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
   When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured profile-backed step wrappers after the scaffold is created.
   An ordinary live-wrapper result is finalized through the shared verify -> commit / reset transaction before terminalization and reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
   A delegate-supervisor wrapper result passes through the same safe finalization but becomes durable handoff and terminal-candidate evidence rather than terminal step authority.
@@ -408,7 +408,7 @@ Data dir: /path/to/data
 ```
 
 The `Approval boundary` line prints the boundary when one was supplied.
-For coding starts, the `Implementation engine` line prints the durable route path recorded for the run.
+For coding starts, the `Implementation engine` line prints the compatibility projection of the durable coding path recorded for the run.
 The `Policy` line prints the `MOMENTUM.md` path when a valid policy was loaded and `(none)` otherwise.
 
 ### Text output (failure)
@@ -1290,7 +1290,7 @@ The implementation-route execution contract is owned by [Daemon commands](daemon
 `current-gnhf-cwfp` remains an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
 `run.route.steps` projects the per-step harness/model/effort selections from `workflow_steps.agent_config_json` when a coding run was started with `--steps-json`; only the steps and fields the operator overrode are shown, so the selected route can be audited from durable state.
 Provider-specific model aliases have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
-Malformed route JSON is fail-closed.
+Malformed legacy route JSON and malformed canonical destination JSON are fail-closed.
 `workflow run start-coding --implementation-engine`, `workflow run preview-coding --implementation-engine`, `workflow run start-coding --steps-json`, `workflow run preview-coding --steps-json`, and `workflow run monitor` all read the same route namespace.
 If the namespace is invalid or unsupported, dispatch routes the run to manual recovery with `route_config_invalid` before execution.
 Unknown or non-agent harness/model values remain pass-through values in these read surfaces.

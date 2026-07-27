@@ -1713,9 +1713,11 @@ function withNoMistakesMigrationProvenance(
  *   - `workflow_steps.kind` and `workflow_runs.approval_boundary` move to the
  *     renamed spellings. `workflow_steps.step_id` never changes: event ids and
  *     artifact trees anchor on it.
- *   - `route_json` step-override objects are re-keyed from `no-mistakes` to
- *     `validate`; rows with unreadable JSON or a colliding target key stay
- *     untouched.
+ *   - When route-state migration is selected, the complete legacy `route_json`
+ *     inventory is pre-scanned before vocabulary rewrites, then moved into the
+ *     explicit route-state destinations by the adapter-owned migration. Malformed,
+ *     unknown, conflicting, ambiguous, or unmappable route state aborts the
+ *     transaction instead of leaving a partial route rewrite.
  *   - Renamed built-in executor values are rewritten in `executor_attempts`,
  *     `executor_rounds`, and the `executor_definitions.executor` identity
  *     column, skipped entirely when a registration claims the old spelling as

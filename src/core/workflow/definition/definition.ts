@@ -89,6 +89,8 @@ export function isExecutorName(value: unknown): value is ExecutorName {
  *   - `executor` is the permanent executor identity that powers the step.
  *   - `config` is optional JSON-compatible portable executor intent; host-local
  *     command resolution does not belong here.
+ *   - `agentConfig` is optional portable harness/model/effort selection metadata
+ *     for the step; executable host bindings do not belong here.
  *   - `order` is the step's position; orders must be unique within a
  *     definition.
  *   - `required` marks whether the step must reach terminal success for the run
