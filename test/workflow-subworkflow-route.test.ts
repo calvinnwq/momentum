@@ -16,8 +16,10 @@ import type { SubworkflowParentLineage } from "../src/core/workflow/route/subwor
  * Iteration 1 landed the config validator + recursion-safety decider but left two
  * connective decisions to "the wiring slice": where a production `subworkflow`
  * step's child config is sourced from, and how the parent run's recursion lineage
- * is encoded durably (there is no first-class depth/lineage column). This module
- * resolves both against the run's free-form `route.subworkflow` namespace, purely:
+ * is encoded durably. Canonical child config lives in
+ * `workflow_steps.executor_config_json`, canonical lineage lives in
+ * `workflow_run_lineage`, and this module resolves both through the projected
+ * `route.subworkflow` namespace, purely:
  *
  *   - {@link readSubworkflowParentLineage} reads the parent's lineage from its
  *     route (absent => top-level; present-but-corrupt => fail closed);

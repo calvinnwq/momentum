@@ -233,11 +233,12 @@ export type DeriveChildSubworkflowRouteInput = {
 };
 
 /**
- * Build the `route` JSON a child run should be started with. The child's ancestry
- * is the parent's ancestry plus the parent's own definition key (root-first), so a
- * grandchild launch sees every ancestor above it and the cycle / depth checks stay
- * sound across nesting levels. The child run gets a fresh route carrying only the
- * propagated lineage — any authored child-of-child config is set separately.
+ * Build the compatibility `route` object a child run should be started with. The
+ * child's ancestry is the parent's ancestry plus the parent's own definition key
+ * (root-first), so a grandchild launch sees every ancestor above it and the cycle /
+ * depth checks stay sound across nesting levels. The child run gets a fresh route
+ * carrying only the propagated lineage; canonical persistence stores it in
+ * `workflow_run_lineage`, and any authored child-of-child config is set separately.
  */
 export function deriveChildSubworkflowRoute(
   input: DeriveChildSubworkflowRouteInput,

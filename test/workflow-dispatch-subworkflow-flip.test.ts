@@ -100,8 +100,9 @@ function makeTempDir(prefix = "momentum-sub-flip-"): string {
 /**
  * Seed a migrated DB with the parent + child definitions and an approved
  * top-level parent run whose single `subworkflow` step is ready to dispatch. The
- * authored child-launch config rides in the run's `route` JSON, exactly where the
- * production lane sources it.
+ * authored child-launch config is supplied through the compatibility `route`
+ * object, then persisted canonically in `workflow_steps.executor_config_json` and
+ * read back through the adapter-owned route projection.
  */
 function seedParentRun(dataDir: string, repoPath: string, runId: string): void {
   const db = openDb(dataDir);
