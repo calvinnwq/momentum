@@ -424,6 +424,95 @@ describe("workflow route-state migration", () => {
     }
   });
 
+  it("accepts repeated step kinds when their projected configs agree", () => {
+    const dataDir = seedReleasedFixture();
+    const db = openDb(dataDir);
+    try {
+      const config = db
+        .prepare(
+          `SELECT agent_config_json
+             FROM workflow_steps
+            WHERE run_id = 'native-full' AND step_id = 'implementation'`,
+        )
+        .get() as { agent_config_json: string };
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required,
+            agent_config_json, executor_config_json, created_at, updated_at)
+         VALUES ('native-full', 'implementation-copy', 'implementation',
+                 'pending', 6, 1, ?, '{}', 1, 1)`,
+      ).run(config.agent_config_json);
+
+      expect(
+        projectLegacyWorkflowRunRoute(db, "native-full", {
+          source: "momentum-native-coding",
+          definitionKey: "coding-workflow",
+          definitionVersion: 3,
+        }),
+      ).toEqual({
+        implementationEngine: "native-goal-loop",
+        profile: "fixture-native",
+        steps: {
+          implementation: {
+            harness: "codex",
+            model: "gpt-5.6",
+            effort: "medium",
+          },
+          postflight: { harness: "claude", model: "opus", effort: "high" },
+          validate: { harness: "codex" },
+          "merge-cleanup": { model: "cleanup-model" },
+          "tracker-refresh": { effort: "low" },
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls back vocabulary normalization with route-state migration failure", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.prepare(
+        `UPDATE workflow_runs
+            SET route_json = ?
+          WHERE id = 'v1-aliases'`,
+      ).run('{"steps":{"no-mistakes":{"harness":"codex"}}}');
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required,
+            created_at, updated_at)
+         VALUES ('missing-run', 'orphan', 'implementation', 'pending', 0, 1, 1, 1)`,
+      ).run();
+    });
+
+    let refusal: RouteStateMigrationError | undefined;
+    try {
+      openDb(dataDir);
+    } catch (error) {
+      refusal = error as RouteStateMigrationError;
+    }
+    expect(refusal).toMatchObject({
+      code: "route_state_foreign_key_invalid",
+    });
+
+    const db = openExistingDbReadOnly(dataDir)!;
+    try {
+      expect(
+        db
+          .prepare(
+            "SELECT route_json FROM workflow_runs WHERE id = 'v1-aliases'",
+          )
+          .get(),
+      ).toEqual({
+        route_json: '{"steps":{"no-mistakes":{"harness":"codex"}}}',
+      });
+      expect(tableNames(db)).not.toContain("workflow_run_lineage");
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves status, list, and dispatch behavior through the projector seam", () => {
     const dataDir = seedReleasedFixture();
     const legacy = captureLegacyRoutes(dataDir);
@@ -742,6 +831,48 @@ describe("workflow route-state migration", () => {
           .run(
             '{"subworkflow":{"lineage":{"parentRunId":"subworkflow-parent","parentStepId":"missing","depth":1,"ancestorDefinitionKeys":["fixture-parent"]}}}',
             "subworkflow-child",
+          ),
+    },
+    {
+      name: "lineage parent is not a subworkflow",
+      runId: "subworkflow-child",
+      jsonPath: "$.subworkflow.lineage.parentStepId",
+      code: "route_state_lineage_invalid",
+      mutate: (db) =>
+        db
+          .prepare(
+            `UPDATE step_definitions
+                SET executor = 'script'
+              WHERE definition_key = 'fixture-parent'
+                AND definition_version = 1
+                AND step_key = 'child-one'`,
+          )
+          .run(),
+    },
+    {
+      name: "lineage final ancestor disagrees with parent definition",
+      runId: "subworkflow-child",
+      jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+      code: "route_state_lineage_invalid",
+      mutate: (db) =>
+        db
+          .prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?")
+          .run(
+            '{"subworkflow":{"lineage":{"parentRunId":"subworkflow-parent","parentStepId":"child-one","depth":1,"ancestorDefinitionKeys":["fixture-leaf"]}}}',
+            "subworkflow-child",
+          ),
+    },
+    {
+      name: "lineage ancestor chain disagrees with parent lineage",
+      runId: "subworkflow-grandchild",
+      jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+      code: "route_state_lineage_invalid",
+      mutate: (db) =>
+        db
+          .prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?")
+          .run(
+            '{"subworkflow":{"lineage":{"parentRunId":"subworkflow-child","parentStepId":"nested-child","depth":2,"ancestorDefinitionKeys":["fixture-leaf","fixture-nested"]}}}',
+            "subworkflow-grandchild",
           ),
     },
     {

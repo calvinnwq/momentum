@@ -125,6 +125,13 @@ type LineagePlan = {
   ancestorDefinitionKeysJson: string;
 };
 
+type LineageFields = {
+  parentRunId: string;
+  parentStepId: string;
+  depth: number;
+  ancestorDefinitionKeys: string[];
+};
+
 type StepConfigPlan = {
   stepId: string;
   agentConfigJson: string;
@@ -295,7 +302,11 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
         ORDER BY id`,
     )
     .all() as RunRow[];
-  return { runs: rows.map((row) => planRun(db, row)) };
+  for (const row of rows) planRun(db, row);
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  return {
+    runs: rows.map((row) => planRun(db, row, undefined, undefined, rowsById)),
+  };
 }
 
 export function createRouteStateDestinations(db: MomentumDb): void {
@@ -356,28 +367,30 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
 }
 
 export function applyWorkflowRouteStateMigration(db: MomentumDb): void {
-  if (!routeStateMigrationNeeded(db)) return;
-  const plan = preScanRouteState(db);
+  if (!hasRouteStateBaseTables(db)) return;
   db.exec("BEGIN IMMEDIATE");
+  try {
+    applyWorkflowRouteStateMigrationInTransaction(db);
+    db.exec("COMMIT");
+  } catch (error) {
+    safeRollback(db);
+    throw normalizeRouteStateMigrationError(error);
+  }
+}
+
+export function applyWorkflowRouteStateMigrationInTransaction(
+  db: MomentumDb,
+): void {
+  if (!hasRouteStateBaseTables(db)) return;
+  const plan = preScanRouteState(db);
   try {
     createRouteStateDestinations(db);
     applyRouteStatePlan(db, plan);
     assertProjectionEquivalence(db, plan);
     clearMigratedRouteJson(db, plan);
     assertForeignKeyCheckEmpty(db);
-    db.exec("COMMIT");
   } catch (error) {
-    safeRollback(db);
-    if (error instanceof RouteStateMigrationError) throw error;
-    if (error instanceof RouteStateProjectionError) {
-      throw new RouteStateMigrationError({
-        runId: error.runId,
-        jsonPath: error.jsonPath,
-        code: "route_state_projection_mismatch",
-        detail: error.message,
-      });
-    }
-    throw error;
+    throw normalizeRouteStateMigrationError(error);
   }
 }
 
@@ -386,6 +399,7 @@ function planRun(
   run: RunRow,
   definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
   definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>,
+  lineageRuns?: ReadonlyMap<string, RunRow>,
 ): RouteRunPlan {
   const parsedRoute = parseRoute(run);
   validateKnownKeys(
@@ -433,7 +447,12 @@ function planRun(
   const mode = optionalNonBlankString(run.id, "$.mode", parsedRoute["mode"]);
   const risk = optionalNonBlankString(run.id, "$.risk", parsedRoute["risk"]);
   const steps = planStepAgentConfigs(db, run, parsedRoute["steps"]);
-  const subworkflow = planSubworkflow(db, run, parsedRoute["subworkflow"]);
+  const subworkflow = planSubworkflow(
+    db,
+    run,
+    parsedRoute["subworkflow"],
+    lineageRuns,
+  );
   const quotaPolicyJson = planQuotaPolicy(run.id, parsedRoute["quotaPolicy"]);
 
   const hasNativeMarker =
@@ -610,6 +629,7 @@ function planSubworkflow(
   db: MomentumDb,
   run: RunRow,
   raw: unknown,
+  lineageRuns?: ReadonlyMap<string, RunRow>,
 ): { child: Record<string, unknown> | null; lineage: LineagePlan | null } {
   if (raw === undefined) return { child: null, lineage: null };
   if (!isPlainObject(raw)) {
@@ -710,16 +730,35 @@ function planSubworkflow(
         "depth must equal ancestorDefinitionKeys.length",
       );
     }
-    const parent = db
-      .prepare("SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?")
-      .get(parentRunId, parentStepId);
-    if (parent === undefined) {
-      throw new RouteStateMigrationError({
-        runId: run.id,
-        jsonPath: `${at}.parentStepId`,
-        code: "route_state_lineage_parent_missing",
-        detail: "parent run step does not exist",
-      });
+    if (new Set(ancestors).size !== ancestors.length) {
+      invalidLineage(
+        run.id,
+        `${at}.ancestorDefinitionKeys`,
+        "ancestorDefinitionKeys must not repeat a definition",
+      );
+    }
+    const initialLineage = {
+      parentRunId,
+      parentStepId,
+      depth,
+      ancestorDefinitionKeys: ancestors as string[],
+    } satisfies LineageFields;
+    if (lineageRuns !== undefined) {
+      validateLineageChain(db, run, at, initialLineage, lineageRuns);
+    } else {
+      const parent = db
+        .prepare(
+          "SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get(parentRunId, parentStepId);
+      if (parent === undefined) {
+        throw new RouteStateMigrationError({
+          runId: run.id,
+          jsonPath: `${at}.parentStepId`,
+          code: "route_state_lineage_parent_missing",
+          detail: "parent run step does not exist",
+        });
+      }
     }
     lineage = {
       parentRunId,
@@ -729,6 +768,155 @@ function planSubworkflow(
     };
   }
   return { child, lineage };
+}
+
+function validateLineageChain(
+  db: MomentumDb,
+  childRun: RunRow,
+  path: string,
+  lineage: LineageFields,
+  lineageRuns: ReadonlyMap<string, RunRow>,
+): void {
+  let currentRun = childRun;
+  let currentLineage = lineage;
+  let currentPath = path;
+  const visited = new Set([childRun.id]);
+
+  while (true) {
+    const parentRun = lineageRuns.get(currentLineage.parentRunId);
+    if (parentRun === undefined) {
+      throw new RouteStateMigrationError({
+        runId: currentRun.id,
+        jsonPath: `${currentPath}.parentRunId`,
+        code: "route_state_lineage_parent_missing",
+        detail: "parent run step does not exist",
+      });
+    }
+    if (visited.has(parentRun.id)) {
+      invalidLineage(
+        currentRun.id,
+        `${currentPath}.parentRunId`,
+        "lineage parent chain contains a cycle",
+      );
+    }
+    visited.add(parentRun.id);
+
+    const parent = db
+      .prepare(
+        `SELECT wr.workflow_definition_key AS parent_definition_key,
+                wr.workflow_definition_version AS parent_definition_version,
+                sd.definition_key AS step_definition_key,
+                sd.definition_version AS step_definition_version,
+                sd.executor AS step_executor
+           FROM workflow_runs AS wr
+           JOIN workflow_steps AS ws
+             ON ws.run_id = wr.id AND ws.step_id = ?
+           LEFT JOIN step_definitions AS sd
+             ON sd.definition_key = wr.workflow_definition_key
+            AND sd.definition_version = wr.workflow_definition_version
+            AND sd.step_key = ws.step_id
+          WHERE wr.id = ?`,
+      )
+      .get(currentLineage.parentStepId, currentLineage.parentRunId) as
+      | {
+          parent_definition_key: string | null;
+          parent_definition_version: number | null;
+          step_definition_key: string | null;
+          step_definition_version: number | null;
+          step_executor: string | null;
+        }
+      | undefined;
+    if (parent === undefined) {
+      throw new RouteStateMigrationError({
+        runId: currentRun.id,
+        jsonPath: `${currentPath}.parentStepId`,
+        code: "route_state_lineage_parent_missing",
+        detail: "parent run step does not exist",
+      });
+    }
+    if (parent.step_executor !== "subworkflow") {
+      invalidLineage(
+        currentRun.id,
+        `${currentPath}.parentStepId`,
+        "parent step is not a subworkflow dispatch",
+      );
+    }
+    if (
+      parent.parent_definition_key === null ||
+      parent.parent_definition_version === null ||
+      parent.step_definition_key !== parent.parent_definition_key ||
+      parent.step_definition_version !== parent.parent_definition_version
+    ) {
+      invalidLineage(
+        currentRun.id,
+        `${currentPath}.parentStepId`,
+        "parent step is not linked to the parent run definition",
+      );
+    }
+
+    const parentLineage = readLineageFields(parentRun);
+    const expectedAncestors =
+      parentLineage === null
+        ? [parent.parent_definition_key]
+        : [
+            ...parentLineage.ancestorDefinitionKeys,
+            parent.parent_definition_key,
+          ];
+    if (
+      currentLineage.depth !== expectedAncestors.length ||
+      !isDeepStrictEqual(
+        currentLineage.ancestorDefinitionKeys,
+        expectedAncestors,
+      )
+    ) {
+      invalidLineage(
+        currentRun.id,
+        `${currentPath}.ancestorDefinitionKeys`,
+        "ancestorDefinitionKeys does not match the parent lineage chain",
+      );
+    }
+    if (parentLineage === null) return;
+    currentRun = parentRun;
+    currentLineage = parentLineage;
+    currentPath = "$.subworkflow.lineage";
+  }
+}
+
+function readLineageFields(run: RunRow): LineageFields | null {
+  const route = parseRoute(run);
+  validateKnownKeys(run.id, "$", route, new Set(LEGACY_ROUTE_TOP_LEVEL_KEYS));
+  const raw = route["subworkflow"];
+  validateSubworkflowShape(run.id, raw);
+  if (!isPlainObject(raw) || raw["lineage"] === undefined) return null;
+  const value = raw["lineage"];
+  if (!isPlainObject(value)) {
+    invalidLineage(
+      run.id,
+      "$.subworkflow.lineage",
+      "lineage must be an object",
+    );
+  }
+  return {
+    parentRunId: requiredNonBlankString(
+      run.id,
+      "$.subworkflow.lineage.parentRunId",
+      value["parentRunId"],
+      true,
+    ),
+    parentStepId: requiredNonBlankString(
+      run.id,
+      "$.subworkflow.lineage.parentStepId",
+      value["parentStepId"],
+      true,
+    ),
+    depth: requiredPositiveInteger(
+      run.id,
+      "$.subworkflow.lineage.depth",
+      value["depth"],
+      true,
+    ),
+    ancestorDefinitionKeys: value["ancestorDefinitionKeys"] as string[],
+  };
 }
 
 function validateSubworkflowShape(runId: string, raw: unknown): void {
@@ -1185,6 +1373,18 @@ function invalidLineage(
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeRouteStateMigrationError(
+  error: unknown,
+): RouteStateMigrationError | unknown {
+  if (!(error instanceof RouteStateProjectionError)) return error;
+  return new RouteStateMigrationError({
+    runId: error.runId,
+    jsonPath: error.jsonPath,
+    code: "route_state_projection_mismatch",
+    detail: error.message,
+  });
 }
 
 function safeRollback(db: MomentumDb): void {

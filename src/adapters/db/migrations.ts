@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import {
-  applyWorkflowRouteStateMigration,
+  applyWorkflowRouteStateMigrationInTransaction,
   preScanRouteState,
 } from "./route-state.js";
 
@@ -1733,9 +1733,12 @@ function withNoMistakesMigrationProvenance(
 function migrateWorkflowVocabulary(
   db: MomentumDb,
   options: QueueMigrationOptions,
+  migrateRouteState = false,
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (migrateRouteState) preScanRouteState(db);
+
     mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_definitions", "family");
@@ -1952,6 +1955,10 @@ function migrateWorkflowVocabulary(
         candidate.attempt_id,
       );
       convertRounds!.run(candidate.attempt_id);
+    }
+
+    if (migrateRouteState) {
+      applyWorkflowRouteStateMigrationInTransaction(db);
     }
 
     db.exec("COMMIT");
@@ -2255,12 +2262,7 @@ export function applyQueueMigrations(
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
   migratePartialLegacyExecutorInvocationSchema(db, options);
-  // Validate the original released route state before the vocabulary migration
-  // can re-key legacy step aliases. The route-state migration scans again after
-  // that normalization to build the canonical write plan.
-  preScanRouteState(db);
-  migrateWorkflowVocabulary(db, options);
-  applyWorkflowRouteStateMigration(db);
+  migrateWorkflowVocabulary(db, options, true);
 }
 
 type PragmaColumnRow = { name: string };

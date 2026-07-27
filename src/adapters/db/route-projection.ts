@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 
 type MomentumDb = DatabaseSync;
 
@@ -95,6 +96,7 @@ function projectNativeRoute(
     );
     if (Object.keys(agentConfig).length === 0) continue;
     if (Object.hasOwn(steps, row.kind)) {
+      if (isDeepStrictEqual(steps[row.kind], agentConfig)) continue;
       throw new RouteStateProjectionError(
         runId,
         `$.steps.${row.kind}`,
