@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   applyWorkflowRouteStateMigrationInTransaction,
   preScanRouteState,
+  refreshWorkflowRouteStatePlan,
 } from "./route-state.js";
 
 type MomentumDb = DatabaseSync;
@@ -1739,7 +1740,9 @@ function migrateWorkflowVocabulary(
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (migrateRouteState) preScanRouteState(db);
+    const routeStatePlan = migrateRouteState
+      ? preScanRouteState(db)
+      : undefined;
 
     mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
@@ -1959,8 +1962,9 @@ function migrateWorkflowVocabulary(
       convertRounds!.run(candidate.attempt_id);
     }
 
-    if (migrateRouteState) {
-      applyWorkflowRouteStateMigrationInTransaction(db);
+    if (routeStatePlan !== undefined) {
+      refreshWorkflowRouteStatePlan(db, routeStatePlan);
+      applyWorkflowRouteStateMigrationInTransaction(db, routeStatePlan);
     }
 
     db.exec("COMMIT");

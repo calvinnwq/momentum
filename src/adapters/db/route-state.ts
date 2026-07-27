@@ -442,6 +442,27 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
   return plan;
 }
 
+export function refreshWorkflowRouteStatePlan(
+  db: MomentumDb,
+  plan: WorkflowRouteStatePlan,
+): void {
+  if (plan.runs.length === 0) return;
+  const routes = new Map(
+    (
+      db.prepare("SELECT id, route_json FROM workflow_runs").all() as Array<{
+        id: string;
+        route_json: string | null;
+      }>
+    ).map((row) => [row.id, row.route_json]),
+  );
+  for (const item of plan.runs) {
+    const routeJson = routes.get(item.run.id);
+    if (routeJson === undefined) continue;
+    item.run.route_json = routeJson;
+    item.parsedRoute = parseRoute(item.run);
+  }
+}
+
 export function createRouteStateDestinations(db: MomentumDb): void {
   for (const contract of DESTINATION_COLUMNS) {
     if (!columnExists(db, contract.table, contract.column)) {
@@ -469,14 +490,15 @@ export function applyWorkflowRouteStateMigration(db: MomentumDb): void {
 
 export function applyWorkflowRouteStateMigrationInTransaction(
   db: MomentumDb,
+  plan?: WorkflowRouteStatePlan,
 ): void {
   if (!hasRouteStateBaseTables(db)) return;
-  const plan = preScanRouteState(db);
+  const routeStatePlan = plan ?? preScanRouteState(db);
   try {
     createRouteStateDestinations(db);
-    applyRouteStatePlan(db, plan);
-    assertProjectionEquivalence(db, plan);
-    clearMigratedRouteJson(db, plan);
+    applyRouteStatePlan(db, routeStatePlan);
+    assertProjectionEquivalence(db, routeStatePlan);
+    clearMigratedRouteJson(db, routeStatePlan);
     assertForeignKeyCheckEmpty(db);
   } catch (error) {
     throw normalizeRouteStateMigrationError(error);
