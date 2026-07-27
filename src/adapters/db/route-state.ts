@@ -316,7 +316,7 @@ export function validateWorkflowRouteStepProjection(input: {
       routeKindsByCanonicalKind.set(canonicalKind, kind);
     }
   }
-  const materializedKinds = new Set(
+  const materializedKinds = new Set<string>(
     input.steps.map(
       (step) =>
         LEGACY_WORKFLOW_STEP_KIND_ALIASES[
