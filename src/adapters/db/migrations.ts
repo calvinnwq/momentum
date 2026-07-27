@@ -480,7 +480,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
 // src/core/workflow/definition/definition.ts. Portable per-step executor intent
-// lives in config_json; machine-local resolution and run state stay elsewhere.
+// lives in config_json, optional portable agent selection metadata lives in
+// agent_config_json, and machine-local resolution plus run state stay elsewhere.
 const WORKFLOW_DEFINITIONS_DDL = `
 CREATE TABLE IF NOT EXISTS workflow_definitions (
   key TEXT NOT NULL,
@@ -1718,10 +1719,10 @@ function withNoMistakesMigrationProvenance(
  *     renamed spellings. `workflow_steps.step_id` never changes: event ids and
  *     artifact trees anchor on it.
  *   - When route-state migration is selected, the complete legacy `route_json`
- *     inventory is pre-scanned before vocabulary rewrites, then moved into the
- *     explicit route-state destinations by the adapter-owned migration. Malformed,
- *     unknown, conflicting, ambiguous, or unmappable route state aborts the
- *     transaction instead of leaving a partial route rewrite.
+ *     inventory is pre-scanned before any migration mutation, then moved into
+ *     the explicit route-state destinations by the adapter-owned migration.
+ *     Malformed, unknown, conflicting, ambiguous, or unmappable route state
+ *     aborts the transaction instead of leaving a partial route rewrite.
  *   - Renamed built-in executor values are rewritten in `executor_attempts`,
  *     `executor_rounds`, and the `executor_definitions.executor` identity
  *     column, skipped entirely when a registration claims the old spelling as

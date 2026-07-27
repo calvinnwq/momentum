@@ -12,11 +12,11 @@
  *      module's definition-config scope, so the adapter persists it in the
  *      owning `workflow_steps.executor_config_json` destination and projects it
  *      through the compatibility `route` JSON.
- *   2. *How* the parent run's recursion lineage is encoded durably. There is no
- *      first-class depth / lineage column on `workflow_runs`, so the adapter
- *      persists lineage in `workflow_run_lineage` and projects it through the
- *      same compatibility `route` JSON as it propagates one level down each time
- *      a parent launches a child.
+ *   2. *How* the parent run's recursion lineage is encoded durably. Lineage has
+ *      a dedicated `workflow_run_lineage` destination rather than a column on
+ *      `workflow_runs`; the adapter persists it there and projects it through
+ *      the same compatibility `route` JSON as it propagates one level down each
+ *      time a parent launches a child.
  *
  * This module owns exactly those two decisions, purely. Both the authored child
  * config and the propagated lineage are represented in the single compatibility
@@ -59,9 +59,9 @@ import {
 export const SUBWORKFLOW_ROUTE_KEY = "subworkflow";
 
 /**
- * The recursion lineage the daemon writes onto a *child* run's
+ * The recursion lineage the daemon persists for a *child* run and exposes through
  * `route.subworkflow.lineage` when it launches that child. Canonical lineage is
- * persisted in `workflow_run_lineage`; the projection is absent for a top-level run.
+ * stored in `workflow_run_lineage`; the projection is absent for a top-level run.
  *
  *   - `parentRunId` / `parentStepId`: the parent run + dispatched step that
  *     launched this child (operator-visible provenance).
