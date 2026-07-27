@@ -1188,10 +1188,7 @@ function validateLineageChain(
       );
     }
 
-    const parentLineage = readLineageFields(
-      parentRun,
-      canonicalLineageByRunId,
-    );
+    const parentLineage = readLineageFields(parentRun, canonicalLineageByRunId);
     const expectedAncestors =
       parentLineage === null
         ? [parent.parent_definition_key]
