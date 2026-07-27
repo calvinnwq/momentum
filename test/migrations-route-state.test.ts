@@ -272,6 +272,34 @@ describe("workflow route-state migration", () => {
     }
   });
 
+  it("canonicalizes recognized empty step config to an absent route namespace", () => {
+    const dataDir = seedReleasedFixture();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `UPDATE workflow_runs
+            SET route_json = '{"implementationEngine":"gnhf","steps":{"implementation":{}}}'
+          WHERE id = 'native-simple'`,
+      ).run();
+    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        projectLegacyWorkflowRunRoute(db, "native-simple", {
+          source: "momentum-native-coding",
+          definitionKey: null,
+          definitionVersion: null,
+        }),
+      ).toEqual({ implementationEngine: "gnhf" });
+      expect(
+        db
+          .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
+          .get("native-simple"),
+      ).toEqual({ route_json: "{}" });
+    } finally {
+      db.close();
+    }
+  });
+
   it("creates identical destination schema on fresh and released databases", () => {
     const freshDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "momentum-route-fresh-"),
@@ -1585,6 +1613,68 @@ describe("workflow route-state migration", () => {
       jsonPath: "$canonical.workflow_run_import_metadata",
       code: "route_state_source_conflict",
     });
+  });
+
+  for (const readOnly of [false, true]) {
+    it(`refuses an imported run missing its canonical metadata marker on ${readOnly ? "read-only projection" : "writable open"}`, () => {
+      const dataDir = seedReleasedFixture();
+      openDb(dataDir).close();
+      withRawDb(dataDir, (db) => {
+        db.prepare(
+          "DELETE FROM workflow_run_import_metadata WHERE run_id = ?",
+        ).run("cwfp-imported");
+      });
+      const before = databaseHash(dataDir);
+      let refusal: unknown;
+      try {
+        if (readOnly) {
+          const db = openExistingDbMigratedReadOnly(dataDir)!;
+          try {
+            loadWorkflowRunDetail(db, "cwfp-imported");
+          } finally {
+            db.close();
+          }
+        } else {
+          openDb(dataDir).close();
+        }
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({
+        runId: "cwfp-imported",
+        jsonPath: "$canonical.workflow_run_import_metadata",
+        code: "route_state_canonical_conflict",
+      });
+      expect(databaseHash(dataDir)).toBe(before);
+    });
+  }
+
+  it("accepts a generic agent-workflow run without import metadata when no source artifact exists", () => {
+    const dataDir = seedReleasedFixture();
+    openDb(dataDir).close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+         VALUES (?, 'running', 'agent-workflow', '{}', '{}', 0, 1, 1)`,
+      ).run("generic-agent-workflow");
+    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        loadWorkflowRunDetail(db, "generic-agent-workflow")?.run.route,
+      ).toEqual({});
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_run_import_metadata WHERE run_id = ?",
+          )
+          .get("generic-agent-workflow"),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
   });
 
   it("keeps batch compatibility step properties in durable step order", () => {

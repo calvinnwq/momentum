@@ -234,6 +234,37 @@ function parseOrThrow(runDir: string) {
 }
 
 describe("persistWorkflowRunImport", () => {
+  it("persists an empty import metadata marker for an imported run with no route values", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-empty-import-route",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {};
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, imported);
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json
+               FROM workflow_run_import_metadata
+              WHERE run_id = ?`,
+          )
+          .get(imported.run.runId),
+      ).toEqual({
+        mode: null,
+        profile: null,
+        risk: null,
+        quota_policy_json: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses duplicate lineage ancestors before writing imported rows", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();

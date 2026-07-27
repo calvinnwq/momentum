@@ -83,8 +83,7 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
   updated_at INTEGER NOT NULL,
   CHECK (mode IS NULL OR trim(mode) <> ''),
   CHECK (profile IS NULL OR trim(profile) <> ''),
-  CHECK (risk IS NULL OR trim(risk) <> ''),
-  CHECK (COALESCE(mode, profile, risk, quota_policy_json) IS NOT NULL)
+  CHECK (risk IS NULL OR trim(risk) <> '')
 ) STRICT`,
   },
 ] as const;
@@ -597,7 +596,7 @@ export function refreshWorkflowRouteStatePlan(
     const routeJson = routes.get(item.run.id);
     if (routeJson === undefined) continue;
     item.run.route_json = routeJson;
-    item.parsedRoute = parseRoute(item.run);
+    item.parsedRoute = canonicalizeEmptyStepConfigs(parseRoute(item.run));
   }
 }
 
@@ -733,16 +732,13 @@ function planRun(
       ? { implementationEngine, selectedProfile: profile }
       : null;
   const importMetadata =
-    run.source === "agent-workflow" &&
-    (mode !== null ||
-      profile !== null ||
-      risk !== null ||
-      quotaPolicyJson !== null)
+    run.source === "agent-workflow"
       ? { mode, profile, risk, quotaPolicyJson }
       : null;
+  const canonicalRoute = canonicalizeEmptyStepConfigs(parsedRoute);
   return {
     run,
-    parsedRoute,
+    parsedRoute: canonicalRoute,
     compatibility,
     importMetadata,
     lineage: subworkflow.lineage,
@@ -779,6 +775,25 @@ function parseRoute(run: RunRow): Record<string, unknown> {
     });
   }
   return parsed;
+}
+
+function canonicalizeEmptyStepConfigs(
+  route: Record<string, unknown>,
+): Record<string, unknown> {
+  const rawSteps = route["steps"];
+  if (!isPlainObject(rawSteps)) return route;
+  const steps = Object.fromEntries(
+    Object.entries(rawSteps).filter(
+      ([, config]) => isPlainObject(config) && Object.keys(config).length > 0,
+    ),
+  );
+  const canonical = { ...route };
+  if (Object.keys(steps).length === 0) {
+    delete canonical["steps"];
+  } else {
+    canonical["steps"] = steps;
+  }
+  return canonical;
 }
 
 function planStepAgentConfigs(
@@ -1674,6 +1689,28 @@ function assertCanonicalRowsMatchRunSources(
         code: "route_state_source_conflict",
         detail:
           "import metadata cannot attach to a run whose source is not agent-workflow",
+      });
+    }
+    const missingImport = db
+      .prepare(
+        `SELECT wr.id
+           FROM workflow_runs AS wr
+           LEFT JOIN workflow_run_import_metadata AS metadata
+             ON metadata.run_id = wr.id
+          WHERE wr.id IN (${placeholders})
+            AND wr.source = 'agent-workflow'
+            AND wr.source_artifact_path IS NOT NULL
+            AND metadata.run_id IS NULL
+          ORDER BY wr.id
+          LIMIT 1`,
+      )
+      .get(...chunk) as { id: string } | undefined;
+    if (missingImport !== undefined) {
+      throw new RouteStateMigrationError({
+        runId: missingImport.id,
+        jsonPath: "$canonical.workflow_run_import_metadata",
+        code: "route_state_canonical_conflict",
+        detail: "imported run is missing its canonical metadata marker row",
       });
     }
   }
