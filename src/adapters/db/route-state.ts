@@ -296,6 +296,7 @@ export function validateWorkflowRouteStepProjection(input: {
     ? input.route["steps"]
     : {};
   const routeConfigsByKind = new Map<string, Record<string, unknown>>();
+  const routeKindsByCanonicalKind = new Map<string, string>();
   for (const [kind, config] of Object.entries(routeSteps)) {
     const canonicalKind =
       LEGACY_WORKFLOW_STEP_KIND_ALIASES[
@@ -311,7 +312,25 @@ export function validateWorkflowRouteStepProjection(input: {
         });
       }
       routeConfigsByKind.set(canonicalKind, config);
+      routeKindsByCanonicalKind.set(canonicalKind, kind);
     }
+  }
+  const materializedKinds = new Set(
+    input.steps.map(
+      (step) =>
+        LEGACY_WORKFLOW_STEP_KIND_ALIASES[
+          step.kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
+        ] ?? step.kind,
+    ),
+  );
+  for (const [canonicalKind, kind] of routeKindsByCanonicalKind) {
+    if (materializedKinds.has(canonicalKind)) continue;
+    throw new RouteStateMigrationError({
+      runId: input.runId,
+      jsonPath: `$.steps.${kind}`,
+      code: "route_state_step_target_missing",
+      detail: `no materialized step has canonical kind '${canonicalKind}'`,
+    });
   }
   const configsByKind = new Map<string, Record<string, string>>();
   for (const step of input.steps) {
@@ -487,7 +506,7 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
       });
     }
     assertRouteDestinationForeignKeysEmpty(db);
-    validateCanonicalRouteState(db);
+    assertCanonicalCompatibilityMarkers(db);
     return { runs: [], dataVersion };
   }
 
@@ -1410,7 +1429,7 @@ function assertProjectionEquivalence(
   }
 }
 
-function validateCanonicalRouteState(db: MomentumDb): void {
+export function auditCanonicalRouteState(db: MomentumDb): void {
   const runs = db
     .prepare(
       `SELECT id, source, route_json, workflow_definition_key,
@@ -1551,6 +1570,28 @@ function assertRouteDestinationForeignKeysEmpty(
       detail: `${table} contains ${rows.length} invalid foreign-key reference(s)`,
     });
   }
+}
+
+function assertCanonicalCompatibilityMarkers(db: MomentumDb): void {
+  const missing = db
+    .prepare(
+      `SELECT wr.id
+         FROM workflow_runs AS wr
+         LEFT JOIN workflow_run_coding_compatibility AS cc
+           ON cc.run_id = wr.id
+        WHERE wr.source = 'momentum-native-coding'
+          AND cc.run_id IS NULL
+        ORDER BY wr.id
+        LIMIT 1`,
+    )
+    .get() as { id: string } | undefined;
+  if (missing === undefined) return;
+  throw new RouteStateMigrationError({
+    runId: missing.id,
+    jsonPath: "$canonical.workflow_run_coding_compatibility",
+    code: "route_state_canonical_conflict",
+    detail: "native coding run is missing its compatibility marker row",
+  });
 }
 
 function destinationSchemaState(db: MomentumDb): {

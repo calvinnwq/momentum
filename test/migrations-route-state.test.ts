@@ -19,6 +19,7 @@ import {
 } from "../src/adapters/db/route-projection.js";
 import {
   assertWorkflowRouteStatePlanCurrent,
+  auditCanonicalRouteState,
   createRouteStateDestinations,
   preScanRouteState,
   RouteStateMigrationError,
@@ -165,12 +166,54 @@ function expectRouteRefusal(
   return refusal!;
 }
 
+function expectCanonicalAuditRefusal(
+  dataDir: string,
+  expected: {
+    runId: string;
+    jsonPath: string;
+    code: RouteStateMigrationError["code"];
+  },
+): RouteStateMigrationError {
+  const before = databaseHash(dataDir);
+  const db = openExistingDbReadOnly(dataDir);
+  if (db === undefined) throw new Error("database missing");
+  let refusal: RouteStateMigrationError | undefined;
+  try {
+    try {
+      auditCanonicalRouteState(db);
+    } catch (error) {
+      expect(error).toBeInstanceOf(RouteStateMigrationError);
+      refusal = error as RouteStateMigrationError;
+    }
+  } finally {
+    db.close();
+  }
+  expect(refusal).toMatchObject(expected);
+  expect(refusal?.repair).toContain("manually repair");
+  expect(refusal?.message).toContain(expected.runId);
+  expect(refusal?.message).toContain(expected.jsonPath);
+  expect(databaseHash(dataDir)).toBe(before);
+  return refusal!;
+}
+
 describe("workflow route-state migration", () => {
   it("pins released fixture provenance and excludes destination schema", () => {
     const fixture = fs.readFileSync(fixturePath, "utf8");
     expect(fixture).toContain(
       "commit: ebde7a3fe14ab135375b7cf724f383a838949b1c",
     );
+    const bodyStart = fixture.indexOf("PRAGMA foreign_keys = OFF;");
+    const declaredDigest = fixture.match(
+      /^-- body-sha256: ([0-9a-f]{64})$/m,
+    )?.[1];
+    expect(bodyStart).toBeGreaterThanOrEqual(0);
+    expect(declaredDigest).toBeDefined();
+    expect(
+      crypto
+        .createHash("sha256")
+        .update(fixture.slice(bodyStart))
+        .digest("hex"),
+    ).toBe(declaredDigest);
     for (const token of [
       "agent_config_json",
       "executor_config_json",
@@ -1297,7 +1340,7 @@ describe("workflow route-state migration", () => {
           WHERE run_id = 'subworkflow-parent' AND step_id = 'child-two'`,
       ).run();
     });
-    expectRouteRefusal(dataDir, {
+    expectCanonicalAuditRefusal(dataDir, {
       runId: "subworkflow-parent",
       jsonPath: "$.subworkflow.child",
       code: "route_state_projection_mismatch",
@@ -1359,7 +1402,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses invalid canonical agent config on writable open", () => {
+  it("refuses invalid canonical agent config in an explicit audit", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
     withRawDb(dataDir, (db) => {
@@ -1369,7 +1412,7 @@ describe("workflow route-state migration", () => {
           WHERE run_id = 'native-full' AND step_id = 'implementation'`,
       ).run();
     });
-    expectRouteRefusal(dataDir, {
+    expectCanonicalAuditRefusal(dataDir, {
       runId: "native-full",
       jsonPath: "$.steps.implementation.model",
       code: "route_state_value_invalid",
@@ -1400,7 +1443,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("refuses cyclic canonical lineage on writable open", () => {
+  it("refuses cyclic canonical lineage in an explicit audit", () => {
     const dataDir = seedReleasedFixture();
     openDb(dataDir).close();
     withRawDb(dataDir, (db) => {
@@ -1412,7 +1455,7 @@ describe("workflow route-state migration", () => {
                  '["fixture-parent","fixture-nested"]', 1, 1)`,
       ).run();
     });
-    expectRouteRefusal(dataDir, {
+    expectCanonicalAuditRefusal(dataDir, {
       runId: "subworkflow-child",
       jsonPath: "$.subworkflow.lineage.parentRunId",
       code: "route_state_lineage_invalid",
