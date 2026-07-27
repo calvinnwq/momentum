@@ -401,7 +401,6 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
         "all canonical destination objects already exist while legacy route_json still carries state",
     });
   }
-  validateCanonicalRouteState(db);
   return false;
 }
 
