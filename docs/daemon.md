@@ -293,8 +293,9 @@ and scope their later attempts beneath that step directory.
 When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from canonical `workflow_steps.agent_config_json`
-when the operator supplied `--steps-json`, otherwise they are omitted.
-Provider-aware alias normalization happens before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`.
+when definition-level agent config or `--steps-json` supplies them, otherwise they
+are omitted.
+Provider-aware aliases from run-specific `--steps-json` selections are normalized before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`. Definition-level agent config retains its declared values.
 Unknown or non-agent harness/model values still pass through unchanged after structural validation.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at

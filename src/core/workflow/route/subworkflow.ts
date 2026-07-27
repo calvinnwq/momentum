@@ -101,7 +101,7 @@ export type SubworkflowRouteLaunchRefusal =
 export type PlanSubworkflowChildLaunchFromRouteInput = {
   parentRunId: string;
   parentStepId: string;
-  /** The parent run's durable `route` JSON. */
+  /** The parent run's projected compatibility `route` JSON. */
   parentRoute: Record<string, unknown>;
   /** The parent run's own workflow definition key. */
   parentDefinitionKey: string;

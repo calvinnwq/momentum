@@ -325,7 +325,7 @@ Behaviour:
 ```
 
 `state` is `approved` and `approvalBoundary` echoes the supplied boundary when `--approval-boundary` is used; otherwise `state` is `pending` and `approvalBoundary` is `null`.
-`route` is the durable run route as persisted, and `implementationEngine` is the selected coding implementation path when the route includes one.
+`route` is the read-only compatibility projection of canonical run route state, and `implementationEngine` is the selected coding implementation path when the projection includes one.
 `counts.steps` is the number of materialized step rows.
 `policy.present` is `true` only when a valid `MOMENTUM.md` was loaded; `policy.path` is always the resolved `MOMENTUM.md` path.
 
@@ -1284,12 +1284,13 @@ Gate rows migrated from the legacy invocation model may retain `targetScope: "in
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route` is a read-only compatibility projection over explicit canonical destinations; new writes leave `workflow_runs.route_json` empty.
-`run.route.profile` is present when a run was started with `--profile`; its native durable source is `workflow_run_coding_compatibility.selected_profile`, which records historical compatibility for status, handoff, monitor, and logs while daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+`run.route.profile` is projected from the source-appropriate canonical destination: `workflow_run_coding_compatibility.selected_profile` for non-imported runs and `workflow_run_import_metadata.profile` for imported runs.
+For CLI-created runs, `--profile` records the non-imported value for status, handoff, monitor, and logs, while daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `run.route.implementationEngine` projects the coding implementation path from `workflow_run_coding_compatibility.implementation_engine`: `gnhf`, legacy `native-goal-loop`, or `current-gnhf-cwfp`.
 The implementation-route execution contract is owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 `current-gnhf-cwfp` remains an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
-`run.route.steps` projects the per-step harness/model/effort selections from `workflow_steps.agent_config_json` when a coding run was started with `--steps-json`; only the steps and fields the operator overrode are shown, so the selected route can be audited from durable state.
-Provider-specific model aliases have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
+For non-imported runs, `run.route.steps` projects the effective per-step harness/model/effort selections from `workflow_steps.agent_config_json`; definition-level `agentConfig` and run-specific `--steps-json` selections are merged there, so the selected route can be audited from durable state.
+Provider-specific model aliases from run-specific `--steps-json` selections have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string; definition-level agent config retains its declared values.
 Malformed legacy route JSON and malformed canonical destination JSON are fail-closed.
 `workflow run start-coding --implementation-engine`, `workflow run preview-coding --implementation-engine`, `workflow run start-coding --steps-json`, `workflow run preview-coding --steps-json`, and `workflow run monitor` all read the same route namespace.
 If the namespace is invalid or unsupported, dispatch routes the run to manual recovery with `route_config_invalid` before execution.
