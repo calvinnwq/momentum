@@ -17,7 +17,10 @@
  * surfacing.
  */
 import type { MomentumDb } from "../../../adapters/db.js";
-import { projectLegacyWorkflowRunRoute } from "../../../adapters/db/route-projection.js";
+import {
+  projectLegacyWorkflowRunRoute,
+  projectLegacyWorkflowRunRoutes,
+} from "../../../adapters/db/route-projection.js";
 import {
   listWorkflowGatesForRun,
   type WorkflowGateRecord,
@@ -248,15 +251,18 @@ export function listWorkflowRunSummaries(
   if (options.limit !== undefined && options.limit >= 0) {
     query += ` LIMIT ${Math.floor(options.limit)}`;
   }
-  const runs = (db.prepare(query).all(...params) as RunRow[]).map((row) =>
-    parseRunRow(
-      row,
-      projectLegacyWorkflowRunRoute(db, row.id, {
-        source: row.source,
-        definitionKey: row.workflow_definition_key,
-        definitionVersion: row.workflow_definition_version,
-      }),
-    ),
+  const rows = db.prepare(query).all(...params) as RunRow[];
+  const projectedRoutes = projectLegacyWorkflowRunRoutes(
+    db,
+    rows.map((row) => ({
+      runId: row.id,
+      source: row.source,
+      definitionKey: row.workflow_definition_key,
+      definitionVersion: row.workflow_definition_version,
+    })),
+  );
+  const runs = rows.map((row) =>
+    parseRunRow(row, projectedRoutes.get(row.id)!),
   );
   if (runs.length === 0) return [];
 

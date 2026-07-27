@@ -277,6 +277,44 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("refuses canonical and legacy route aliases before writing", () => {
+    const db = openTempDb();
+    try {
+      let refusal: InvalidWorkflowRunStartError | undefined;
+      try {
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            route: {
+              steps: {
+                "no-mistakes": { harness: "claude" },
+                validate: { harness: "codex" },
+              },
+            },
+          }),
+        );
+      } catch (error) {
+        refusal = error as InvalidWorkflowRunStartError;
+      }
+      expect(refusal).toBeInstanceOf(InvalidWorkflowRunStartError);
+      expect(refusal?.errors).toEqual([
+        expect.objectContaining({
+          code: "route_invalid",
+          path: "$.steps.validate",
+        }),
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses unknown route keys before writing a run", () => {
     const db = openTempDb();
     try {

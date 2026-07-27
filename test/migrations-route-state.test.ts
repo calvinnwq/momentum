@@ -13,6 +13,7 @@ import {
 import {
   LEGACY_ROUTE_TOP_LEVEL_KEYS,
   LEGACY_WORKFLOW_STEP_KIND_ALIASES,
+  projectLegacyWorkflowRunRoutes,
   projectLegacyWorkflowRunRoute,
 } from "../src/adapters/db/route-projection.js";
 import {
@@ -518,6 +519,31 @@ describe("workflow route-state migration", () => {
     const legacy = captureLegacyRoutes(dataDir);
     const db = openDb(dataDir);
     try {
+      const rows = db
+        .prepare(
+          `SELECT id, source, workflow_definition_key,
+                  workflow_definition_version
+             FROM workflow_runs
+            ORDER BY id`,
+        )
+        .all() as Array<{
+        id: string;
+        source: string;
+        workflow_definition_key: string | null;
+        workflow_definition_version: number | null;
+      }>;
+      const projected = projectLegacyWorkflowRunRoutes(
+        db,
+        rows.map((row) => ({
+          runId: row.id,
+          source: row.source,
+          definitionKey: row.workflow_definition_key,
+          definitionVersion: row.workflow_definition_version,
+        })),
+      );
+      for (const row of rows) {
+        expect(projected.get(row.id)).toEqual(legacy.get(row.id)?.route);
+      }
       expect(loadWorkflowRunDetail(db, "native-full")?.run.route).toEqual(
         legacy.get("native-full")?.route,
       );

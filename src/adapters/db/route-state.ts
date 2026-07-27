@@ -189,6 +189,7 @@ type LineagePlan = {
   parentRunId: string;
   parentStepId: string;
   depth: number;
+  ancestorDefinitionKeys: string[];
   ancestorDefinitionKeysJson: string;
 };
 
@@ -297,7 +298,17 @@ export function validateWorkflowRouteStepProjection(input: {
       LEGACY_WORKFLOW_STEP_KIND_ALIASES[
         kind as keyof typeof LEGACY_WORKFLOW_STEP_KIND_ALIASES
       ] ?? kind;
-    if (isPlainObject(config)) routeConfigsByKind.set(canonicalKind, config);
+    if (isPlainObject(config)) {
+      if (routeConfigsByKind.has(canonicalKind)) {
+        throw new RouteStateMigrationError({
+          runId: input.runId,
+          jsonPath: `$.steps.${kind}`,
+          code: "route_state_step_target_ambiguous",
+          detail: `route defines multiple keys for canonical step kind '${canonicalKind}'`,
+        });
+      }
+      routeConfigsByKind.set(canonicalKind, config);
+    }
   }
   const configsByKind = new Map<string, Record<string, string>>();
   for (const step of input.steps) {
@@ -423,11 +434,12 @@ export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
         ORDER BY id`,
     )
     .all() as RunRow[];
-  for (const row of rows) planRun(db, row);
   const rowsById = new Map(rows.map((row) => [row.id, row]));
-  return {
+  const plan = {
     runs: rows.map((row) => planRun(db, row, undefined, undefined, rowsById)),
   };
+  validateLineagePlans(db, plan, rowsById);
+  return plan;
 }
 
 export function createRouteStateDestinations(db: MomentumDb): void {
@@ -814,15 +826,7 @@ function planSubworkflow(
         "ancestorDefinitionKeys must not repeat a definition",
       );
     }
-    const initialLineage = {
-      parentRunId,
-      parentStepId,
-      depth,
-      ancestorDefinitionKeys: ancestors as string[],
-    } satisfies LineageFields;
-    if (lineageRuns !== undefined) {
-      validateLineageChain(db, run, at, initialLineage, lineageRuns);
-    } else {
+    if (lineageRuns === undefined) {
       const parent = db
         .prepare(
           "SELECT 1 FROM workflow_steps WHERE run_id = ? AND step_id = ?",
@@ -841,10 +845,28 @@ function planSubworkflow(
       parentRunId,
       parentStepId,
       depth,
+      ancestorDefinitionKeys: ancestors,
       ancestorDefinitionKeysJson: JSON.stringify(ancestors),
     };
   }
   return { child, lineage };
+}
+
+function validateLineagePlans(
+  db: MomentumDb,
+  plan: WorkflowRouteStatePlan,
+  lineageRuns: ReadonlyMap<string, RunRow>,
+): void {
+  for (const item of plan.runs) {
+    if (item.lineage === null) continue;
+    validateLineageChain(
+      db,
+      item.run,
+      "$.subworkflow.lineage",
+      item.lineage,
+      lineageRuns,
+    );
+  }
 }
 
 function validateLineageChain(
