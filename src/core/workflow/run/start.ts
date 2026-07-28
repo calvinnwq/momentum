@@ -57,6 +57,11 @@ import {
   type EffectiveExecutorOptions,
 } from "../definition/legacy.js";
 import {
+  readCodingStepRouteOverrides,
+  resolveCodingStepAgentConfig,
+  type CodingStepRouteOverride,
+} from "../route/coding.js";
+import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
   workflowStepKindsForApprovalBoundary,
@@ -314,6 +319,7 @@ export type WorkflowCodingPlanStep = {
   kind: WorkflowStepKind;
   executor: ExecutorName;
   config?: Record<string, unknown>;
+  agentConfig?: CodingStepRouteOverride;
   order: number;
   required: boolean;
   state: WorkflowStepState;
@@ -387,8 +393,32 @@ export function materializeWorkflowCodingPlanPreview(
   );
 
   const { run } = result.plan;
+  const routeOverrides = readCodingStepRouteOverrides(run.route);
+  if (!routeOverrides.ok) {
+    const error: WorkflowRunStartError = {
+      code: "route_invalid",
+      message: routeOverrides.reason,
+    };
+    if (routeOverrides.path !== undefined) error.path = routeOverrides.path;
+    return {
+      ok: false,
+      errors: [error],
+    };
+  }
   const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => {
     const definitionStep = definitionByStepKey.get(step.stepId);
+    const definitionAgentConfig = definitionStep?.agentConfig ?? {};
+    const routeStepKey = canonicalWorkflowStepKind(step.kind) ?? step.kind;
+    const routeAgentConfig =
+      routeStepKey in routeOverrides.overrides
+        ? (routeOverrides.overrides[
+            routeStepKey as keyof typeof routeOverrides.overrides
+          ] ?? {})
+        : {};
+    const agentConfig = resolveCodingStepAgentConfig(
+      definitionAgentConfig,
+      routeAgentConfig,
+    );
     return {
       stepId: step.stepId,
       kind: step.kind,
@@ -399,6 +429,7 @@ export function materializeWorkflowCodingPlanPreview(
       ...(definitionStep?.config === undefined
         ? {}
         : { config: { ...definitionStep.config } }),
+      ...(Object.keys(agentConfig).length === 0 ? {} : { agentConfig }),
       order: step.order,
       required: step.required,
       state: step.state,

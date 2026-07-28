@@ -39,6 +39,10 @@ import {
   canonicalWorkflowApprovalBoundary,
   canonicalWorkflowStepKind,
 } from "../definition/legacy.js";
+import {
+  readCanonicalWorkflowStepAgentConfigs,
+  type CanonicalWorkflowStepAgentConfig,
+} from "../route/canonical-agent-config.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
@@ -96,6 +100,8 @@ export type WorkflowStepRow = {
   finishedAt: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Frozen step-owned selection, when the canonical row is available. */
+  agentConfig?: CanonicalWorkflowStepAgentConfig;
 };
 
 export type WorkflowApprovalRow = {
@@ -349,13 +355,22 @@ export function loadWorkflowRunDetail(
 }
 
 function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
+  const agentConfigs = readCanonicalWorkflowStepAgentConfigs(db, runId);
   return (
     db
       .prepare(
         "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id",
       )
       .all(runId) as StepRow[]
-  ).map(parseStepRow);
+  ).map((row) => {
+    const agentConfig = agentConfigs.get(row.step_id);
+    return {
+      ...parseStepRow(row),
+      ...(agentConfig === undefined || Object.keys(agentConfig).length === 0
+        ? {}
+        : { agentConfig }),
+    };
+  });
 }
 
 function listApprovalsByRunId(

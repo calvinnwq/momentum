@@ -44,14 +44,23 @@ import {
   validateWorkflowRouteStepProjection,
   writeCanonicalWorkflowRunRouteState,
 } from "../../../adapters/db/route-state.js";
-import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
+import {
+  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
+  readCodingStepRouteOverrides,
+  resolveCodingStepAgentConfig,
+} from "../route/coding.js";
 import {
   materializeWorkflowRunStart,
+  MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   type WorkflowRunStartError,
   type WorkflowRunStartInput,
 } from "./start.js";
 import type { WorkflowApprovalBoundary, WorkflowRunState } from "./reducer.js";
-import type { WorkflowDefinition } from "../definition/definition.js";
+import {
+  CODING_WORKFLOW_DEFINITION_KEY,
+  type WorkflowDefinition,
+} from "../definition/definition.js";
+import { canonicalWorkflowStepKind } from "../definition/legacy.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not
@@ -123,6 +132,44 @@ export function persistWorkflowRunStart(
         : [[step.key, step.agentConfig] as const],
     ),
   );
+  const isNativeCodingRun =
+    run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    run.definitionKey === CODING_WORKFLOW_DEFINITION_KEY;
+  const routeOverrides = isNativeCodingRun
+    ? readCodingStepRouteOverrides(run.route)
+    : { ok: true as const, overrides: {} };
+  if (!routeOverrides.ok) {
+    throw new InvalidWorkflowRunStartError([
+      {
+        code: "route_invalid",
+        message: routeOverrides.reason,
+        ...(routeOverrides.path === undefined
+          ? {}
+          : { path: routeOverrides.path }),
+      },
+    ]);
+  }
+  const definitionByStepKey = new Map(
+    definition.steps.map((step) => [step.key, step]),
+  );
+  const canonicalAgentConfigs = isNativeCodingRun
+    ? new Map(
+        steps.map((step) => {
+          const definitionStep = definitionByStepKey.get(step.stepId);
+          const canonicalStepKey =
+            canonicalWorkflowStepKind(step.kind) ?? step.kind;
+          return [
+            step.stepId,
+            resolveCodingStepAgentConfig(
+              definitionStep?.agentConfig,
+              routeOverrides.overrides[
+                canonicalStepKey as keyof typeof routeOverrides.overrides
+              ],
+            ),
+          ] as const;
+        }),
+      )
+    : undefined;
   try {
     validateWorkflowRouteShape({
       runId: run.runId,
@@ -229,6 +276,7 @@ export function persistWorkflowRunStart(
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
       definitionAgentConfigs,
+      ...(canonicalAgentConfigs === undefined ? {} : { canonicalAgentConfigs }),
       definitionExecutorConfigs: new Map(
         definition.steps.flatMap((step) =>
           step.config === undefined ? [] : [[step.key, step.config] as const],

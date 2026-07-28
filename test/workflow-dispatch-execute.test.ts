@@ -765,7 +765,15 @@ describe("executeWorkflowStepDispatch — supported family", () => {
   });
 
   it("allocates a collision-safe native-owned round id on retry", () => {
-    const db = openSeededDb();
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        implementation: {
+          harness: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+      },
+    });
     const targetAttemptId = `${RUN_ID}::implementation::attempt-1`;
     const collidingRoundId = `${RUN_ID}::implementation::attempt-2::round::1`;
 
@@ -870,7 +878,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workerId: WORKER,
       now: NOW + 2,
       executorOwnsRounds: true,
-      materializeOwnedRound: ({ attempt, roundId }) => ({
+      materializeOwnedRound: ({ attempt, roundId, selection }) => ({
         round: {
           roundId: roundId ?? collidingRoundId,
           attemptId: attempt.attemptId,
@@ -885,9 +893,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
           startedAt: NOW + 2,
           heartbeatAt: NOW + 2,
           finishedAt: null,
-          agentProvider: null,
-          model: null,
-          effort: null,
+          agentProvider: selection.agentProvider,
+          model: selection.model,
+          effort: selection.effort,
           inputDigest: null,
           resultDigest: null,
           artifactRoot: null,
@@ -925,6 +933,19 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       round_id: `${collidingRoundId}::allocated-1`,
       attempt_id: `${RUN_ID}::implementation::attempt-2`,
       round_index: 1,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT agent_provider AS agentProvider, model, effort
+             FROM executor_rounds
+            WHERE round_id = ?`,
+        )
+        .get(`${collidingRoundId}::allocated-1`),
+    ).toEqual({
+      agentProvider: "codex",
+      model: "gpt-5.6-codex",
+      effort: "high",
     });
     expect(
       db
@@ -1088,7 +1109,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
-  it("routes corrupt native coding route overrides to manual recovery", () => {
+  it("routes corrupt canonical native agent config to manual recovery", () => {
     const db = openNativeCodingDbWithRoute({
       steps: {
         implementation: { model: "opus" },
@@ -1117,7 +1138,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       evidence: "route_config_invalid",
       resolvedAt: null,
     });
-    expect(gates[0]?.reason).toContain("steps.implementation.unexpected");
+    expect(gates[0]?.reason).toContain("$.steps.implementation.agentConfig");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);

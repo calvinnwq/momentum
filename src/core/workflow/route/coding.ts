@@ -18,9 +18,9 @@
  * fail-closed contract is exhaustively testable on its own. The CLI
  * start/preview doors build overrides from `--steps-json`, the detail/read-back
  * surfaces expose the selected config through canonical run state and the
- * compatibility route projection, while executor rounds freeze it, and daemon dispatch consumes the same compatibility namespace when it freezes
+ * compatibility route projection, while executor rounds freeze it, and daemon dispatch consumes the same canonical step row when it freezes
  * per-step agent/model/effort selection for execution or fails closed when the
- * namespace is corrupt.
+ * row is corrupt.
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
  * portable recipe-level executor and agent config, while the selected
@@ -49,6 +49,7 @@
  * `string | null` treatment.
  */
 import { resolveCommandModelAlias } from "../../model-aliases.js";
+import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 
 /** The run-`route` field that records the selected coding implementation engine. */
 export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
@@ -249,6 +250,14 @@ export function resolveCodingRouteModelAlias(
   model: string,
 ): string {
   return resolveCommandModelAlias(harness, model);
+}
+
+/** Resolve a definition-level selection plus a sparse operator override. */
+export function resolveCodingStepAgentConfig(
+  definition: CodingStepRouteOverride | undefined,
+  override: CodingStepRouteOverride | undefined,
+): CodingStepRouteOverride {
+  return mergePortableAgentConfig(definition, override);
 }
 
 /**
@@ -468,10 +477,14 @@ export function writeCodingStepRouteOverrides(
  */
 export function resolveCodingRouteStepSelections(
   overrides: CodingStepRouteOverrides,
+  defaults: CodingStepRouteOverrides = {},
 ): CodingRouteStepSelections {
   const selections = {} as CodingRouteStepSelections;
   for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
-    const override = overrides[stepKey];
+    const override = resolveCodingStepAgentConfig(
+      defaults[stepKey],
+      overrides[stepKey],
+    );
     selections[stepKey] = {
       harness: override?.harness ?? null,
       model: override?.model ?? null,

@@ -164,6 +164,9 @@ export function emitWorkflowRunPreviewCodingSuccess(
     kind: step.kind,
     executor: step.executor,
     ...(step.config === undefined ? {} : { config: step.config }),
+    ...(step.agentConfig === undefined
+      ? {}
+      : { agentConfig: step.agentConfig }),
     order: step.order,
     required: step.required,
     state: step.state,
@@ -225,6 +228,10 @@ export function emitWorkflowRunPreviewCodingSuccess(
           step.config === undefined
             ? ""
             : ` config=${JSON.stringify(step.config)}`
+        }${
+          step.agentConfig === undefined
+            ? ""
+            : ` agentConfig=${JSON.stringify(step.agentConfig)}`
         } [${step.required ? "required" : "optional"}, ${step.state}]`,
     ),
     "",
@@ -1985,6 +1992,9 @@ export function workflowStepToJsonShape(
     finishedAt: step.finishedAt,
     createdAt: step.createdAt,
     updatedAt: step.updatedAt,
+    ...(step.agentConfig === undefined
+      ? {}
+      : { agentConfig: step.agentConfig }),
   };
 }
 

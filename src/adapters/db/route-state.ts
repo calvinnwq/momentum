@@ -15,6 +15,7 @@ import {
   validateWorkflowRoute,
   type ValidatedRouteLineage,
 } from "./route-state-validation.js";
+import { mergePortableAgentConfig } from "../../shared/agent-config.js";
 
 export {
   ROUTE_STATE_MIGRATION_ERROR_CODES,
@@ -221,6 +222,7 @@ export function writeCanonicalWorkflowRunRouteState(
     createdAt: number;
     updatedAt: number;
     definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>;
+    canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>;
     definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>;
   },
 ): void {
@@ -243,6 +245,7 @@ export function writeCanonicalWorkflowRunRouteState(
     input.definitionExecutorConfigs,
     lineageRuns,
     validated,
+    input.canonicalAgentConfigs,
   );
   if (plan.lineage !== null && lineageRuns !== undefined) {
     validateLineagePlans(db, { runs: [plan] }, lineageRuns);
@@ -502,6 +505,7 @@ function planRun(
   definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>,
   lineageRuns?: ReadonlyMap<string, RunRow>,
   validated?: ReturnType<typeof validateWorkflowRoute>,
+  canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
 ): RouteRunPlan {
   const route =
     validated ??
@@ -515,6 +519,7 @@ function planRun(
     run,
     route.stepAgentConfigs,
     definitionAgentConfigs,
+    canonicalAgentConfigs,
   );
   const subworkflow = planSubworkflow(db, run, route, lineageRuns);
   const compatibility =
@@ -549,6 +554,7 @@ function planRun(
       subworkflow.child,
       definitionAgentConfigs,
       definitionExecutorConfigs,
+      canonicalAgentConfigs !== undefined,
     ),
   };
 }
@@ -558,7 +564,16 @@ function planStepAgentConfigs(
   run: RunRow,
   agentConfigs: ReadonlyMap<string, string>,
   definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
+  canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
 ): Map<string, string> {
+  if (canonicalAgentConfigs !== undefined) {
+    return new Map(
+      [...canonicalAgentConfigs.entries()].map(([stepId, config]) => [
+        stepId,
+        JSON.stringify(config),
+      ]),
+    );
+  }
   const result = new Map<string, string>();
   for (const [canonicalKind, config] of agentConfigs) {
     const matches = (
@@ -967,6 +982,7 @@ function mergeStepPlans(
   child: Record<string, unknown> | null,
   definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
   definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>,
+  normalizeAgentConfigs = false,
 ): StepConfigPlan[] {
   const rows = db
     .prepare(
@@ -1009,10 +1025,11 @@ function mergeStepPlans(
         : base;
     return {
       stepId: row.step_id,
-      agentConfigJson: JSON.stringify({
-        ...definitionAgentConfig,
-        ...routeAgentConfig,
-      }),
+      agentConfigJson: JSON.stringify(
+        normalizeAgentConfigs
+          ? mergePortableAgentConfig(definitionAgentConfig, routeAgentConfig)
+          : { ...definitionAgentConfig, ...routeAgentConfig },
+      ),
       executorConfigJson: JSON.stringify(executorConfig),
     };
   });

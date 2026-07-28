@@ -74,7 +74,10 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../../core/workflow/dispatch/execute.js";
 import { resolveClaimedWorkflowStepExecutor } from "../../core/workflow/dispatch/persist.js";
-import { legacyApprovalBoundarySynonyms } from "../../core/workflow/definition/legacy.js";
+import {
+  canonicalWorkflowStepKind,
+  legacyApprovalBoundarySynonyms,
+} from "../../core/workflow/definition/legacy.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
   resolveDaemonWorkflowStepDispatch,
@@ -903,7 +906,17 @@ async function runWorkflowStartCommand(
       // Humanize the same validated per-step overrides that built the preview
       // route so the default (non-JSON) preview can audit the selection.
       stepRouteLines: formatCodingRouteStepSelectionLines(
-        resolveCodingRouteStepSelections(stepRouteOverrides),
+        resolveCodingRouteStepSelections(
+          stepRouteOverrides,
+          codingDefinition === undefined
+            ? {}
+            : Object.fromEntries(
+                codingDefinition.steps.map((step) => [
+                  canonicalWorkflowStepKind(step.kind) ?? step.kind,
+                  step.agentConfig ?? {},
+                ]),
+              ),
+        ),
       ),
     });
   }

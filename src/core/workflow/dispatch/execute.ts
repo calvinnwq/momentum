@@ -57,10 +57,7 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
-import {
-  projectValidatedLegacyWorkflowRunRoute,
-  RouteStateMigrationError,
-} from "../../../adapters/db/route-state.js";
+import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import {
   allocateExecutorCheckpointId,
   allocateExecutorRoundId,
@@ -78,21 +75,19 @@ import type {
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
+import { effectiveStepExecutor } from "../definition/legacy.js";
 import {
-  canonicalWorkflowStepKind,
-  effectiveStepExecutor,
-} from "../definition/legacy.js";
-import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
   GNHF_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   isCodingImplementationEngine,
-  readCodingStepRouteOverrides,
-  resolveCodingStepExecutorSelection,
   type CodingImplementationEngine,
   type CodingStepExecutorSelection,
 } from "../route/coding.js";
+import {
+  canonicalWorkflowStepExecutorSelection,
+  readCanonicalWorkflowStepAgentConfig,
+} from "../route/canonical-agent-config.js";
 import { insertWorkflowGate, loadWorkflowGate } from "../gate/persist.js";
 import type { WorkflowGateType } from "../gate/gate.js";
 import { releaseWorkflowLease } from "../leases.js";
@@ -582,65 +577,57 @@ export function resolveWorkflowStepDispatchRouteSelection(
     return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
   }
 
-  let route: Record<string, unknown>;
+  const compatibility = db
+    .prepare(
+      `SELECT implementation_engine
+         FROM workflow_run_coding_compatibility
+        WHERE run_id = ?`,
+    )
+    .get(claim.runId) as { implementation_engine: string | null } | undefined;
   try {
-    route = projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
-      source: row.source,
-      definitionKey: row.workflow_definition_key,
-      definitionVersion: row.workflow_definition_version,
+    const implementationEngine = readCodingImplementationEngine(
+      claim.runId,
+      compatibility?.implementation_engine,
+    );
+    if (!implementationEngine.ok) {
+      return { ok: false, reason: implementationEngine.reason };
+    }
+    if (
+      claim.stepId === "implementation" &&
+      implementationEngine.engine === CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+    ) {
+      return {
+        ok: false,
+        reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
+      };
+    }
+
+    const agentConfig = readCanonicalWorkflowStepAgentConfig(db, {
+      runId: claim.runId,
+      stepId: claim.stepId,
     });
+    return {
+      ok: true,
+      selection: canonicalWorkflowStepExecutorSelection(agentConfig),
+    };
   } catch (error) {
     if (!(error instanceof RouteStateMigrationError)) throw error;
     return {
       ok: false,
       reason:
-        `Native coding run ${claim.runId} route is corrupt at ${error.jsonPath}; ` +
+        `Native coding run ${claim.runId} canonical agent config is corrupt at ${error.jsonPath}; ` +
         "routing to manual recovery.",
     };
   }
-  const implementationEngine = readCodingImplementationEngine(
-    claim.runId,
-    route,
-  );
-  if (!implementationEngine.ok) {
-    return { ok: false, reason: implementationEngine.reason };
-  }
-  if (
-    claim.stepId === "implementation" &&
-    implementationEngine.engine === CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
-  ) {
-    return {
-      ok: false,
-      reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
-    };
-  }
-
-  const overrides = readCodingStepRouteOverrides(route);
-  if (!overrides.ok) {
-    return {
-      ok: false,
-      reason: `Native coding run ${claim.runId} route.steps is invalid (${overrides.refusal}${
-        overrides.path === undefined ? "" : ` at ${overrides.path}`
-      }): ${overrides.reason}`,
-    };
-  }
-  return {
-    ok: true,
-    selection: resolveCodingStepExecutorSelection(
-      overrides.overrides,
-      canonicalWorkflowStepKind(claim.stepId) ?? claim.stepId,
-    ),
-  };
 }
 
 function readCodingImplementationEngine(
   runId: string,
-  route: Record<string, unknown>,
+  value: unknown,
 ):
   | { ok: true; engine: CodingImplementationEngine }
   | { ok: false; reason: string } {
-  const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
-  if (value === undefined) {
+  if (value === undefined || value === null) {
     return { ok: true, engine: NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE };
   }
   if (typeof value !== "string" || value.trim().length === 0) {

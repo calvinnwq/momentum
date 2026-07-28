@@ -628,6 +628,15 @@ describe("momentum workflow run preview-coding", () => {
         },
       },
     });
+    const steps = payload["steps"] as Array<{
+      stepId: string;
+      agentConfig?: Record<string, string>;
+    }>;
+    expect(
+      steps.find((step) => step.stepId === "implementation"),
+    ).toMatchObject({
+      agentConfig: { harness: "gnhf", model: "opus" },
+    });
 
     // A preview still writes nothing durable.
     const db = openDb(dataDir);
