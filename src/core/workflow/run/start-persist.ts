@@ -47,8 +47,8 @@ import {
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   readCodingStepRouteOverrides,
-  resolveCodingStepAgentConfig,
 } from "../route/coding.js";
+import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 import {
   materializeWorkflowRunStart,
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
@@ -160,7 +160,7 @@ export function persistWorkflowRunStart(
             canonicalWorkflowStepKind(step.kind) ?? step.kind;
           return [
             step.stepId,
-            resolveCodingStepAgentConfig(
+            mergePortableAgentConfig(
               definitionStep?.agentConfig,
               routeOverrides.overrides[
                 canonicalStepKey as keyof typeof routeOverrides.overrides

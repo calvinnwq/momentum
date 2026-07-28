@@ -730,6 +730,35 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
+  it("routes a native run with a missing compatibility marker to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({});
+    db.prepare(
+      "DELETE FROM workflow_run_coding_compatibility WHERE run_id = ?",
+    ).run(RUN_ID);
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toEqual([
+      expect.objectContaining({
+        evidence: "route_config_invalid",
+        reason: expect.stringContaining(
+          "$canonical.workflow_run_coding_compatibility",
+        ),
+      }),
+    ]);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");

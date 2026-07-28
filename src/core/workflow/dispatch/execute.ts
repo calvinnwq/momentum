@@ -584,10 +584,18 @@ export function resolveWorkflowStepDispatchRouteSelection(
         WHERE run_id = ?`,
     )
     .get(claim.runId) as { implementation_engine: string | null } | undefined;
+  if (compatibility === undefined) {
+    return {
+      ok: false,
+      reason:
+        `Native coding run ${claim.runId} route is corrupt at $canonical.workflow_run_coding_compatibility; ` +
+        "routing to manual recovery.",
+    };
+  }
   try {
     const implementationEngine = readCodingImplementationEngine(
       claim.runId,
-      compatibility?.implementation_engine,
+      compatibility.implementation_engine,
     );
     if (!implementationEngine.ok) {
       return { ok: false, reason: implementationEngine.reason };

@@ -252,14 +252,6 @@ export function resolveCodingRouteModelAlias(
   return resolveCommandModelAlias(harness, model);
 }
 
-/** Resolve a definition-level selection plus a sparse operator override. */
-export function resolveCodingStepAgentConfig(
-  definition: CodingStepRouteOverride | undefined,
-  override: CodingStepRouteOverride | undefined,
-): CodingStepRouteOverride {
-  return mergePortableAgentConfig(definition, override);
-}
-
 /**
  * Validate and normalize untrusted per-step coding route overrides into a
  * {@link CodingStepRouteOverrides} map. Pure and total: never throws, always
@@ -481,7 +473,7 @@ export function resolveCodingRouteStepSelections(
 ): CodingRouteStepSelections {
   const selections = {} as CodingRouteStepSelections;
   for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
-    const override = resolveCodingStepAgentConfig(
+    const override = mergePortableAgentConfig(
       defaults[stepKey],
       overrides[stepKey],
     );

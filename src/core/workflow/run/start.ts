@@ -58,9 +58,9 @@ import {
 } from "../definition/legacy.js";
 import {
   readCodingStepRouteOverrides,
-  resolveCodingStepAgentConfig,
   type CodingStepRouteOverride,
 } from "../route/coding.js";
+import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
@@ -415,7 +415,7 @@ export function materializeWorkflowCodingPlanPreview(
             routeStepKey as keyof typeof routeOverrides.overrides
           ] ?? {})
         : {};
-    const agentConfig = resolveCodingStepAgentConfig(
+    const agentConfig = mergePortableAgentConfig(
       definitionAgentConfig,
       routeAgentConfig,
     );
