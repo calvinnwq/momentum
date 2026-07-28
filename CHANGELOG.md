@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/calvinnwq/momentum/compare/v0.22.0...v0.23.0) (2026-07-28)
+
+
+### Features
+
+* **workflow:** migrate legacy route state atomically ([#239](https://github.com/calvinnwq/momentum/issues/239)) ([8c32dba](https://github.com/calvinnwq/momentum/commit/8c32dbae4978ddcfca747b10104246f1c29a5b79))
+
 ## [0.22.0](https://github.com/calvinnwq/momentum/compare/v0.21.0...v0.22.0) (2026-07-24)
 
 
