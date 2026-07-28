@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,23 @@ function makeTempDir(prefix = "momentum-cli-workflow-import-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function seedRouteRefusal(dataDir: string): void {
+  const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+  try {
+    db.exec(
+      fs.readFileSync(
+        path.join(__dirname, "fixtures", "v0220-route-state.sql"),
+        "utf8",
+      ),
+    );
+    db.prepare(
+      "UPDATE workflow_runs SET route_json = ? WHERE id = 'native-simple'",
+    ).run('{"unknown":true}');
+  } finally {
+    db.close();
+  }
 }
 
 async function run(argv: string[]): Promise<RunResult> {
@@ -179,6 +197,84 @@ function buildPendingApprovalRunFixture(
 }
 
 describe("momentum workflow import", () => {
+  for (const json of [true, false]) {
+    it(`renders route-state open refusals in the stable ${json ? "JSON" : "text"} envelope`, async () => {
+      const dataDir = makeTempDir();
+      const workflowRoot = makeTempDir("momentum-cli-workflow-import-runs-");
+      const runDir = buildCompletedRunFixture(
+        workflowRoot,
+        "route-refusal-import",
+      );
+      seedRouteRefusal(dataDir);
+      const argv = [
+        "workflow",
+        "import",
+        "--path",
+        runDir,
+        "--data-dir",
+        dataDir,
+      ];
+      if (json) argv.push("--json");
+
+      const result = await run(argv);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      if (json) {
+        expect(JSON.parse(result.stderr)).toMatchObject({
+          ok: false,
+          command: "workflow import",
+          code: "route_state_unknown_key",
+          runId: "native-simple",
+          jsonPath: "$.unknown",
+          repair: expect.stringContaining("manually repair"),
+        });
+      } else {
+        expect(result.stderr).toContain("route_state_unknown_key");
+        expect(result.stderr).toContain("native-simple");
+        expect(result.stderr).toContain("$.unknown");
+        expect(result.stderr).toContain("manually repair");
+      }
+    });
+  }
+
+  it("renders imported route validation failures in the stable JSON envelope", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-workflow-import-runs-");
+    const runDir = buildCompletedRunFixture(
+      workflowRoot,
+      "invalid-import-route",
+    );
+    const planPath = path.join(runDir, "plan.json");
+    const plan = JSON.parse(fs.readFileSync(planPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    plan["mode"] = " ";
+    writeJsonFile(planPath, plan);
+
+    const result = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow import",
+      code: "route_state_value_invalid",
+      runId: "invalid-import-route",
+      jsonPath: "$.mode",
+      path: runDir,
+      repair: expect.stringContaining("manually repair"),
+    });
+  });
+
   it("rejects unknown workflow subcommand", async () => {
     const dataDir = makeTempDir();
     const result = await run(["workflow", "nope", "--data-dir", dataDir]);

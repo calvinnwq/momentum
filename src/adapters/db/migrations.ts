@@ -1,5 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import {
+  applyWorkflowRouteStateMigrationInTransaction,
+  assertWorkflowRouteStatePlanCurrent,
+  preScanRouteState,
+  refreshWorkflowRouteStatePlan,
+  routeStateMigrationNeeded,
+  type WorkflowRouteStatePlan,
+} from "./route-state.js";
+
 type MomentumDb = DatabaseSync;
 
 export type QueueMigrationOptions = {
@@ -471,7 +480,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
 // src/core/workflow/definition/definition.ts. Portable per-step executor intent
-// lives in config_json; machine-local resolution and run state stay elsewhere.
+// lives in config_json, optional portable agent selection metadata lives in
+// agent_config_json, and machine-local resolution plus run state stay elsewhere.
 const WORKFLOW_DEFINITIONS_DDL = `
 CREATE TABLE IF NOT EXISTS workflow_definitions (
   key TEXT NOT NULL,
@@ -1708,9 +1718,11 @@ function withNoMistakesMigrationProvenance(
  *   - `workflow_steps.kind` and `workflow_runs.approval_boundary` move to the
  *     renamed spellings. `workflow_steps.step_id` never changes: event ids and
  *     artifact trees anchor on it.
- *   - `route_json` step-override objects are re-keyed from `no-mistakes` to
- *     `validate`; rows with unreadable JSON or a colliding target key stay
- *     untouched.
+ *   - When route-state migration is selected, the complete legacy `route_json`
+ *     inventory is pre-scanned before any migration mutation, then moved into
+ *     the explicit route-state destinations by the adapter-owned migration.
+ *     Malformed, unknown, conflicting, ambiguous, or unmappable route state
+ *     aborts the transaction instead of leaving a partial route rewrite.
  *   - Renamed built-in executor values are rewritten in `executor_attempts`,
  *     `executor_rounds`, and the `executor_definitions.executor` identity
  *     column, skipped entirely when a registration claims the old spelling as
@@ -1728,9 +1740,16 @@ function withNoMistakesMigrationProvenance(
 function migrateWorkflowVocabulary(
   db: MomentumDb,
   options: QueueMigrationOptions,
+  routeStatePlan?: WorkflowRouteStatePlan,
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
+    if (
+      routeStatePlan !== undefined &&
+      routeStatePlan.deferredUntilBaseComplete !== true
+    ) {
+      assertWorkflowRouteStatePlanCurrent(db, routeStatePlan);
+    }
     mergeOrRenameExecutorColumn(db, "executor_attempts", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_rounds", "executor_family");
     mergeOrRenameExecutorColumn(db, "executor_definitions", "family");
@@ -1947,6 +1966,14 @@ function migrateWorkflowVocabulary(
         candidate.attempt_id,
       );
       convertRounds!.run(candidate.attempt_id);
+    }
+
+    if (routeStatePlan?.deferredUntilBaseComplete === true) {
+      routeStatePlan = preScanRouteState(db);
+    }
+    if (routeStatePlan !== undefined && routeStateMigrationNeeded(db)) {
+      refreshWorkflowRouteStatePlan(db, routeStatePlan);
+      applyWorkflowRouteStateMigrationInTransaction(db, routeStatePlan);
     }
 
     db.exec("COMMIT");
@@ -2166,7 +2193,9 @@ function mergeOrRenameExecutorColumn(
 export function applyQueueMigrations(
   db: MomentumDb,
   options: QueueMigrationOptions = {},
+  validatedRouteStatePlan?: WorkflowRouteStatePlan,
 ): void {
+  const routeStatePlan = validatedRouteStatePlan ?? preScanRouteState(db);
   // Runs before the main additive pass because it must rebuild tables with
   // foreign keys disabled, which SQLite only allows outside a transaction.
   migrateLegacyExecutorInvocationSchema(db, options);
@@ -2250,7 +2279,7 @@ export function applyQueueMigrations(
   // Runs after the additive pass so every table exists in its current shape
   // before the vocabulary rename inspects and rewrites rows.
   migratePartialLegacyExecutorInvocationSchema(db, options);
-  migrateWorkflowVocabulary(db, options);
+  migrateWorkflowVocabulary(db, options, routeStatePlan);
 }
 
 type PragmaColumnRow = { name: string };

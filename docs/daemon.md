@@ -110,8 +110,9 @@ under the run directory and reconciles the step from that terminal evidence.
 If durable external-apply audit evidence already proves the intended write landed and post-apply reconcile succeeded, the step records already-applied terminal evidence without another Linear mutation.
 Missing issue scope, missing or ambiguous source evidence, duplicate intents, stale or mismatched applied evidence, missing credentials, policy denial, audit-incomplete, blocked, or other unsafe apply outcomes park the step for manual recovery rather than fabricating success.
 Configured `subworkflow` steps are also handled by the
-managed daemon: the parent run's `route.subworkflow.child` config selects the
-child workflow definition, bounded lineage in `route.subworkflow.lineage` prevents
+managed daemon: the parent run's canonical `workflow_steps.executor_config_json`
+projects as `route.subworkflow.child` and selects the child workflow definition,
+bounded lineage in `workflow_run_lineage` projects as `route.subworkflow.lineage` and prevents
 unsafe recursion, and the parent step mirrors terminal child-run evidence only
 after the child reaches a terminal state. Missing child config, unsafe recursion,
 unresolved child definitions, unsupported child attachments, invalid child state,
@@ -291,9 +292,10 @@ Delegate-supervisor steps use `.agent-workflows/<run-id>/delegate/<step-id>/`
 and scope their later attempts beneath that step directory.
 When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
-coding runs those values come from persisted `route.steps` overrides when the
-operator supplied `--steps-json`, otherwise they are omitted.
-Provider-aware alias normalization happens before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`.
+coding runs those values come from canonical `workflow_steps.agent_config_json`
+when definition-level agent config or `--steps-json` supplies them, otherwise they
+are omitted.
+Provider-aware aliases from run-specific `--steps-json` selections are normalized before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`. Definition-level agent config retains its declared values.
 Unknown or non-agent harness/model values still pass through unchanged after structural validation.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
@@ -304,15 +306,15 @@ unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
 managed-loop mode to fail before registering a daemon run with
 `code: "daemon_live_wrapper_profile_invalid"`.
 
-The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in the run's durable `route.profile`; a blank profile is refused before durable writes.
+The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in `workflow_run_coding_compatibility.selected_profile`; the read-only `route.profile` projection preserves the existing reader shape, and a blank profile is refused before durable writes.
 `workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
-The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `gnhf`.
+The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `workflow_run_coding_compatibility.implementation_engine`; the read-only `route.implementationEngine` projection preserves the existing reader shape, and when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
 The version-pinned built-in definition remains authoritative for the implementation executor: current version 3 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label; retained version 1 projects its recorded `goal-loop` executor according to the raw-identity compatibility rule in [SPEC.md](../SPEC.md), while retained version 2 keeps its recorded `delegate-supervisor` implementation and delegated tool configuration.
 Both executor paths resolve their machine-local mechanism from the step-kind live-wrapper binding.
 A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
-The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
+The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `workflow_steps.agent_config_json`, and the read-only `route.steps` projection plus `workflow run preview-coding --steps-json <json>` report the same selection without persisting a preview run.
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.

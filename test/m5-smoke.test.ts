@@ -161,7 +161,8 @@ async function startLinearMockServer(
 
 describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
   it("doctor --json reports the M11 closeout milestone marker", () => {
-    const result = runCliBinary(["doctor", "--json"]);
+    const dataDir = makeTempDir("momentum-smoke-m5-doctor-");
+    const result = runCliBinary(["doctor", "--data-dir", dataDir, "--json"]);
     expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["milestone"]).toBe(DOCTOR_SCOPE);

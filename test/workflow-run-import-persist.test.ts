@@ -234,6 +234,118 @@ function parseOrThrow(runDir: string) {
 }
 
 describe("persistWorkflowRunImport", () => {
+  it("persists an empty import metadata marker for an imported run with no route values", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-empty-import-route",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {};
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, imported);
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json
+               FROM workflow_run_import_metadata
+              WHERE run_id = ?`,
+          )
+          .get(imported.run.runId),
+      ).toEqual({
+        mode: null,
+        profile: null,
+        risk: null,
+        quota_policy_json: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses duplicate lineage ancestors before writing imported rows", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-duplicate-ancestors",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {
+      ...imported.run.route,
+      subworkflow: {
+        lineage: {
+          parentRunId: "parent-run",
+          parentStepId: "child",
+          depth: 2,
+          ancestorDefinitionKeys: ["parent-workflow", "parent-workflow"],
+        },
+      },
+    };
+    const db = openDb(dataDir);
+    try {
+      expect(() => persistWorkflowRunImport(db, imported)).toThrowError(
+        expect.objectContaining({
+          jsonPath: "$.subworkflow.lineage.ancestorDefinitionKeys",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get(imported.run.runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses missing imported lineage before the run upsert", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(
+      artifactRoot,
+      "cwfp-missing-parent",
+    );
+    const imported = parseOrThrow(runDir);
+    imported.run.route = {
+      ...imported.run.route,
+      subworkflow: {
+        lineage: {
+          parentRunId: "missing-parent",
+          parentStepId: "child",
+          depth: 1,
+          ancestorDefinitionKeys: ["parent-workflow"],
+        },
+      },
+    };
+    const db = openDb(dataDir);
+    try {
+      db.exec(`
+        CREATE TRIGGER reject_imported_run_insert
+        BEFORE INSERT ON workflow_runs
+        WHEN NEW.id = 'cwfp-missing-parent'
+        BEGIN
+          SELECT RAISE(FAIL, 'workflow run insert reached');
+        END
+      `);
+      expect(() => persistWorkflowRunImport(db, imported)).toThrowError(
+        expect.objectContaining({
+          code: "route_state_lineage_parent_missing",
+          jsonPath: "$.subworkflow.lineage.parentRunId",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get(imported.run.runId),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("inserts workflow_runs, workflow_steps, and workflow_approvals rows from a parsed import", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();
@@ -282,9 +394,20 @@ describe("persistWorkflowRunImport", () => {
         source: "explicit",
         status: "resolved",
       });
-      expect(JSON.parse(runRow.route_json)).toEqual({
+      expect(runRow.route_json).toBe("{}");
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json
+               FROM workflow_run_import_metadata
+              WHERE run_id = 'cwfp-persist01'`,
+          )
+          .get(),
+      ).toEqual({
         mode: "execute-ready",
         profile: "momentum-m7",
+        risk: null,
+        quota_policy_json: null,
       });
       expect(JSON.parse(runRow.plan_json)).toMatchObject({
         runId: "cwfp-persist01",
@@ -327,6 +450,39 @@ describe("persistWorkflowRunImport", () => {
       expect(approval.artifact_digest).toBe(expectedDigest);
       expect(approval.recorded_at).toBe(Date.parse("2026-05-17T09:00:00Z"));
       expect(approval.discharged_at).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("clears stale workflow-definition links on imported upsert", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const { runDir } = makeCompletedRunFixture(artifactRoot);
+    const db = openDb(dataDir);
+    try {
+      const imported = parseOrThrow(runDir);
+      persistWorkflowRunImport(db, imported, { now: 1_700_000_000 });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET workflow_definition_key = ?, workflow_definition_version = ?
+          WHERE id = ?`,
+      ).run("stale-definition", 9, imported.run.runId);
+
+      persistWorkflowRunImport(db, imported, { now: 1_700_000_500 });
+
+      expect(
+        db
+          .prepare(
+            `SELECT workflow_definition_key, workflow_definition_version
+               FROM workflow_runs
+              WHERE id = ?`,
+          )
+          .get(imported.run.runId),
+      ).toEqual({
+        workflow_definition_key: null,
+        workflow_definition_version: null,
+      });
     } finally {
       db.close();
     }

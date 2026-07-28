@@ -8,6 +8,7 @@ import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition,
 } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import {
   WORKFLOW_RUN_START_SOURCE,
   type WorkflowRunStartInput,
@@ -58,6 +59,23 @@ function twoStepDefinition(): WorkflowDefinition {
         executor: "agent-once",
         order: 0,
         required: false,
+      },
+    ],
+  };
+}
+
+function subworkflowDefinition(key: string): WorkflowDefinition {
+  return {
+    key,
+    title: `${key} definition`,
+    version: 1,
+    steps: [
+      {
+        key: "dispatch",
+        kind: "implementation",
+        executor: "subworkflow",
+        order: 0,
+        required: true,
       },
     ],
   };
@@ -215,6 +233,327 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("freezes definition and route config into explicit step destinations", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = {
+        harness: "codex",
+        model: "gpt-5.6",
+      };
+      definition.steps[0]!.config = { command: "implement" };
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition,
+          route: {
+            steps: {
+              implementation: { model: "gpt-5.6-codex", effort: "medium" },
+            },
+          },
+        }),
+      );
+
+      expect(
+        db
+          .prepare(
+            `SELECT agent_config_json, executor_config_json
+               FROM workflow_steps
+              WHERE run_id = 'run-001' AND step_id = 'implementation'`,
+          )
+          .get(),
+      ).toEqual({
+        agent_config_json:
+          '{"harness":"codex","model":"gpt-5.6-codex","effort":"medium"}',
+        executor_config_json: '{"command":"implement"}',
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses divergent agent configs for repeated step kinds before writing", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = { harness: "codex" };
+      definition.steps[1]!.kind = "implementation";
+      definition.steps[1]!.agentConfig = { harness: "claude" };
+
+      expect(() =>
+        persistWorkflowRunStart(db, baseInput({ definition })),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists equal agent configs for repeated step kinds", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = { harness: "codex" };
+      definition.steps[1]!.kind = "implementation";
+      definition.steps[1]!.agentConfig = { harness: "codex" };
+
+      expect(
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            definition,
+            route: {
+              steps: {
+                implementation: { model: "gpt-5.6", effort: "medium" },
+              },
+            },
+          }),
+        ).inserted,
+      ).toBe(true);
+      expect(
+        db
+          .prepare(
+            `SELECT step_id, agent_config_json
+               FROM workflow_steps
+              WHERE run_id = 'run-001'
+              ORDER BY step_id`,
+          )
+          .all(),
+      ).toEqual([
+        {
+          step_id: "implementation",
+          agent_config_json:
+            '{"harness":"codex","model":"gpt-5.6","effort":"medium"}',
+        },
+        {
+          step_id: "preflight",
+          agent_config_json:
+            '{"harness":"codex","model":"gpt-5.6","effort":"medium"}',
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses canonical and legacy route aliases before writing", () => {
+    const db = openTempDb();
+    try {
+      let refusal: InvalidWorkflowRunStartError | undefined;
+      try {
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            route: {
+              steps: {
+                "no-mistakes": { harness: "claude" },
+                validate: { harness: "codex" },
+              },
+            },
+          }),
+        );
+      } catch (error) {
+        refusal = error as InvalidWorkflowRunStartError;
+      }
+      expect(refusal).toBeInstanceOf(InvalidWorkflowRunStartError);
+      expect(refusal?.errors).toEqual([
+        expect.objectContaining({
+          code: "route_invalid",
+          path: "$.steps.validate",
+        }),
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses unmatched route step targets before writing", () => {
+    const db = openTempDb();
+    try {
+      let refusal: InvalidWorkflowRunStartError | undefined;
+      try {
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            route: {
+              steps: {
+                validate: { harness: "codex" },
+              },
+            },
+          }),
+        );
+      } catch (error) {
+        refusal = error as InvalidWorkflowRunStartError;
+      }
+      expect(refusal).toBeInstanceOf(InvalidWorkflowRunStartError);
+      expect(refusal?.errors).toEqual([
+        expect.objectContaining({
+          code: "route_invalid",
+          path: "$.steps.validate",
+        }),
+      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses unknown route keys before writing a run", () => {
+    const db = openTempDb();
+    try {
+      expect(() =>
+        persistWorkflowRunStart(db, baseInput({ route: { unknown: "value" } })),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses duplicate lineage ancestors before writing a run", () => {
+    const db = openTempDb();
+    try {
+      expect(() =>
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            route: {
+              subworkflow: {
+                lineage: {
+                  parentRunId: "parent-run",
+                  parentStepId: "child",
+                  depth: 2,
+                  ancestorDefinitionKeys: [
+                    "parent-workflow",
+                    "parent-workflow",
+                  ],
+                },
+              },
+            },
+          }),
+        ),
+      ).toThrow(InvalidWorkflowRunStartError);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM workflow_runs WHERE id = 'run-001'",
+          )
+          .get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses fresh lineage that disagrees with a canonical parent chain", () => {
+    const db = openTempDb();
+    try {
+      const grandparentDefinition = subworkflowDefinition(
+        "grandparent-workflow",
+      );
+      const parentDefinition = subworkflowDefinition("parent-workflow");
+      persistWorkflowDefinition(db, grandparentDefinition, { now: NOW });
+      persistWorkflowDefinition(db, parentDefinition, { now: NOW });
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition: grandparentDefinition,
+          runId: "grandparent-run",
+        }),
+      );
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition: parentDefinition,
+          runId: "parent-run",
+          route: {
+            subworkflow: {
+              lineage: {
+                parentRunId: "grandparent-run",
+                parentStepId: "dispatch",
+                depth: 1,
+                ancestorDefinitionKeys: ["grandparent-workflow"],
+              },
+            },
+          },
+        }),
+      );
+
+      db.exec(`
+        CREATE TRIGGER reject_child_run_insert
+        BEFORE INSERT ON workflow_runs
+        WHEN NEW.id = 'child-run'
+        BEGIN
+          SELECT RAISE(FAIL, 'workflow run insert reached');
+        END
+      `);
+      let refusal: InvalidWorkflowRunStartError | undefined;
+      try {
+        persistWorkflowRunStart(
+          db,
+          baseInput({
+            runId: "child-run",
+            route: {
+              subworkflow: {
+                lineage: {
+                  parentRunId: "parent-run",
+                  parentStepId: "dispatch",
+                  depth: 2,
+                  ancestorDefinitionKeys: [
+                    "grandparent-workflow",
+                    "wrong-workflow",
+                  ],
+                },
+              },
+            },
+          }),
+        );
+      } catch (error) {
+        if (error instanceof InvalidWorkflowRunStartError) refusal = error;
+        else throw error;
+      }
+      expect(refusal).toBeDefined();
+      expect(refusal?.errors).toContainEqual(
+        expect.objectContaining({
+          code: "route_invalid",
+          path: "$.subworkflow.lineage.ancestorDefinitionKeys",
+        }),
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS count FROM workflow_runs WHERE id = ?")
+          .get("child-run"),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("persists the built-in coding workflow with honoured scope, route, and skill revision", () => {
     const db = openTempDb();
     try {
@@ -223,22 +562,34 @@ describe("persistWorkflowRunStart", () => {
         baseInput({
           definition: CODING_WORKFLOW_DEFINITION,
           issueScope: { issues: ["NGX-346"] },
-          route: { channel: "discord" },
-          source: "operator-cli",
+          route: { profile: "fixture-profile" },
+          source: "workflow-definition",
           skillRevision: "abc123",
         }),
       );
       expect(summary.definitionKey).toBe("coding-workflow");
-      expect(summary.source).toBe("operator-cli");
+      expect(summary.source).toBe("workflow-definition");
       expect(summary.stepCount).toBe(CODING_WORKFLOW_DEFINITION.steps.length);
 
       const row = loadRunRow(db, "run-001");
       expect(row?.issue_scope_json).toBe(
         JSON.stringify({ issues: ["NGX-346"] }),
       );
-      expect(row?.route_json).toBe(JSON.stringify({ channel: "discord" }));
+      expect(row?.route_json).toBe("{}");
       expect(row?.skill_revision).toBe("abc123");
-      expect(row?.source).toBe("operator-cli");
+      expect(row?.source).toBe("workflow-definition");
+      expect(
+        db
+          .prepare(
+            `SELECT implementation_engine, selected_profile
+               FROM workflow_run_coding_compatibility
+              WHERE run_id = 'run-001'`,
+          )
+          .get(),
+      ).toEqual({
+        implementation_engine: null,
+        selected_profile: "fixture-profile",
+      });
 
       const steps = loadStepRows(db, "run-001");
       expect(steps.map((s) => s.kind)).toEqual([

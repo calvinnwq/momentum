@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import {
   deriveWorkflowMonitorProgress,
   type WorkflowMonitorProgressTick,
@@ -175,6 +176,7 @@ function seedRun(db: MomentumDb, runId: string): void {
     SEED_NOW,
     SEED_NOW,
   );
+  seedCanonicalCodingCompatibilityMarker(db, runId, SEED_NOW);
 }
 
 function seedRunningStep(db: MomentumDb, runId: string): void {

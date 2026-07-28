@@ -6,20 +6,21 @@ import { DatabaseSync } from "node:sqlite";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import type {
   WorkflowRunEvents,
-  WorkflowSemanticEvent
+  WorkflowSemanticEvent,
 } from "../src/core/workflow/run/events.js";
 import {
   buildWorkflowWatchStreamTick,
   runWorkflowWatchStream,
   type RunWorkflowWatchStreamResult,
   type WorkflowWatchStreamPollResult,
-  type WorkflowWatchStreamRecord
+  type WorkflowWatchStreamRecord,
 } from "../src/core/workflow/monitor/watch-stream.js";
 import {
   createWorkflowWatchStreamDbPoll,
-  WorkflowWatchStreamRunNotFoundError
+  WorkflowWatchStreamRunNotFoundError,
 } from "../src/core/workflow/monitor/watch-stream-source.js";
 
 /**
@@ -39,7 +40,7 @@ function event(
   input: Partial<WorkflowSemanticEvent> & {
     type: WorkflowSemanticEvent["type"];
     cursor: string;
-  }
+  },
 ): WorkflowSemanticEvent {
   return {
     id: input.id ?? `${input.type}:${input.cursor}`,
@@ -47,18 +48,18 @@ function event(
     timestamp: input.timestamp ?? NOW,
     type: input.type,
     stepId: input.stepId ?? null,
-    payload: input.payload ?? {}
+    payload: input.payload ?? {},
   };
 }
 
 function eventsEnvelope(
-  input: Partial<WorkflowRunEvents> & { events: WorkflowSemanticEvent[] }
+  input: Partial<WorkflowRunEvents> & { events: WorkflowSemanticEvent[] },
 ): WorkflowRunEvents {
   return {
     runId: input.runId ?? "cwfp-stream",
     since: input.since ?? null,
     cursor: input.cursor ?? input.events.at(-1)?.cursor ?? input.since ?? null,
-    events: input.events
+    events: input.events,
   };
 }
 
@@ -72,9 +73,9 @@ describe("buildWorkflowWatchStreamTick", () => {
           type: "step_succeeded",
           cursor: "wfcur1.bbb",
           stepId: "impl",
-          payload: { resultDigest: "sha256:1" }
-        })
-      ]
+          payload: { resultDigest: "sha256:1" },
+        }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -87,21 +88,21 @@ describe("buildWorkflowWatchStreamTick", () => {
         mode: "stream",
         kind: "event",
         emit: true,
-        runId: "cwfp-stream"
+        runId: "cwfp-stream",
       });
       expect(JSON.stringify(record)).not.toContain("\n");
     }
     expect(tick.records[0]).toMatchObject({
       cursor: "wfcur1.aaa",
-      event: { type: "step_started", stepId: "impl", cursor: "wfcur1.aaa" }
+      event: { type: "step_started", stepId: "impl", cursor: "wfcur1.aaa" },
     });
     expect(tick.records[1]).toMatchObject({
       cursor: "wfcur1.bbb",
       event: {
         type: "step_succeeded",
         stepId: "impl",
-        payload: { resultDigest: "sha256:1" }
-      }
+        payload: { resultDigest: "sha256:1" },
+      },
     });
   });
 
@@ -110,7 +111,7 @@ describe("buildWorkflowWatchStreamTick", () => {
       runId: "cwfp-stream",
       since: "wfcur1.last",
       cursor: "wfcur1.last",
-      events: []
+      events: [],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -126,7 +127,7 @@ describe("buildWorkflowWatchStreamTick", () => {
       runId: "cwfp-stream",
       cursor: "wfcur1.last",
       generatedAt: NOW,
-      terminal: false
+      terminal: false,
     });
     expect(JSON.stringify(heartbeat)).not.toContain("\n");
   });
@@ -135,12 +136,12 @@ describe("buildWorkflowWatchStreamTick", () => {
     const envelope = eventsEnvelope({
       since: "wfcur1.last",
       cursor: "wfcur1.last",
-      events: []
+      events: [],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, {
       now: NOW,
-      heartbeat: false
+      heartbeat: false,
     });
 
     expect(tick.records).toEqual([]);
@@ -155,9 +156,9 @@ describe("buildWorkflowWatchStreamTick", () => {
         event({
           type: "terminal_state",
           cursor: "wfcur1.z",
-          payload: { state: "succeeded" }
-        })
-      ]
+          payload: { state: "succeeded" },
+        }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -168,7 +169,7 @@ describe("buildWorkflowWatchStreamTick", () => {
       kind: "event",
       emit: true,
       terminal: true,
-      event: { type: "terminal_state", payload: { state: "succeeded" } }
+      event: { type: "terminal_state", payload: { state: "succeeded" } },
     });
   });
 
@@ -178,10 +179,10 @@ describe("buildWorkflowWatchStreamTick", () => {
         event({
           type: "terminal_state",
           cursor: "wfcur1.terminal",
-          payload: { state: "failed" }
+          payload: { state: "failed" },
         }),
-        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal" })
-      ]
+        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal" }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -189,7 +190,7 @@ describe("buildWorkflowWatchStreamTick", () => {
     expect(tick.terminal).toBe(true);
     expect(tick.records).toMatchObject([
       { kind: "event", terminal: true, event: { type: "terminal_state" } },
-      { kind: "event", terminal: true, event: { type: "recovery_cleared" } }
+      { kind: "event", terminal: true, event: { type: "recovery_cleared" } },
     ]);
   });
 
@@ -197,45 +198,48 @@ describe("buildWorkflowWatchStreamTick", () => {
     const envelope = eventsEnvelope({
       since: "wfcur1.done",
       cursor: "wfcur1.done",
-      events: []
+      events: [],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, {
       now: NOW,
-      runTerminal: true
+      runTerminal: true,
     });
 
     expect(tick.terminal).toBe(true);
     expect(tick.records[0]).toMatchObject({
       kind: "heartbeat",
       emit: false,
-      terminal: true
+      terminal: true,
     });
   });
 
   it("marks the final event terminal when the run row is already terminal", () => {
     const envelope = eventsEnvelope({
       events: [
-        event({ type: "monitor_quiet_heartbeat", cursor: "wfcur1.after-terminal-1" }),
-        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal-2" })
-      ]
+        event({
+          type: "monitor_quiet_heartbeat",
+          cursor: "wfcur1.after-terminal-1",
+        }),
+        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal-2" }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, {
       now: NOW,
-      runTerminal: true
+      runTerminal: true,
     });
 
     expect(tick.terminal).toBe(true);
     expect(tick.records).toHaveLength(2);
     expect(tick.records[0]).toMatchObject({
       kind: "event",
-      terminal: false
+      terminal: false,
     });
     expect(tick.records[1]).toMatchObject({
       kind: "event",
       terminal: true,
-      event: { type: "recovery_cleared" }
+      event: { type: "recovery_cleared" },
     });
   });
 
@@ -244,8 +248,8 @@ describe("buildWorkflowWatchStreamTick", () => {
       since: "wfcur1.start",
       events: [
         event({ type: "step_started", cursor: "wfcur1.a" }),
-        event({ type: "step_succeeded", cursor: "wfcur1.b" })
-      ]
+        event({ type: "step_succeeded", cursor: "wfcur1.b" }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -257,7 +261,7 @@ describe("buildWorkflowWatchStreamTick", () => {
     const envelope = eventsEnvelope({
       since: "wfcur1.caughtup",
       cursor: "wfcur1.caughtup",
-      events: []
+      events: [],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -269,9 +273,9 @@ describe("buildWorkflowWatchStreamTick", () => {
   it("stays stateless so an advanced cursor yields only heartbeat ticks", () => {
     const first = buildWorkflowWatchStreamTick(
       eventsEnvelope({
-        events: [event({ type: "step_started", cursor: "wfcur1.a" })]
+        events: [event({ type: "step_started", cursor: "wfcur1.a" })],
       }),
-      { now: NOW }
+      { now: NOW },
     );
     expect(first.records).toHaveLength(1);
     expect(first.records[0]).toMatchObject({ kind: "event" });
@@ -280,9 +284,9 @@ describe("buildWorkflowWatchStreamTick", () => {
       eventsEnvelope({
         since: first.cursor,
         cursor: first.cursor,
-        events: []
+        events: [],
       }),
-      { now: NOW + 1000 }
+      { now: NOW + 1000 },
     );
     expect(caughtUp.records).toHaveLength(1);
     expect(caughtUp.records[0]).toMatchObject({ kind: "heartbeat" });
@@ -291,9 +295,13 @@ describe("buildWorkflowWatchStreamTick", () => {
   it("serializes every record as one parseable JSON line", () => {
     const envelope = eventsEnvelope({
       events: [
-        event({ type: "approval_required", cursor: "wfcur1.a", stepId: "plan" }),
-        event({ type: "terminal_state", cursor: "wfcur1.z" })
-      ]
+        event({
+          type: "approval_required",
+          cursor: "wfcur1.a",
+          stepId: "plan",
+        }),
+        event({ type: "terminal_state", cursor: "wfcur1.z" }),
+      ],
     });
 
     const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
@@ -337,9 +345,9 @@ function scriptedPoll(steps: PollStep[]): {
       events: eventsEnvelope({
         since,
         cursor: step.events.at(-1)?.cursor ?? since,
-        events: step.events
+        events: step.events,
       }),
-      runTerminal: step.runTerminal ?? false
+      runTerminal: step.runTerminal ?? false,
     };
   };
   return { poll, seenSince };
@@ -352,10 +360,10 @@ describe("runWorkflowWatchStream", () => {
       {
         events: [
           event({ type: "step_started", cursor: "wfcur1.a", stepId: "impl" }),
-          event({ type: "step_succeeded", cursor: "wfcur1.b", stepId: "impl" })
-        ]
+          event({ type: "step_succeeded", cursor: "wfcur1.b", stepId: "impl" }),
+        ],
       },
-      { events: [] }
+      { events: [] },
     ]);
 
     const result: RunWorkflowWatchStreamResult = await runWorkflowWatchStream({
@@ -363,13 +371,13 @@ describe("runWorkflowWatchStream", () => {
       write: (record) => written.push(record),
       now: () => NOW,
       sleep: async () => {},
-      maxTicks: 2
+      maxTicks: 2,
     });
 
     expect(written).toHaveLength(3);
     expect(written.slice(0, 2)).toMatchObject([
       { kind: "event", emit: true, event: { cursor: "wfcur1.a" } },
-      { kind: "event", emit: true, event: { cursor: "wfcur1.b" } }
+      { kind: "event", emit: true, event: { cursor: "wfcur1.b" } },
     ]);
     expect(written[2]).toMatchObject({ kind: "heartbeat", emit: false });
     for (const record of written) {
@@ -384,7 +392,7 @@ describe("runWorkflowWatchStream", () => {
 
   it("resumes from the provided since cursor on reconnect", async () => {
     const { poll, seenSince } = scriptedPoll([
-      { events: [event({ type: "step_succeeded", cursor: "wfcur1.next" })] }
+      { events: [event({ type: "step_succeeded", cursor: "wfcur1.next" })] },
     ]);
 
     await runWorkflowWatchStream({
@@ -393,7 +401,7 @@ describe("runWorkflowWatchStream", () => {
       since: "wfcur1.start",
       now: () => NOW,
       sleep: async () => {},
-      maxTicks: 1
+      maxTicks: 1,
     });
 
     expect(seenSince[0]).toBe("wfcur1.start");
@@ -405,15 +413,19 @@ describe("runWorkflowWatchStream", () => {
     const { poll, seenSince } = scriptedPoll([
       {
         events: [
-          event({ type: "step_succeeded", cursor: "wfcur1.a", stepId: "merge" }),
+          event({
+            type: "step_succeeded",
+            cursor: "wfcur1.a",
+            stepId: "merge",
+          }),
           event({
             type: "terminal_state",
             cursor: "wfcur1.z",
-            payload: { state: "succeeded" }
-          })
-        ]
+            payload: { state: "succeeded" },
+          }),
+        ],
       },
-      { events: [] }
+      { events: [] },
     ]);
 
     const result = await runWorkflowWatchStream({
@@ -422,7 +434,7 @@ describe("runWorkflowWatchStream", () => {
       now: () => NOW,
       sleep: async (ms) => {
         sleeps.push(ms);
-      }
+      },
     });
 
     expect(result.exitReason).toBe("terminal");
@@ -433,14 +445,14 @@ describe("runWorkflowWatchStream", () => {
       kind: "event",
       emit: true,
       terminal: true,
-      event: { type: "terminal_state" }
+      event: { type: "terminal_state" },
     });
   });
 
   it("recognizes an already-terminal run on reconnect and exits via heartbeat", async () => {
     const written: WorkflowWatchStreamRecord[] = [];
     const { poll, seenSince } = scriptedPoll([
-      { events: [], runTerminal: true }
+      { events: [], runTerminal: true },
     ]);
 
     const result = await runWorkflowWatchStream({
@@ -448,7 +460,7 @@ describe("runWorkflowWatchStream", () => {
       write: (record) => written.push(record),
       since: "wfcur1.done",
       now: () => NOW,
-      sleep: async () => {}
+      sleep: async () => {},
     });
 
     expect(result.exitReason).toBe("terminal");
@@ -458,7 +470,7 @@ describe("runWorkflowWatchStream", () => {
     expect(written[0]).toMatchObject({
       kind: "heartbeat",
       emit: false,
-      terminal: true
+      terminal: true,
     });
   });
 
@@ -472,7 +484,7 @@ describe("runWorkflowWatchStream", () => {
       heartbeat: false,
       now: () => NOW,
       sleep: async () => {},
-      maxTicks: 3
+      maxTicks: 3,
     });
 
     expect(written).toEqual([]);
@@ -489,9 +501,9 @@ describe("runWorkflowWatchStream", () => {
       return {
         events: eventsEnvelope({
           since,
-          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })]
+          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })],
         }),
-        runTerminal: false
+        runTerminal: false,
       };
     };
 
@@ -502,7 +514,7 @@ describe("runWorkflowWatchStream", () => {
       },
       now: () => NOW,
       sleep: async () => {},
-      maxTicks: 500
+      maxTicks: 500,
     });
 
     expect(written).toBe(500);
@@ -520,7 +532,7 @@ describe("runWorkflowWatchStream", () => {
       "exitReason",
       "recordsWritten",
       "terminal",
-      "ticks"
+      "ticks",
     ]);
   });
 
@@ -534,13 +546,13 @@ describe("runWorkflowWatchStream", () => {
         polled += 1;
         return {
           events: eventsEnvelope({ events: [] }),
-          runTerminal: false
+          runTerminal: false,
         };
       },
       write: () => {},
       now: () => NOW,
       sleep: async () => {},
-      signal: controller.signal
+      signal: controller.signal,
     });
 
     expect(polled).toBe(0);
@@ -557,9 +569,9 @@ describe("runWorkflowWatchStream", () => {
       return {
         events: eventsEnvelope({
           since,
-          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })]
+          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })],
         }),
-        runTerminal: false
+        runTerminal: false,
       };
     };
 
@@ -570,7 +582,7 @@ describe("runWorkflowWatchStream", () => {
       sleep: async () => {
         controller.abort();
       },
-      signal: controller.signal
+      signal: controller.signal,
     });
 
     expect(result.ticks).toBe(1);
@@ -585,11 +597,11 @@ describe("runWorkflowWatchStream", () => {
           event({
             type: "terminal_state",
             cursor: "wfcur1.z",
-            payload: { state: "succeeded" }
-          })
-        ]
+            payload: { state: "succeeded" },
+          }),
+        ],
       },
-      { events: [], runTerminal: true }
+      { events: [], runTerminal: true },
     ]);
 
     const result = await runWorkflowWatchStream({
@@ -598,7 +610,7 @@ describe("runWorkflowWatchStream", () => {
       exitOnTerminal: false,
       now: () => NOW,
       sleep: async () => {},
-      maxTicks: 3
+      maxTicks: 3,
     });
 
     expect(result.terminal).toBe(true);
@@ -617,8 +629,8 @@ describe("runWorkflowWatchStream", () => {
         write: () => {},
         pollIntervalMs: -1,
         now: () => NOW,
-        sleep: async () => {}
-      })
+        sleep: async () => {},
+      }),
     ).rejects.toThrow(/pollIntervalMs/);
     expect(polled).toBe(0);
   });
@@ -647,7 +659,7 @@ afterEach(() => {
 
 function makeStreamSourceTempDir(): string {
   const dir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "momentum-watch-stream-source-")
+    path.join(os.tmpdir(), "momentum-watch-stream-source-"),
   );
   streamSourceTempRoots.push(dir);
   return fs.realpathSync(dir);
@@ -661,22 +673,23 @@ function seedStreamRun(
     startedAt?: number | null;
     finishedAt?: number | null;
     updatedAt?: number;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs
        (id, state, source, plan_json, issue_scope_json, route_json,
         needs_manual_recovery, started_at, finished_at, created_at, updated_at)
        VALUES (?, ?, 'momentum-native-coding', '{}', '{}', '{}',
-        0, ?, ?, ?, ?)`
+        0, ?, ?, ?, ?)`,
   ).run(
     input.runId,
     input.state ?? "running",
     input.startedAt ?? null,
     input.finishedAt ?? null,
     1,
-    input.updatedAt ?? 1
+    input.updatedAt ?? 1,
   );
+  seedCanonicalCodingCompatibilityMarker(db, input.runId, input.updatedAt ?? 1);
 }
 
 function seedStreamEvent(
@@ -688,12 +701,12 @@ function seedStreamEvent(
     timestamp: number;
     stepId?: string | null;
     payload?: Record<string, unknown>;
-  }
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_events
        (event_id, run_id, step_id, occurred_at, type, payload_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.eventId,
     input.runId,
@@ -701,7 +714,7 @@ function seedStreamEvent(
     input.timestamp,
     input.type,
     JSON.stringify(input.payload ?? {}),
-    input.timestamp
+    input.timestamp,
   );
 }
 
@@ -716,7 +729,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         runId: "run-live",
         type: "recovery_required",
         timestamp: 70,
-        payload: { reason: "manual inspection required" }
+        payload: { reason: "manual inspection required" },
       });
 
       const poll = createWorkflowWatchStreamDbPoll(db, "run-live");
@@ -726,7 +739,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
       expect(result.events.runId).toBe("run-live");
       expect(result.events.since).toBeNull();
       expect(result.events.events.map((event) => event.type)).toContain(
-        "recovery_required"
+        "recovery_required",
       );
       expect(result.events.cursor).not.toBeNull();
     } finally {
@@ -743,7 +756,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         eventId: "000000000070:recovery_required:run-advance",
         runId: "run-advance",
         type: "recovery_required",
-        timestamp: 70
+        timestamp: 70,
       });
 
       const poll = createWorkflowWatchStreamDbPoll(db, "run-advance");
@@ -769,14 +782,14 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         state: "succeeded",
         startedAt: 5,
         finishedAt: 80,
-        updatedAt: 80
+        updatedAt: 80,
       });
 
       const poll = createWorkflowWatchStreamDbPoll(db, "run-term");
       const first = poll(null);
       expect(first.runTerminal).toBe(true);
       expect(first.events.events.map((event) => event.type)).toContain(
-        "terminal_state"
+        "terminal_state",
       );
 
       // Reconnecting from a cursor at/past the terminal event yields no new
@@ -797,7 +810,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         runId: "run-race",
         state: "running",
         startedAt: 5,
-        updatedAt: 60
+        updatedAt: 60,
       });
 
       let flipped = false;
@@ -811,18 +824,18 @@ describe("createWorkflowWatchStreamDbPoll", () => {
             db.prepare(
               `UPDATE workflow_runs
                   SET state = 'succeeded', finished_at = 80, updated_at = 80
-                WHERE id = ?`
+                WHERE id = ?`,
             ).run("run-race");
           }
           return db.prepare(sql);
-        }
+        },
       } as MomentumDb;
 
       const result = createWorkflowWatchStreamDbPoll(raceDb, "run-race")(null);
 
       expect(result.runTerminal).toBe(true);
       expect(result.events.events.map((event) => event.type)).toContain(
-        "terminal_state"
+        "terminal_state",
       );
     } finally {
       db.close();
@@ -839,7 +852,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
           eventId: `${String(i).padStart(12, "0")}:recovery_required:run-bounded`,
           runId: "run-bounded",
           type: "recovery_required",
-          timestamp: i
+          timestamp: i,
         });
       }
 
@@ -848,7 +861,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         eventId: "000000001001:recovery_required:run-bounded",
         runId: "run-bounded",
         type: "recovery_required",
-        timestamp: 1001
+        timestamp: 1001,
       });
 
       let storedRowsRead = 0;
@@ -865,20 +878,20 @@ describe("createWorkflowWatchStreamDbPoll", () => {
                 const rows = statement.all(...args);
                 storedRowsRead = rows.length;
                 return rows;
-              }
+              },
             };
           }
           return statement;
-        }
+        },
       } as MomentumDb;
 
       const second = createWorkflowWatchStreamDbPoll(
         boundedDb,
-        "run-bounded"
+        "run-bounded",
       )(first.events.cursor);
 
       expect(second.events.events.map((event) => event.timestamp)).toEqual([
-        1001
+        1001,
       ]);
       expect(storedRowsRead).toBeLessThanOrEqual(2);
     } finally {
@@ -907,7 +920,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         state: "succeeded",
         startedAt: 5,
         finishedAt: 80,
-        updatedAt: 80
+        updatedAt: 80,
       });
 
       const written: WorkflowWatchStreamRecord[] = [];
@@ -915,7 +928,7 @@ describe("createWorkflowWatchStreamDbPoll", () => {
         poll: createWorkflowWatchStreamDbPoll(db, "run-drive"),
         write: (record) => written.push(record),
         now: () => NOW,
-        sleep: async () => {}
+        sleep: async () => {},
       });
 
       expect(result.exitReason).toBe("terminal");
@@ -923,9 +936,8 @@ describe("createWorkflowWatchStreamDbPoll", () => {
       expect(
         written.some(
           (record) =>
-            record.kind === "event" &&
-            record.event.type === "terminal_state"
-        )
+            record.kind === "event" && record.event.type === "terminal_state",
+        ),
       ).toBe(true);
       for (const record of written) {
         expect(JSON.stringify(record)).not.toContain("\n");
@@ -959,15 +971,15 @@ async function runStreamCli(argv: string[]): Promise<StreamCliResult> {
       write(chunk: string) {
         stdout += chunk;
         return true;
-      }
+      },
     },
     stderr: {
       write(chunk: string) {
         stderr += chunk;
         return true;
-      }
+      },
     },
-    env: {}
+    env: {},
   });
   return { code, stdout, stderr };
 }
@@ -989,13 +1001,13 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
         state: "succeeded",
         startedAt: 5,
         finishedAt: 80,
-        updatedAt: 80
+        updatedAt: 80,
       });
       seedStreamEvent(db, {
         eventId: "000000000040:monitor_quiet_heartbeat:stream-cli-terminal",
         runId: "stream-cli-terminal",
         type: "monitor_quiet_heartbeat",
-        timestamp: 40
+        timestamp: 40,
       });
     } finally {
       db.close();
@@ -1009,7 +1021,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--stream",
       "--jsonl",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code, `stderr: ${result.stderr}`).toBe(0);
@@ -1032,7 +1044,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     expect(last["kind"]).toBe("event");
     expect(last["terminal"]).toBe(true);
     expect((last["event"] as Record<string, unknown>)["type"]).toBe(
-      "terminal_state"
+      "terminal_state",
     );
   });
 
@@ -1045,7 +1057,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "any-run",
       "--stream",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(1);
@@ -1059,7 +1071,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "run",
       "watch",
       "--stream",
-      "--jsonl"
+      "--jsonl",
     ]);
 
     expect(result.code).toBe(1);
@@ -1068,7 +1080,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       ok: false,
       command: "workflow run watch",
       code: "run_id_required",
-      message: "Missing required <run-id> for workflow run watch."
+      message: "Missing required <run-id> for workflow run watch.",
     });
   });
 
@@ -1080,7 +1092,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "stream-run",
       "extra",
       "--stream",
-      "--jsonl"
+      "--jsonl",
     ]);
 
     expect(result.code).toBe(2);
@@ -1089,7 +1101,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       ok: false,
       command: "workflow run watch",
       code: "usage_error",
-      message: "Unexpected argument for workflow run watch: extra"
+      message: "Unexpected argument for workflow run watch: extra",
     });
   });
 
@@ -1101,7 +1113,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "stream-run",
       "--stream",
       "--jsonl",
-      "--since"
+      "--since",
     ]);
 
     expect(result.code).toBe(2);
@@ -1109,7 +1121,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
       code: "usage_error",
-      message: "Missing required value for --since."
+      message: "Missing required value for --since.",
     });
   });
 
@@ -1130,7 +1142,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--stream",
       "--jsonl",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(1);
@@ -1150,7 +1162,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
         `CREATE TABLE goals (
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL
-        ) STRICT`
+        ) STRICT`,
       );
     } finally {
       legacyDb.close();
@@ -1164,7 +1176,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--stream",
       "--jsonl",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(1);
@@ -1174,7 +1186,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       command: "workflow run watch",
       code: "run_not_found",
       dataDir,
-      runId: "legacy-missing-run"
+      runId: "legacy-missing-run",
     });
   });
 
@@ -1190,7 +1202,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--stream",
       "--jsonl",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(1);
@@ -1200,7 +1212,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       command: "workflow run watch",
       code: "run_not_found",
       dataDir,
-      runId: "missing-run"
+      runId: "missing-run",
     });
     expect(fs.existsSync(dataDir)).toBe(false);
   });
@@ -1214,10 +1226,10 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     try {
       const first = createWorkflowWatchStreamDbPoll(
         probe,
-        "stream-cli-resume"
+        "stream-cli-resume",
       )(null);
       const heartbeat = first.events.events.find(
-        (e) => e.type === "monitor_quiet_heartbeat"
+        (e) => e.type === "monitor_quiet_heartbeat",
       );
       expect(heartbeat).toBeDefined();
       firstCursor = heartbeat!.cursor;
@@ -1235,7 +1247,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--since",
       firstCursor,
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code, `stderr: ${result.stderr}`).toBe(0);
@@ -1248,8 +1260,8 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       records.some(
         (r) =>
           r["kind"] === "event" &&
-          (r["event"] as Record<string, unknown>)["type"] === "terminal_state"
-      )
+          (r["event"] as Record<string, unknown>)["type"] === "terminal_state",
+      ),
     ).toBe(true);
   });
 
@@ -1264,7 +1276,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--jsonl",
       "--once",
       "--data-dir",
-      dataDir
+      dataDir,
     ]);
 
     expect(result.code).toBe(1);
@@ -1281,13 +1293,13 @@ function seedTerminalRunWithEvent(dataDir: string, runId: string): void {
       state: "succeeded",
       startedAt: 5,
       finishedAt: 90,
-      updatedAt: 90
+      updatedAt: 90,
     });
     seedStreamEvent(db, {
       eventId: `000000000040:monitor_quiet_heartbeat:${runId}`,
       runId,
       type: "monitor_quiet_heartbeat",
-      timestamp: 40
+      timestamp: 40,
     });
   } finally {
     db.close();

@@ -43,6 +43,8 @@ type WorkflowRendererFailure = {
   dataDir?: string;
   runId?: string;
   path?: string;
+  jsonPath?: string;
+  repair?: string;
   boundary?: string;
   stepId?: string;
   gateId?: string;
@@ -120,8 +122,16 @@ export function emitWorkflowRunStartFailure(
     command?: WorkflowRunStartCommand;
   },
 ): number {
+  const preserveSingleLineText =
+    !parsed.json &&
+    failure.jsonPath === undefined &&
+    failure.repair === undefined;
+  const { runId: _runId, ...failureWithoutRunId } = failure;
+  const failureToRender = preserveSingleLineText
+    ? failureWithoutRunId
+    : failure;
   return emitWorkflowFailure(parsed, io, {
-    ...failure,
+    ...failureToRender,
     command: failure.command ?? "workflow run start",
   });
 }
@@ -1851,6 +1861,8 @@ function emitWorkflowFailure(
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
   if (failure.path !== undefined) payload["path"] = failure.path;
+  if (failure.jsonPath !== undefined) payload["jsonPath"] = failure.jsonPath;
+  if (failure.repair !== undefined) payload["repair"] = failure.repair;
   if (failure.boundary !== undefined) payload["boundary"] = failure.boundary;
   if (failure.stepId !== undefined) payload["stepId"] = failure.stepId;
   if (failure.gateId !== undefined) payload["gateId"] = failure.gateId;
@@ -1877,7 +1889,12 @@ function emitWorkflowFailure(
     writeJson(io.stderr, payload);
     return exitCode;
   }
-  write(io.stderr, `${failure.message}\n`);
+  const lines = [failure.message];
+  if (failure.runId !== undefined) lines.push(`Run ID: ${failure.runId}`);
+  if (failure.jsonPath !== undefined)
+    lines.push(`JSON path: ${failure.jsonPath}`);
+  if (failure.repair !== undefined) lines.push(`Repair: ${failure.repair}`);
+  write(io.stderr, `${lines.join("\n")}\n`);
   return exitCode;
 }
 

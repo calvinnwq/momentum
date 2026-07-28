@@ -57,7 +57,8 @@ describe("evidence alias concurrency", () => {
         ]),
       ),
     );
-    expect(results.every((result) => result.code === 0)).toBe(true);
+    const failures = results.filter((result) => result.code !== 0);
+    expect(failures, JSON.stringify(failures, null, 2)).toEqual([]);
 
     const db = openDb(dataDir);
     try {

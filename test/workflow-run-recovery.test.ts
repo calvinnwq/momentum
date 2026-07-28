@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import {
   acquireRepoLock,
   markRepoLockNeedsManualRecovery,
@@ -73,6 +74,7 @@ function seedRunWithState(
     updatedAt,
     updatedAt,
   );
+  seedCanonicalCodingCompatibilityMarker(db, id, updatedAt);
 }
 
 function seedStep(

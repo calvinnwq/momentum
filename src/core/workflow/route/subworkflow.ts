@@ -1,5 +1,5 @@
 /**
- * Route-encoded child config + durable recursion lineage for production
+ * Compatibility-projected child config + durable recursion lineage for production
  * `subworkflow` steps.
  *
  * Iteration 1 (`route/subworkflow-child-config.ts`) landed the two pure deciders —
@@ -9,22 +9,24 @@
  *   1. *Where* a production `subworkflow` step's child config is sourced from. A
  *      {@link StepDefinition} may carry portable recipe-level executor config,
  *      but child launch identity is run-specific and deliberately outside this
- *      module's definition-config scope, so it lives in the run's existing
- *      free-form `route` JSON.
- *   2. *How* the parent run's recursion lineage is encoded durably. There is no
- *      first-class depth / lineage column on `workflow_runs`, so lineage rides in
- *      the same `route` JSON and is propagated one level down each time a parent
- *      launches a child.
+ *      module's definition-config scope, so the adapter persists it in the
+ *      owning `workflow_steps.executor_config_json` destination and projects it
+ *      through the compatibility `route` JSON.
+ *   2. *How* the parent run's recursion lineage is encoded durably. Lineage has
+ *      a dedicated `workflow_run_lineage` destination rather than a column on
+ *      `workflow_runs`; the adapter persists it there and projects it through
+ *      the same compatibility `route` JSON as it propagates one level down each
+ *      time a parent launches a child.
  *
  * This module owns exactly those two decisions, purely. Both the authored child
- * config and the propagated lineage live under the single
+ * config and the propagated lineage are represented in the single compatibility
  * {@link SUBWORKFLOW_ROUTE_KEY} (`route.subworkflow`) namespace:
  *
  *   - `route.subworkflow.child` — the authored child-launch config a top-level
- *     caller sets when starting the parent run (validated by iteration 1's
+ *     caller supplies when starting the parent run (validated by iteration 1's
  *     {@link validateSubworkflowChildConfig});
- *   - `route.subworkflow.lineage` — the recursion lineage the daemon writes onto a
- *     *child* run's route when it launches that child, so the child's own
+ *   - `route.subworkflow.lineage` — the recursion lineage the compatibility
+ *     projection exposes for a *child* run when the daemon launches that child, so the child's own
  *     `subworkflow` steps can detect a cycle / depth bound. Absent for a top-level
  *     run.
  *
@@ -53,13 +55,13 @@ import {
   type SubworkflowParentLineage,
 } from "./subworkflow-child-config.js";
 
-/** The run-`route` namespace that carries all subworkflow config + lineage. */
+/** The compatibility run-`route` namespace that projects subworkflow config + lineage. */
 export const SUBWORKFLOW_ROUTE_KEY = "subworkflow";
 
 /**
- * The recursion lineage the daemon writes onto a *child* run's
- * `route.subworkflow.lineage` when it launches that child. Absent for a top-level
- * run.
+ * The recursion lineage the daemon persists for a *child* run and exposes through
+ * `route.subworkflow.lineage` when it launches that child. Canonical lineage is
+ * stored in `workflow_run_lineage`; the projection is absent for a top-level run.
  *
  *   - `parentRunId` / `parentStepId`: the parent run + dispatched step that
  *     launched this child (operator-visible provenance).
@@ -99,7 +101,7 @@ export type SubworkflowRouteLaunchRefusal =
 export type PlanSubworkflowChildLaunchFromRouteInput = {
   parentRunId: string;
   parentStepId: string;
-  /** The parent run's durable `route` JSON. */
+  /** The parent run's projected compatibility `route` JSON. */
   parentRoute: Record<string, unknown>;
   /** The parent run's own workflow definition key. */
   parentDefinitionKey: string;
@@ -231,11 +233,12 @@ export type DeriveChildSubworkflowRouteInput = {
 };
 
 /**
- * Build the `route` JSON a child run should be started with. The child's ancestry
- * is the parent's ancestry plus the parent's own definition key (root-first), so a
- * grandchild launch sees every ancestor above it and the cycle / depth checks stay
- * sound across nesting levels. The child run gets a fresh route carrying only the
- * propagated lineage — any authored child-of-child config is set separately.
+ * Build the compatibility `route` object a child run should be started with. The
+ * child's ancestry is the parent's ancestry plus the parent's own definition key
+ * (root-first), so a grandchild launch sees every ancestor above it and the cycle /
+ * depth checks stay sound across nesting levels. The child run gets a fresh route
+ * carrying only the propagated lineage; canonical persistence stores it in
+ * `workflow_run_lineage`, and any authored child-of-child config is set separately.
  */
 export function deriveChildSubworkflowRoute(
   input: DeriveChildSubworkflowRouteInput,

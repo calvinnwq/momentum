@@ -65,6 +65,36 @@ describe("persistWorkflowDefinition", () => {
     }
   });
 
+  it("round-trips sparse agent config independently from executor config", () => {
+    const db = openTempDb();
+    const definition: WorkflowDefinition = {
+      key: "configured-workflow",
+      title: "Configured workflow",
+      version: 1,
+      steps: [
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "agent-loop",
+          config: { command: "implement" },
+          agentConfig: {
+            harness: "codex",
+            model: "gpt-5.6",
+            effort: "medium",
+          },
+          order: 0,
+          required: true,
+        },
+      ],
+    };
+    try {
+      persistWorkflowDefinition(db, definition, { now: 1000 });
+      expect(loadWorkflowDefinition(db, definition.key)).toEqual(definition);
+    } finally {
+      db.close();
+    }
+  });
+
   it("re-persists a loaded retained built-in definition", () => {
     const db = openTempDb();
     try {

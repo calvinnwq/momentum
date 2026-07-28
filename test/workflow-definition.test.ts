@@ -225,6 +225,31 @@ describe("validateWorkflowDefinition", () => {
     }
   });
 
+  it("accepts sparse agent config and rejects unknown or blank fields", () => {
+    const configured = baseValidDefinition();
+    configured.steps[1]!.agentConfig = {
+      harness: "codex",
+      model: "gpt-5.6",
+      effort: "medium",
+    };
+    expect(validateWorkflowDefinition(configured).ok).toBe(true);
+
+    for (const agentConfig of [{ harness: " " }, { provider: "codex" }]) {
+      const invalid = baseValidDefinition();
+      invalid.steps[1]!.agentConfig = agentConfig as never;
+      const result = validateWorkflowDefinition(invalid);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.errors).toContainEqual(
+          expect.objectContaining({
+            code: "step_agent_config_invalid",
+            path: "steps[1].agentConfig",
+          }),
+        );
+      }
+    }
+  });
+
   it("rejects config objects that cannot round-trip as JSON objects", () => {
     for (const config of [new Date("2026-01-01T00:00:00Z"), new Map()]) {
       const invalid = baseValidDefinition();

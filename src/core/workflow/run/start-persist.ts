@@ -5,7 +5,9 @@
  * materializes it through {@link materializeWorkflowRunStart}, and writes the
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
- * approval boundary. This is the storage twin of the pure materializer:
+ * approval boundary, and persists route state through the adapter-owned canonical
+ * destinations while leaving `workflow_runs.route_json` empty.
+ * This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
  * is owned separately by `dispatch/scheduler.ts`; the native agent-loop,
  * agent-once / script SDK paths and the legacy no-mistakes mirror /
@@ -35,6 +37,13 @@
 import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
+import {
+  RouteStateMigrationError,
+  validateWorkflowRouteLineage,
+  validateWorkflowRouteShape,
+  validateWorkflowRouteStepProjection,
+  writeCanonicalWorkflowRunRouteState,
+} from "../../../adapters/db/route-state.js";
 import { CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY } from "../route/coding.js";
 import {
   materializeWorkflowRunStart,
@@ -42,6 +51,7 @@ import {
   type WorkflowRunStartInput,
 } from "./start.js";
 import type { WorkflowApprovalBoundary, WorkflowRunState } from "./reducer.js";
+import type { WorkflowDefinition } from "../definition/definition.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not
@@ -105,9 +115,59 @@ export function persistWorkflowRunStart(
     throw new InvalidWorkflowRunStartError(result.errors);
   }
   const { run, steps } = result.plan;
+  const definition = input.definition as WorkflowDefinition;
+  const definitionAgentConfigs = new Map(
+    definition.steps.flatMap((step) =>
+      step.agentConfig === undefined
+        ? []
+        : [[step.key, step.agentConfig] as const],
+    ),
+  );
+  try {
+    validateWorkflowRouteShape({
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+    });
+    validateWorkflowRouteStepProjection({
+      runId: run.runId,
+      route: run.route,
+      steps: steps.map((step) => ({
+        kind: step.kind,
+        agentConfig: definitionAgentConfigs.get(step.stepId),
+      })),
+    });
+    validateWorkflowRouteLineage(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    });
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    throw new InvalidWorkflowRunStartError([
+      {
+        code: "route_invalid",
+        message: error.message,
+        path: error.jsonPath,
+      },
+    ]);
+  }
 
   db.exec("BEGIN IMMEDIATE");
   try {
+    validateWorkflowRouteLineage(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    });
     const existing = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
       .get(run.runId) as { id: string } | undefined;
@@ -131,7 +191,7 @@ export function persistWorkflowRunStart(
       run.repoPath,
       run.objective,
       JSON.stringify(run.issueScope),
-      JSON.stringify(run.route),
+      "{}",
       run.approvalBoundary,
       run.skillRevision,
       run.definitionKey,
@@ -159,6 +219,22 @@ export function persistWorkflowRunStart(
         run.updatedAt,
       );
     }
+
+    writeCanonicalWorkflowRunRouteState(db, {
+      runId: run.runId,
+      source: run.source,
+      route: run.route,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      definitionAgentConfigs,
+      definitionExecutorConfigs: new Map(
+        definition.steps.flatMap((step) =>
+          step.config === undefined ? [] : [[step.key, step.config] as const],
+        ),
+      ),
+    });
 
     if (run.approvalBoundary !== null) {
       const phrase = `workflow run start --approval-boundary ${run.approvalBoundary}`;
@@ -192,6 +268,15 @@ export function persistWorkflowRunStart(
     safeRollback(db);
     if (isUniqueViolation(error)) {
       throw new WorkflowRunStartConflictError(run.runId);
+    }
+    if (error instanceof RouteStateMigrationError) {
+      throw new InvalidWorkflowRunStartError([
+        {
+          code: "route_invalid",
+          message: error.message,
+          path: error.jsonPath,
+        },
+      ]);
     }
     throw error;
   }

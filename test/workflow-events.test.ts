@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import {
   insertWorkflowGate,
   resolveWorkflowGate,
@@ -181,6 +182,7 @@ function seedRun(
     input.createdAt ?? 1,
     input.updatedAt ?? 1,
   );
+  seedCanonicalCodingCompatibilityMarker(db, input.runId, input.updatedAt ?? 1);
 }
 
 function seedStep(

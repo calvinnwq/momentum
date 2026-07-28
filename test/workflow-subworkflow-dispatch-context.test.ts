@@ -23,6 +23,7 @@ import {
   resolveSubworkflowParentRunFacts,
   type SubworkflowParentRunRow,
 } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 /**
  * NGX-498 (RC-4b) — focused coverage for the *daemon-lane context deriver* that
@@ -75,6 +76,13 @@ const CHILD_DEFINITION: WorkflowDefinition = {
   ],
 };
 
+const PARENT_DEFINITION: WorkflowDefinition = {
+  ...CODING_WORKFLOW_DEFINITION,
+  steps: CODING_WORKFLOW_DEFINITION.steps.map((step) =>
+    step.key === STEP_ID ? { ...step, executor: "subworkflow" } : step,
+  ),
+};
+
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -103,7 +111,7 @@ function openSeededDb(
   } = {},
 ): MomentumDb {
   const db = openDb(makeTempDir());
-  persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+  persistWorkflowDefinition(db, PARENT_DEFINITION, { now: NOW });
 
   const subworkflow: Record<string, unknown> = {};
   if (options.childConfig !== undefined)
@@ -113,7 +121,7 @@ function openSeededDb(
     Object.keys(subworkflow).length > 0 ? { subworkflow } : undefined;
 
   persistWorkflowRunStart(db, {
-    definition: CODING_WORKFLOW_DEFINITION,
+    definition: PARENT_DEFINITION,
     runId: PARENT_RUN_ID,
     repoPath: REPO_PATH,
     objective: "Parent run for RC-4b context deriver coverage",
@@ -157,14 +165,6 @@ function countRuns(db: MomentumDb): number {
   return (
     db.prepare("SELECT COUNT(*) AS n FROM workflow_runs").get() as { n: number }
   ).n;
-}
-
-function childRouteJson(db: MomentumDb): unknown {
-  const row = db
-    .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-    .get(CHILD_RUN_ID) as { route_json: string | null } | undefined;
-  if (row?.route_json == null) return null;
-  return JSON.parse(row.route_json) as unknown;
 }
 
 describe("deriveDispatchedSubworkflowContext — resolves a configured subworkflow step", () => {
@@ -222,7 +222,7 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
 
     await resolution.runSubworkflowChild();
 
-    expect(childRouteJson(db)).toEqual({
+    expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual({
       subworkflow: {
         lineage: {
           parentRunId: PARENT_RUN_ID,
@@ -271,16 +271,39 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
         childDefinitionKey: CHILD_DEFINITION_KEY,
         childDefinitionVersion: CHILD_DEFINITION.version,
       },
-      lineage: { parentRunId: 42 },
     });
+    persistWorkflowRunStart(db, {
+      definition: PARENT_DEFINITION,
+      runId: "run-grandparent-ctx-001",
+      repoPath: REPO_PATH,
+      objective: "Grandparent run for corrupt lineage coverage",
+      now: NOW,
+    });
+    db.prepare(
+      `INSERT INTO workflow_run_lineage (
+         run_id, parent_run_id, parent_step_id, depth,
+         ancestor_definition_keys_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      PARENT_RUN_ID,
+      "run-grandparent-ctx-001",
+      STEP_ID,
+      1,
+      JSON.stringify([
+        CODING_WORKFLOW_DEFINITION_KEY,
+        CODING_WORKFLOW_DEFINITION_KEY,
+      ]),
+      NOW,
+      NOW,
+    );
     const resolution = deriveDispatchedSubworkflowContext(
       claim(db),
       context(db),
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) return;
-    expect(resolution.reason).toMatch(/lineage/i);
-    expect(countRuns(db)).toBe(1);
+    expect(resolution.reason).toMatch(/depth|maxDepth/i);
+    expect(countRuns(db)).toBe(2);
   });
 
   it("refuses at build time when the configured child definition key does not resolve", () => {

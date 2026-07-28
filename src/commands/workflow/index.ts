@@ -17,6 +17,7 @@ import {
   openExistingDbReadOnly,
   type MomentumDb,
 } from "../../adapters/db.js";
+import { RouteStateMigrationError } from "../../adapters/db/route-state.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
@@ -240,6 +241,34 @@ type ParsedFlags = {
   error?: string;
 };
 
+type RouteAwareWorkflowFailure = {
+  code: string;
+  message: string;
+  runId?: string;
+  jsonPath?: string;
+  repair?: string;
+};
+
+function normalizeWorkflowFailure(
+  error: unknown,
+  fallbackRunId?: string,
+): RouteAwareWorkflowFailure {
+  if (error instanceof RouteStateMigrationError) {
+    return {
+      code: error.code,
+      message: error.message,
+      runId: error.runId,
+      jsonPath: error.jsonPath,
+      repair: error.repair,
+    };
+  }
+  return {
+    code: "data_dir_failed",
+    message: error instanceof Error ? error.message : String(error),
+    ...(fallbackRunId === undefined ? {} : { runId: fallbackRunId }),
+  };
+}
+
 export type CliDeps = DaemonWorkflowDispatchDeps;
 
 export function workflow(
@@ -404,10 +433,8 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
       });
     }
     return emitWorkflowRunEventsFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: error instanceof Error ? error.message : String(error),
+      ...normalizeWorkflowFailure(error, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -443,12 +470,13 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
- *   - it records the coding implementation engine under
+ *   - it builds the coding implementation engine compatibility value exposed as
  *     `route.implementationEngine`, defaulting to the honest `gnhf` label while
  *     retaining persisted `native-goal-loop` compatibility and
  *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
- *   - it accepts the coding-only `--steps-json` route override and records
- *     validated per-step harness/model/effort selections under `route.steps`,
+ *   - it accepts the coding-only `--steps-json` route override and builds
+ *     validated per-step harness/model/effort selections for canonical
+ *     persistence, exposed through the compatibility `route.steps` projection,
  *     with provider-aware model aliases normalized before persistence; and
  *   - it runs structural preflight for built-in definition lookup, route
  *     profile, route steps, and run-start shape before any durable write.
@@ -637,9 +665,9 @@ async function runWorkflowStartCommand(
   // Native per-step coding route reconfiguration: an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
   // --steps-json. The validated, normalized overrides, including provider-aware
-  // model alias rewrites for known harness mappings, are embedded durably under
-  // route.steps so status/handoff/logs can audit the selection and so execution
-  // can read it (or fail closed). The per-step namespace is coding-door specific,
+  // model alias rewrites for known harness mappings, are handed to canonical
+  // persistence and exposed through route.steps so status/handoff/logs can audit
+  // the selection and execution can read it (or fail closed). The per-step namespace is coding-door specific,
   // so the generic `workflow run start` refuses it rather than silently dropping
   // a coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
@@ -880,7 +908,16 @@ async function runWorkflowStartCommand(
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      command,
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+    });
+  }
   try {
     const definition = options.coding
       ? codingDefinition
@@ -1089,11 +1126,12 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the durable run route from the recorded implementation engine
-  // (route.implementationEngine), operator profile (route.profile), and validated
-  // per-step overrides (route.steps). The engine marker is written for native
-  // coding starts even when profile and per-step overrides are omitted, so readback
-  // can distinguish the selected implementation path from the compatibility route.
+  // Compose the compatibility route projection from the recorded implementation
+  // engine (route.implementationEngine), operator profile (route.profile), and
+  // validated per-step overrides (route.steps). Canonical persistence owns the
+  // destination rows; the engine marker is still built for native coding starts
+  // even when profile and per-step overrides are omitted, so readback can
+  // distinguish the selected implementation path from the compatibility route.
   let route: Record<string, unknown> = {};
   if (coding) {
     route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;
@@ -1150,7 +1188,16 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowImportFailure(parsed, io, {
+      ...normalizeWorkflowFailure(error),
+      dataDir,
+      path: artifactPath,
+    });
+  }
   let summary: PersistWorkflowRunImportSummary;
   let recovery: ReconcileWorkflowRunManualRecoveryResult;
   let recoveryState: WorkflowRunManualRecoveryState | undefined;
@@ -1162,6 +1209,12 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
       artifactRunDir: artifactPath,
     });
     recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
+  } catch (error) {
+    return emitWorkflowImportFailure(parsed, io, {
+      ...normalizeWorkflowFailure(error, parseResult.import.run.runId),
+      dataDir,
+      path: artifactPath,
+    });
   } finally {
     db.close();
   }
@@ -1244,10 +1297,8 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
     } catch (err) {
       return emitWorkflowStatusFailure(parsed, io, {
         command: "workflow status",
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     } finally {
       db?.close();
@@ -1289,8 +1340,7 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowStatusFailure(parsed, io, {
       command: "workflow status",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err),
       dataDir,
     });
   } finally {
@@ -1405,8 +1455,7 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowRunListFailure(parsed, io, {
       command: "workflow run list",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err),
       dataDir,
     });
   } finally {
@@ -1505,7 +1554,17 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
   let approvalArtifactDigest = "";
   let recordedAt = 0;
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+      boundary,
+    });
+  }
   try {
     const existingRun = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
@@ -1808,7 +1867,17 @@ function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
     resolutionNote: parsed.note ?? null,
   };
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      ...normalizeWorkflowFailure(error),
+      dataDir,
+      gateId,
+    });
+  }
   try {
     const resolved = resolveWorkflowGateAndResumeRegisteredExecutor(
       db,
@@ -1937,7 +2006,17 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
 
   let resultPayload: Record<string, unknown> | null = null;
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+      stepId,
+    });
+  }
   try {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -2258,7 +2337,15 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
+  let db: MomentumDb;
+  try {
+    db = openDb(dataDir);
+  } catch (error) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      ...normalizeWorkflowFailure(error, runId),
+      dataDir,
+    });
+  }
   let result: ClearWorkflowRunManualRecoveryGuardedResult;
   try {
     const clearInput: ClearWorkflowRunManualRecoveryGuardedInput = { runId };
@@ -2323,10 +2410,8 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     envelope = db === undefined ? null : loadWorkflowMonitorEnvelope(db, runId);
   } catch (err) {
     return emitWorkflowRunMonitorFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -2395,10 +2480,8 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
         );
     } catch (err) {
       return emitWorkflowRunMonitorFailure(parsed, io, {
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     } finally {
       writeDb?.close();
@@ -2496,10 +2579,8 @@ async function workflowRunWatch(
   } catch (err) {
     if (!isSqliteBusyError(err)) {
       return emitWorkflowRunWatchFailure(parsed, io, {
-        code: "data_dir_failed",
-        message: err instanceof Error ? err.message : String(err),
+        ...normalizeWorkflowFailure(err, runId),
         dataDir,
-        runId,
       });
     }
     try {
@@ -2512,13 +2593,8 @@ async function workflowRunWatch(
       readOnlyFallback = true;
     } catch (fallbackError) {
       return emitWorkflowRunWatchFailure(parsed, io, {
-        code: "data_dir_failed",
-        message:
-          fallbackError instanceof Error
-            ? fallbackError.message
-            : String(fallbackError),
+        ...normalizeWorkflowFailure(fallbackError, runId),
         dataDir,
-        runId,
       });
     }
   } finally {
@@ -2594,10 +2670,8 @@ async function workflowRunWatch(
     appendWorkflowWatchAdvisoryEvent(writeDb, envelope, progress, advisory);
   } catch (err) {
     return emitWorkflowRunWatchFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     writeDb?.close();
@@ -2714,10 +2788,8 @@ async function workflowRunWatchStream(
       });
     }
     return emitStreamFailure({
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     if (signalCapable) process.removeListener("SIGINT", onSigint);
@@ -2968,10 +3040,8 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
           });
   } catch (err) {
     return emitWorkflowRunLogsFailure(parsed, io, {
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();
@@ -3148,10 +3218,8 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
   } catch (err) {
     return emitWorkflowHandoffFailure(parsed, io, {
       command: "workflow handoff",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
+      ...normalizeWorkflowFailure(err, runId),
       dataDir,
-      runId,
     });
   } finally {
     db?.close();

@@ -12,28 +12,29 @@
  *   - iteration 1 (`route/subworkflow-child-config.ts`): the child-config shape +
  *     recursion-safety deciders;
  *   - iteration 2 (`route/subworkflow.ts`): {@link planSubworkflowChildLaunchFromRoute},
- *     which sources the child config from `route.subworkflow.child` and the durable
- *     recursion lineage from `route.subworkflow.lineage`, returning a launch plan
+ *     which sources the child config from the projected `route.subworkflow.child`
+ *     and the canonical recursion lineage projected as `route.subworkflow.lineage`, returning a launch plan
  *     (child definition key, deterministic child run id, propagated child route) or
  *     a typed fail-closed refusal;
  *   - iteration 3 (`route/subworkflow-child-runner.ts`):
  *     {@link buildDispatchedSubworkflowChildRunner}, which resolves the child
  *     definition by key and returns the production start-or-attach runner.
  *
- * The deriver reads the parent run's durable facts (its `route`, definition key,
- * objective, and repo) from the `workflow_runs` row, runs the iteration-2 launch
- * plan over them, derives the parent-run-dir evidence paths, builds the iteration-3
- * runner, and returns the {@link DispatchedSubworkflowContextResolution} the
- * factory forwards into the producer (or routes to manual recovery on any refusal).
+ * The deriver reads the parent run's durable facts and adapter-owned compatibility
+ * route projection, definition key, objective, and repo, runs the iteration-2
+ * launch plan over them, derives the parent-run-dir evidence paths, builds the
+ * iteration-3 runner, and returns the {@link DispatchedSubworkflowContextResolution}
+ * the factory forwards into the producer (or routes to manual recovery on any refusal).
  *
  * Discipline (the pure-decision / injected-IO split `live-wrapper/daemon-exec-context.ts`
  * uses, and total so the factory never has to handle a thrown derivation specially):
  *
  *   - {@link resolveSubworkflowParentRunFacts} is the pure half: it validates the
  *     raw run-row columns the launch plan needs (a definition-linked run, a
- *     non-blank inherited objective) and parses `route_json` — failing closed on a
- *     corrupt route rather than throwing, the same posture the route module takes
- *     for a corrupt lineage. `repo_path` is passed through and owned by the reused
+ *     non-blank inherited objective) and parses the projected compatibility route
+ *     JSON — failing closed on a corrupt route rather than throwing, the same
+ *     posture the route module takes for a corrupt lineage. `repo_path` is passed
+ *     through and owned by the reused
  *     {@link resolveDispatchedStepExecutorContext} run-dir resolver, which already
  *     refuses a run with no repo to host a child.
  *   - {@link loadSubworkflowParentRunRow} is the injected IO half: it reads the
@@ -56,6 +57,10 @@
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import {
+  projectValidatedLegacyWorkflowRunRoute,
+  RouteStateMigrationError,
+} from "../../../adapters/db/route-state.js";
 import { resolveDispatchedStepExecutorContext } from "../live-wrapper/daemon-exec-context.js";
 import type {
   ClaimedWorkflowStep,
@@ -72,7 +77,7 @@ import { planSubworkflowChildLaunchFromRoute } from "./subworkflow.js";
  * refusal.
  */
 export type SubworkflowParentRunRow = {
-  /** The run's free-form `route` JSON (carries the subworkflow config + lineage). */
+  /** The projected compatibility `route` JSON (canonical config and lineage live in adapter destinations). */
   routeJson: string | null;
   /** The run's own workflow definition key (the recursion self-reference anchor). */
   definitionKey: string | null;
@@ -82,6 +87,8 @@ export type SubworkflowParentRunRow = {
   repoPath: string | null;
   /** The imported run's source artifact path (run-dir layout for imported runs). */
   sourceArtifactPath: string | null;
+  /** Stable canonical-route refusal detail when the adapter rejects projection. */
+  routeStateError?: string;
 };
 
 /**
@@ -112,14 +119,22 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Validate a parent run row into the facts the child launch needs. Pure and total:
  * a definition-unlinked or objectiveless run is refused, and a corrupt / non-object
- * `route_json` fails closed rather than throwing (a `null` route is the legitimate
- * empty-route case). `repoPath` / `sourceArtifactPath` pass through to the run-dir
+ * projected route JSON fails closed rather than throwing (a `null` route is the
+ * legitimate empty-route case). `repoPath` / `sourceArtifactPath` pass through to the run-dir
  * resolver, which owns the "no repo to host a child" refusal.
  */
 export function resolveSubworkflowParentRunFacts(
   runId: string,
   row: SubworkflowParentRunRow,
 ): SubworkflowParentRunFactsResolution {
+  if (row.routeStateError !== undefined) {
+    return {
+      ok: false,
+      reason:
+        `Subworkflow parent run ${runId} has a corrupt route at ${row.routeStateError}; ` +
+        "routing to manual recovery.",
+    };
+  }
   if (!nonBlank(row.definitionKey)) {
     return {
       ok: false,
@@ -178,25 +193,43 @@ export function loadSubworkflowParentRunRow(
 ): SubworkflowParentRunRow | undefined {
   const row = db
     .prepare(
-      `SELECT route_json, workflow_definition_key, objective, repo_path, source_artifact_path
+      `SELECT source, workflow_definition_key, workflow_definition_version,
+              objective, repo_path, source_artifact_path
          FROM workflow_runs WHERE id = ?`,
     )
     .get(runId) as
     | {
-        route_json: string | null;
+        source: string;
         workflow_definition_key: string | null;
+        workflow_definition_version: number | null;
         objective: string | null;
         repo_path: string | null;
         source_artifact_path: string | null;
       }
     | undefined;
   if (row === undefined) return undefined;
+  let routeJson: string;
+  let routeStateError: string | undefined;
+  try {
+    routeJson = JSON.stringify(
+      projectValidatedLegacyWorkflowRunRoute(db, runId, {
+        source: row.source,
+        definitionKey: row.workflow_definition_key,
+        definitionVersion: row.workflow_definition_version,
+      }),
+    );
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    routeJson = "{}";
+    routeStateError = error.jsonPath;
+  }
   return {
-    routeJson: row.route_json,
+    routeJson,
     definitionKey: row.workflow_definition_key,
     objective: row.objective,
     repoPath: row.repo_path,
     sourceArtifactPath: row.source_artifact_path,
+    ...(routeStateError !== undefined ? { routeStateError } : {}),
   };
 }
 

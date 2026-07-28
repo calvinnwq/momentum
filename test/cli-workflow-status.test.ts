@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import { insertExecutorAttempt } from "../src/core/executors/loop/persist.js";
 import {
@@ -187,6 +188,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     now,
     input.updatedAt ?? now,
   );
+  seedCanonicalCodingCompatibilityMarker(db, input.runId, now);
 }
 
 function seedStep(db: MomentumDb, runId: string, input: SeedStepInput): void {
@@ -681,6 +683,21 @@ describe("momentum workflow status", () => {
       code: "run_not_found",
       runId: "cwfp-missing",
     });
+  });
+
+  it("preserves the run id in text failures unrelated to route state", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-missing",
+      "--data-dir",
+      dataDir,
+    ]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "Workflow run not found: cwfp-missing\nRun ID: cwfp-missing\n",
+    );
   });
 
   it("returns detail with steps, approvals, leases, and monitor next-action", async () => {

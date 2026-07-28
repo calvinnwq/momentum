@@ -25,6 +25,7 @@ import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workfl
 import { deriveDispatchedSubworkflowContext } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 /**
  * NGX-498 (RC-4b) — the production flip proof.
@@ -99,8 +100,9 @@ function makeTempDir(prefix = "momentum-sub-flip-"): string {
 /**
  * Seed a migrated DB with the parent + child definitions and an approved
  * top-level parent run whose single `subworkflow` step is ready to dispatch. The
- * authored child-launch config rides in the run's `route` JSON, exactly where the
- * production lane sources it.
+ * authored child-launch config is supplied through the compatibility `route`
+ * object, then persisted canonically in `workflow_steps.executor_config_json` and
+ * read back through the adapter-owned route projection.
  */
 function seedParentRun(dataDir: string, repoPath: string, runId: string): void {
   const db = openDb(dataDir);
@@ -204,10 +206,10 @@ describe("subworkflow production flip — configured step dispatches through dae
 
       // The child run carries the propagated recursion lineage so its own
       // subworkflow steps can detect a cycle / depth bound.
-      const childRow = db
-        .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-        .get(childRunId(runId)) as { route_json: string | null } | undefined;
-      const childRoute = JSON.parse(childRow?.route_json ?? "{}") as {
+      const childRoute = loadCanonicalWorkflowRunRoute(
+        db,
+        childRunId(runId),
+      ) as {
         subworkflow?: { lineage?: Record<string, unknown> };
       };
       expect(childRoute.subworkflow?.lineage).toMatchObject({

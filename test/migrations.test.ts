@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, openExistingDbMigratedReadOnly } from "../src/adapters/db.js";
-import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
+import {
+  applyQueueMigrations,
+  applyWorkflowVocabularyMigration,
+} from "../src/adapters/db/migrations.js";
 import { startRetryableDispatchAttempt } from "../src/core/workflow/dispatch/retry.js";
 import { selectRunnableWorkflowWork } from "../src/core/workflow/dispatch/scheduler.js";
 
@@ -3233,7 +3236,7 @@ INSERT INTO workflow_runs
    created_at, updated_at)
 VALUES
   ('vocab-run-1', 'running', 'momentum-native-coding-workflow', '{}',
-   '{"steps":{"no-mistakes":{"runner_profile":"careful"}}}', 'no-mistakes',
+   '{"steps":{"no-mistakes":{"harness":"careful"}}}', 'no-mistakes',
    100, 900),
   ('vocab-run-2', 'running', 'momentum-native-coding-workflow', '{}', '{}',
    'through-no-mistakes', 100, 900);
@@ -3423,7 +3426,8 @@ VALUES
         { step_id: "linear-refresh", kind: "tracker-refresh" },
       ]);
 
-      // Approval boundaries and route step overrides re-spell.
+      // Approval boundaries re-spell. The route override is re-keyed by NAM-02,
+      // then the route-state migration moves it to the canonical step column.
       const runs = db
         .prepare(
           `SELECT id, approval_boundary, route_json
@@ -3434,8 +3438,20 @@ VALUES
         id: "vocab-run-1",
         approval_boundary: "validate",
       });
-      expect(JSON.parse(String(runs[0]?.route_json))).toEqual({
-        steps: { validate: { runner_profile: "careful" } },
+      expect(runs[0]).toMatchObject({
+        route_json: "{}",
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT agent_config_json
+               FROM workflow_steps
+              WHERE run_id = 'vocab-run-1'
+                AND step_id = 'no-mistakes'`,
+          )
+          .get(),
+      ).toEqual({
+        agent_config_json: '{"harness":"careful"}',
       });
       expect(runs[1]).toMatchObject({
         id: "vocab-run-2",
@@ -3751,7 +3767,7 @@ VALUES
     }
   });
 
-  it("migrates workflow vocabulary in a partial read-only database", () => {
+  it("migrates workflow vocabulary directly in a partial database", () => {
     const dataDir = makeTempDir("momentum-nam02-partial-readonly-");
     const writable = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
@@ -3770,7 +3786,7 @@ VALUES
         INSERT INTO workflow_runs (id, route_json, approval_boundary)
         VALUES (
           'partial-vocab-run',
-          '{"steps":{"no-mistakes":{"runner_profile":"careful"}}}',
+          '{"steps":{"no-mistakes":{"harness":"careful"}}}',
           'through-no-mistakes'
         );
         INSERT INTO workflow_steps (run_id, step_id, kind)
@@ -3780,11 +3796,11 @@ VALUES
       writable.close();
     }
 
-    const db = openExistingDbMigratedReadOnly(dataDir);
-    expect(db).toBeDefined();
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
+      applyWorkflowVocabularyMigration(db);
       expect(
-        db!
+        db
           .prepare(
             `SELECT approval_boundary, route_json
                FROM workflow_runs WHERE id = 'partial-vocab-run'`,
@@ -3792,10 +3808,10 @@ VALUES
           .get(),
       ).toEqual({
         approval_boundary: "through-validate",
-        route_json: '{"steps":{"validate":{"runner_profile":"careful"}}}',
+        route_json: '{"steps":{"validate":{"harness":"careful"}}}',
       });
       expect(
-        db!
+        db
           .prepare(
             `SELECT step_id, kind
                FROM workflow_steps WHERE run_id = 'partial-vocab-run'`,
@@ -3803,7 +3819,7 @@ VALUES
           .get(),
       ).toEqual({ step_id: "no-mistakes", kind: "validate" });
     } finally {
-      db?.close();
+      db.close();
     }
   });
 
@@ -3864,9 +3880,9 @@ VALUES
       writable.close();
     }
 
-    const db = openExistingDbMigratedReadOnly(dataDir);
-    expect(db).toBeDefined();
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
+      applyWorkflowVocabularyMigration(db);
       expect(
         db
           ?.prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
@@ -3883,7 +3899,7 @@ VALUES
         route_json: '{"steps":{"tracker-refresh":{"model":"tracker"}}}',
       });
     } finally {
-      db?.close();
+      db.close();
     }
   });
 

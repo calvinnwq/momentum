@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { WORKFLOW_EXECUTORS } from "../src/core/workflow/definition/definition.js";
@@ -213,6 +214,7 @@ function seedRun(
     SEED_NOW,
     SEED_NOW,
   );
+  seedCanonicalCodingCompatibilityMarker(db, input.runId, SEED_NOW);
 }
 
 function seedStep(

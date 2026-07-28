@@ -18,8 +18,9 @@
  *     bad definition can never leave partial state behind.
  *   - `created_at` is preserved across re-persists; `updated_at` is bumped on
  *     every upsert so callers can detect re-ingest.
- *   - Optional portable step config round-trips through nullable `config_json`;
- *     an omitted config remains absent when loaded.
+ *   - Optional portable step config and agent selection metadata round-trip through
+ *     nullable `config_json` and `agent_config_json`; omitted values remain absent
+ *     when loaded.
  *   - The persisted step set exactly mirrors the definition: re-persisting a
  *     `(key, version)` with a step removed deletes the orphaned step row, so a
  *     loaded definition always round-trips to what was last persisted.
@@ -127,12 +128,14 @@ function persistWorkflowDefinitionWithLegacyMode(
     const stepStmt = db.prepare(
       `INSERT INTO step_definitions
          (definition_key, definition_version, step_key, kind, executor, config_json,
+          agent_config_json,
           step_order, required, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(definition_key, definition_version, step_key) DO UPDATE SET
          kind = excluded.kind,
          executor = excluded.executor,
          config_json = excluded.config_json,
+         agent_config_json = excluded.agent_config_json,
          step_order = excluded.step_order,
          required = excluded.required,
          updated_at = excluded.updated_at`,
@@ -145,6 +148,9 @@ function persistWorkflowDefinitionWithLegacyMode(
         step.kind,
         step.executor,
         step.config === undefined ? null : JSON.stringify(step.config),
+        step.agentConfig === undefined
+          ? null
+          : JSON.stringify(step.agentConfig),
         step.order,
         step.required ? 1 : 0,
         now,
@@ -208,7 +214,8 @@ export function loadWorkflowDefinition(
 
   const stepRows = db
     .prepare(
-      `SELECT step_key, kind, executor, config_json, step_order, required
+      `SELECT step_key, kind, executor, config_json, agent_config_json,
+              step_order, required
          FROM step_definitions
          WHERE definition_key = ? AND definition_version = ?
          ORDER BY step_order, step_key`,
@@ -218,6 +225,7 @@ export function loadWorkflowDefinition(
     kind: string;
     executor: string;
     config_json: string | null;
+    agent_config_json: string | null;
     step_order: number;
     required: number;
   }>;
@@ -229,11 +237,18 @@ export function loadWorkflowDefinition(
       resolvedVersion,
       row.step_key,
     );
+    const agentConfig = parseStepAgentConfig(
+      row.agent_config_json,
+      key,
+      resolvedVersion,
+      row.step_key,
+    );
     return {
       key: row.step_key,
       kind: row.kind as StepDefinitionKind,
       executor: row.executor as ExecutorName,
       ...(config === undefined ? {} : { config }),
+      ...(agentConfig === undefined ? {} : { agentConfig }),
       order: row.step_order,
       required: row.required === 1,
     };
@@ -245,6 +260,29 @@ export function loadWorkflowDefinition(
     version: defRow.version,
     steps,
   };
+}
+
+function parseStepAgentConfig(
+  raw: string | null,
+  definitionKey: string,
+  definitionVersion: number,
+  stepKey: string,
+): StepDefinition["agentConfig"] | undefined {
+  if (raw === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `Invalid step agent config JSON for ${definitionKey}@${definitionVersion}/${stepKey}.`,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `Invalid step agent config object for ${definitionKey}@${definitionVersion}/${stepKey}.`,
+    );
+  }
+  return parsed as StepDefinition["agentConfig"];
 }
 
 function parseStepConfig(

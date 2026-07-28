@@ -8,7 +8,8 @@
  * route input, and nothing per-step. CWFP already lets an operator inspect and
  * adjust the implementation path plus planned harness/model choices before
  * approving execution; this module is the keystone that lets the native door
- * carry the same durable route control.
+ * carry the same durable route control while keeping canonical persistence
+ * separate from the compatibility route projection.
  *
  * This module owns ONLY the pure representation + validation half (no SQLite, no
  * file system, no clock, no network), the same discipline
@@ -16,19 +17,19 @@
  * `readSubworkflowParentLineage` (`route/subworkflow.ts`) follow, so the
  * fail-closed contract is exhaustively testable on its own. The CLI
  * start/preview doors build overrides from `--steps-json`, the detail/read-back
- * surfaces expose the selected config through the durable run route and executor
- * rounds, and daemon dispatch consumes the same namespace when it freezes
+ * surfaces expose the selected config through canonical run state and the
+ * compatibility route projection, while executor rounds freeze it, and daemon dispatch consumes the same compatibility namespace when it freezes
  * per-step agent/model/effort selection for execution or fails closed when the
  * namespace is corrupt.
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
- * portable recipe-level executor config, but the selected implementation path
- * and operator harness/model/effort overrides are run-specific. Their durable
- * home is therefore the run's free-form `route` JSON. The implementation path lives under
- * {@link CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY} (`route.implementationEngine`).
- * Per-step overrides live under the single {@link CODING_ROUTE_STEPS_KEY}
- * (`route.steps`) namespace, parallel to `route.subworkflow` and the run-level
- * `route.profile`.
+ * portable recipe-level executor and agent config, while the selected
+ * implementation path and operator harness/model/effort overrides are run-specific.
+ * Canonical run state is owned by the database adapter: per-step overrides live in
+ * `workflow_steps.agent_config_json`, and the implementation path/profile live in
+ * the coding-compatibility destination. This module operates on their stable
+ * compatibility projection under `route.implementationEngine`, `route.steps`, and
+ * `route.profile`, parallel to `route.subworkflow`.
  * `route.profile` (the recorded operator profile) stays distinct from these
  * per-step selections and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE`
  * execution profile; none of them are conflated here.
@@ -120,8 +121,8 @@ export type CodingStepRouteOverride = Partial<
 >;
 
 /**
- * The durable per-step override map carried under `route.steps`. Only steps the
- * operator actually overrode (with at least one field) appear; a step with no
+ * The compatibility-projection per-step override map carried under `route.steps`.
+ * Only steps the operator actually overrode (with at least one field) appear; a step with no
  * overrides is simply absent and resolves to the defaults.
  */
 export type CodingStepRouteOverrides = Partial<
@@ -369,7 +370,7 @@ export function validateCodingStepRouteOverrides(
 }
 
 /**
- * Read back per-step coding route overrides from a persisted run `route`. Pure and
+ * Read back per-step coding route overrides from the projected run `route`. Pure and
  * total: an absent `route.steps` namespace is a legitimate run with no per-step
  * overrides; a present-but-corrupt namespace fails closed with the same refusal
  * taxonomy as {@link validateCodingStepRouteOverrides} so a hand-edited or
@@ -439,9 +440,9 @@ function mergePersistedRouteOverrideValues(
 }
 
 /**
- * Embed per-step coding route overrides into a run `route`, returning a new route
- * object (the input is never mutated). When there are no overrides the
- * `route.steps` namespace is omitted entirely so the durable route stays minimal;
+ * Embed per-step coding route overrides into a compatibility-projection `route`,
+ * returning a new route object (the input is never mutated). When there are no
+ * overrides the `route.steps` namespace is omitted entirely so the projection stays minimal;
  * all other namespaces (`route.implementationEngine`, `route.profile`,
  * `route.subworkflow`, ...) are preserved.
  */

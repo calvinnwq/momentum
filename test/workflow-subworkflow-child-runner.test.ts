@@ -13,6 +13,7 @@ import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.
 import { markWorkflowRunNeedsManualRecovery } from "../src/core/workflow/run/recovery.js";
 import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import { buildDispatchedSubworkflowChildRunner } from "../src/core/workflow/route/subworkflow-child-runner.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 /**
  * NGX-498 (RC-4b) — focused coverage for the *production* start-or-attach child
@@ -79,6 +80,26 @@ const OTHER_DEFINITION: WorkflowDefinition = {
   title: "Other Child Workflow",
 };
 
+const PARENT_DEFINITION: WorkflowDefinition = {
+  ...CODING_WORKFLOW_DEFINITION,
+  key: "parent-workflow",
+  title: "Parent Workflow",
+  steps: CODING_WORKFLOW_DEFINITION.steps.map((step) =>
+    step.key === STEP_ID
+      ? {
+          ...step,
+          executor: "subworkflow",
+          config: {
+            child: {
+              childDefinitionKey: CHILD_DEFINITION_KEY,
+              childDefinitionVersion: 1,
+            },
+          },
+        }
+      : step,
+  ),
+};
+
 /** A propagated child route, as iteration 2's `deriveChildSubworkflowRoute` builds. */
 const CHILD_ROUTE = {
   subworkflow: {
@@ -86,7 +107,7 @@ const CHILD_ROUTE = {
       parentRunId: PARENT_RUN_ID,
       parentStepId: STEP_ID,
       depth: 1,
-      ancestorDefinitionKeys: ["coding-workflow"],
+      ancestorDefinitionKeys: [PARENT_DEFINITION.key],
     },
   },
 };
@@ -111,9 +132,9 @@ function openSeededDb(
   options: { withChildDefinition?: boolean } = {},
 ): MomentumDb {
   const db = openDb(makeTempDir());
-  persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+  persistWorkflowDefinition(db, PARENT_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
-    definition: CODING_WORKFLOW_DEFINITION,
+    definition: PARENT_DEFINITION,
     runId: PARENT_RUN_ID,
     repoPath: "/repos/momentum",
     objective: "Parent run for RC-4b child-runner coverage",
@@ -129,14 +150,6 @@ function countRuns(db: MomentumDb): number {
   return (
     db.prepare("SELECT COUNT(*) AS n FROM workflow_runs").get() as { n: number }
   ).n;
-}
-
-function childRouteJson(db: MomentumDb): unknown {
-  const row = db
-    .prepare("SELECT route_json FROM workflow_runs WHERE id = ?")
-    .get(CHILD_RUN_ID) as { route_json: string | null } | undefined;
-  if (row?.route_json == null) return null;
-  return JSON.parse(row.route_json) as unknown;
 }
 
 function buildRunner(
@@ -190,7 +203,9 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
 
     await resolution.run();
 
-    expect(childRouteJson(db)).toEqual(CHILD_ROUTE);
+    expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual(
+      CHILD_ROUTE,
+    );
   });
 
   it("starts the child workflow run from the configured definition version", async () => {

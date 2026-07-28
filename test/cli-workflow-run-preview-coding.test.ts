@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -874,7 +875,9 @@ describe("momentum workflow run preview-coding", () => {
         previewPayload["definitionVersion"],
       );
       expect(runRow.approval_boundary).toBe(previewPayload["approvalBoundary"]);
-      expect(JSON.parse(runRow.route_json)).toEqual(previewPayload["route"]);
+      expect(loadCanonicalWorkflowRunRoute(db, "preview-equiv")).toEqual(
+        previewPayload["route"],
+      );
 
       const persistedSteps = db
         .prepare(
@@ -1028,7 +1031,9 @@ describe("momentum workflow run preview-coding", () => {
       expect(JSON.parse(runRow.issue_scope_json)).toEqual({
         identifier: "NGX-575",
       });
-      expect(JSON.parse(runRow.route_json)).toEqual(previewPayload["route"]);
+      expect(loadCanonicalWorkflowRunRoute(db, runId)).toEqual(
+        previewPayload["route"],
+      );
 
       const persistedStepStates = db
         .prepare(

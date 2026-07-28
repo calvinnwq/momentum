@@ -89,6 +89,8 @@ export function isExecutorName(value: unknown): value is ExecutorName {
  *   - `executor` is the permanent executor identity that powers the step.
  *   - `config` is optional JSON-compatible portable executor intent; host-local
  *     command resolution does not belong here.
+ *   - `agentConfig` is optional portable harness/model/effort selection metadata
+ *     for the step; executable host bindings do not belong here.
  *   - `order` is the step's position; orders must be unique within a
  *     definition.
  *   - `required` marks whether the step must reach terminal success for the run
@@ -107,6 +109,11 @@ export type StepDefinition = {
   kind: StepDefinitionKind;
   executor: ExecutorName;
   config?: Record<string, unknown>;
+  agentConfig?: {
+    harness?: string;
+    model?: string;
+    effort?: string;
+  };
   order: number;
   required: boolean;
 };
@@ -134,6 +141,7 @@ export const WORKFLOW_DEFINITION_VALIDATION_ERROR_CODES = [
   "step_kind_invalid",
   "step_executor_invalid",
   "step_config_invalid",
+  "step_agent_config_invalid",
   "step_order_invalid",
   "step_order_duplicate",
   "step_required_invalid",
@@ -307,6 +315,25 @@ function validateSteps(
         message: `Step ${index} config must be a JSON-compatible object.`,
         path: `${at}.config`,
       });
+    }
+
+    if (rawStep["agentConfig"] !== undefined) {
+      const agentConfig = rawStep["agentConfig"];
+      const valid =
+        isPlainObject(agentConfig) &&
+        Object.keys(agentConfig).every((key) =>
+          ["harness", "model", "effort"].includes(key),
+        ) &&
+        Object.values(agentConfig).every(
+          (entry) => typeof entry === "string" && entry.trim().length > 0,
+        );
+      if (!valid) {
+        errors.push({
+          code: "step_agent_config_invalid",
+          message: `Step ${index} agentConfig must contain only non-blank harness, model, and effort strings.`,
+          path: `${at}.agentConfig`,
+        });
+      }
     }
 
     const order = rawStep["order"];

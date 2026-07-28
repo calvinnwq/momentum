@@ -6,7 +6,7 @@ import {
   deriveChildSubworkflowRunId,
   planSubworkflowChildLaunchFromRoute,
   readSubworkflowParentLineage,
-  type SubworkflowRouteLineage
+  type SubworkflowRouteLineage,
 } from "../src/core/workflow/route/subworkflow.js";
 import type { SubworkflowParentLineage } from "../src/core/workflow/route/subworkflow-child-config.js";
 
@@ -16,8 +16,10 @@ import type { SubworkflowParentLineage } from "../src/core/workflow/route/subwor
  * Iteration 1 landed the config validator + recursion-safety decider but left two
  * connective decisions to "the wiring slice": where a production `subworkflow`
  * step's child config is sourced from, and how the parent run's recursion lineage
- * is encoded durably (there is no first-class depth/lineage column). This module
- * resolves both against the run's free-form `route.subworkflow` namespace, purely:
+ * is encoded durably. Canonical child config lives in
+ * `workflow_steps.executor_config_json`, canonical lineage lives in
+ * `workflow_run_lineage`, and this module resolves both through the projected
+ * `route.subworkflow` namespace, purely:
  *
  *   - {@link readSubworkflowParentLineage} reads the parent's lineage from its
  *     route (absent => top-level; present-but-corrupt => fail closed);
@@ -40,7 +42,7 @@ const CHILD_DEF_VERSION = 1;
 
 function routeWithChild(
   child: unknown,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return { [SUBWORKFLOW_ROUTE_KEY]: { child, ...extra } };
 }
@@ -52,14 +54,18 @@ describe("readSubworkflowParentLineage", () => {
     if (!resolution.ok) throw new Error("expected ok");
     expect(resolution.lineage).toEqual<SubworkflowParentLineage>({
       definitionKey: PARENT_DEF_KEY,
-      ancestorDefinitionKeys: []
+      ancestorDefinitionKeys: [],
     });
   });
 
   it("treats a subworkflow namespace without a lineage as top-level", () => {
     const resolution = readSubworkflowParentLineage(
-      { [SUBWORKFLOW_ROUTE_KEY]: { child: { childDefinitionKey: CHILD_DEF_KEY } } },
-      PARENT_DEF_KEY
+      {
+        [SUBWORKFLOW_ROUTE_KEY]: {
+          child: { childDefinitionKey: CHILD_DEF_KEY },
+        },
+      },
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) throw new Error("expected ok");
@@ -69,7 +75,7 @@ describe("readSubworkflowParentLineage", () => {
   it("treats a non-object subworkflow namespace as top-level", () => {
     const resolution = readSubworkflowParentLineage(
       { [SUBWORKFLOW_ROUTE_KEY]: "nope" },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) throw new Error("expected ok");
@@ -81,24 +87,24 @@ describe("readSubworkflowParentLineage", () => {
       parentRunId: "run-grandparent",
       parentStepId: "delegate",
       depth: 1,
-      ancestorDefinitionKeys: ["grandparent-workflow"]
+      ancestorDefinitionKeys: ["grandparent-workflow"],
     };
     const resolution = readSubworkflowParentLineage(
       { [SUBWORKFLOW_ROUTE_KEY]: { lineage } },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) throw new Error("expected ok");
     expect(resolution.lineage).toEqual<SubworkflowParentLineage>({
       definitionKey: PARENT_DEF_KEY,
-      ancestorDefinitionKeys: ["grandparent-workflow"]
+      ancestorDefinitionKeys: ["grandparent-workflow"],
     });
   });
 
   it("fails closed when a present lineage is not an object", () => {
     const resolution = readSubworkflowParentLineage(
       { [SUBWORKFLOW_ROUTE_KEY]: { lineage: "corrupt" } },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected refusal");
@@ -112,11 +118,11 @@ describe("readSubworkflowParentLineage", () => {
           lineage: {
             parentRunId: "  ",
             parentStepId: "delegate",
-            ancestorDefinitionKeys: ["grandparent-workflow"]
-          }
-        }
+            ancestorDefinitionKeys: ["grandparent-workflow"],
+          },
+        },
       },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected refusal");
@@ -130,11 +136,11 @@ describe("readSubworkflowParentLineage", () => {
           lineage: {
             parentRunId: "run-grandparent",
             parentStepId: "delegate",
-            ancestorDefinitionKeys: "grandparent-workflow"
-          }
-        }
+            ancestorDefinitionKeys: "grandparent-workflow",
+          },
+        },
       },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected refusal");
@@ -148,11 +154,11 @@ describe("readSubworkflowParentLineage", () => {
           lineage: {
             parentRunId: "run-grandparent",
             parentStepId: "delegate",
-            ancestorDefinitionKeys: ["grandparent-workflow", ""]
-          }
-        }
+            ancestorDefinitionKeys: ["grandparent-workflow", ""],
+          },
+        },
       },
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     );
     expect(resolution.ok).toBe(false);
     if (resolution.ok) throw new Error("expected refusal");
@@ -163,7 +169,7 @@ describe("readSubworkflowParentLineage", () => {
 describe("deriveChildSubworkflowRunId", () => {
   it("derives a deterministic child run id from the parent run + step", () => {
     expect(deriveChildSubworkflowRunId(PARENT_RUN_ID, PARENT_STEP_ID)).toBe(
-      `${PARENT_RUN_ID}::${PARENT_STEP_ID}::child`
+      `${PARENT_RUN_ID}::${PARENT_STEP_ID}::child`,
     );
   });
 });
@@ -174,8 +180,11 @@ describe("deriveChildSubworkflowRoute", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentDefinitionKey: PARENT_DEF_KEY,
-      parentLineage: { definitionKey: PARENT_DEF_KEY, ancestorDefinitionKeys: [] },
-      childDepth: 1
+      parentLineage: {
+        definitionKey: PARENT_DEF_KEY,
+        ancestorDefinitionKeys: [],
+      },
+      childDepth: 1,
     });
     expect(childRoute).toEqual({
       [SUBWORKFLOW_ROUTE_KEY]: {
@@ -183,9 +192,9 @@ describe("deriveChildSubworkflowRoute", () => {
           parentRunId: PARENT_RUN_ID,
           parentStepId: PARENT_STEP_ID,
           depth: 1,
-          ancestorDefinitionKeys: [PARENT_DEF_KEY]
-        }
-      }
+          ancestorDefinitionKeys: [PARENT_DEF_KEY],
+        },
+      },
     });
   });
 
@@ -196,9 +205,9 @@ describe("deriveChildSubworkflowRoute", () => {
       parentDefinitionKey: PARENT_DEF_KEY,
       parentLineage: {
         definitionKey: PARENT_DEF_KEY,
-        ancestorDefinitionKeys: ["grandparent-workflow"]
+        ancestorDefinitionKeys: ["grandparent-workflow"],
       },
-      childDepth: 2
+      childDepth: 2,
     });
     const lineage = (
       childRoute[SUBWORKFLOW_ROUTE_KEY] as { lineage: SubworkflowRouteLineage }
@@ -206,7 +215,7 @@ describe("deriveChildSubworkflowRoute", () => {
     expect(lineage.depth).toBe(2);
     expect(lineage.ancestorDefinitionKeys).toEqual([
       "grandparent-workflow",
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     ]);
   });
 
@@ -215,15 +224,18 @@ describe("deriveChildSubworkflowRoute", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentDefinitionKey: PARENT_DEF_KEY,
-      parentLineage: { definitionKey: PARENT_DEF_KEY, ancestorDefinitionKeys: [] },
-      childDepth: 1
+      parentLineage: {
+        definitionKey: PARENT_DEF_KEY,
+        ancestorDefinitionKeys: [],
+      },
+      childDepth: 1,
     });
     const readBack = readSubworkflowParentLineage(childRoute, CHILD_DEF_KEY);
     expect(readBack.ok).toBe(true);
     if (!readBack.ok) throw new Error("expected ok");
     expect(readBack.lineage).toEqual<SubworkflowParentLineage>({
       definitionKey: CHILD_DEF_KEY,
-      ancestorDefinitionKeys: [PARENT_DEF_KEY]
+      ancestorDefinitionKeys: [PARENT_DEF_KEY],
     });
   });
 });
@@ -234,7 +246,7 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentRoute: {},
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -248,9 +260,9 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild({
         childDefinitionKey: "   ",
-        childDefinitionVersion: CHILD_DEF_VERSION
+        childDefinitionVersion: CHILD_DEF_VERSION,
       }),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -264,9 +276,9 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRoute: routeWithChild({
         childDefinitionKey: CHILD_DEF_KEY,
         childDefinitionVersion: CHILD_DEF_VERSION,
-        maxDepth: 0
+        maxDepth: 0,
       }),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -278,7 +290,7 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild({ childDefinitionKey: CHILD_DEF_KEY }),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -292,11 +304,11 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRoute: routeWithChild(
         {
           childDefinitionKey: CHILD_DEF_KEY,
-          childDefinitionVersion: CHILD_DEF_VERSION
+          childDefinitionVersion: CHILD_DEF_VERSION,
         },
-        { lineage: "corrupt" }
+        { lineage: "corrupt" },
       ),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -309,9 +321,9 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild({
         childDefinitionKey: PARENT_DEF_KEY,
-        childDefinitionVersion: CHILD_DEF_VERSION
+        childDefinitionVersion: CHILD_DEF_VERSION,
       }),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -326,18 +338,18 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
         {
           childDefinitionKey: CHILD_DEF_KEY,
           childDefinitionVersion: CHILD_DEF_VERSION,
-          maxDepth: 5
+          maxDepth: 5,
         },
         {
           lineage: {
             parentRunId: "run-grandparent",
             parentStepId: "delegate",
             depth: 1,
-            ancestorDefinitionKeys: [CHILD_DEF_KEY]
-          }
-        }
+            ancestorDefinitionKeys: [CHILD_DEF_KEY],
+          },
+        },
       ),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -352,18 +364,18 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRoute: routeWithChild(
         {
           childDefinitionKey: CHILD_DEF_KEY,
-          childDefinitionVersion: CHILD_DEF_VERSION
+          childDefinitionVersion: CHILD_DEF_VERSION,
         },
         {
           lineage: {
             parentRunId: "run-grandparent",
             parentStepId: "delegate",
             depth: 1,
-            ancestorDefinitionKeys: ["grandparent-workflow"]
-          }
-        }
+            ancestorDefinitionKeys: ["grandparent-workflow"],
+          },
+        },
       ),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(false);
     if (plan.ok) throw new Error("expected refusal");
@@ -378,9 +390,9 @@ describe("planSubworkflowChildLaunchFromRoute — launchable child", () => {
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild({
         childDefinitionKey: CHILD_DEF_KEY,
-        childDefinitionVersion: CHILD_DEF_VERSION
+        childDefinitionVersion: CHILD_DEF_VERSION,
       }),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(true);
     if (!plan.ok) throw new Error("expected ok");
@@ -389,7 +401,10 @@ describe("planSubworkflowChildLaunchFromRoute — launchable child", () => {
     expect(plan.childRunId).toBe(`${PARENT_RUN_ID}::${PARENT_STEP_ID}::child`);
     expect(plan.childDepth).toBe(1);
     expect(plan.maxDepth).toBe(1);
-    const readBack = readSubworkflowParentLineage(plan.childRoute, CHILD_DEF_KEY);
+    const readBack = readSubworkflowParentLineage(
+      plan.childRoute,
+      CHILD_DEF_KEY,
+    );
     expect(readBack.ok).toBe(true);
     if (!readBack.ok) throw new Error("expected ok");
     expect(readBack.lineage.ancestorDefinitionKeys).toEqual([PARENT_DEF_KEY]);
@@ -403,29 +418,32 @@ describe("planSubworkflowChildLaunchFromRoute — launchable child", () => {
         {
           childDefinitionKey: CHILD_DEF_KEY,
           childDefinitionVersion: CHILD_DEF_VERSION,
-          maxDepth: 2
+          maxDepth: 2,
         },
         {
           lineage: {
             parentRunId: "run-grandparent",
             parentStepId: "delegate",
             depth: 1,
-            ancestorDefinitionKeys: ["grandparent-workflow"]
-          }
-        }
+            ancestorDefinitionKeys: ["grandparent-workflow"],
+          },
+        },
       ),
-      parentDefinitionKey: PARENT_DEF_KEY
+      parentDefinitionKey: PARENT_DEF_KEY,
     });
     expect(plan.ok).toBe(true);
     if (!plan.ok) throw new Error("expected ok");
     expect(plan.childDepth).toBe(2);
     expect(plan.maxDepth).toBe(2);
-    const readBack = readSubworkflowParentLineage(plan.childRoute, CHILD_DEF_KEY);
+    const readBack = readSubworkflowParentLineage(
+      plan.childRoute,
+      CHILD_DEF_KEY,
+    );
     expect(readBack.ok).toBe(true);
     if (!readBack.ok) throw new Error("expected ok");
     expect(readBack.lineage.ancestorDefinitionKeys).toEqual([
       "grandparent-workflow",
-      PARENT_DEF_KEY
+      PARENT_DEF_KEY,
     ]);
   });
 });
