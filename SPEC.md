@@ -465,6 +465,15 @@ Provider-specific model aliases are part of that normalization when the merged s
 For a fresh native coding run, definition-level agent config and run-specific overrides are merged and normalized at start, then the resulting sparse selection is frozen in the matching `workflow_steps.agent_config_json` row.
 The read-only `route.steps` projection exposes that effective per-step selection for durable audit by status/handoff/monitor/logs, while native dispatch reads the frozen step row rather than the compatibility projection.
 Retry and reattachment round materialization reuses the same frozen step-owned selection, so stale or conflicting `route.steps` data cannot override it.
+Before native executor work begins, dispatch validates the required
+`workflow_run_coding_compatibility` marker and its nullable profile and
+implementation-engine values.
+Missing or malformed marker state fails closed with `route_config_invalid` and
+creates no executor attempt or round.
+Status detail read-back exposes optional `steps[].agentConfig` only for runs
+whose source is `momentum-native-coding` and whose definition key is
+`coding-workflow`; generic definition runs and imported compatibility runs keep
+their existing step shape.
 The projection stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 Durable route state uses explicit destinations: per-step agent and executor config on `workflow_steps`, optional definition agent config on `step_definitions`, child ancestry in `workflow_run_lineage`, non-imported run engine/profile compatibility in `workflow_run_coding_compatibility`, and imported mode/profile/risk/quota policy in `workflow_run_import_metadata`.
 Fresh writes leave `workflow_runs.route_json` empty, while one adapter-owned read-only projector preserves the current `route` output and reader behavior.

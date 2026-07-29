@@ -1283,6 +1283,10 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 `gates` is the list of durable workflow / step / executor gates for the run, oldest first.
 Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 Gate rows migrated from the legacy invocation model may retain `targetScope: "invocation"` as read-only provenance so their replay event ids remain stable; new gates never emit that scope.
+The optional `steps[].agentConfig` field is emitted only for runs whose source is
+`momentum-native-coding` and whose definition key is `coding-workflow`.
+Generic definition runs and imported compatibility runs retain their existing
+step shape without that field.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route` is a read-only compatibility projection over explicit canonical destinations; new writes leave `workflow_runs.route_json` empty.
@@ -1295,6 +1299,9 @@ For non-imported runs, `run.route.steps` projects the effective per-step harness
 Provider-specific model aliases from the merged selection have already been normalized when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and native dispatch use the same command-ready model string.
 Native dispatch reads the canonical step row, not `run.route.steps`, and stale or conflicting compatibility route data cannot replace that frozen selection.
 Malformed legacy route JSON and malformed canonical destination JSON are fail-closed.
+Before native executor work, dispatch also validates the required compatibility
+marker and fails closed with `route_config_invalid` without creating an attempt
+or round when the marker is missing or malformed.
 `workflow run start-coding --implementation-engine`, `workflow run preview-coding --implementation-engine`, `workflow run start-coding --steps-json`, `workflow run preview-coding --steps-json`, and `workflow run monitor` all expose the same compatibility route namespace.
 If the compatibility namespace is invalid or unsupported, its owning read surface fails closed; if native canonical agent config is corrupt, dispatch routes the run to manual recovery with `route_config_invalid` before creating executor work.
 Unknown or non-agent harness/model values remain pass-through values in these read surfaces.
