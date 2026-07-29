@@ -102,7 +102,7 @@ export type WorkflowStepRow = {
   finishedAt: number | null;
   createdAt: number;
   updatedAt: number;
-  /** Frozen step-owned selection, when the canonical row is available. */
+  /** Frozen step-owned selection for native coding detail read-back. */
   agentConfig?: CanonicalWorkflowStepAgentConfig;
 };
 

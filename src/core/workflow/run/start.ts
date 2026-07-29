@@ -14,9 +14,9 @@
  * materializer does not run the landed agent-loop / agent-once / script /
  * no-mistakes mirror adapters or delegate-supervisor. The coding plan preview
  * in this module enriches
- * the projected steps with definition executor identities and optional portable
- * config for operator inspection, but it still does not invoke any executor or
- * write durable state.
+ * the projected steps with definition executor identities, optional portable
+ * config, and effective agent config for operator inspection, but it still does
+ * not invoke any executor or write durable state.
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model and
  * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
@@ -36,9 +36,9 @@
  *     unapproved run opens `pending`.
  *   - Durable run-start materialization carries only the canonical
  *     `WorkflowStepRecord` fields the substrate persists; the coding preview
- *     separately joins the executor identity and optional portable config from the
- *     validated definition so the no-write plan can show how each step would
- *     dispatch.
+ *     separately joins the executor identity, optional portable config, and
+ *     effective agent config from the validated definition and native route so the
+ *     no-write plan can show how each step would dispatch.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -311,8 +311,10 @@ function isKnownRetainedBuiltInDefinition(definition: unknown): boolean {
 /**
  * One step of a frozen coding-workflow plan preview. It carries the canonical
  * {@link WorkflowStepRecord} fields plus the step's {@link ExecutorName}
- * and optional portable config joined from the definition, so an operator can
- * read how each step will dispatch before the run is approved or executed.
+ * and optional portable config joined from the definition, plus effective agent
+ * config resolved from definition defaults and native route overrides, so an
+ * operator can read how each step will dispatch before the run is approved or
+ * executed.
  */
 export type WorkflowCodingPlanStep = {
   stepId: string;
@@ -373,9 +375,9 @@ function readImplementationEngine(
  * {@link WorkflowRunStartInput} a native coding start would use, without touching
  * any durable state. It reuses {@link materializeWorkflowRunStart} for the run /
  * step shape (so the preview matches exactly what a start would persist) and
- * enriches each step with the effective executor identity and optional portable config
- * declared on the definition. Invalid inputs surface the same refusal taxonomy
- * as a start.
+ * enriches each step with the effective executor identity, optional portable
+ * config declared on the definition, and effective agent config. Invalid inputs
+ * surface the same refusal taxonomy as a start.
  */
 export function materializeWorkflowCodingPlanPreview(
   input: WorkflowRunStartInput,

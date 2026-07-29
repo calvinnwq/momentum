@@ -133,7 +133,7 @@ export const executor: Executor<Config, HostBindings> = {
 - `state`: a read-only attempt plus ordered round/evidence snapshots captured before the tick; the round snapshot spans the step's rounds across attempts so retry evidence stays visible, while writes stay bound to the current attempt;
 - `config`: machine-portable workflow intent described by `configSchema`;
 - `hostBindings`: machine-local executable, environment, credential, and client resolution;
-- `selection`: the optional frozen `{ agentProvider, model, effort }` selection carried into the tick; native coding dispatch resolves it from the canonical workflow-step row rather than the compatibility `route.steps` projection;
+- `selection`: the optional frozen `{ agentProvider, model, effort }` selection carried into the tick; native coding dispatch resolves it from the canonical workflow-step row rather than the compatibility `route.steps` projection, while generic definition and imported compatibility runs omit it so executors retain their existing config fallback behavior;
 - `envelope`: the only durable-state API available to executor code;
 - `signal`: the daemon's cancellation signal for the bounded turn.
 

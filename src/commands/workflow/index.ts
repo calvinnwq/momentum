@@ -478,9 +478,10 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
  *     retaining persisted `native-goal-loop` compatibility and
  *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
  *   - it accepts the coding-only `--steps-json` route override and builds
- *     validated per-step harness/model/effort selections for canonical
- *     persistence, exposed through the compatibility `route.steps` projection,
- *     with provider-aware model aliases normalized before persistence; and
+ *     validated per-step harness/model/effort overrides whose effective merged
+ *     selections are normalized and frozen by canonical persistence, exposed
+ *     through the compatibility `route.steps` projection, with provider-aware
+ *     model aliases normalized before persistence; and
  *   - it runs structural preflight for built-in definition lookup, route
  *     profile, route steps, and run-start shape before any durable write.
  *
@@ -505,10 +506,11 @@ function workflowRunStartCoding(
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
  * approval boundary, route/profile, implementation engine, and per-step route
- * selections, definition key/version, and every step with its executor identity
- * and optional portable config - before approving or executing it. The preview
- * is a pure projection of the version-pinned built-in definition plus inputs, so
- * the durable run a later `start-coding` persists matches it exactly.
+ * selections, definition key/version, and every step with its executor identity,
+ * optional portable config, and effective agent config - before approving or
+ * executing it. The preview is a pure projection of the version-pinned built-in
+ * definition plus inputs, so the durable run a later `start-coding` persists
+ * matches it exactly.
  */
 function workflowRunPreviewCoding(
   parsed: ParsedFlags,
@@ -670,7 +672,8 @@ async function runWorkflowStartCommand(
   // --steps-json. The validated, normalized overrides, including provider-aware
   // model alias rewrites for known harness mappings, are handed to canonical
   // persistence and exposed through route.steps so status/handoff/logs can audit
-  // the selection and execution can read it (or fail closed). The per-step namespace is coding-door specific,
+  // the effective selection; native execution reads the frozen step row (or
+  // fails closed). The per-step namespace is coding-door specific,
   // so the generic `workflow run start` refuses it rather than silently dropping
   // a coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
