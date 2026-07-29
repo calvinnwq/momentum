@@ -142,7 +142,8 @@ export function emitWorkflowRunStartFailure(
  * `workflow run start-coding` would durably persist - run id, repo, objective,
  * issue scope, route/profile, implementation engine, and per-step route
  * selections, approval boundary, definition key/version, and the ordered steps
- * each with its executor and on-start state - but carries an explicit
+ * each with its executor, optional effective agent config, and on-start state -
+ * but carries an explicit
  * `preview: true` marker and writes nothing. It contains no wall-clock fields,
  * so repeated previews of the same inputs are byte-stable and safe to show
  * before approval.
@@ -164,6 +165,9 @@ export function emitWorkflowRunPreviewCodingSuccess(
     kind: step.kind,
     executor: step.executor,
     ...(step.config === undefined ? {} : { config: step.config }),
+    ...(step.agentConfig === undefined
+      ? {}
+      : { agentConfig: step.agentConfig }),
     order: step.order,
     required: step.required,
     state: step.state,
@@ -201,10 +205,11 @@ export function emitWorkflowRunPreviewCodingSuccess(
       : "(none)";
   // The per-step route.steps selections are surfaced alongside the
   // run-level profile so an operator reading the default (non-JSON) preview can
-  // audit which per-step harness/model/effort selections are default and which were
-  // changed before approving. The lines are computed by the command from the same
-  // validated overrides that built the preview route (renderers accept computed
-  // results rather than importing the core route-config projection).
+  // audit the effective per-step harness/model/effort selections and any changes
+  // before approving. The lines are computed by the command from the same
+  // validated overrides and definition defaults that built the preview route
+  // (renderers accept computed results rather than importing the core route-config
+  // projection).
   const lines = [
     `Coding workflow plan preview (not started): ${preview.runId}`,
     `Definition: ${preview.definitionKey} v${preview.definitionVersion}`,
@@ -225,6 +230,10 @@ export function emitWorkflowRunPreviewCodingSuccess(
           step.config === undefined
             ? ""
             : ` config=${JSON.stringify(step.config)}`
+        }${
+          step.agentConfig === undefined
+            ? ""
+            : ` agentConfig=${JSON.stringify(step.agentConfig)}`
         } [${step.required ? "required" : "optional"}, ${step.state}]`,
     ),
     "",
@@ -1985,6 +1994,9 @@ export function workflowStepToJsonShape(
     finishedAt: step.finishedAt,
     createdAt: step.createdAt,
     updatedAt: step.updatedAt,
+    ...(step.agentConfig === undefined
+      ? {}
+      : { agentConfig: step.agentConfig }),
   };
 }
 

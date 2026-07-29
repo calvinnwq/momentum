@@ -39,6 +39,11 @@ import {
   canonicalWorkflowApprovalBoundary,
   canonicalWorkflowStepKind,
 } from "../definition/legacy.js";
+import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
+import {
+  parseCanonicalWorkflowStepAgentConfig,
+  type CanonicalWorkflowStepAgentConfig,
+} from "../route/canonical-agent-config.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
@@ -49,6 +54,7 @@ import type {
   WorkflowStepRecord,
   WorkflowStepState,
 } from "./reducer.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "./start.js";
 
 export type WorkflowRunRow = {
   runId: string;
@@ -96,6 +102,8 @@ export type WorkflowStepRow = {
   finishedAt: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Frozen step-owned selection for native coding detail read-back. */
+  agentConfig?: CanonicalWorkflowStepAgentConfig;
 };
 
 export type WorkflowApprovalRow = {
@@ -321,7 +329,10 @@ export function loadWorkflowRunDetail(
       definitionVersion: runRow.workflow_definition_version,
     }),
   );
-  const steps = listStepsByRunId(db, runId);
+  const includeAgentConfig =
+    runRow.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    runRow.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY;
+  const steps = listStepsByRunId(db, runId, includeAgentConfig);
   const approvals = listApprovalsByRunId(db, runId);
   const leases = listLeasesByRunId(db, runId);
   const now = options.now ?? Date.now();
@@ -348,14 +359,32 @@ export function loadWorkflowRunDetail(
   return { run, steps, approvals, leases, monitor, evidence, gates };
 }
 
-function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
+function listStepsByRunId(
+  db: MomentumDb,
+  runId: string,
+  includeAgentConfig = false,
+): WorkflowStepRow[] {
   return (
     db
       .prepare(
         "SELECT * FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id",
       )
       .all(runId) as StepRow[]
-  ).map(parseStepRow);
+  ).map((row) => {
+    const agentConfig = includeAgentConfig
+      ? parseCanonicalWorkflowStepAgentConfig(
+          runId,
+          row.step_id,
+          row.agent_config_json,
+        )
+      : undefined;
+    return {
+      ...parseStepRow(row),
+      ...(agentConfig === undefined || Object.keys(agentConfig).length === 0
+        ? {}
+        : { agentConfig }),
+    };
+  });
 }
 
 function listApprovalsByRunId(
@@ -512,6 +541,7 @@ type StepRow = {
   finished_at: number | null;
   created_at: number;
   updated_at: number;
+  agent_config_json: string | null;
 };
 
 type ApprovalRow = {

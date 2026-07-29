@@ -21,6 +21,7 @@ import { createDurableExecutorEnvelope } from "./envelope.js";
 import {
   EXECUTOR_HUMAN_GATE_DECISION_CHECKPOINT_STAGE,
   type Executor,
+  type ExecutorAgentSelection,
   type ExecutorTickResult,
 } from "./types.js";
 
@@ -30,6 +31,7 @@ export type DriveExecutorTicksInput = {
   executor: Executor;
   config: Readonly<Record<string, unknown>>;
   hostBindings: Readonly<unknown>;
+  selection?: ExecutorAgentSelection;
   signal?: AbortSignal;
   /** Maximum bounded turns in this daemon pass. Defaults to one. */
   maxTicks?: number;
@@ -86,6 +88,9 @@ export async function driveExecutorTicks(
         state,
         config: input.config,
         hostBindings: input.hostBindings,
+        ...(input.selection === undefined
+          ? {}
+          : { selection: input.selection }),
         envelope: envelope.facade,
         signal,
       });
@@ -133,9 +138,9 @@ export async function driveExecutorTicks(
                 afterThrow.rounds.map((snapshot) => snapshot.round),
               ),
               state: "running",
-              agentProvider: null,
-              model: null,
-              effort: null,
+              agentProvider: input.selection?.agentProvider ?? null,
+              model: input.selection?.model ?? null,
+              effort: input.selection?.effort ?? null,
               inputDigest: null,
               resultDigest: null,
               artifactRoot: null,

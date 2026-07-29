@@ -7,7 +7,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
-  It writes no Momentum state and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, implementation engine, and per-step route selections, definition key/version, repo policy, and every step with its executor identity and optional portable config.
+  It writes no Momentum state and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, implementation engine, and per-step route selections, definition key/version, repo policy, and every step with its executor identity, optional portable config, and effective agent config.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -286,7 +286,7 @@ Behaviour:
 - **Execution**: `workflow run start` only materializes durable run state.
   Approved steps are claimed by bounded `daemon start --max-*`, which dispatches valid executor identities into durable `executor_attempts` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
   The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them.
-  Native coding runs with the canonical `workflow_steps.agent_config_json` selections freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; corrupt canonical step config routes to manual recovery with `route_config_invalid` instead of silently falling back.
+  Native coding dispatch reads the frozen per-step harness/model/effort selection from canonical `workflow_steps.agent_config_json` before creating executor work, carries it into the durable executor-owned or controller-created rounds, and routes corrupt canonical step config to manual recovery with `route_config_invalid` instead of silently falling back.
   The `external-apply` executor is filled by the daemon itself for the built-in `tracker-refresh` step: it proves `LINEAR_API_KEY`, repo `intent_apply_policy: external_apply_allowed`, the run issue scope, a matching source item, and either one pending Linear `status_update` intent or enough unique issue-scope/source evidence to seed the expected pending `status_update` intent with a `Done` payload deterministically.
   The resulting intent must have a valid one-of `state` / `stateId` payload and a stable idempotency marker before the daemon reuses the policy-gated `intent apply --external-apply` write path.
   Successful apply records terminal evidence and reconciles the step; already-applied successful audit evidence can be reconciled without another Linear mutation.
@@ -448,12 +448,12 @@ Optional arguments:
 - `--implementation-engine <engine>` - select the coding implementation engine recorded in `workflow_run_coding_compatibility.implementation_engine` and exposed through the read-only `route.implementationEngine` projection.
   Valid values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`; when omitted, the coding doors select and persist the honest `gnhf` label.
   Execution semantics for those values are owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
-- `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, frozen in each matching `workflow_steps.agent_config_json` row and exposed through the read-only `route.steps` projection so status, handoff, monitor, and logs can audit which selection the run was started with.
-  The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `validate`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
+- `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, with the normalized merged value frozen in each matching `workflow_steps.agent_config_json` row and exposed through the read-only `route.steps` projection so status, handoff, monitor, and logs can audit which selection the run was started with.
+  The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `validate`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field inherits the definition-level default while the start/preview plan is resolved, and the merged native value is not re-resolved at dispatch or retry time.
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
-  Provider-specific model aliases are normalized when the step also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
+  Provider-specific model aliases are normalized when the merged step selection also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
   Unknown harness/model values remain free-form after structural validation, so future provider model ids can still be passed through before Momentum learns a shorthand for them.
-  During daemon dispatch, the persisted selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
+  During native daemon dispatch, the canonical step-row selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields, including retry and reattachment round materialization, and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
   `route.steps` (the per-step selection) stays distinct from `route.profile` (the recorded operator profile) and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
   When omitted, the latest known built-in version is used.
@@ -499,7 +499,7 @@ The read-only plan preview for the Momentum-native coding workflow.
 It runs the exact same precondition checks and built-in definition resolution as [`workflow run start-coding`](#workflow-run-start-coding) - required inputs, the reserved-run-id and conflicting-`--definition` refusals, data-directory resolution, repo-policy loading, and configured executor module/schema validation - but stops before any durable write.
 Instead of persisting a run it emits a frozen plan an operator can inspect before approving or executing it.
 
-It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a trimmed, non-blank read-only route/profile preview, `--implementation-engine <engine>` as a read-only preview of the selected implementation route, `--steps-json <json>` as a read-only preview of the reconfigured per-step `route.steps` selection, and `--approval-boundary <boundary>` as the projected initial approval state.
+It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a trimmed, non-blank read-only route/profile preview, `--implementation-engine <engine>` as a read-only preview of the selected implementation route, `--steps-json <json>` as a read-only preview of the normalized merged per-step selection, and `--approval-boundary <boundary>` as the projected initial approval state.
 A `--steps-json` selection is validated and projected into the previewed `route` exactly as `workflow run start-coding` would record it, so an operator can preview the default route, change it, and start the same frozen selection.
 Provider-aware model alias normalization is part of that projection, so the preview shows the exact model string the later run would persist and forward to the live wrapper.
 
@@ -510,7 +510,7 @@ Behaviour:
 - **Frozen projection**: the preview is a pure projection of the version-pinned built-in `coding-workflow` definition plus the supplied inputs, so the durable run a later `workflow run start-coding` materializes from the same inputs matches the preview exactly.
   Because the built-in definition is immutable per version, the same plan can be reconstructed from the run's recorded `(definition key, version)` for approval and dispatch to reference later.
 - **Stable output**: the envelope carries no wall-clock fields, so repeated previews of the same inputs are byte-stable and safe to show before approval.
-- **Step detail**: each step carries its `kind`, executor identity, optional portable `config`, `order`, `required` flag, and on-start `state` (`pending`, or `approved` for the steps an `--approval-boundary` covers).
+- **Step detail**: each step carries its `kind`, executor identity, optional portable `config`, optional effective `agentConfig`, `order`, `required` flag, and on-start `state` (`pending`, or `approved` for the steps an `--approval-boundary` covers).
 
 Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `state`, `approvalBoundary`, `definitionKey`, `definitionVersion`, `repoPath`, `objective`, `issueScope`, `route`, `implementationEngine`, `skillRevision`), a `steps` array, `counts.steps`, and `policy`:
 
@@ -549,8 +549,8 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 
 ### Text output (success)
 
-Text output is a human-readable preview of the same frozen plan and includes the command's no-Momentum-write status, definition key/version, source, projected run state, approval boundary, profile, implementation engine, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor identity, required/optional marker, and projected state.
-The per-step route block lists every configurable step (implementation, postflight, validate, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
+Text output is a human-readable preview of the same frozen plan and includes the command's no-Momentum-write status, definition key/version, source, projected run state, approval boundary, profile, implementation engine, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor identity, optional agent config, required/optional marker, and projected state.
+The per-step route block lists every configurable step (implementation, postflight, validate, merge-cleanup) with its effective harness/model/effort selection, showing `(default)` where the merged selection has no value, so an operator can audit definition defaults and any `--steps-json` changes before approval:
 
 ```text
 Coding workflow plan preview (not started): native-coding-1
@@ -1283,6 +1283,10 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 `gates` is the list of durable workflow / step / executor gates for the run, oldest first.
 Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `attemptId`, `roundId`, `targetScope` (`workflow` / `step` / `attempt` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 Gate rows migrated from the legacy invocation model may retain `targetScope: "invocation"` as read-only provenance so their replay event ids remain stable; new gates never emit that scope.
+The optional `steps[].agentConfig` field is emitted only for runs whose source is
+`momentum-native-coding` and whose definition key is `coding-workflow`.
+Generic definition runs and imported compatibility runs retain their existing
+step shape without that field.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route` is a read-only compatibility projection over explicit canonical destinations; new writes leave `workflow_runs.route_json` empty.
@@ -1291,11 +1295,15 @@ For CLI-created runs, `--profile` records the non-imported value for status, han
 `run.route.implementationEngine` projects the coding implementation path from `workflow_run_coding_compatibility.implementation_engine`: `gnhf`, legacy `native-goal-loop`, or `current-gnhf-cwfp`.
 The implementation-route execution contract is owned by [Daemon commands](daemon.md#workflow-live-wrapper-profile).
 `current-gnhf-cwfp` remains an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
-For non-imported runs, `run.route.steps` projects the effective per-step harness/model/effort selections from `workflow_steps.agent_config_json`; definition-level `agentConfig` and run-specific `--steps-json` selections are merged there, so the selected route can be audited from durable state.
-Provider-specific model aliases from run-specific `--steps-json` selections have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string; definition-level agent config retains its declared values.
+For non-imported runs, `run.route.steps` projects the effective per-step harness/model/effort selections from `workflow_steps.agent_config_json`; for fresh native coding runs, definition-level `agentConfig` and run-specific `--steps-json` selections are merged and normalized at start, so the selected route can be audited from durable state.
+Provider-specific model aliases from the merged selection have already been normalized when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and native dispatch use the same command-ready model string.
+Native dispatch reads the canonical step row, not `run.route.steps`, and stale or conflicting compatibility route data cannot replace that frozen selection.
 Malformed legacy route JSON and malformed canonical destination JSON are fail-closed.
-`workflow run start-coding --implementation-engine`, `workflow run preview-coding --implementation-engine`, `workflow run start-coding --steps-json`, `workflow run preview-coding --steps-json`, and `workflow run monitor` all read the same route namespace.
-If the namespace is invalid or unsupported, dispatch routes the run to manual recovery with `route_config_invalid` before execution.
+Before native executor work, dispatch also validates the required compatibility
+marker and fails closed with `route_config_invalid` without creating an attempt
+or round when the marker is missing or malformed.
+`workflow run start-coding --implementation-engine`, `workflow run preview-coding --implementation-engine`, `workflow run start-coding --steps-json`, `workflow run preview-coding --steps-json`, and `workflow run monitor` all expose the same compatibility route namespace.
+If the compatibility namespace is invalid or unsupported, its owning read surface fails closed; if native canonical agent config is corrupt, dispatch routes the run to manual recovery with `route_config_invalid` before creating executor work.
 Unknown or non-agent harness/model values remain pass-through values in these read surfaces.
 
 ### State / next-action vocabulary

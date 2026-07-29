@@ -9,6 +9,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { seedCanonicalCodingCompatibilityMarker } from "./support/canonical-route-state.js";
 import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import { insertExecutorAttempt } from "../src/core/executors/loop/persist.js";
+import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import {
   insertWorkflowGate,
   resolveWorkflowGate,
@@ -336,6 +337,34 @@ describe("momentum workflow status", () => {
       expect(payload.steps[0]?.kind).toBe("validate");
     } finally {
       await releaseWriter();
+    }
+  });
+
+  it("does not read canonical agent config for generic workflow status", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "generic-status-agent-config",
+        state: "running",
+        source: "agent-workflow",
+      });
+      seedStep(db, "generic-status-agent-config", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "running",
+        order: 0,
+      });
+      db.prepare(
+        `UPDATE workflow_steps
+            SET agent_config_json = '{"model":7}'
+          WHERE run_id = ?`,
+      ).run("generic-status-agent-config");
+
+      const detail = loadWorkflowRunDetail(db, "generic-status-agent-config");
+      expect(detail?.steps[0]).not.toHaveProperty("agentConfig");
+    } finally {
+      db.close();
     }
   });
 

@@ -628,6 +628,15 @@ describe("momentum workflow run preview-coding", () => {
         },
       },
     });
+    const steps = payload["steps"] as Array<{
+      stepId: string;
+      agentConfig?: Record<string, string>;
+    }>;
+    expect(
+      steps.find((step) => step.stepId === "implementation"),
+    ).toMatchObject({
+      agentConfig: { harness: "gnhf", model: "opus" },
+    });
 
     // A preview still writes nothing durable.
     const db = openDb(dataDir);
@@ -812,6 +821,15 @@ describe("momentum workflow run preview-coding", () => {
       "NGX-509",
       "--approval-boundary",
       "through-implementation",
+      "--steps-json",
+      JSON.stringify({
+        implementation: {
+          harness: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+        postflight: { harness: "opencode", model: "glm-5.2" },
+      }),
     ];
 
     const preview = await run(
@@ -835,6 +853,7 @@ describe("momentum workflow run preview-coding", () => {
       order: number;
       required: boolean;
       state: string;
+      agentConfig?: Record<string, string>;
     }>;
 
     const started = await run([
@@ -881,7 +900,7 @@ describe("momentum workflow run preview-coding", () => {
 
       const persistedSteps = db
         .prepare(
-          `SELECT step_id, kind, step_order, required, state
+          `SELECT step_id, kind, step_order, required, state, agent_config_json
              FROM workflow_steps WHERE run_id = ? ORDER BY step_order`,
         )
         .all("preview-equiv") as Array<{
@@ -890,6 +909,7 @@ describe("momentum workflow run preview-coding", () => {
         step_order: number;
         required: number;
         state: string;
+        agent_config_json: string;
       }>;
       expect(
         persistedSteps.map((step) => ({
@@ -898,6 +918,7 @@ describe("momentum workflow run preview-coding", () => {
           order: step.step_order,
           required: step.required === 1,
           state: step.state,
+          agentConfig: JSON.parse(step.agent_config_json),
         })),
       ).toEqual(
         previewSteps.map((step) => ({
@@ -906,6 +927,7 @@ describe("momentum workflow run preview-coding", () => {
           order: step.order,
           required: step.required,
           state: step.state,
+          agentConfig: step.agentConfig ?? {},
         })),
       );
     } finally {

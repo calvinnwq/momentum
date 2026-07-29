@@ -14,9 +14,9 @@
  * materializer does not run the landed agent-loop / agent-once / script /
  * no-mistakes mirror adapters or delegate-supervisor. The coding plan preview
  * in this module enriches
- * the projected steps with definition executor identities and optional portable
- * config for operator inspection, but it still does not invoke any executor or
- * write durable state.
+ * the projected steps with definition executor identities, optional portable
+ * config, and effective agent config for operator inspection, but it still does
+ * not invoke any executor or write durable state.
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model and
  * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
@@ -36,9 +36,9 @@
  *     unapproved run opens `pending`.
  *   - Durable run-start materialization carries only the canonical
  *     `WorkflowStepRecord` fields the substrate persists; the coding preview
- *     separately joins the executor identity and optional portable config from the
- *     validated definition so the no-write plan can show how each step would
- *     dispatch.
+ *     separately joins the executor identity, optional portable config, and
+ *     effective agent config from the validated definition and native route so the
+ *     no-write plan can show how each step would dispatch.
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -56,6 +56,11 @@ import {
   effectiveStepExecutor,
   type EffectiveExecutorOptions,
 } from "../definition/legacy.js";
+import {
+  readCodingStepRouteOverrides,
+  resolveCodingStepAgentConfigs,
+  type CodingStepRouteOverride,
+} from "../route/coding.js";
 import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
@@ -306,14 +311,17 @@ function isKnownRetainedBuiltInDefinition(definition: unknown): boolean {
 /**
  * One step of a frozen coding-workflow plan preview. It carries the canonical
  * {@link WorkflowStepRecord} fields plus the step's {@link ExecutorName}
- * and optional portable config joined from the definition, so an operator can
- * read how each step will dispatch before the run is approved or executed.
+ * and optional portable config joined from the definition, plus effective agent
+ * config resolved from definition defaults and native route overrides, so an
+ * operator can read how each step will dispatch before the run is approved or
+ * executed.
  */
 export type WorkflowCodingPlanStep = {
   stepId: string;
   kind: WorkflowStepKind;
   executor: ExecutorName;
   config?: Record<string, unknown>;
+  agentConfig?: CodingStepRouteOverride;
   order: number;
   required: boolean;
   state: WorkflowStepState;
@@ -323,8 +331,9 @@ export type WorkflowCodingPlanStep = {
  * A frozen, pre-execution preview of the coding workflow a native start would
  * materialize. It is a pure projection of the version-pinned
  * {@link WorkflowDefinition} plus the run-start parameters: the same definition
- * key/version, repo, objective, issue scope, compatibility route, and approval
- * boundary a `workflow run start-coding` would canonically persist and project.
+ * key/version, repo, objective, issue scope, compatibility route, effective
+ * per-step agent config, and approval boundary a `workflow run start-coding`
+ * would canonically persist and project.
  * Because the projection is
  * deterministic and the built-in definition is immutable per version, the same
  * preview can be reconstructed from the durable run later for approval/dispatch
@@ -366,9 +375,9 @@ function readImplementationEngine(
  * {@link WorkflowRunStartInput} a native coding start would use, without touching
  * any durable state. It reuses {@link materializeWorkflowRunStart} for the run /
  * step shape (so the preview matches exactly what a start would persist) and
- * enriches each step with the effective executor identity and optional portable config
- * declared on the definition. Invalid inputs surface the same refusal taxonomy
- * as a start.
+ * enriches each step with the effective executor identity, optional portable
+ * config declared on the definition, and effective agent config. Invalid inputs
+ * surface the same refusal taxonomy as a start.
  */
 export function materializeWorkflowCodingPlanPreview(
   input: WorkflowRunStartInput,
@@ -382,13 +391,29 @@ export function materializeWorkflowCodingPlanPreview(
   // `materializeWorkflowRunStart` succeeded, so `input.definition` is a valid
   // `WorkflowDefinition`; build the executor lookup from it by stable step key.
   const definition = input.definition as WorkflowDefinition;
-  const definitionByStepKey = new Map(
-    definition.steps.map((step) => [step.key, step]),
-  );
-
   const { run } = result.plan;
+  const routeOverrides = readCodingStepRouteOverrides(run.route);
+  if (!routeOverrides.ok) {
+    const error: WorkflowRunStartError = {
+      code: "route_invalid",
+      message: routeOverrides.reason,
+    };
+    if (routeOverrides.path !== undefined) error.path = routeOverrides.path;
+    return {
+      ok: false,
+      errors: [error],
+    };
+  }
+  const effectiveAgentConfigs = resolveCodingStepAgentConfigs(
+    definition.steps,
+    result.plan.steps,
+    routeOverrides.overrides,
+  );
   const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => {
-    const definitionStep = definitionByStepKey.get(step.stepId);
+    const definitionStep = definition.steps.find(
+      (candidate) => candidate.key === step.stepId,
+    );
+    const agentConfig = effectiveAgentConfigs.get(step.stepId) ?? {};
     return {
       stepId: step.stepId,
       kind: step.kind,
@@ -399,6 +424,7 @@ export function materializeWorkflowCodingPlanPreview(
       ...(definitionStep?.config === undefined
         ? {}
         : { config: { ...definitionStep.config } }),
+      ...(Object.keys(agentConfig).length === 0 ? {} : { agentConfig }),
       order: step.order,
       required: step.required,
       state: step.state,

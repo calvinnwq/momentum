@@ -1,9 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/adapters/db/route-state.js")>();
+  return {
+    ...actual,
+    projectValidatedLegacyWorkflowRunRoute: vi.fn(
+      actual.projectValidatedLegacyWorkflowRunRoute,
+    ),
+  };
+});
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
+import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_V1,
@@ -57,6 +72,52 @@ function makeTempDir(): string {
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function initGitRepo(repoPath: string): void {
+  fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-workflows/\n");
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n");
+  execFileSync("git", ["-C", repoPath, "init", "--initial-branch=main"], {
+    stdio: "ignore",
+  });
+  execFileSync(
+    "git",
+    ["-C", repoPath, "config", "user.email", "test@example.com"],
+    {
+      stdio: "ignore",
+    },
+  );
+  execFileSync("git", ["-C", repoPath, "config", "user.name", "Test User"], {
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", repoPath, "add", "."], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoPath, "commit", "-m", "init"], {
+    stdio: "ignore",
+  });
+}
+
+function writeLegacyRouteProfile(profileDir: string): string {
+  const profilePath = path.join(profileDir, "legacy-route-profile.json");
+  const script = `cat > "$MOMENTUM_RESULT_PATH" <<JSON
+{"success":true,"summary":"$MOMENTUM_AGENT_PROVIDER|$MOMENTUM_MODEL|$MOMENTUM_EFFORT","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"legacy route selection","body":"","breaking":false}}
+JSON`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "legacy-route-test",
+      wrappers: {
+        validate: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "repo",
+          timeout_sec: 5,
+          env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    }),
+  );
+  return profilePath;
 }
 
 /** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
@@ -455,6 +516,96 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
+  it("keeps retained legacy host bindings on the compatibility route projection", async () => {
+    const repoPath = makeTempDir();
+    initGitRepo(repoPath);
+    const profilePath = writeLegacyRouteProfile(makeTempDir());
+    const db = openDb(makeTempDir());
+    const runId = "native-legacy-consumer-route-v1";
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION_V1,
+      runId,
+      repoPath,
+      objective: "Preserve the legacy consumer boundary",
+      now: NOW,
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      route: {
+        steps: {
+          validate: {
+            harness: "claude",
+            model: "compatibility-model",
+            effort: "low",
+          },
+        },
+      },
+    });
+    const actualRouteState = await vi.importActual<
+      typeof import("../src/adapters/db/route-state.js")
+    >("../src/adapters/db/route-state.js");
+    expect(
+      actualRouteState.projectValidatedLegacyWorkflowRunRoute(db, runId, {
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        definitionKey: CODING_WORKFLOW_DEFINITION_V1.key,
+        definitionVersion: CODING_WORKFLOW_DEFINITION_V1.version,
+      }),
+    ).toEqual({
+      steps: {
+        validate: {
+          harness: "claude",
+          model: "compatibility-model",
+          effort: "low",
+        },
+      },
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET agent_config_json = ? WHERE run_id = ? AND step_id = ?",
+    ).run(
+      JSON.stringify({
+        harness: "codex",
+        model: "canonical-model",
+        effort: "high",
+      }),
+      runId,
+      "no-mistakes",
+    );
+    const claim = approveAndClaim(db, "no-mistakes", runId);
+    const projectedRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
+    projectedRoute.mockImplementation(() => ({
+      steps: {
+        validate: {
+          harness: "claude",
+          model: "compatibility-model",
+          effort: "low",
+        },
+      },
+    }));
+
+    try {
+      const production = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!production.ok) throw new Error(production.message);
+
+      await production.dispatch(claim, {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+    } finally {
+      projectedRoute.mockRestore();
+    }
+
+    expect(
+      db
+        .prepare(
+          "SELECT summary FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ summary: "claude|compatibility-model|low" });
+  });
+
   it("applies a retained linear-refresh route override through tracker-refresh", () => {
     const db = openDb(makeTempDir());
     const runId = "native-retained-tracker-route-v1";
@@ -730,6 +881,35 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
+  it("routes a native run with a missing compatibility marker to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({});
+    db.prepare(
+      "DELETE FROM workflow_run_coding_compatibility WHERE run_id = ?",
+    ).run(RUN_ID);
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1,
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toEqual([
+      expect.objectContaining({
+        evidence: "route_config_invalid",
+        reason: expect.stringContaining(
+          "$canonical.workflow_run_coding_compatibility",
+        ),
+      }),
+    ]);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
+    ).toBe(true);
+    expect(countAttempts(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
@@ -765,7 +945,15 @@ describe("executeWorkflowStepDispatch — supported family", () => {
   });
 
   it("allocates a collision-safe native-owned round id on retry", () => {
-    const db = openSeededDb();
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        implementation: {
+          harness: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+      },
+    });
     const targetAttemptId = `${RUN_ID}::implementation::attempt-1`;
     const collidingRoundId = `${RUN_ID}::implementation::attempt-2::round::1`;
 
@@ -870,7 +1058,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       workerId: WORKER,
       now: NOW + 2,
       executorOwnsRounds: true,
-      materializeOwnedRound: ({ attempt, roundId }) => ({
+      materializeOwnedRound: ({ attempt, roundId, selection }) => ({
         round: {
           roundId: roundId ?? collidingRoundId,
           attemptId: attempt.attemptId,
@@ -885,9 +1073,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
           startedAt: NOW + 2,
           heartbeatAt: NOW + 2,
           finishedAt: null,
-          agentProvider: null,
-          model: null,
-          effort: null,
+          agentProvider: selection.agentProvider,
+          model: selection.model,
+          effort: selection.effort,
           inputDigest: null,
           resultDigest: null,
           artifactRoot: null,
@@ -925,6 +1113,19 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       round_id: `${collidingRoundId}::allocated-1`,
       attempt_id: `${RUN_ID}::implementation::attempt-2`,
       round_index: 1,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT agent_provider AS agentProvider, model, effort
+             FROM executor_rounds
+            WHERE round_id = ?`,
+        )
+        .get(`${collidingRoundId}::allocated-1`),
+    ).toEqual({
+      agentProvider: "codex",
+      model: "gpt-5.6-codex",
+      effort: "high",
     });
     expect(
       db
@@ -1088,7 +1289,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
   });
 
-  it("routes corrupt native coding route overrides to manual recovery", () => {
+  it("routes corrupt canonical native agent config to manual recovery", () => {
     const db = openNativeCodingDbWithRoute({
       steps: {
         implementation: { model: "opus" },
@@ -1117,7 +1318,7 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       evidence: "route_config_invalid",
       resolvedAt: null,
     });
-    expect(gates[0]?.reason).toContain("steps.implementation.unexpected");
+    expect(gates[0]?.reason).toContain("$.steps.implementation.agentConfig");
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery,
     ).toBe(true);

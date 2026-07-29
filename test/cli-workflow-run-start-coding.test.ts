@@ -998,9 +998,17 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
       "--json",
     ]);
     expect(status.code).toBe(0);
-    expect(JSON.stringify(JSON.parse(status.stdout))).toContain(
-      '"harness":"gnhf"',
-    );
+    const statusPayload = JSON.parse(status.stdout) as {
+      steps: Array<{ stepId: string; agentConfig?: Record<string, string> }>;
+    };
+    expect(
+      statusPayload.steps.find((step) => step.stepId === "implementation"),
+    ).toMatchObject({
+      agentConfig: {
+        harness: "gnhf",
+        model: "claude-opus-4-8",
+      },
+    });
   });
 
   it("combines --profile and --steps-json into a single durable route", async () => {
