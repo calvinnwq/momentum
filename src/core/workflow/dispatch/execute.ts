@@ -57,6 +57,9 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import {
+  projectValidatedLegacyWorkflowRunRoute,
+} from "../../../adapters/db/route-state.js";
 import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import {
   allocateExecutorCheckpointId,
@@ -640,6 +643,12 @@ export function resolveWorkflowStepDispatchRouteSelection(
         reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
       };
     }
+
+    projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
+      source: row.source,
+      definitionKey: row.workflow_definition_key,
+      definitionVersion: row.workflow_definition_version,
+    });
 
     const agentConfig = readCanonicalWorkflowStepAgentConfig(db, {
       runId: claim.runId,

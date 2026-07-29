@@ -547,6 +547,41 @@ describe("native dispatch canonical agent config", () => {
     }
   });
 
+  it("fails closed when a different canonical step config is corrupt", () => {
+    const runId = "canonical-agent-config-other-step-corrupt";
+    const db = seedNativeImplementationRun(runId);
+    try {
+      db.prepare(
+        `UPDATE workflow_steps
+            SET agent_config_json = '{"model":7}'
+          WHERE run_id = ? AND step_id = 'postflight'`,
+      ).run(runId);
+
+      const result = executeWorkflowStepDispatch(
+        claimImplementation(db, runId),
+        {
+          db,
+          workerId: WORKER,
+          now: NOW + 1,
+        },
+      );
+
+      expect(result.status).toBe("manual_recovery_gated");
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      expect(listWorkflowGatesForRun(db, runId)).toEqual([
+        expect.objectContaining({ evidence: "route_config_invalid" }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("fails closed on an invalid compatibility profile before creating executor work", () => {
     const runId = "canonical-agent-config-invalid-profile";
     const db = seedNativeImplementationRun(runId);

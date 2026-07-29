@@ -329,7 +329,12 @@ export function loadWorkflowRunDetail(
       definitionVersion: runRow.workflow_definition_version,
     }),
   );
-  const steps = listStepsByRunId(db, runId);
+  const agentConfigs =
+    runRow.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    runRow.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY
+      ? readCanonicalWorkflowStepAgentConfigs(db, runId)
+      : undefined;
+  const steps = listStepsByRunId(db, runId, agentConfigs);
   const approvals = listApprovalsByRunId(db, runId);
   const leases = listLeasesByRunId(db, runId);
   const now = options.now ?? Date.now();
@@ -356,19 +361,11 @@ export function loadWorkflowRunDetail(
   return { run, steps, approvals, leases, monitor, evidence, gates };
 }
 
-function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
-  const run = db
-    .prepare(
-      "SELECT source, workflow_definition_key FROM workflow_runs WHERE id = ?",
-    )
-    .get(runId) as
-    | { source: string | null; workflow_definition_key: string | null }
-    | undefined;
-  const agentConfigs =
-    run?.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
-    run.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY
-      ? readCanonicalWorkflowStepAgentConfigs(db, runId)
-      : new Map<string, CanonicalWorkflowStepAgentConfig>();
+function listStepsByRunId(
+  db: MomentumDb,
+  runId: string,
+  agentConfigs?: ReadonlyMap<string, CanonicalWorkflowStepAgentConfig>,
+): WorkflowStepRow[] {
   return (
     db
       .prepare(
@@ -376,7 +373,7 @@ function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
       )
       .all(runId) as StepRow[]
   ).map((row) => {
-    const agentConfig = agentConfigs.get(row.step_id);
+    const agentConfig = agentConfigs?.get(row.step_id);
     return {
       ...parseStepRow(row),
       ...(agentConfig === undefined || Object.keys(agentConfig).length === 0
