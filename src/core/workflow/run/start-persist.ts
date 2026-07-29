@@ -128,15 +128,13 @@ export function persistWorkflowRunStart(
   const isNativeCodingRun =
     run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
     run.definitionKey === CODING_WORKFLOW_DEFINITION_KEY;
-  const definitionAgentConfigs = isNativeCodingRun
-    ? new Map(
-        definition.steps.flatMap((step) =>
-          step.agentConfig === undefined
-            ? []
-            : [[step.key, step.agentConfig] as const],
-        ),
-      )
-    : undefined;
+  const definitionAgentConfigs = new Map(
+    definition.steps.flatMap((step) =>
+      step.agentConfig === undefined
+        ? []
+        : [[step.key, step.agentConfig] as const],
+    ),
+  );
   const routeOverrides = isNativeCodingRun
     ? readCodingStepRouteOverrides(run.route)
     : { ok: true as const, overrides: {} };

@@ -539,6 +539,24 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         },
       },
     });
+    const actualRouteState = await vi.importActual<
+      typeof import("../src/adapters/db/route-state.js")
+    >("../src/adapters/db/route-state.js");
+    expect(
+      actualRouteState.projectValidatedLegacyWorkflowRunRoute(db, runId, {
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        definitionKey: CODING_WORKFLOW_DEFINITION_V1.key,
+        definitionVersion: CODING_WORKFLOW_DEFINITION_V1.version,
+      }),
+    ).toEqual({
+      steps: {
+        validate: {
+          harness: "claude",
+          model: "compatibility-model",
+          effort: "low",
+        },
+      },
+    });
     db.prepare(
       "UPDATE workflow_steps SET agent_config_json = ? WHERE run_id = ? AND step_id = ?",
     ).run(

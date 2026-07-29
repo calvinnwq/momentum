@@ -283,7 +283,7 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
-  it("does not project generic definition agent config into route state", () => {
+  it("preserves generic definition agent config in route state", () => {
     const db = openTempDb();
     try {
       const definition = twoStepDefinition();
@@ -303,14 +303,25 @@ describe("persistWorkflowRunStart", () => {
               WHERE run_id = 'run-001' AND step_id = 'implementation'`,
           )
           .get(),
-      ).toEqual({ agent_config_json: "{}" });
+      ).toEqual({
+        agent_config_json:
+          '{"harness":"codex","model":"gpt-generic","effort":"high"}',
+      });
       expect(
         projectValidatedLegacyWorkflowRunRoute(db, "run-001", {
           source: WORKFLOW_RUN_START_SOURCE,
           definitionKey: definition.key,
           definitionVersion: definition.version,
         }),
-      ).toEqual({});
+      ).toEqual({
+        steps: {
+          implementation: {
+            harness: "codex",
+            model: "gpt-generic",
+            effort: "high",
+          },
+        },
+      });
     } finally {
       db.close();
     }
