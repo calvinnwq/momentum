@@ -1,9 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/adapters/db/route-state.js")>();
+  return {
+    ...actual,
+    projectValidatedLegacyWorkflowRunRoute: vi.fn(
+      actual.projectValidatedLegacyWorkflowRunRoute,
+    ),
+  };
+});
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
+import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_V1,
@@ -58,6 +73,52 @@ function makeTempDir(): string {
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function initGitRepo(repoPath: string): void {
+  fs.writeFileSync(path.join(repoPath, ".gitignore"), ".agent-workflows/\n");
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n");
+  execFileSync("git", ["-C", repoPath, "init", "--initial-branch=main"], {
+    stdio: "ignore",
+  });
+  execFileSync(
+    "git",
+    ["-C", repoPath, "config", "user.email", "test@example.com"],
+    {
+      stdio: "ignore",
+    },
+  );
+  execFileSync("git", ["-C", repoPath, "config", "user.name", "Test User"], {
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", repoPath, "add", "."], { stdio: "ignore" });
+  execFileSync("git", ["-C", repoPath, "commit", "-m", "init"], {
+    stdio: "ignore",
+  });
+}
+
+function writeLegacyRouteProfile(profileDir: string): string {
+  const profilePath = path.join(profileDir, "legacy-route-profile.json");
+  const script = `cat > "$MOMENTUM_RESULT_PATH" <<JSON
+{"success":true,"summary":"$MOMENTUM_AGENT_PROVIDER|$MOMENTUM_MODEL|$MOMENTUM_EFFORT","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"legacy route selection","body":"","breaking":false}}
+JSON`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "legacy-route-test",
+      wrappers: {
+        validate: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "repo",
+          timeout_sec: 5,
+          env_allow: [],
+          result_file: "result.json",
+        },
+      },
+    }),
+  );
+  return profilePath;
 }
 
 /** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
@@ -456,13 +517,16 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
-  it("keeps the retained legacy resolver on the compatibility route projection", () => {
+  it("keeps retained legacy host bindings on the compatibility route projection", async () => {
+    const repoPath = makeTempDir();
+    initGitRepo(repoPath);
+    const profilePath = writeLegacyRouteProfile(makeTempDir());
     const db = openDb(makeTempDir());
     const runId = "native-legacy-consumer-route-v1";
     persistWorkflowRunStart(db, {
       definition: CODING_WORKFLOW_DEFINITION_V1,
       runId,
-      repoPath: "/repos/momentum",
+      repoPath,
       objective: "Preserve the legacy consumer boundary",
       now: NOW,
       source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
@@ -470,7 +534,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
         steps: {
           validate: {
             harness: "claude",
-            model: "claude-sonnet-4-6",
+            model: "compatibility-model",
             effort: "low",
           },
         },
@@ -481,39 +545,48 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     ).run(
       JSON.stringify({
         harness: "codex",
-        model: "gpt-5.6-codex",
+        model: "canonical-model",
         effort: "high",
       }),
       runId,
       "no-mistakes",
     );
+    const claim = approveAndClaim(db, "no-mistakes", runId);
+    const projectedRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
+    projectedRoute.mockImplementation(() => ({
+      steps: {
+        validate: {
+          harness: "claude",
+          model: "compatibility-model",
+          effort: "low",
+        },
+      },
+    }));
+
+    try {
+      const production = resolveDaemonWorkflowStepDispatch(
+        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        executeWorkflowStepDispatch,
+        {},
+      );
+      if (!production.ok) throw new Error(production.message);
+
+      await production.dispatch(claim, {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+    } finally {
+      projectedRoute.mockRestore();
+    }
 
     expect(
-      resolveWorkflowStepDispatchRouteSelection(db, {
-        runId,
-        stepId: "no-mistakes",
-      }),
-    ).toEqual({
-      ok: true,
-      selection: {
-        agentProvider: "codex",
-        model: "gpt-5.6-codex",
-        effort: "high",
-      },
-    });
-    expect(
-      resolveLegacyWorkflowStepDispatchRouteSelection(db, {
-        runId,
-        stepId: "no-mistakes",
-      }),
-    ).toEqual({
-      ok: true,
-      selection: {
-        agentProvider: "codex",
-        model: "gpt-5.6-codex",
-        effort: "high",
-      },
-    });
+      db
+        .prepare(
+          "SELECT summary FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ summary: "claude|compatibility-model|low" });
   });
 
   it("applies a retained linear-refresh route override through tracker-refresh", () => {
