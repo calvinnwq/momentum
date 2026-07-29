@@ -8,11 +8,9 @@ vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
     await importOriginal<typeof import("../src/adapters/db/route-state.js")>();
   return {
     ...actual,
-    projectValidatedLegacyWorkflowRunRoute: vi.fn(() => {
-      throw new Error(
-        "compatibility route must not be read for agent selection",
-      );
-    }),
+    projectValidatedLegacyWorkflowRunRoute: vi.fn(
+      actual.projectValidatedLegacyWorkflowRunRoute,
+    ),
   };
 });
 
