@@ -17,13 +17,18 @@ vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
 });
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { DelegateSupervisorExecutor } from "../src/core/executors/delegate-supervisor/executor.js";
+import {
+  DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
+  DelegateSupervisorExecutor,
+} from "../src/core/executors/delegate-supervisor/executor.js";
 import type { DelegateSupervisorToolAdapter } from "../src/core/executors/delegate-supervisor/types.js";
+import type { Executor } from "../src/core/executors/sdk/types.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import { createRegisteredExecutorWorkflowDispatch } from "../src/core/workflow/dispatch/registered-executor.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { clearWorkflowRunManualRecoveryGuarded } from "../src/core/workflow/run/recovery.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 
@@ -206,6 +211,221 @@ describe("native dispatch canonical agent config", () => {
         agentProvider: "codex",
         model: "gpt-5.6-codex",
         effort: "high",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("carries the frozen selection through registered reattachment rounds", async () => {
+    const runId = "canonical-agent-config-reattach";
+    const db = seedNativeImplementationRun(runId);
+    const adapter: DelegateSupervisorToolAdapter = {
+      name: "gnhf",
+      handoff: () => ({
+        externalIdentity: {
+          externalRunId: "external-run",
+          branch: "main",
+          headSha: "a".repeat(40),
+        },
+        summary: "native handoff remains active",
+      }),
+      readExternalState: () => ({
+        ok: true,
+        value: {
+          externalRunId: "external-run",
+          branch: "main",
+          headSha: "a".repeat(40),
+          activeStep: "implementation",
+          stepStatus: "running",
+          findings: [],
+          selectedFindingIds: [],
+          decisions: [],
+          prUrl: null,
+          ciState: "none",
+        },
+        digest: "external-state-digest",
+      }),
+    };
+    try {
+      const production = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        {
+          registry: new Map([
+            ["delegate-supervisor", new DelegateSupervisorExecutor()],
+          ]),
+          resolveHostBindings: () => ({ tools: { gnhf: adapter } }),
+        },
+      );
+      const claim = claimImplementation(db, runId);
+
+      await production(claim, { db, workerId: WORKER, now: NOW + 1 });
+      await production(claim, { db, workerId: WORKER, now: NOW + 2 });
+
+      expect(
+        db
+          .prepare(
+            `SELECT round_index AS roundIndex, agent_provider AS agentProvider, model, effort
+               FROM executor_rounds
+              WHERE workflow_run_id = ?
+              ORDER BY round_index`,
+          )
+          .all(runId),
+      ).toEqual([
+        {
+          roundIndex: 0,
+          agentProvider: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+        {
+          roundIndex: 1,
+          agentProvider: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("carries the frozen selection through registered retry rounds", async () => {
+    const runId = "canonical-agent-config-retry";
+    const db = seedNativeImplementationRun(runId);
+    const registry = new Map([
+      ["delegate-supervisor", new DelegateSupervisorExecutor()],
+    ]);
+    try {
+      const unavailable = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        {
+          registry,
+          resolveHostBindings: () => ({ tools: {} }),
+        },
+      );
+      const firstClaim = claimImplementation(db, runId);
+      await unavailable(firstClaim, {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT agent_provider AS agentProvider, model, effort
+               FROM executor_rounds
+              WHERE workflow_run_id = ?
+              ORDER BY round_index DESC
+              LIMIT 1`,
+          )
+          .get(runId),
+      ).toEqual({
+        agentProvider: "codex",
+        model: "gpt-5.6-codex",
+        effort: "high",
+      });
+
+      expect(
+        clearWorkflowRunManualRecoveryGuarded(db, {
+          runId,
+          now: NOW + 2,
+        }),
+      ).toMatchObject({
+        ok: true,
+        retryPrepared: {
+          stepId: "implementation",
+        },
+      });
+
+      const adapter: DelegateSupervisorToolAdapter = {
+        name: "gnhf",
+        handoff: () => ({
+          externalIdentity: {
+            externalRunId: "external-retry-run",
+            branch: "main",
+            headSha: "b".repeat(40),
+          },
+          summary: "retried native handoff",
+        }),
+        readExternalState: () => ({
+          ok: false,
+          error: "not polled in this bounded retry",
+        }),
+      };
+      const repaired = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        {
+          registry,
+          resolveHostBindings: () => ({ tools: { gnhf: adapter } }),
+        },
+      );
+      const secondClaim = claimImplementation(db, runId);
+      await repaired(secondClaim, { db, workerId: WORKER, now: NOW + 3 });
+
+      expect(
+        db
+          .prepare(
+            `SELECT attempt_number AS attempt, agent_provider AS agentProvider, model, effort
+               FROM executor_rounds
+              WHERE workflow_run_id = ?
+              ORDER BY round_index`,
+          )
+          .all(runId),
+      ).toEqual([
+        {
+          attempt: 1,
+          agentProvider: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+        {
+          attempt: 2,
+          agentProvider: "codex",
+          model: "gpt-5.6-codex",
+          effort: "high",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("carries the frozen selection into a driver-created recovery round", async () => {
+    const runId = "canonical-agent-config-driver-recovery";
+    const db = seedNativeImplementationRun(runId);
+    const executor: Executor = {
+      name: "delegate-supervisor",
+      configSchema: DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
+      tick() {
+        throw new Error("registered executor failed before starting a round");
+      },
+    };
+    try {
+      const production = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        { registry: new Map([[executor.name, executor]]) },
+      );
+
+      await production(claimImplementation(db, runId), {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+
+      expect(
+        db
+          .prepare(
+            `SELECT agent_provider AS agentProvider, model, effort, recovery_code AS recoveryCode
+               FROM executor_rounds
+              WHERE workflow_run_id = ?`,
+          )
+          .get(runId),
+      ).toEqual({
+        agentProvider: "codex",
+        model: "gpt-5.6-codex",
+        effort: "high",
+        recoveryCode: "executor_threw",
       });
     } finally {
       db.close();

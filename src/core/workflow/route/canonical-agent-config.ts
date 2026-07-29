@@ -4,10 +4,12 @@ import {
   type CodingStepExecutorSelection,
   type CodingStepRouteOverride,
 } from "./coding.js";
-import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
+import {
+  mergePortableAgentConfig,
+  PORTABLE_AGENT_CONFIG_FIELDS,
+} from "../../../shared/agent-config.js";
 
-const AGENT_CONFIG_FIELDS = ["harness", "model", "effort"] as const;
-type AgentConfigField = (typeof AGENT_CONFIG_FIELDS)[number];
+type AgentConfigField = (typeof PORTABLE_AGENT_CONFIG_FIELDS)[number];
 
 type CanonicalAgentConfigRow = {
   step_id: string;
@@ -109,7 +111,7 @@ function parseCanonicalAgentConfig(
 
   const normalized: CodingStepRouteOverride = {};
   for (const [key, value] of Object.entries(parsed)) {
-    if (!(AGENT_CONFIG_FIELDS as readonly string[]).includes(key)) {
+    if (!(PORTABLE_AGENT_CONFIG_FIELDS as readonly string[]).includes(key)) {
       throw canonicalConfigError(
         runId,
         stepId,
