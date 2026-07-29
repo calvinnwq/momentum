@@ -1174,6 +1174,9 @@ export type WorkflowStepDispatchContext = {
   workerId: string;
   /** The single tick timestamp used for recovery, scan, and the claim. */
   now: number;
+  resolvedRouteSelection?:
+    | { ok: true; selection: CodingStepExecutorSelection }
+    | { ok: false; reason: string };
   /** Registered SDK executors materialize their own first durable round. */
   executorOwnsRounds?: boolean;
   /**

@@ -35,8 +35,7 @@ import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
 import {
   ExecutorOwnedRoundMaterializationError,
-  isNativeCodingWorkflowRun,
-  resolveWorkflowStepDispatchRouteSelection,
+  resolveWorkflowStepDispatchRoute,
 } from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
@@ -196,13 +195,13 @@ export function createRegisteredExecutorWorkflowDispatch(
       }
     }
 
-    const routeSelection = resolveWorkflowStepDispatchRouteSelection(
+    const routeSelection = resolveWorkflowStepDispatchRoute(
       context.db,
       claim,
     );
     const selection: ExecutorAgentSelection | undefined =
-      routeSelection.ok && isNativeCodingWorkflowRun(context.db, claim)
-        ? routeSelection.selection
+      routeSelection.nativeCoding && routeSelection.selection.ok
+        ? routeSelection.selection.selection
         : undefined;
     const materializeOwnedRound = options.resolveOwnedRoundMaterializer?.({
       claim,
@@ -219,6 +218,7 @@ export function createRegisteredExecutorWorkflowDispatch(
         isRegisteredExecutor,
         isDurablyClaimedExecutor,
         isCanonicalBuiltInExecutor,
+        resolvedRouteSelection: routeSelection.selection,
         ...(materializeOwnedRound === undefined
           ? {}
           : { materializeOwnedRound }),
@@ -239,6 +239,7 @@ export function createRegisteredExecutorWorkflowDispatch(
         isRegisteredExecutor,
         isDurablyClaimedExecutor,
         isCanonicalBuiltInExecutor,
+        resolvedRouteSelection: routeSelection.selection,
         materializeOwnedRound: ({
           attempt,
           now,

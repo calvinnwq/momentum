@@ -179,7 +179,9 @@ export function executeWorkflowStepDispatch(
     });
   }
 
-  const selection = resolveWorkflowStepDispatchRouteSelection(db, claim);
+  const selection =
+    context.resolvedRouteSelection ??
+    resolveWorkflowStepDispatchRouteSelection(db, claim);
   if (!selection.ok) {
     return failClosedDispatch(db, claim, {
       code: "route_config_invalid",
@@ -543,9 +545,14 @@ function buildRoundScaffold(
   };
 }
 
-export type WorkflowStepDispatchRouteSelectionResolution =
-  | { ok: true; selection: CodingStepExecutorSelection }
-  | { ok: false; reason: string };
+export type WorkflowStepDispatchRouteSelectionResolution = NonNullable<
+  WorkflowStepDispatchContext["resolvedRouteSelection"]
+>;
+
+export type WorkflowStepDispatchRouteResolution = {
+  nativeCoding: boolean;
+  selection: WorkflowStepDispatchRouteSelectionResolution;
+};
 
 type DispatchRouteRow = {
   source: string;
@@ -559,29 +566,17 @@ const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
   effort: null,
 };
 
-/** Return whether a claimed step belongs to the native coding workflow lane. */
-export function isNativeCodingWorkflowRun(
-  db: MomentumDb,
-  claim: Pick<ClaimedWorkflowStep, "runId">,
-): boolean {
-  const row = db
-    .prepare(
-      `SELECT source, workflow_definition_key
-         FROM workflow_runs
-        WHERE id = ?`,
-    )
-    .get(claim.runId) as
-    { source: string; workflow_definition_key: string | null } | undefined;
-  return (
-    row?.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
-    row.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY
-  );
-}
-
 export function resolveWorkflowStepDispatchRouteSelection(
   db: MomentumDb,
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
 ): WorkflowStepDispatchRouteSelectionResolution {
+  return resolveWorkflowStepDispatchRoute(db, claim).selection;
+}
+
+export function resolveWorkflowStepDispatchRoute(
+  db: MomentumDb,
+  claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
+): WorkflowStepDispatchRouteResolution {
   const row = db
     .prepare(
       `SELECT source, workflow_definition_key, workflow_definition_version
@@ -590,13 +585,19 @@ export function resolveWorkflowStepDispatchRouteSelection(
     )
     .get(claim.runId) as DispatchRouteRow | undefined;
   if (row === undefined) {
-    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
+    return {
+      nativeCoding: false,
+      selection: { ok: true, selection: DEFAULT_DISPATCH_SELECTION },
+    };
   }
   if (
     row.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
     row.workflow_definition_key !== CODING_WORKFLOW_DEFINITION_KEY
   ) {
-    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
+    return {
+      nativeCoding: false,
+      selection: { ok: true, selection: DEFAULT_DISPATCH_SELECTION },
+    };
   }
 
   const compatibility = db
@@ -613,10 +614,13 @@ export function resolveWorkflowStepDispatchRouteSelection(
     | undefined;
   if (compatibility === undefined) {
     return {
-      ok: false,
-      reason:
-        `Native coding run ${claim.runId} route is corrupt at $canonical.workflow_run_coding_compatibility; ` +
-        "routing to manual recovery.",
+      nativeCoding: true,
+      selection: {
+        ok: false,
+        reason:
+          `Native coding run ${claim.runId} route is corrupt at $canonical.workflow_run_coding_compatibility; ` +
+          "routing to manual recovery.",
+      },
     };
   }
   try {
@@ -625,46 +629,60 @@ export function resolveWorkflowStepDispatchRouteSelection(
       compatibility.selected_profile,
     );
     if (!selectedProfile.ok) {
-      return { ok: false, reason: selectedProfile.reason };
+      return {
+        nativeCoding: true,
+        selection: { ok: false, reason: selectedProfile.reason },
+      };
     }
     const implementationEngine = readCodingImplementationEngine(
       claim.runId,
       compatibility.implementation_engine,
     );
     if (!implementationEngine.ok) {
-      return { ok: false, reason: implementationEngine.reason };
+      return {
+        nativeCoding: true,
+        selection: { ok: false, reason: implementationEngine.reason },
+      };
     }
     if (
       claim.stepId === "implementation" &&
       implementationEngine.engine === CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
     ) {
       return {
-        ok: false,
-        reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
+        nativeCoding: true,
+        selection: {
+          ok: false,
+          reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
+        },
       };
     }
-
-    projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
-      source: row.source,
-      definitionKey: row.workflow_definition_key,
-      definitionVersion: row.workflow_definition_version,
-    });
 
     const agentConfig = readCanonicalWorkflowStepAgentConfig(db, {
       runId: claim.runId,
       stepId: claim.stepId,
     });
+    projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
+      source: row.source,
+      definitionKey: row.workflow_definition_key,
+      definitionVersion: row.workflow_definition_version,
+    });
     return {
-      ok: true,
-      selection: canonicalWorkflowStepExecutorSelection(agentConfig),
+      nativeCoding: true,
+      selection: {
+        ok: true,
+        selection: canonicalWorkflowStepExecutorSelection(agentConfig),
+      },
     };
   } catch (error) {
     if (!(error instanceof RouteStateMigrationError)) throw error;
     return {
-      ok: false,
-      reason:
-        `Native coding run ${claim.runId} canonical agent config is corrupt at ${error.jsonPath}; ` +
-        "routing to manual recovery.",
+      nativeCoding: true,
+      selection: {
+        ok: false,
+        reason:
+          `Native coding run ${claim.runId} canonical route state is corrupt at ${error.jsonPath} [${error.code}]; ` +
+          "routing to manual recovery.",
+      },
     };
   }
 }

@@ -15,6 +15,7 @@ vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
 });
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import {
   DELEGATE_SUPERVISOR_CONFIG_SCHEMA,
   DelegateSupervisorExecutor,
@@ -191,6 +192,8 @@ describe("native dispatch canonical agent config", () => {
           resolveHostBindings: () => ({ tools: { gnhf: adapter } }),
         },
       );
+      const projectRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
+      projectRoute.mockClear();
 
       await production(claimImplementation(db, runId), {
         db,
@@ -211,6 +214,7 @@ describe("native dispatch canonical agent config", () => {
         model: "gpt-5.6-codex",
         effort: "high",
       });
+      expect(projectRoute).toHaveBeenCalledTimes(1);
     } finally {
       db.close();
     }
@@ -540,7 +544,10 @@ describe("native dispatch canonical agent config", () => {
           .get(runId),
       ).toEqual({ count: 0 });
       expect(listWorkflowGatesForRun(db, runId)).toEqual([
-        expect.objectContaining({ evidence: "route_config_invalid" }),
+        expect.objectContaining({
+          evidence: "route_config_invalid",
+          reason: expect.stringContaining("canonical route state is corrupt"),
+        }),
       ]);
     } finally {
       db.close();
