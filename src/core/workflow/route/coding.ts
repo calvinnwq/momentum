@@ -114,17 +114,19 @@ export type CodingStepRouteField = (typeof CODING_STEP_ROUTE_FIELDS)[number];
 
 /**
  * A single step's operator override. Sparse: only the fields the operator set are
- * present, so an absent field defers to the lower-precedence selection layers at
- * execution time (an explicit value is a deliberate per-step choice).
+ * present, so an absent field defers to the lower-precedence selection layers when
+ * the native start or preview resolves the effective selection (an explicit value
+ * is a deliberate per-step choice).
  */
 export type CodingStepRouteOverride = Partial<
   Record<CodingStepRouteField, string>
 >;
 
 /**
- * The compatibility-projection per-step override map carried under `route.steps`.
- * Only steps the operator actually overrode (with at least one field) appear; a step with no
- * overrides is simply absent and resolves to the defaults.
+ * The per-step override map carried under the compatibility `route.steps` namespace.
+ * Start and preview inputs contain only operator-supplied fields, while native
+ * read-back may expose the effective canonical value; absent fields resolve from
+ * the lower-precedence defaults during plan/start materialization.
  */
 export type CodingStepRouteOverrides = Partial<
   Record<ConfigurableCodingStepKey | "tracker-refresh", CodingStepRouteOverride>
@@ -132,8 +134,8 @@ export type CodingStepRouteOverrides = Partial<
 
 /**
  * The effective selection for one step as a preview/status surface should show it:
- * every field present, `null` where the operator did not override it (the
- * "default / inherit at execution" sentinel).
+ * every selected field present, and `null` where no value is selected in the
+ * merged canonical configuration.
  */
 export type CodingStepRouteSelection = Record<
   CodingStepRouteField,
@@ -153,8 +155,8 @@ export type CodingStepExecutorSelection = {
 };
 
 /**
- * The default selection for a step the operator did not reconfigure: every field
- * `null`, meaning "inherit from repo/run/global config at execution time".
+ * The default selection for a step with no Momentum agent value: every field is
+ * `null`, meaning that Momentum supplies no harness/model/effort override.
  */
 export const DEFAULT_CODING_STEP_ROUTE_SELECTION: CodingStepRouteSelection = {
   harness: null,
@@ -463,9 +465,10 @@ export function writeCodingStepRouteOverrides(
 /**
  * Project per-step overrides into the effective per-step selections a
  * preview/status surface shows: every configurable step in canonical order, every
- * field present, `null` where the operator did not override it. This is the
+ * field present, and `null` where the merged selection has no value. This is the
  * "preview default route selections, then the changed ones" view - a step with no
- * override reads as all-default, an overridden field reads as the operator's choice.
+ * configured value reads as all-default, and an overridden field reads as the
+ * operator's choice.
  */
 export function resolveCodingRouteStepSelections(
   overrides: CodingStepRouteOverrides,
@@ -501,7 +504,7 @@ export function resolveCodingStepExecutorSelection(
   };
 }
 
-/** The label a human audit surface prints for a field the operator did not set. */
+/** The label a human audit surface prints for a field with no selected value. */
 export const CODING_STEP_ROUTE_DEFAULT_LABEL = "(default)";
 
 /**
@@ -509,11 +512,11 @@ export const CODING_STEP_ROUTE_DEFAULT_LABEL = "(default)";
  * lines for an audit surface, parallel to the run-level `Profile:` line the coding
  * plan preview already prints. Pure and byte-stable: a header line followed by
  * every configurable step in {@link CONFIGURABLE_CODING_STEP_KEYS} order, each
- * field in {@link CODING_STEP_ROUTE_FIELDS} order showing the operator's value or
- * the {@link CODING_STEP_ROUTE_DEFAULT_LABEL} sentinel where it was not overridden.
+ * field in {@link CODING_STEP_ROUTE_FIELDS} order showing the effective value or
+ * the {@link CODING_STEP_ROUTE_DEFAULT_LABEL} sentinel where no value was selected.
  * This is the text-mode counterpart to the JSON `route.steps` projection, so an
- * operator reading the default (non-JSON) preview can audit "these are the default
- * per-step selections, these I changed" before approving execution. The command
+ * operator reading the default (non-JSON) preview can audit the effective
+ * per-step selections and any `--steps-json` changes before approving execution. The command
  * layer calls this and hands the lines to the renderer (renderers accept computed
  * results rather than importing this projection).
  */

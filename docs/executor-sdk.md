@@ -386,7 +386,7 @@ The shipped agent-loop and single-shot lifecycles keep round-start identity and 
 Before invoking that adapter, the built-in lifecycle clones and freezes its portable config and host round-start bindings so runner mutation cannot change the durable dispatch identity.
 The runner still receives portable config and must reject any mismatch with the captured host resolution.
 The production profile-backed host cross-checks agent-loop agent/timeout/policy, script command/timeout/policy, and agent-once agent/timeout/policy identity before launching a process.
-Its policy identity is the resolved live-wrapper profile name, its agent identity is the persisted per-step agent selection exposed through the compatibility `route.steps` projection, and its script identity is the profile's optional `command_identity` or the workflow step kind for older profiles.
+Its policy identity is the resolved live-wrapper profile name, its agent identity is the persisted per-step selection from canonical step state and exposed through the compatibility `route.steps` projection, and its script identity is the profile's optional `command_identity` or the workflow step kind for older profiles.
 Resolved executable paths, raw argv, cwd, and environment remain host-owned and contribute only an opaque digest to the durable reattachment binding.
 Any mismatch returns `invalid_input` before process launch.
 For scripts, an explicit host `commandIdentity` is authoritative; otherwise the absolute executable's basename is the expected portable command identity.

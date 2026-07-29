@@ -903,8 +903,8 @@ async function runWorkflowStartCommand(
       preview: previewResult.preview,
       policyPresent: policy.present === true,
       policyPath: policy.path,
-      // Humanize the same validated per-step overrides that built the preview
-      // route so the default (non-JSON) preview can audit the selection.
+      // Humanize the same validated per-step selection that built the preview
+      // route so the default (non-JSON) preview can audit the effective values.
       stepRouteLines: formatCodingRouteStepSelectionLines(
         resolveCodingRouteStepSelections(
           stepRouteOverrides,

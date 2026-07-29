@@ -291,11 +291,11 @@ For native workflow runs, ordinary live-wrapper steps use the repo-local
 Delegate-supervisor steps use `.agent-workflows/<run-id>/delegate/<step-id>/`
 and scope their later attempts beneath that step directory.
 When a dispatched executor round has selected values, Momentum also injects
-`MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
-coding runs those values come from canonical `workflow_steps.agent_config_json`
-when definition-level agent config or `--steps-json` supplies them, otherwise they
-are omitted.
-Provider-aware aliases from run-specific `--steps-json` selections are normalized before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`. Definition-level agent config retains its declared values.
+`MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for fresh
+native coding runs those values come from the normalized merged selection frozen
+in canonical `workflow_steps.agent_config_json` at start, otherwise they are
+omitted.
+Provider-aware aliases from the merged native selection are normalized before persistence, so a step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; a `codex` step supplied as `model=openai/gpt-5.5` injects `MOMENTUM_MODEL=gpt-5.5`; and an `opencode` step supplied as `model=glm-5.2` injects `MOMENTUM_MODEL=opencode-go/glm-5.2`.
 Unknown or non-agent harness/model values still pass through unchanged after structural validation.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
@@ -314,8 +314,9 @@ Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
 The version-pinned built-in definition remains authoritative for the implementation executor: current version 3 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label; retained version 1 projects its recorded `goal-loop` executor according to the raw-identity compatibility rule in [SPEC.md](../SPEC.md), while retained version 2 keeps its recorded `delegate-supervisor` implementation and delegated tool configuration.
 Both executor paths resolve their machine-local mechanism from the step-kind live-wrapper binding.
 A persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to another route.
-The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `workflow_steps.agent_config_json`, and the read-only `route.steps` projection plus `workflow run preview-coding --steps-json <json>` report the same selection without persisting a preview run.
-Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
+The `--steps-json <json>` option on `workflow run start-coding` merges and freezes per-step harness/model/effort selections in `workflow_steps.agent_config_json`, and the read-only `route.steps` projection plus `workflow run preview-coding --steps-json <json>` report the same normalized selection without persisting a preview run.
+Provider-aware model aliases are normalized in both paths when the merged step selection supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
+Native dispatch, including retry and reattachment round materialization, reads the frozen canonical step row rather than `route.steps`; stale or conflicting compatibility route data cannot override it.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `workflow run watch --once` resolves the same profile for its bounded run-scoped dispatcher tick when it is eligible to dispatch a non-tail step, so an invalid profile can also fail that supervisor command with `daemon_live_wrapper_profile_invalid`.
