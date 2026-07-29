@@ -195,10 +195,7 @@ export function createRegisteredExecutorWorkflowDispatch(
       }
     }
 
-    const routeSelection = resolveWorkflowStepDispatchRoute(
-      context.db,
-      claim,
-    );
+    const routeSelection = resolveWorkflowStepDispatchRoute(context.db, claim);
     const selection: ExecutorAgentSelection | undefined =
       routeSelection.nativeCoding && routeSelection.selection.ok
         ? routeSelection.selection.selection

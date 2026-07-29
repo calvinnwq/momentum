@@ -57,9 +57,7 @@
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
-import {
-  projectValidatedLegacyWorkflowRunRoute,
-} from "../../../adapters/db/route-state.js";
+import { projectValidatedLegacyWorkflowRunRoute } from "../../../adapters/db/route-state.js";
 import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import {
   allocateExecutorCheckpointId,
