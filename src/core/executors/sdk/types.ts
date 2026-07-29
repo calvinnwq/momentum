@@ -111,6 +111,13 @@ export type ExecutorEnvelopeSnapshot = {
   readonly currentRound: ExecutorRoundEnvelopeSnapshot | null;
 };
 
+/** Frozen portable agent selection carried into executor-owned rounds. */
+export type ExecutorAgentSelection = {
+  readonly agentProvider: string | null;
+  readonly model: string | null;
+  readonly effort: string | null;
+};
+
 export const EXECUTOR_OBSERVATION_PHASES = [
   "pending",
   "running",
@@ -244,6 +251,8 @@ export type ExecutorTickContext<Config = unknown, HostBindings = unknown> = {
   readonly config: Readonly<Config>;
   /** Machine-local executable/env/credential resolution, never workflow data. */
   readonly hostBindings: Readonly<HostBindings>;
+  /** Selection frozen by the workflow step, when the step has one. */
+  readonly selection?: ExecutorAgentSelection;
   /** Durable facade bound to `state.attempt`. */
   readonly envelope: ExecutorEnvelope;
   /** Daemon cancellation signal for the bounded turn. */

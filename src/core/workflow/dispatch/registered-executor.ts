@@ -12,6 +12,7 @@ import {
 } from "../../executors/loop/reducer.js";
 import type {
   Executor,
+  ExecutorAgentSelection,
   ExecutorEnvelopeSnapshot,
   ExecutorRoundStart,
   ExecutorRoundView,
@@ -32,7 +33,10 @@ import { classifyWorkflowLease } from "../run/reducer.js";
 import { getWorkflowLease, heartbeatWorkflowLease } from "../leases.js";
 import { reconcileDispatchedWorkflowStep } from "./reconcile-execute.js";
 import { recordDispatchedStepManualRecovery } from "./executor-recovery.js";
-import { ExecutorOwnedRoundMaterializationError } from "./execute.js";
+import {
+  ExecutorOwnedRoundMaterializationError,
+  resolveWorkflowStepDispatchRouteSelection,
+} from "./execute.js";
 import { shouldDriveDispatchedExecutor } from "./dispatch-status.js";
 import { parkRegisteredExecutorAtHumanGate } from "./executor-gate.js";
 import { effectiveStepExecutor } from "../definition/legacy.js";
@@ -191,6 +195,13 @@ export function createRegisteredExecutorWorkflowDispatch(
       }
     }
 
+    const routeSelection = resolveWorkflowStepDispatchRouteSelection(
+      context.db,
+      claim,
+    );
+    const selection: ExecutorAgentSelection | undefined = routeSelection.ok
+      ? routeSelection.selection
+      : undefined;
     const materializeOwnedRound = options.resolveOwnedRoundMaterializer?.({
       claim,
       context,
@@ -241,7 +252,12 @@ export function createRegisteredExecutorWorkflowDispatch(
               attempt.stepRunId,
             ),
           );
-          const canonicalRound = genericRoundRecord(attempt, roundIndex, now);
+          const canonicalRound = genericRoundRecord(
+            attempt,
+            roundIndex,
+            now,
+            selection,
+          );
           const round =
             requestedRoundId === undefined
               ? canonicalRound
@@ -299,6 +315,7 @@ export function createRegisteredExecutorWorkflowDispatch(
             executor,
             config,
             hostBindings,
+            ...(selection === undefined ? {} : { selection }),
             maxTicks:
               options.resolveMaxTicks?.({
                 executorName: runtime.executorName,
@@ -665,6 +682,7 @@ function startGenericRound(
     genericRoundStart(
       attempt,
       nextExecutorRoundIndex(state.rounds.map((snapshot) => snapshot.round)),
+      context.selection,
     ),
   );
 }
@@ -672,6 +690,7 @@ function startGenericRound(
 function genericRoundStart(
   attempt: ExecutorEnvelopeSnapshot["attempt"],
   roundIndex: number,
+  selection?: ExecutorAgentSelection,
 ): ExecutorRoundStart {
   return {
     roundId: `${attempt.attemptId}::round-${roundIndex + 1}`,
@@ -683,9 +702,9 @@ function genericRoundStart(
     attemptNumber: attempt.attemptNumber,
     roundIndex,
     state: "running",
-    agentProvider: null,
-    model: null,
-    effort: null,
+    agentProvider: selection?.agentProvider ?? null,
+    model: selection?.model ?? null,
+    effort: selection?.effort ?? null,
     inputDigest: null,
     resultDigest: null,
     artifactRoot: null,
@@ -704,8 +723,9 @@ function genericRoundRecord(
   attempt: ExecutorEnvelopeSnapshot["attempt"],
   roundIndex: number,
   now: number,
+  selection?: ExecutorAgentSelection,
 ): ExecutorRoundRecord {
-  const start = genericRoundStart(attempt, roundIndex);
+  const start = genericRoundStart(attempt, roundIndex, selection);
   return {
     ...start,
     logPaths: [...start.logPaths],

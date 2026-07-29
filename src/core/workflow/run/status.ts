@@ -39,6 +39,7 @@ import {
   canonicalWorkflowApprovalBoundary,
   canonicalWorkflowStepKind,
 } from "../definition/legacy.js";
+import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
 import {
   readCanonicalWorkflowStepAgentConfigs,
   type CanonicalWorkflowStepAgentConfig,
@@ -53,6 +54,7 @@ import type {
   WorkflowStepRecord,
   WorkflowStepState,
 } from "./reducer.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "./start.js";
 
 export type WorkflowRunRow = {
   runId: string;
@@ -355,7 +357,18 @@ export function loadWorkflowRunDetail(
 }
 
 function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {
-  const agentConfigs = readCanonicalWorkflowStepAgentConfigs(db, runId);
+  const run = db
+    .prepare(
+      "SELECT source, workflow_definition_key FROM workflow_runs WHERE id = ?",
+    )
+    .get(runId) as
+    | { source: string | null; workflow_definition_key: string | null }
+    | undefined;
+  const agentConfigs =
+    run?.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    run.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY
+      ? readCanonicalWorkflowStepAgentConfigs(db, runId)
+      : new Map<string, CanonicalWorkflowStepAgentConfig>();
   return (
     db
       .prepare(

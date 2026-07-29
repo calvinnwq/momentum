@@ -579,11 +579,16 @@ export function resolveWorkflowStepDispatchRouteSelection(
 
   const compatibility = db
     .prepare(
-      `SELECT implementation_engine
+      `SELECT implementation_engine, selected_profile
          FROM workflow_run_coding_compatibility
         WHERE run_id = ?`,
     )
-    .get(claim.runId) as { implementation_engine: string | null } | undefined;
+    .get(claim.runId) as
+    | {
+        implementation_engine: string | null;
+        selected_profile: string | null;
+      }
+    | undefined;
   if (compatibility === undefined) {
     return {
       ok: false,
@@ -593,6 +598,13 @@ export function resolveWorkflowStepDispatchRouteSelection(
     };
   }
   try {
+    const selectedProfile = readCodingSelectedProfile(
+      claim.runId,
+      compatibility.selected_profile,
+    );
+    if (!selectedProfile.ok) {
+      return { ok: false, reason: selectedProfile.reason };
+    }
     const implementationEngine = readCodingImplementationEngine(
       claim.runId,
       compatibility.implementation_engine,
@@ -652,6 +664,20 @@ function readCodingImplementationEngine(
     };
   }
   return { ok: true, engine: normalized };
+}
+
+function readCodingSelectedProfile(
+  runId: string,
+  value: unknown,
+): { ok: true } | { ok: false; reason: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      reason: `Native coding run ${runId} route.profile is invalid; routing to manual recovery.`,
+    };
+  }
+  return { ok: true };
 }
 
 function deriveDispatchRoundId(attemptId: string): string {
