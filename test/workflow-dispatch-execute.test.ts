@@ -38,7 +38,6 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
-  resolveLegacyWorkflowStepDispatchRouteSelection,
   resolveWorkflowStepDispatchRouteSelection,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
