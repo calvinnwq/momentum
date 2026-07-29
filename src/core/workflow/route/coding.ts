@@ -49,6 +49,8 @@
  * `string | null` treatment.
  */
 import { resolveCommandModelAlias } from "../../model-aliases.js";
+import type { StepDefinition } from "../definition/definition.js";
+import { canonicalWorkflowStepKind } from "../definition/legacy.js";
 import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 
 /** The run-`route` field that records the selected coding implementation engine. */
@@ -121,6 +123,44 @@ export type CodingStepRouteField = (typeof CODING_STEP_ROUTE_FIELDS)[number];
 export type CodingStepRouteOverride = Partial<
   Record<CodingStepRouteField, string>
 >;
+
+export type CodingAgentConfigDefinitionStep = Pick<
+  StepDefinition,
+  "key" | "kind" | "agentConfig"
+>;
+
+export type CodingAgentConfigWorkflowStep = {
+  stepId: string;
+  kind: string;
+};
+
+export function resolveCodingStepAgentConfig(
+  definitionSteps: ReadonlyArray<CodingAgentConfigDefinitionStep>,
+  step: CodingAgentConfigWorkflowStep,
+  overrides: CodingStepRouteOverrides,
+): CodingStepRouteOverride {
+  const definitionStep = definitionSteps.find(
+    (candidate) => candidate.key === step.stepId,
+  );
+  const routeStepKey = canonicalWorkflowStepKind(step.kind) ?? step.kind;
+  return mergePortableAgentConfig(
+    definitionStep?.agentConfig,
+    overrides[routeStepKey as keyof CodingStepRouteOverrides],
+  );
+}
+
+export function resolveCodingStepAgentConfigs(
+  definitionSteps: ReadonlyArray<CodingAgentConfigDefinitionStep>,
+  steps: ReadonlyArray<CodingAgentConfigWorkflowStep>,
+  overrides: CodingStepRouteOverrides,
+): Map<string, CodingStepRouteOverride> {
+  return new Map(
+    steps.map((step) => [
+      step.stepId,
+      resolveCodingStepAgentConfig(definitionSteps, step, overrides),
+    ]),
+  );
+}
 
 /**
  * The per-step override map carried under the compatibility `route.steps` namespace.
@@ -487,6 +527,23 @@ export function resolveCodingRouteStepSelections(
     };
   }
   return selections;
+}
+
+export function resolveCodingRouteStepSelectionsFromDefinition(
+  definitionSteps: ReadonlyArray<CodingAgentConfigDefinitionStep>,
+  overrides: CodingStepRouteOverrides,
+): CodingRouteStepSelections {
+  const defaults: CodingStepRouteOverrides = {};
+  for (const step of definitionSteps) {
+    const routeStepKey = canonicalWorkflowStepKind(step.kind) ?? step.kind;
+    if (!isConfigurableCodingStepKey(routeStepKey)) continue;
+    defaults[routeStepKey] = resolveCodingStepAgentConfig(
+      definitionSteps,
+      { stepId: step.key, kind: step.kind },
+      overrides,
+    );
+  }
+  return resolveCodingRouteStepSelections({}, defaults);
 }
 
 export function resolveCodingStepExecutorSelection(

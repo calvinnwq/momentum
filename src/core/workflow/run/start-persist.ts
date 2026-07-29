@@ -47,8 +47,8 @@ import {
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   readCodingStepRouteOverrides,
+  resolveCodingStepAgentConfigs,
 } from "../route/coding.js";
-import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 import {
   materializeWorkflowRunStart,
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
@@ -60,7 +60,6 @@ import {
   CODING_WORKFLOW_DEFINITION_KEY,
   type WorkflowDefinition,
 } from "../definition/definition.js";
-import { canonicalWorkflowStepKind } from "../definition/legacy.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not
@@ -149,25 +148,11 @@ export function persistWorkflowRunStart(
       },
     ]);
   }
-  const definitionByStepKey = new Map(
-    definition.steps.map((step) => [step.key, step]),
-  );
   const canonicalAgentConfigs = isNativeCodingRun
-    ? new Map(
-        steps.map((step) => {
-          const definitionStep = definitionByStepKey.get(step.stepId);
-          const canonicalStepKey =
-            canonicalWorkflowStepKind(step.kind) ?? step.kind;
-          return [
-            step.stepId,
-            mergePortableAgentConfig(
-              definitionStep?.agentConfig,
-              routeOverrides.overrides[
-                canonicalStepKey as keyof typeof routeOverrides.overrides
-              ],
-            ),
-          ] as const;
-        }),
+    ? resolveCodingStepAgentConfigs(
+        definition.steps,
+        steps,
+        routeOverrides.overrides,
       )
     : undefined;
   try {

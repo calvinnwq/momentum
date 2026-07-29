@@ -43,7 +43,7 @@ export function readCanonicalWorkflowStepAgentConfig(
       "canonical workflow step row is missing",
     );
   }
-  return parseCanonicalAgentConfig(
+  return parseCanonicalWorkflowStepAgentConfig(
     input.runId,
     input.stepId,
     row.agent_config_json,
@@ -66,7 +66,11 @@ export function readCanonicalWorkflowStepAgentConfigs(
   return new Map(
     rows.map((row) => [
       row.step_id,
-      parseCanonicalAgentConfig(runId, row.step_id, row.agent_config_json),
+      parseCanonicalWorkflowStepAgentConfig(
+        runId,
+        row.step_id,
+        row.agent_config_json,
+      ),
     ]),
   );
 }
@@ -82,7 +86,7 @@ export function canonicalWorkflowStepExecutorSelection(
   };
 }
 
-function parseCanonicalAgentConfig(
+export function parseCanonicalWorkflowStepAgentConfig(
   runId: string,
   stepId: string,
   raw: string | null,

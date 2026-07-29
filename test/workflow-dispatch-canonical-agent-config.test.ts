@@ -304,16 +304,20 @@ describe("native dispatch canonical agent config", () => {
   it("carries the frozen selection through registered reattachment rounds", async () => {
     const runId = "canonical-agent-config-reattach";
     const db = seedNativeImplementationRun(runId);
+    let handoffCalls = 0;
     const adapter: DelegateSupervisorToolAdapter = {
       name: "gnhf",
-      handoff: () => ({
-        externalIdentity: {
-          externalRunId: "external-run",
-          branch: "main",
-          headSha: "a".repeat(40),
-        },
-        summary: "native handoff remains active",
-      }),
+      handoff: () => {
+        handoffCalls += 1;
+        return {
+          externalIdentity: {
+            externalRunId: "external-run",
+            branch: "main",
+            headSha: "a".repeat(40),
+          },
+          summary: "native handoff remains active",
+        };
+      },
       readExternalState: () => ({
         ok: true,
         value: {
@@ -346,6 +350,7 @@ describe("native dispatch canonical agent config", () => {
       await production(claim, { db, workerId: WORKER, now: NOW + 1 });
       await production(claim, { db, workerId: WORKER, now: NOW + 2 });
 
+      expect(handoffCalls).toBe(1);
       expect(
         db
           .prepare(

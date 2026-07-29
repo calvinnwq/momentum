@@ -58,9 +58,9 @@ import {
 } from "../definition/legacy.js";
 import {
   readCodingStepRouteOverrides,
+  resolveCodingStepAgentConfigs,
   type CodingStepRouteOverride,
 } from "../route/coding.js";
-import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
@@ -391,10 +391,6 @@ export function materializeWorkflowCodingPlanPreview(
   // `materializeWorkflowRunStart` succeeded, so `input.definition` is a valid
   // `WorkflowDefinition`; build the executor lookup from it by stable step key.
   const definition = input.definition as WorkflowDefinition;
-  const definitionByStepKey = new Map(
-    definition.steps.map((step) => [step.key, step]),
-  );
-
   const { run } = result.plan;
   const routeOverrides = readCodingStepRouteOverrides(run.route);
   if (!routeOverrides.ok) {
@@ -408,20 +404,16 @@ export function materializeWorkflowCodingPlanPreview(
       errors: [error],
     };
   }
+  const effectiveAgentConfigs = resolveCodingStepAgentConfigs(
+    definition.steps,
+    result.plan.steps,
+    routeOverrides.overrides,
+  );
   const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => {
-    const definitionStep = definitionByStepKey.get(step.stepId);
-    const definitionAgentConfig = definitionStep?.agentConfig ?? {};
-    const routeStepKey = canonicalWorkflowStepKind(step.kind) ?? step.kind;
-    const routeAgentConfig =
-      routeStepKey in routeOverrides.overrides
-        ? (routeOverrides.overrides[
-            routeStepKey as keyof typeof routeOverrides.overrides
-          ] ?? {})
-        : {};
-    const agentConfig = mergePortableAgentConfig(
-      definitionAgentConfig,
-      routeAgentConfig,
+    const definitionStep = definition.steps.find(
+      (candidate) => candidate.key === step.stepId,
     );
+    const agentConfig = effectiveAgentConfigs.get(step.stepId) ?? {};
     return {
       stepId: step.stepId,
       kind: step.kind,
