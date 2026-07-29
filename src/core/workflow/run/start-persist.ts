@@ -125,16 +125,18 @@ export function persistWorkflowRunStart(
   }
   const { run, steps } = result.plan;
   const definition = input.definition as WorkflowDefinition;
-  const definitionAgentConfigs = new Map(
-    definition.steps.flatMap((step) =>
-      step.agentConfig === undefined
-        ? []
-        : [[step.key, step.agentConfig] as const],
-    ),
-  );
   const isNativeCodingRun =
     run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
     run.definitionKey === CODING_WORKFLOW_DEFINITION_KEY;
+  const definitionAgentConfigs = isNativeCodingRun
+    ? new Map(
+        definition.steps.flatMap((step) =>
+          step.agentConfig === undefined
+            ? []
+            : [[step.key, step.agentConfig] as const],
+        ),
+      )
+    : undefined;
   const routeOverrides = isNativeCodingRun
     ? readCodingStepRouteOverrides(run.route)
     : { ok: true as const, overrides: {} };
@@ -181,7 +183,7 @@ export function persistWorkflowRunStart(
       route: run.route,
       steps: steps.map((step) => ({
         kind: step.kind,
-        agentConfig: definitionAgentConfigs.get(step.stepId),
+        agentConfig: definitionAgentConfigs?.get(step.stepId),
       })),
     });
     validateWorkflowRouteLineage(db, {
@@ -275,7 +277,9 @@ export function persistWorkflowRunStart(
       definitionVersion: run.definitionVersion,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
-      definitionAgentConfigs,
+      ...(definitionAgentConfigs === undefined
+        ? {}
+        : { definitionAgentConfigs }),
       ...(canonicalAgentConfigs === undefined ? {} : { canonicalAgentConfigs }),
       definitionExecutorConfigs: new Map(
         definition.steps.flatMap((step) =>

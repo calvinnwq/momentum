@@ -286,6 +286,11 @@ describe("momentum workflow run start (NGX-346)", () => {
           key: "implementation",
           kind: "implementation",
           executor: "agent-loop",
+          agentConfig: {
+            harness: "codex",
+            model: "gpt-generic",
+            effort: "high",
+          },
           order: 1,
           required: false,
         },
@@ -315,6 +320,24 @@ describe("momentum workflow run start (NGX-346)", () => {
       definitionVersion: 2,
     });
     expect((payload["counts"] as { steps: number }).steps).toBe(2);
+
+    const status = await run([
+      "workflow",
+      "status",
+      "run-custom",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+    expect(status.code).toBe(0);
+    const statusPayload = JSON.parse(status.stdout) as {
+      run: { source: string; route: Record<string, unknown> };
+    };
+    expect(statusPayload.run).toMatchObject({
+      source: "workflow-definition",
+      route: {},
+    });
+    expect(statusPayload.run.route).not.toHaveProperty("steps");
   });
 
   it("refuses when --run-id is missing", async () => {

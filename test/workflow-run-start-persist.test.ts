@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition,
@@ -92,6 +93,17 @@ function baseInput(
     now: NOW,
     ...overrides,
   };
+}
+
+function nativeInput(
+  definition: WorkflowDefinition,
+  overrides: Partial<WorkflowRunStartInput> = {},
+): WorkflowRunStartInput {
+  return baseInput({
+    ...overrides,
+    definition: { ...definition, key: "coding-workflow", version: 3 },
+    source: "momentum-native-coding",
+  });
 }
 
 type RunRow = {
@@ -244,8 +256,7 @@ describe("persistWorkflowRunStart", () => {
       definition.steps[0]!.config = { command: "implement" };
       persistWorkflowRunStart(
         db,
-        baseInput({
-          definition,
+        nativeInput(definition, {
           route: {
             steps: {
               implementation: { model: "gpt-5.6-codex", effort: "medium" },
@@ -272,6 +283,39 @@ describe("persistWorkflowRunStart", () => {
     }
   });
 
+  it("does not project generic definition agent config into route state", () => {
+    const db = openTempDb();
+    try {
+      const definition = twoStepDefinition();
+      definition.steps[0]!.agentConfig = {
+        harness: "codex",
+        model: "gpt-generic",
+        effort: "high",
+      };
+
+      persistWorkflowRunStart(db, baseInput({ definition }));
+
+      expect(
+        db
+          .prepare(
+            `SELECT agent_config_json
+               FROM workflow_steps
+              WHERE run_id = 'run-001' AND step_id = 'implementation'`,
+          )
+          .get(),
+      ).toEqual({ agent_config_json: "{}" });
+      expect(
+        projectValidatedLegacyWorkflowRunRoute(db, "run-001", {
+          source: WORKFLOW_RUN_START_SOURCE,
+          definitionKey: definition.key,
+          definitionVersion: definition.version,
+        }),
+      ).toEqual({});
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses divergent agent configs for repeated step kinds before writing", () => {
     const db = openTempDb();
     try {
@@ -281,7 +325,7 @@ describe("persistWorkflowRunStart", () => {
       definition.steps[1]!.agentConfig = { harness: "claude" };
 
       expect(() =>
-        persistWorkflowRunStart(db, baseInput({ definition })),
+        persistWorkflowRunStart(db, nativeInput(definition)),
       ).toThrow(InvalidWorkflowRunStartError);
       expect(
         db
@@ -306,8 +350,7 @@ describe("persistWorkflowRunStart", () => {
       expect(
         persistWorkflowRunStart(
           db,
-          baseInput({
-            definition,
+          nativeInput(definition, {
             route: {
               steps: {
                 implementation: { model: "gpt-5.6", effort: "medium" },
