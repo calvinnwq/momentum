@@ -145,6 +145,7 @@ import {
 } from "../workflow/dispatch/executor-context.js";
 import {
   deriveDispatchCorrelationId,
+  resolveLegacyWorkflowStepDispatchRouteSelection,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
 import {
@@ -1018,7 +1019,9 @@ function createLiveStepHostBindingsResolver(
       );
     }
     const selection = guardRecoveredNativeRepoOwnership(() =>
-      resolveWorkflowStepDispatchRouteSelection(context.db, claim),
+      isLiveStep
+        ? resolveLegacyWorkflowStepDispatchRouteSelection(context.db, claim)
+        : resolveWorkflowStepDispatchRouteSelection(context.db, claim),
     );
     if (!selection.ok) {
       return failRecoveredNativeRepoOwnership(new Error(selection.reason));

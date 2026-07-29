@@ -23,6 +23,7 @@ import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
+  resolveLegacyWorkflowStepDispatchRouteSelection,
   resolveWorkflowStepDispatchRouteSelection,
   WORKFLOW_DISPATCH_RESULT_STATUS,
 } from "../src/core/workflow/dispatch/execute.js";
@@ -450,6 +451,66 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       selection: {
         agentProvider: "codex",
         model: "gpt-5.1",
+        effort: "high",
+      },
+    });
+  });
+
+  it("keeps the retained legacy resolver on the compatibility route projection", () => {
+    const db = openDb(makeTempDir());
+    const runId = "native-legacy-consumer-route-v1";
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION_V1,
+      runId,
+      repoPath: "/repos/momentum",
+      objective: "Preserve the legacy consumer boundary",
+      now: NOW,
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      route: {
+        steps: {
+          validate: {
+            harness: "claude",
+            model: "claude-sonnet-4-6",
+            effort: "low",
+          },
+        },
+      },
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET agent_config_json = ? WHERE run_id = ? AND step_id = ?",
+    ).run(
+      JSON.stringify({
+        harness: "codex",
+        model: "gpt-5.6-codex",
+        effort: "high",
+      }),
+      runId,
+      "no-mistakes",
+    );
+
+    expect(
+      resolveWorkflowStepDispatchRouteSelection(db, {
+        runId,
+        stepId: "no-mistakes",
+      }),
+    ).toEqual({
+      ok: true,
+      selection: {
+        agentProvider: "codex",
+        model: "gpt-5.6-codex",
+        effort: "high",
+      },
+    });
+    expect(
+      resolveLegacyWorkflowStepDispatchRouteSelection(db, {
+        runId,
+        stepId: "no-mistakes",
+      }),
+    ).toEqual({
+      ok: true,
+      selection: {
+        agentProvider: "codex",
+        model: "gpt-5.6-codex",
         effort: "high",
       },
     });
