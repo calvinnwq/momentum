@@ -22,6 +22,7 @@ import {
 import type { DelegateSupervisorToolAdapter } from "../src/core/executors/delegate-supervisor/types.js";
 import type { Executor } from "../src/core/executors/sdk/types.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import { createRegisteredExecutorWorkflowDispatch } from "../src/core/workflow/dispatch/registered-executor.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
@@ -210,6 +211,87 @@ describe("native dispatch canonical agent config", () => {
         model: "gpt-5.6-codex",
         effort: "high",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not pass an empty native selection to generic registered executors", async () => {
+    const runId = "generic-registered-selection-fallback";
+    const db = openTempDb();
+    let observedSelection: unknown = "not-called";
+    const executor: Executor = {
+      name: "delegate-supervisor",
+      configSchema: {
+        type: "object",
+        properties: {
+          tool: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      tick(context) {
+        observedSelection = context.selection;
+        const attempt = context.state.attempt;
+        const roundId = `${attempt.attemptId}::round-1`;
+        context.envelope.startRound({
+          roundId,
+          attemptId: attempt.attemptId,
+          workflowRunId: attempt.workflowRunId,
+          stepRunId: attempt.stepRunId,
+          stepKey: attempt.stepKey,
+          executor: attempt.executor,
+          attemptNumber: attempt.attemptNumber,
+          roundIndex: 0,
+          state: "running",
+          agentProvider: null,
+          model: null,
+          effort: null,
+          inputDigest: null,
+          resultDigest: null,
+          artifactRoot: null,
+          logPaths: [],
+          summary: null,
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          commitSha: null,
+        });
+        return {
+          roundId,
+          recommendation: "complete",
+          recommendedRoundState: "succeeded",
+          recommendedAttemptState: "succeeded",
+          recoveryCode: null,
+          humanGate: null,
+          reason: "generic executor completed",
+        };
+      },
+    };
+    persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId,
+      repoPath: "/repos/momentum",
+      objective: "Preserve generic executor fallback semantics",
+      now: NOW,
+    });
+    try {
+      const production = createRegisteredExecutorWorkflowDispatch(
+        executeWorkflowStepDispatch,
+        {
+          registry: new Map([[executor.name, executor]]),
+        },
+      );
+      const result = await production(claimImplementation(db, runId), {
+        db,
+        workerId: WORKER,
+        now: NOW + 1,
+      });
+
+      expect(result.status, JSON.stringify(result)).toBe("executor_dispatched");
+      expect(observedSelection).toBeUndefined();
     } finally {
       db.close();
     }

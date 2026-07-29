@@ -556,6 +556,25 @@ const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
   effort: null,
 };
 
+/** Return whether a claimed step belongs to the native coding workflow lane. */
+export function isNativeCodingWorkflowRun(
+  db: MomentumDb,
+  claim: Pick<ClaimedWorkflowStep, "runId">,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT source, workflow_definition_key
+         FROM workflow_runs
+        WHERE id = ?`,
+    )
+    .get(claim.runId) as
+    { source: string; workflow_definition_key: string | null } | undefined;
+  return (
+    row?.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    row.workflow_definition_key === CODING_WORKFLOW_DEFINITION_KEY
+  );
+}
+
 export function resolveWorkflowStepDispatchRouteSelection(
   db: MomentumDb,
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
