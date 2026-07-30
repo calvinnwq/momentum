@@ -12,9 +12,9 @@
  *
  * Production cannot hardcode the child recipe: a configured `subworkflow` step
  * names its child by key (validated into a {@link SubworkflowChildDefinitionConfig}
- * by iteration 1 and route-sourced by iteration 2), so the runner the daemon lane
- * injects must resolve that key against the durable definition store and fail
- * closed when it does not resolve. This module owns exactly that — the keystone IO
+ * in the owning step's `workflow_steps.executor_config_json`), so the runner the
+ * daemon lane injects must resolve that key against the durable definition store
+ * and fail closed when it does not resolve. This module owns exactly that — the keystone IO
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
  * and nothing else: it does not itself touch
  * `PHASE1_DISPATCHABLE_EXECUTORS` or wire any daemon lane; the production lane
@@ -32,7 +32,7 @@
  *     fail-closed case.
  *   - On success it returns a start-or-attach {@link DispatchedSubworkflowChildRunner}.
  *     The first tick durably starts the child run from the resolved definition with
- *     the propagated child route; a later tick hits the run-start conflict guard and
+ *     the explicit canonical child lineage; a later tick hits the run-start conflict guard and
  *     *attaches* to the SAME child run only after verifying the existing row is the
  *     expected child definition. A conflicting row at the deterministic child id is
  *     an unsupported attachment and fails closed instead of silently observing an

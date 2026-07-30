@@ -14,7 +14,7 @@
  * This module owns ONLY the pure representation + validation half (no SQLite, no
  * file system, no clock, no network), the same discipline
  * `validateSubworkflowChildConfig` (`route/subworkflow-child-config.ts`) and
- * `readSubworkflowParentLineage` (`route/subworkflow.ts`) follow, so the
+ * `readSubworkflowCanonicalLineage` (`route/subworkflow.ts`) follow, so the
  * fail-closed contract is exhaustively testable on its own. The CLI
  * start/preview doors build overrides from `--steps-json`, the detail/read-back
  * surfaces expose the selected config through canonical run state and the
@@ -29,7 +29,8 @@
  * `workflow_steps.agent_config_json`, and the implementation path/profile live in
  * the coding-compatibility destination. This module operates on their stable
  * compatibility projection under `route.implementationEngine`, `route.steps`, and
- * `route.profile`, parallel to `route.subworkflow`.
+ * `route.profile`; canonical subworkflow state is owned by the workflow step and
+ * lineage destinations instead of this compatibility projection.
  * `route.profile` (the recorded operator profile) stays distinct from these
  * per-step selections and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE`
  * execution profile; none of them are conflated here.
@@ -486,8 +487,8 @@ function mergePersistedRouteOverrideValues(
  * Embed per-step coding route overrides into a compatibility-projection `route`,
  * returning a new route object (the input is never mutated). When there are no
  * overrides the `route.steps` namespace is omitted entirely so the projection stays minimal;
- * all other namespaces (`route.implementationEngine`, `route.profile`,
- * `route.subworkflow`, ...) are preserved.
+ * all other caller-supplied route fields are preserved; active run-start
+ * validation rejects the retired `route.subworkflow` namespace.
  */
 export function writeCodingStepRouteOverrides(
   route: Record<string, unknown>,
