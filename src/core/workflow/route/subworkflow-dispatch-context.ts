@@ -47,6 +47,8 @@
 import path from "node:path";
 
 import type { MomentumDb } from "../../../adapters/db.js";
+import { validateCanonicalWorkflowRunLineage } from "../../../adapters/db/route-state.js";
+import { RouteStateMigrationError } from "../../../adapters/db/route-state-errors.js";
 import { resolveDispatchedStepExecutorContext } from "../live-wrapper/daemon-exec-context.js";
 import type {
   ClaimedWorkflowStep,
@@ -244,6 +246,15 @@ export function loadSubworkflowRunLineageRow(
     ancestorDefinitionKeysJson: row.ancestor_definition_keys_json,
   });
   if (!read.ok) return { ok: false, reason: read.reason };
+  try {
+    validateCanonicalWorkflowRunLineage(db, runId);
+  } catch (error) {
+    if (!(error instanceof RouteStateMigrationError)) throw error;
+    return {
+      ok: false,
+      reason: `${error.message}; routing to manual recovery.`,
+    };
+  }
   return { ok: true, lineage: read.lineage };
 }
 

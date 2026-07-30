@@ -216,6 +216,41 @@ export function validateWorkflowRouteLineage(
   );
 }
 
+export function validateCanonicalWorkflowRunLineage(
+  db: MomentumDb,
+  runId: string,
+): void {
+  const run = db
+    .prepare(
+      `SELECT id, source, route_json, workflow_definition_key,
+              workflow_definition_version, created_at, updated_at
+         FROM workflow_runs WHERE id = ?`,
+    )
+    .get(runId) as RunRow | undefined;
+  if (run === undefined) return;
+
+  const canonicalLineageByRunId = loadCanonicalLineageFields(db);
+  const lineage = canonicalLineageByRunId.get(runId);
+  if (lineage === undefined) return;
+
+  const lineageRuns = loadLineageValidationRuns(db, run);
+  const parentFacts = loadLineageParentFacts(
+    db,
+    lineageRuns,
+    canonicalLineageByRunId,
+    undefined,
+    true,
+  );
+  validateLineageChain(
+    run,
+    "$canonical.workflow_run_lineage",
+    lineage,
+    lineageRuns,
+    parentFacts,
+    canonicalLineageByRunId,
+  );
+}
+
 export function writeCanonicalWorkflowRunRouteState(
   db: MomentumDb,
   input: {
@@ -735,6 +770,7 @@ function loadLineageParentFacts(
     string,
     ReturnType<typeof validateWorkflowRoute>
   > = new Map(),
+  canonicalOnly = false,
 ): Map<string, LineageParentFact> {
   const parentRunIds = new Set<string>();
   for (const run of lineageRuns.values()) {
@@ -742,6 +778,7 @@ function loadLineageParentFacts(
       run,
       canonicalLineageByRunId,
       validatedRoutes,
+      canonicalOnly,
     );
     if (lineage !== null) parentRunIds.add(lineage.parentRunId);
   }
@@ -892,7 +929,9 @@ function readLineageFields(
     string,
     ReturnType<typeof validateWorkflowRoute>
   > = new Map(),
+  canonicalOnly = false,
 ): LineageFields | null {
+  if (canonicalOnly) return canonicalLineageByRunId.get(run.id) ?? null;
   const validated =
     validatedRoutes.get(run.id) ??
     validateWorkflowRoute({

@@ -375,6 +375,48 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     expect(countRuns(db)).toBe(2);
   });
 
+  it("refuses relationally invalid canonical lineage before planning", () => {
+    const db = openSeededDb({
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
+    });
+    persistWorkflowRunStart(db, {
+      definition: parentDefinitionWithChildConfig({
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      }),
+      runId: "run-parent-ctx-invalid-lineage",
+      repoPath: REPO_PATH,
+      objective: "Parent run for invalid lineage coverage",
+      now: NOW,
+    });
+    db.prepare(
+      `INSERT INTO workflow_run_lineage (
+         run_id, parent_run_id, parent_step_id, depth,
+         ancestor_definition_keys_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      PARENT_RUN_ID,
+      "run-parent-ctx-invalid-lineage",
+      "implementation",
+      1,
+      JSON.stringify([CODING_WORKFLOW_DEFINITION_KEY]),
+      NOW,
+      NOW,
+    );
+
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toMatch(/subworkflow dispatch|lineage/i);
+    expect(countRuns(db)).toBe(2);
+  });
+
   it("refuses at build time when the configured child definition key does not resolve", () => {
     const db = openSeededDb({
       childConfig: {

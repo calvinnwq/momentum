@@ -116,20 +116,18 @@ export function buildDispatchedSubworkflowChildRunner(
   }
 
   const existingAttachment = loadChildRunAttachment(input.db, input.childRunId);
-  if (
-    existingAttachment !== undefined &&
-    !matchesExpectedAttachment(existingAttachment, input)
-  ) {
-    return {
-      ok: false,
-      reason: unsupportedAttachmentReason(
-        input.childRunId,
-        input.childDefinitionKey,
-        input.childDefinitionVersion,
-        existingAttachment.definitionKey,
-        existingAttachment.definitionVersion,
-      ),
-    };
+  if (existingAttachment !== undefined) {
+    const existingAttachmentRefusal = attachmentRefusalReason(
+      input.childRunId,
+      input,
+      existingAttachment,
+    );
+    if (existingAttachmentRefusal !== undefined) {
+      return {
+        ok: false,
+        reason: existingAttachmentRefusal,
+      };
+    }
   }
 
   const run: DispatchedSubworkflowChildRunner = async () =>
@@ -162,16 +160,13 @@ function startOrAttachAndObserveChildRun(
     // recovery rather than silently mis-observing.
     if (!(error instanceof WorkflowRunStartConflictError)) throw error;
     const attached = loadChildRunAttachment(db, childRunId);
-    if (attached === undefined || !matchesExpectedAttachment(attached, input)) {
-      throw new Error(
-        unsupportedAttachmentReason(
-          childRunId,
-          input.childDefinitionKey,
-          input.childDefinitionVersion,
-          attached?.definitionKey ?? null,
-          attached?.definitionVersion ?? null,
-        ),
-      );
+    const attachmentRefusal = attachmentRefusalReason(
+      childRunId,
+      input,
+      attached,
+    );
+    if (attachmentRefusal !== undefined) {
+      throw new Error(attachmentRefusal);
     }
   }
 
@@ -190,40 +185,112 @@ function startOrAttachAndObserveChildRun(
   };
 }
 
+type ChildRunLineageAttachment = {
+  parentRunId: string;
+  parentStepId: string;
+  depth: number;
+  ancestorDefinitionKeysJson: string;
+};
+
+type ChildRunAttachment = {
+  definitionKey: string | null;
+  definitionVersion: number | null;
+  lineage: ChildRunLineageAttachment | null;
+};
+
 function loadChildRunAttachment(
   db: MomentumDb,
   runId: string,
-):
-  | { definitionKey: string | null; definitionVersion: number | null }
-  | undefined {
+): ChildRunAttachment | undefined {
   const row = db
     .prepare(
-      "SELECT workflow_definition_key, workflow_definition_version FROM workflow_runs WHERE id = ?",
+      `SELECT wr.workflow_definition_key, wr.workflow_definition_version,
+              lineage.parent_run_id, lineage.parent_step_id, lineage.depth,
+              lineage.ancestor_definition_keys_json
+         FROM workflow_runs AS wr
+         LEFT JOIN workflow_run_lineage AS lineage ON lineage.run_id = wr.id
+        WHERE wr.id = ?`,
     )
     .get(runId) as
     | {
         workflow_definition_key: string | null;
         workflow_definition_version: number | null;
+        parent_run_id: string | null;
+        parent_step_id: string | null;
+        depth: number | null;
+        ancestor_definition_keys_json: string | null;
       }
     | undefined;
   if (row === undefined) return undefined;
   return {
     definitionKey: row.workflow_definition_key,
     definitionVersion: row.workflow_definition_version,
+    lineage:
+      row.parent_run_id === null ||
+      row.parent_step_id === null ||
+      row.depth === null ||
+      row.ancestor_definition_keys_json === null
+        ? null
+        : {
+            parentRunId: row.parent_run_id,
+            parentStepId: row.parent_step_id,
+            depth: row.depth,
+            ancestorDefinitionKeysJson: row.ancestor_definition_keys_json,
+          },
   };
 }
 
 function matchesExpectedAttachment(
-  attachment: {
-    definitionKey: string | null;
-    definitionVersion: number | null;
-  },
+  attachment: ChildRunAttachment,
   input: BuildDispatchedSubworkflowChildRunnerInput,
 ): boolean {
-  return (
+  if (
     attachment.definitionKey === input.childDefinitionKey &&
     attachment.definitionVersion === input.childDefinitionVersion
-  );
+  ) {
+    const lineage = attachment.lineage;
+    return (
+      lineage !== null &&
+      lineage.parentRunId === input.childLineage.parentRunId &&
+      lineage.parentStepId === input.childLineage.parentStepId &&
+      lineage.depth === input.childLineage.depth &&
+      lineage.ancestorDefinitionKeysJson ===
+        JSON.stringify(input.childLineage.ancestorDefinitionKeys)
+    );
+  }
+  return false;
+}
+
+function attachmentRefusalReason(
+  childRunId: string,
+  input: BuildDispatchedSubworkflowChildRunnerInput,
+  attachment: ChildRunAttachment | undefined,
+): string | undefined {
+  if (attachment === undefined) {
+    return unsupportedAttachmentReason(
+      childRunId,
+      input.childDefinitionKey,
+      input.childDefinitionVersion,
+      null,
+      null,
+    );
+  }
+  if (
+    attachment.definitionKey !== input.childDefinitionKey ||
+    attachment.definitionVersion !== input.childDefinitionVersion
+  ) {
+    return unsupportedAttachmentReason(
+      childRunId,
+      input.childDefinitionKey,
+      input.childDefinitionVersion,
+      attachment.definitionKey,
+      attachment.definitionVersion,
+    );
+  }
+  if (!matchesExpectedAttachment(attachment, input)) {
+    return `Subworkflow child run ${childRunId} has missing or unexpected canonical lineage; routing to manual recovery.`;
+  }
+  return undefined;
 }
 
 function unsupportedAttachmentReason(

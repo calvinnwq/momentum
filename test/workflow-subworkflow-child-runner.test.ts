@@ -259,6 +259,22 @@ describe("buildDispatchedSubworkflowChildRunner — start-or-attach idempotency"
     expect(second.childRunId).toBe(CHILD_RUN_ID);
     expect(second.childState).toBe("succeeded");
   });
+
+  it("refuses to attach a same-definition top-level run at the child id", async () => {
+    const db = openSeededDb();
+    const resolution = buildRunner(db);
+    if (!resolution.ok) throw new Error(resolution.reason);
+
+    persistWorkflowRunStart(db, {
+      definition: CHILD_DEFINITION,
+      runId: CHILD_RUN_ID,
+      repoPath: "/repos/momentum",
+      objective: "Top-level run at the deterministic child id",
+      now: NOW + 1,
+    });
+
+    await expect(resolution.run()).rejects.toThrow(/canonical lineage/i);
+  });
 });
 
 describe("buildDispatchedSubworkflowChildRunner — fail closed on a missing child definition", () => {
