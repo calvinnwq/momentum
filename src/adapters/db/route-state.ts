@@ -230,10 +230,7 @@ export function validateCanonicalWorkflowRunLineage(
   if (run === undefined) return;
 
   if (!tableExists(db, "workflow_run_lineage")) return;
-  const lineageRuns = loadCanonicalValidationRunClosure(
-    db,
-    new Set([runId]),
-  );
+  const lineageRuns = loadCanonicalValidationRunClosure(db, new Set([runId]));
   const canonicalLineageByRunId = loadCanonicalLineageFields(
     db,
     new Set(lineageRuns.keys()),
