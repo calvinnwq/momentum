@@ -24,7 +24,7 @@ import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.j
  * through a *test-only* `realChildRunner` helper that hardcodes
  * `CODING_WORKFLOW_DEFINITION` as the child recipe. The production daemon lane
  * cannot hardcode a child definition: a configured `subworkflow` step names its
- * child by key (`route.subworkflow.child.childDefinitionKey`, validated by
+ * child by key in the owning step's `executor_config_json` (validated by
  * iterations 1-2), so the runner the daemon injects must resolve that key against
  * the durable definition store and fail closed when it does not resolve.
  *

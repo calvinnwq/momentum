@@ -150,7 +150,7 @@ executor entry module does not require a daemon restart. If the repair changes
 only a transitive dependency that Node already attempted to load or evaluate, restart the
 daemon before clearing recovery.
 The daemon-dispatchable `external-apply` path uses the same surface when issue scope, source evidence, deterministic intent seeding, valid payload, resolved target, credentials, policy, audit, or adapter safety checks refuse the write.
-The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
+The configured `subworkflow` path uses the same surface when child config is missing, canonical lineage is invalid, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
 The configured live-wrapper dispatch lane uses the same surface when the wrapper is
 unconfigured for the claimed step kind, the step's repo/run directory cannot be
 derived, the run directory cannot be created, a repo-local run directory is not

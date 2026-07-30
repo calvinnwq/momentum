@@ -146,7 +146,8 @@ directly: child intent from the claimed step's own
 consulted, and the projector emits no subworkflow keys); it resolves the child
 definition by key, refuses unsafe recursion / unsupported attachment, persists
 the child run with an explicit start-persistence lineage input, and keeps
-manual-recovery behavior for missing or ambiguous child state.
+manual-recovery behavior for invalid canonical lineage, missing or ambiguous
+child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
 `profiles/coding-workflow-live-wrapper.profile.json`: the daemon live
