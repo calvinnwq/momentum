@@ -417,6 +417,61 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
     expect(countRuns(db)).toBe(2);
   });
 
+  it("uses canonical ancestor lineage when a stale route projection is present", () => {
+    const db = openSeededDb({
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+        maxDepth: 2,
+      },
+    });
+    const grandparentRunId = "run-grandparent-ctx-stale-route";
+    persistWorkflowRunStart(db, {
+      definition: parentDefinitionWithChildConfig({
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      }),
+      runId: grandparentRunId,
+      repoPath: REPO_PATH,
+      objective: "Grandparent run with stale compatibility lineage",
+      now: NOW,
+    });
+    db.prepare("UPDATE workflow_runs SET route_json = ? WHERE id = ?").run(
+      JSON.stringify({
+        subworkflow: {
+          lineage: {
+            parentRunId: "stale-route-parent",
+            parentStepId: STEP_ID,
+            depth: 1,
+            ancestorDefinitionKeys: ["stale-route-ancestor"],
+          },
+        },
+      }),
+      grandparentRunId,
+    );
+    db.prepare(
+      `INSERT INTO workflow_run_lineage (
+         run_id, parent_run_id, parent_step_id, depth,
+         ancestor_definition_keys_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      PARENT_RUN_ID,
+      grandparentRunId,
+      STEP_ID,
+      1,
+      JSON.stringify([CODING_WORKFLOW_DEFINITION_KEY]),
+      NOW,
+      NOW,
+    );
+
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
+    expect(resolution.ok).toBe(true);
+    expect(countRuns(db)).toBe(2);
+  });
+
   it("refuses at build time when the configured child definition key does not resolve", () => {
     const db = openSeededDb({
       childConfig: {

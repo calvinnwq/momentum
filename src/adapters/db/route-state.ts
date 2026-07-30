@@ -248,6 +248,7 @@ export function validateCanonicalWorkflowRunLineage(
     lineageRuns,
     parentFacts,
     canonicalLineageByRunId,
+    true,
   );
 }
 
@@ -831,6 +832,7 @@ function validateLineageChain(
   lineageRuns: ReadonlyMap<string, RunRow>,
   parentFacts: ReadonlyMap<string, LineageParentFact>,
   canonicalLineageByRunId: ReadonlyMap<string, LineageFields>,
+  canonicalOnly = false,
 ): void {
   let currentRun = childRun;
   let currentLineage = lineage;
@@ -890,7 +892,12 @@ function validateLineageChain(
       );
     }
 
-    const parentLineage = readLineageFields(parentRun, canonicalLineageByRunId);
+    const parentLineage = readLineageFields(
+      parentRun,
+      canonicalLineageByRunId,
+      new Map(),
+      canonicalOnly,
+    );
     const expectedAncestors =
       parentLineage === null
         ? [parent.parent_definition_key]
@@ -1363,6 +1370,7 @@ function validateProjectedCanonicalRoutes(
       projectedRunsById,
       parentFacts,
       canonicalLineageByRunId,
+      true,
     );
   }
 }
