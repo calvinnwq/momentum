@@ -12,9 +12,9 @@
  *
  * Production cannot hardcode the child recipe: a configured `subworkflow` step
  * names its child by key (validated into a {@link SubworkflowChildDefinitionConfig}
- * by iteration 1 and route-sourced by iteration 2), so the runner the daemon lane
- * injects must resolve that key against the durable definition store and fail
- * closed when it does not resolve. This module owns exactly that — the keystone IO
+ * in the owning step's `workflow_steps.executor_config_json`), so the runner the
+ * daemon lane injects must resolve that key against the durable definition store
+ * and fail closed when it does not resolve. This module owns exactly that — the keystone IO
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
  * and nothing else: it does not itself touch
  * `PHASE1_DISPATCHABLE_EXECUTORS` or wire any daemon lane; the production lane
@@ -32,7 +32,7 @@
  *     fail-closed case.
  *   - On success it returns a start-or-attach {@link DispatchedSubworkflowChildRunner}.
  *     The first tick durably starts the child run from the resolved definition with
- *     the propagated child route; a later tick hits the run-start conflict guard and
+ *     the explicit canonical child lineage; a later tick hits the run-start conflict guard and
  *     *attaches* to the SAME child run only after verifying the existing row is the
  *     expected child definition. A conflicting row at the deterministic child id is
  *     an unsupported attachment and fails closed instead of silently observing an
@@ -57,13 +57,14 @@ import {
   WorkflowRunStartConflictError,
 } from "../run/start-persist.js";
 import { loadWorkflowRunDetail } from "../run/status.js";
+import type { SubworkflowCanonicalLineage } from "./subworkflow.js";
 
 /**
  * Everything the builder needs to resolve and drive a dispatched `subworkflow`
  * step's child run. The daemon-lane deriver assembles it from the parent run's
- * durable facts and iteration 2's route-sourced launch plan: `childRunId`,
- * `childDefinitionKey`, and `childRoute` come from
- * {@link planSubworkflowChildLaunchFromRoute}; `repoPath` / `objective` come from
+ * durable facts and the canonical-state launch plan: `childRunId`,
+ * `childDefinitionKey`, and `childLineage` come from
+ * {@link planSubworkflowChildLaunchFromStep}; `repoPath` / `objective` come from
  * the parent run row.
  */
 export type BuildDispatchedSubworkflowChildRunnerInput = {
@@ -74,8 +75,8 @@ export type BuildDispatchedSubworkflowChildRunnerInput = {
   childDefinitionKey: string;
   /** The workflow definition version the child run launches (resolved here). */
   childDefinitionVersion: number;
-  /** The `route` JSON the child run is started with (lineage propagated). */
-  childRoute: Record<string, unknown>;
+  /** The explicit canonical lineage the child run is persisted with. */
+  childLineage: SubworkflowCanonicalLineage;
   /** The repo the child run operates on (inherited from the parent run). */
   repoPath: string;
   /** The child run's objective (inherited / shaped from the parent run). */
@@ -115,20 +116,18 @@ export function buildDispatchedSubworkflowChildRunner(
   }
 
   const existingAttachment = loadChildRunAttachment(input.db, input.childRunId);
-  if (
-    existingAttachment !== undefined &&
-    !matchesExpectedAttachment(existingAttachment, input)
-  ) {
-    return {
-      ok: false,
-      reason: unsupportedAttachmentReason(
-        input.childRunId,
-        input.childDefinitionKey,
-        input.childDefinitionVersion,
-        existingAttachment.definitionKey,
-        existingAttachment.definitionVersion,
-      ),
-    };
+  if (existingAttachment !== undefined) {
+    const existingAttachmentRefusal = attachmentRefusalReason(
+      input.childRunId,
+      input,
+      existingAttachment,
+    );
+    if (existingAttachmentRefusal !== undefined) {
+      return {
+        ok: false,
+        reason: existingAttachmentRefusal,
+      };
+    }
   }
 
   const run: DispatchedSubworkflowChildRunner = async () =>
@@ -141,7 +140,7 @@ function startOrAttachAndObserveChildRun(
   input: BuildDispatchedSubworkflowChildRunnerInput,
   definition: WorkflowDefinition,
 ) {
-  const { db, childRunId, childRoute, repoPath, objective, now } = input;
+  const { db, childRunId, childLineage, repoPath, objective, now } = input;
 
   try {
     persistWorkflowRunStart(db, {
@@ -149,28 +148,25 @@ function startOrAttachAndObserveChildRun(
       runId: childRunId,
       repoPath,
       objective,
-      route: childRoute,
+      lineage: childLineage,
       now,
     });
   } catch (error) {
     // Attach: a prior tick already started this child run. Idempotent re-entry —
-    // never start a second child run; verify the existing row is the expected
-    // child definition, then fall through to observe it.
+    // never start a second child run; verify the existing row has the expected
+    // child definition and canonical lineage, then fall through to observe it.
     // Any other failure (e.g. an invalid run-start the parent facts should have
     // precluded) propagates so the entry-point factory parks the step for manual
     // recovery rather than silently mis-observing.
     if (!(error instanceof WorkflowRunStartConflictError)) throw error;
     const attached = loadChildRunAttachment(db, childRunId);
-    if (attached === undefined || !matchesExpectedAttachment(attached, input)) {
-      throw new Error(
-        unsupportedAttachmentReason(
-          childRunId,
-          input.childDefinitionKey,
-          input.childDefinitionVersion,
-          attached?.definitionKey ?? null,
-          attached?.definitionVersion ?? null,
-        ),
-      );
+    const attachmentRefusal = attachmentRefusalReason(
+      childRunId,
+      input,
+      attached,
+    );
+    if (attachmentRefusal !== undefined) {
+      throw new Error(attachmentRefusal);
     }
   }
 
@@ -189,40 +185,112 @@ function startOrAttachAndObserveChildRun(
   };
 }
 
+type ChildRunLineageAttachment = {
+  parentRunId: string;
+  parentStepId: string;
+  depth: number;
+  ancestorDefinitionKeysJson: string;
+};
+
+type ChildRunAttachment = {
+  definitionKey: string | null;
+  definitionVersion: number | null;
+  lineage: ChildRunLineageAttachment | null;
+};
+
 function loadChildRunAttachment(
   db: MomentumDb,
   runId: string,
-):
-  | { definitionKey: string | null; definitionVersion: number | null }
-  | undefined {
+): ChildRunAttachment | undefined {
   const row = db
     .prepare(
-      "SELECT workflow_definition_key, workflow_definition_version FROM workflow_runs WHERE id = ?",
+      `SELECT wr.workflow_definition_key, wr.workflow_definition_version,
+              lineage.parent_run_id, lineage.parent_step_id, lineage.depth,
+              lineage.ancestor_definition_keys_json
+         FROM workflow_runs AS wr
+         LEFT JOIN workflow_run_lineage AS lineage ON lineage.run_id = wr.id
+        WHERE wr.id = ?`,
     )
     .get(runId) as
     | {
         workflow_definition_key: string | null;
         workflow_definition_version: number | null;
+        parent_run_id: string | null;
+        parent_step_id: string | null;
+        depth: number | null;
+        ancestor_definition_keys_json: string | null;
       }
     | undefined;
   if (row === undefined) return undefined;
   return {
     definitionKey: row.workflow_definition_key,
     definitionVersion: row.workflow_definition_version,
+    lineage:
+      row.parent_run_id === null ||
+      row.parent_step_id === null ||
+      row.depth === null ||
+      row.ancestor_definition_keys_json === null
+        ? null
+        : {
+            parentRunId: row.parent_run_id,
+            parentStepId: row.parent_step_id,
+            depth: row.depth,
+            ancestorDefinitionKeysJson: row.ancestor_definition_keys_json,
+          },
   };
 }
 
 function matchesExpectedAttachment(
-  attachment: {
-    definitionKey: string | null;
-    definitionVersion: number | null;
-  },
+  attachment: ChildRunAttachment,
   input: BuildDispatchedSubworkflowChildRunnerInput,
 ): boolean {
-  return (
+  if (
     attachment.definitionKey === input.childDefinitionKey &&
     attachment.definitionVersion === input.childDefinitionVersion
-  );
+  ) {
+    const lineage = attachment.lineage;
+    return (
+      lineage !== null &&
+      lineage.parentRunId === input.childLineage.parentRunId &&
+      lineage.parentStepId === input.childLineage.parentStepId &&
+      lineage.depth === input.childLineage.depth &&
+      lineage.ancestorDefinitionKeysJson ===
+        JSON.stringify(input.childLineage.ancestorDefinitionKeys)
+    );
+  }
+  return false;
+}
+
+function attachmentRefusalReason(
+  childRunId: string,
+  input: BuildDispatchedSubworkflowChildRunnerInput,
+  attachment: ChildRunAttachment | undefined,
+): string | undefined {
+  if (attachment === undefined) {
+    return unsupportedAttachmentReason(
+      childRunId,
+      input.childDefinitionKey,
+      input.childDefinitionVersion,
+      null,
+      null,
+    );
+  }
+  if (
+    attachment.definitionKey !== input.childDefinitionKey ||
+    attachment.definitionVersion !== input.childDefinitionVersion
+  ) {
+    return unsupportedAttachmentReason(
+      childRunId,
+      input.childDefinitionKey,
+      input.childDefinitionVersion,
+      attachment.definitionKey,
+      attachment.definitionVersion,
+    );
+  }
+  if (!matchesExpectedAttachment(attachment, input)) {
+    return `Subworkflow child run ${childRunId} has missing or unexpected canonical lineage; routing to manual recovery.`;
+  }
+  return undefined;
 }
 
 function unsupportedAttachmentReason(

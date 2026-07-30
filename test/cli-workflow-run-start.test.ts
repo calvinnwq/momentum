@@ -12,6 +12,7 @@ import {
   persistWorkflowDefinition,
 } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import { WORKFLOW_RUN_START_ERROR_CODES } from "../src/core/workflow/run/start.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -658,15 +659,9 @@ describe("workflow run start public docs (NGX-346)", () => {
   });
 
   it("documents the invalid_run_start materialization taxonomy", () => {
-    for (const code of [
-      "definition_invalid",
-      "run_id_invalid",
-      "repo_path_invalid",
-      "objective_invalid",
-      "approval_boundary_invalid",
-      "issue_scope_invalid",
-      "route_invalid",
-    ]) {
+    // Derived from the runtime taxonomy so a new code cannot land without its
+    // public documentation.
+    for (const code of WORKFLOW_RUN_START_ERROR_CODES) {
       expect(
         doc,
         `docs/workflow-commands.md is missing taxonomy code ${code}`,

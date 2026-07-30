@@ -110,11 +110,12 @@ under the run directory and reconciles the step from that terminal evidence.
 If durable external-apply audit evidence already proves the intended write landed and post-apply reconcile succeeded, the step records already-applied terminal evidence without another Linear mutation.
 Missing issue scope, missing or ambiguous source evidence, duplicate intents, stale or mismatched applied evidence, missing credentials, policy denial, audit-incomplete, blocked, or other unsafe apply outcomes park the step for manual recovery rather than fabricating success.
 Configured `subworkflow` steps are also handled by the
-managed daemon: the parent run's canonical `workflow_steps.executor_config_json`
-projects as `route.subworkflow.child` and selects the child workflow definition,
-bounded lineage in `workflow_run_lineage` projects as `route.subworkflow.lineage` and prevents
-unsafe recursion, and the parent step mirrors terminal child-run evidence only
-after the child reaches a terminal state. Missing child config, unsafe recursion,
+managed daemon: the owning step's canonical `workflow_steps.executor_config_json`
+`child` object selects the child workflow definition, the run's canonical
+`workflow_run_lineage` row bounds recursion (run `route` output carries no
+`subworkflow` namespace), and the parent step mirrors terminal child-run
+evidence only after the child reaches a terminal state.
+Missing child config, invalid canonical lineage, unsafe recursion,
 unresolved child definitions, unsupported child attachments, invalid child state,
 or ambiguous child terminals park the parent run for manual recovery. When
 `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow step wrapper profile,

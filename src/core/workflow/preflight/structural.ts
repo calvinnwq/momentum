@@ -555,6 +555,8 @@ function recommendedActionForRunStartError(
       return 'Set issueScope to a plain object such as { identifier: "ABC-123" }, or omit it.';
     case "route_invalid":
       return "Set route to a plain object containing only validated coding workflow route fields.";
+    case "lineage_invalid":
+      return "Supply a valid explicit child lineage (parent run, parent step, depth, root-first ancestors) or omit it for a top-level run.";
   }
 }
 

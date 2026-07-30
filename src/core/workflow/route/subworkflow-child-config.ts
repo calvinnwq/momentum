@@ -25,7 +25,7 @@
  *     `subworkflow` step with no valid child config must route to manual recovery,
  *     never silently no-op.
  *   - {@link planSubworkflowChildLaunch} decides whether starting that child is
- *     *safe* given the parent run's subworkflow {@link SubworkflowParentLineage}.
+ *     *safe* given the parent run's canonical subworkflow lineage.
  *     A child that is its parent's own definition (self-reference), reappears in
  *     the ancestor chain (cycle), or would nest past `maxDepth` fails closed —
  *     the contract's "unsafe recursion" fail-closed case. This is the bound that
@@ -54,9 +54,9 @@ export const DEFAULT_SUBWORKFLOW_MAX_DEPTH = 1;
  * The validated config a production `subworkflow` step carries to start its child
  * run. Intentionally minimal for the production flip: the child workflow
  * definition to launch, plus the resolved recursion bound. Richer per-child run
- * configuration (objective shaping, approval boundary inheritance, route
- * derivation) is the daemon-lane deriver's concern, layered on the existing
- * run-start seam — not pinned into this keystone shape.
+ * configuration (objective shaping and approval boundary inheritance) is the
+ * daemon-lane deriver's concern, layered on the existing run-start seam — not
+ * pinned into this keystone shape.
  */
 export type SubworkflowChildDefinitionConfig = {
   /** The workflow definition key the child run launches. */

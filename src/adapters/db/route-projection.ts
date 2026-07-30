@@ -48,16 +48,6 @@ type NativeStepRow = {
   step_id: string;
   kind: string;
   agent_config_json: string;
-  executor_config_json: string;
-  is_subworkflow: number;
-};
-
-type LineageRow = {
-  run_id: string;
-  parent_run_id: string;
-  parent_step_id: string;
-  depth: number;
-  ancestor_definition_keys_json: string;
 };
 
 const RUN_ID_QUERY_CHUNK_SIZE = 500;
@@ -89,31 +79,7 @@ export function projectLegacyWorkflowRunRoute(
           WHERE run_id = ?`,
       )
       .get(runId) as Omit<ImportMetadataRow, "run_id"> | undefined;
-    const stepRows = db
-      .prepare(
-        `SELECT ws.step_id, ws.kind, ws.agent_config_json,
-                ws.executor_config_json,
-                CASE WHEN sd.executor = 'subworkflow' THEN 1 ELSE 0 END AS is_subworkflow
-           FROM workflow_steps AS ws
-           LEFT JOIN step_definitions AS sd
-             ON sd.definition_key = ?
-            AND sd.definition_version = ?
-            AND sd.step_key = ws.step_id
-          WHERE ws.run_id = ?
-          ORDER BY ws.step_order, ws.step_id`,
-      )
-      .all(run.definitionKey, run.definitionVersion, runId) as Array<
-      Omit<NativeStepRow, "run_id">
-    >;
-    const lineage = db
-      .prepare(
-        `SELECT parent_run_id, parent_step_id, depth,
-                ancestor_definition_keys_json
-           FROM workflow_run_lineage
-          WHERE run_id = ?`,
-      )
-      .get(runId) as Omit<LineageRow, "run_id"> | undefined;
-    return projectImportedRouteFromRows(runId, run, row, stepRows, lineage);
+    return projectImportedRouteFromRows(runId, row);
   }
 
   const compatibility = db
@@ -125,35 +91,13 @@ export function projectLegacyWorkflowRunRoute(
     .get(runId) as Omit<CompatibilityRow, "run_id"> | undefined;
   const stepRows = db
     .prepare(
-      `SELECT ws.step_id, ws.kind, ws.agent_config_json,
-              ws.executor_config_json,
-              CASE WHEN sd.executor = 'subworkflow' THEN 1 ELSE 0 END AS is_subworkflow
+      `SELECT ws.step_id, ws.kind, ws.agent_config_json
          FROM workflow_steps AS ws
-         LEFT JOIN step_definitions AS sd
-           ON sd.definition_key = ?
-          AND sd.definition_version = ?
-          AND sd.step_key = ws.step_id
         WHERE ws.run_id = ?
         ORDER BY ws.step_order, ws.step_id`,
     )
-    .all(run.definitionKey, run.definitionVersion, runId) as Array<
-    Omit<NativeStepRow, "run_id">
-  >;
-  const lineage = db
-    .prepare(
-      `SELECT parent_run_id, parent_step_id, depth,
-              ancestor_definition_keys_json
-         FROM workflow_run_lineage
-        WHERE run_id = ?`,
-    )
-    .get(runId) as Omit<LineageRow, "run_id"> | undefined;
-  return projectNativeRouteFromRows(
-    runId,
-    run,
-    compatibility,
-    stepRows,
-    lineage,
-  );
+    .all(runId) as Array<Omit<NativeStepRow, "run_id">>;
+  return projectNativeRouteFromRows(runId, compatibility, stepRows);
 }
 
 export function projectLegacyWorkflowRunRoutes(
@@ -184,29 +128,12 @@ export function projectLegacyWorkflowRunRoutes(
   const stepRowsByRunId = groupByRunId(
     queryRunScopedRows<NativeStepRow>(
       db,
-      `SELECT ws.run_id, ws.step_id, ws.kind, ws.agent_config_json,
-              ws.executor_config_json,
-              CASE WHEN sd.executor = 'subworkflow' THEN 1 ELSE 0 END AS is_subworkflow
+      `SELECT ws.run_id, ws.step_id, ws.kind, ws.agent_config_json
          FROM workflow_steps AS ws
-         JOIN workflow_runs AS wr ON wr.id = ws.run_id
-         LEFT JOIN step_definitions AS sd
-           ON sd.definition_key = wr.workflow_definition_key
-          AND sd.definition_version = wr.workflow_definition_version
-          AND sd.step_key = ws.step_id
         WHERE ws.run_id`,
       runIds,
       " ORDER BY ws.run_id, ws.step_order, ws.step_id",
     ),
-  );
-  const lineageByRunId = new Map(
-    queryRunScopedRows<LineageRow>(
-      db,
-      `SELECT run_id, parent_run_id, parent_step_id, depth,
-              ancestor_definition_keys_json
-         FROM workflow_run_lineage
-        WHERE run_id`,
-      runIds,
-    ).map((row) => [row.run_id, row]),
   );
 
   const projected = new Map<string, Record<string, unknown>>();
@@ -216,10 +143,7 @@ export function projectLegacyWorkflowRunRoutes(
         run.runId,
         projectImportedRouteFromRows(
           run.runId,
-          run,
           importMetadataByRunId.get(run.runId),
-          stepRowsByRunId.get(run.runId) ?? [],
-          lineageByRunId.get(run.runId),
         ),
       );
       continue;
@@ -228,10 +152,8 @@ export function projectLegacyWorkflowRunRoutes(
       run.runId,
       projectNativeRouteFromRows(
         run.runId,
-        run,
         compatibilityByRunId.get(run.runId),
         stepRowsByRunId.get(run.runId) ?? [],
-        lineageByRunId.get(run.runId),
       ),
     );
   }
@@ -240,11 +162,9 @@ export function projectLegacyWorkflowRunRoutes(
 
 function projectNativeRouteFromRows(
   runId: string,
-  run: WorkflowRunRouteProjectionSource,
   compatibility:
     Omit<CompatibilityRow, "run_id"> | CompatibilityRow | undefined,
   stepRows: ReadonlyArray<Omit<NativeStepRow, "run_id"> | NativeStepRow>,
-  lineage: Omit<LineageRow, "run_id"> | LineageRow | undefined,
 ): Record<string, unknown> {
   const route: Record<string, unknown> = {};
   if (compatibility?.implementation_engine != null) {
@@ -273,23 +193,12 @@ function projectNativeRouteFromRows(
     steps[row.kind] = agentConfig;
   }
   if (Object.keys(steps).length > 0) route["steps"] = steps;
-
-  const subworkflow = projectSubworkflowNamespace(
-    runId,
-    run,
-    stepRows,
-    lineage,
-  );
-  if (subworkflow !== undefined) route["subworkflow"] = subworkflow;
   return route;
 }
 
 function projectImportedRouteFromRows(
   runId: string,
-  run: WorkflowRunRouteProjectionSource,
   row: Omit<ImportMetadataRow, "run_id"> | ImportMetadataRow | undefined,
-  stepRows: ReadonlyArray<Omit<NativeStepRow, "run_id"> | NativeStepRow>,
-  lineage: Omit<LineageRow, "run_id"> | LineageRow | undefined,
 ): Record<string, unknown> {
   const route: Record<string, unknown> = {};
   if (row?.mode != null) route["mode"] = row.mode;
@@ -302,83 +211,7 @@ function projectImportedRouteFromRows(
       "$.quotaPolicy",
     );
   }
-  const subworkflow = projectSubworkflowNamespace(
-    runId,
-    run,
-    stepRows,
-    lineage,
-  );
-  if (subworkflow !== undefined) route["subworkflow"] = subworkflow;
   return route;
-}
-
-function projectSubworkflowNamespace(
-  runId: string,
-  run: WorkflowRunRouteProjectionSource,
-  stepRows: ReadonlyArray<{
-    step_id: string;
-    executor_config_json: string;
-    is_subworkflow: number;
-  }>,
-  lineage:
-    | {
-        parent_run_id: string;
-        parent_step_id: string;
-        depth: number;
-        ancestor_definition_keys_json: string;
-      }
-    | undefined,
-): Record<string, unknown> | undefined {
-  let child: unknown;
-  let missingChild = false;
-  if (run.definitionKey !== null && run.definitionVersion !== null) {
-    for (const row of stepRows) {
-      if (row.is_subworkflow !== 1) continue;
-      const config = parseObject(
-        row.executor_config_json,
-        runId,
-        `$.subworkflow.child`,
-      );
-      if (!Object.hasOwn(config, "child")) {
-        missingChild = true;
-        continue;
-      }
-      if (child === undefined) {
-        child = config["child"];
-      } else if (!isDeepStrictEqual(child, config["child"])) {
-        throw new RouteStateProjectionError(
-          runId,
-          "$.subworkflow.child",
-          "subworkflow steps carry conflicting child config",
-        );
-      }
-    }
-  }
-  if (child !== undefined && missingChild) {
-    throw new RouteStateProjectionError(
-      runId,
-      "$.subworkflow.child",
-      "canonical subworkflow steps are missing required child config",
-    );
-  }
-
-  if (child === undefined && lineage === undefined) return undefined;
-  const namespace: Record<string, unknown> = {};
-  if (child !== undefined) namespace["child"] = child;
-  if (lineage !== undefined) {
-    const ancestors = parseArray(
-      lineage.ancestor_definition_keys_json,
-      runId,
-      "$.subworkflow.lineage.ancestorDefinitionKeys",
-    );
-    namespace["lineage"] = {
-      parentRunId: lineage.parent_run_id,
-      parentStepId: lineage.parent_step_id,
-      depth: lineage.depth,
-      ancestorDefinitionKeys: ancestors,
-    };
-  }
-  return namespace;
 }
 
 function queryRunScopedRows<T>(
@@ -438,25 +271,4 @@ function parseObject(
     );
   }
   return parsed as Record<string, unknown>;
-}
-
-function parseArray(raw: string, runId: string, jsonPath: string): unknown[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new RouteStateProjectionError(
-      runId,
-      jsonPath,
-      "persisted JSON is malformed",
-    );
-  }
-  if (!Array.isArray(parsed)) {
-    throw new RouteStateProjectionError(
-      runId,
-      jsonPath,
-      "persisted JSON is not an array",
-    );
-  }
-  return parsed;
 }

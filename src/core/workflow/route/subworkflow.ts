@@ -1,50 +1,30 @@
 /**
- * Compatibility-projected child config + durable recursion lineage for production
- * `subworkflow` steps.
+ * Canonical-state child-launch planning for production `subworkflow` steps.
  *
- * Iteration 1 (`route/subworkflow-child-config.ts`) landed the two pure deciders —
- * {@link validateSubworkflowChildConfig} and {@link planSubworkflowChildLaunch} —
- * but left two connective decisions to "the wiring slice":
+ * The owning step's `workflow_steps.executor_config_json` is the only active
+ * source of subworkflow child intent, and the run's `workflow_run_lineage` row
+ * is the only active source of parent run, parent step, depth, and ancestry
+ * facts. This module owns the pure composition over those canonical facts; the
+ * daemon-lane deriver (`route/subworkflow-dispatch-context.ts`) owns the IO
+ * that reads them, and start persistence (`run/start-persist.ts`) receives the
+ * explicit child lineage this planner derives. The retired `route.subworkflow`
+ * namespace is no longer consulted anywhere on the active path; legacy
+ * route_json carrying it is migrated into these canonical destinations by the
+ * adapter migration and validated there.
  *
- *   1. *Where* a production `subworkflow` step's child config is sourced from. A
- *      {@link StepDefinition} may carry portable recipe-level executor config,
- *      but child launch identity is run-specific and deliberately outside this
- *      module's definition-config scope, so the adapter persists it in the
- *      owning `workflow_steps.executor_config_json` destination and projects it
- *      through the compatibility `route` JSON.
- *   2. *How* the parent run's recursion lineage is encoded durably. Lineage has
- *      a dedicated `workflow_run_lineage` destination rather than a column on
- *      `workflow_runs`; the adapter persists it there and projects it through
- *      the same compatibility `route` JSON as it propagates one level down each
- *      time a parent launches a child.
+ * Discipline (pure + total + fail-closed, mirroring
+ * `route/subworkflow-child-config.ts` — no SQLite, no file system, no clock):
  *
- * This module owns exactly those two decisions, purely. Both the authored child
- * config and the propagated lineage are represented in the single compatibility
- * {@link SUBWORKFLOW_ROUTE_KEY} (`route.subworkflow`) namespace:
- *
- *   - `route.subworkflow.child` — the authored child-launch config a top-level
- *     caller supplies when starting the parent run (validated by iteration 1's
- *     {@link validateSubworkflowChildConfig});
- *   - `route.subworkflow.lineage` — the recursion lineage the compatibility
- *     projection exposes for a *child* run when the daemon launches that child, so the child's own
- *     `subworkflow` steps can detect a cycle / depth bound. Absent for a top-level
- *     run.
- *
- * Discipline (pure + total + fail-closed, mirroring `route/subworkflow-child-config.ts`
- * — no SQLite, no file system, no clock):
- *
- *   - {@link readSubworkflowParentLineage} treats an absent lineage as a legitimate
- *     top-level run, but a *present-but-corrupt* lineage fails closed
- *     (`lineage_invalid`): silently resetting a corrupt deep lineage to depth 0
- *     would defeat the recursion bound the production flip depends on.
- *   - {@link deriveChildSubworkflowRoute} appends the parent's own definition key
- *     onto the ancestry it propagates, so each nesting level sees every key above
- *     it (root-first) and the cycle / depth checks stay sound across levels.
- *   - {@link planSubworkflowChildLaunchFromRoute} composes config validation +
- *     lineage read + the recursion decider into the single decision the IO deriver
- *     (a later slice) forwards into the landed child-runner path, or routes to
- *     manual recovery on any refusal. Keeping it pure here means that wiring slice
- *     owns only IO, not policy.
+ *   - {@link readSubworkflowCanonicalLineage} validates a present canonical
+ *     lineage row; a corrupt row fails closed (`lineage_invalid`) rather than
+ *     resetting to top-level, which would defeat the recursion bound. An absent
+ *     row is the caller's legitimate top-level case.
+ *   - {@link planSubworkflowChildLaunchFromStep} composes the step-owned child
+ *     config validation, the canonical ancestry, and the existing
+ *     recursion-safety decider into the single decision the IO deriver
+ *     forwards, deriving the deterministic child run id and the explicit child
+ *     lineage (the parent's ancestry plus the parent's own definition key,
+ *     root-first) that start persistence inserts atomically with the child run.
  */
 
 import {
@@ -52,158 +32,51 @@ import {
   validateSubworkflowChildConfig,
   type SubworkflowChildConfigRefusal,
   type SubworkflowChildLaunchRefusal,
-  type SubworkflowParentLineage,
 } from "./subworkflow-child-config.js";
 
-/** The compatibility run-`route` namespace that projects subworkflow config + lineage. */
-export const SUBWORKFLOW_ROUTE_KEY = "subworkflow";
-
 /**
- * The recursion lineage the daemon persists for a *child* run and exposes through
- * `route.subworkflow.lineage` when it launches that child. Canonical lineage is
- * stored in `workflow_run_lineage`; the projection is absent for a top-level run.
- *
- *   - `parentRunId` / `parentStepId`: the parent run + dispatched step that
- *     launched this child (operator-visible provenance).
- *   - `depth`: this run's nesting depth (1 = first nested level). An audit aid; the
- *     read path derives the effective bound from `ancestorDefinitionKeys` only.
- *   - `ancestorDefinitionKeys`: every subworkflow ancestor's definition key above
- *     this run (root-first, excluding this run itself).
- */
-export type SubworkflowRouteLineage = {
-  parentRunId: string;
-  parentStepId: string;
-  depth: number;
-  ancestorDefinitionKeys: readonly string[];
-};
-
-/**
- * Why reading a present `route.subworkflow.lineage` failed: the namespace carries a
- * lineage that is not a well-formed {@link SubworkflowRouteLineage}. A corrupt
- * lineage is treated as unsafe-recursion state and fails closed, never reset to
- * top-level.
+ * Why reading a present canonical lineage row failed: the row is not a
+ * well-formed lineage fact. A corrupt lineage is treated as unsafe-recursion
+ * state and fails closed, never reset to top-level.
  */
 export type SubworkflowLineageRefusal = "lineage_invalid";
 
-export type SubworkflowParentLineageResolution =
-  | { ok: true; lineage: SubworkflowParentLineage }
-  | { ok: false; refusal: SubworkflowLineageRefusal; reason: string };
-
 /**
- * Every reason a route-sourced child launch can fail closed: a config-shape refusal
- * (iteration 1), a corrupt lineage, or an unsafe-recursion refusal (iteration 1).
+ * Every reason a canonical-state child launch can fail closed: a config-shape
+ * refusal, a corrupt lineage, or an unsafe-recursion refusal.
  */
 export type SubworkflowRouteLaunchRefusal =
   | SubworkflowChildConfigRefusal
   | SubworkflowLineageRefusal
   | SubworkflowChildLaunchRefusal;
 
-export type PlanSubworkflowChildLaunchFromRouteInput = {
+/**
+ * The canonical recursion lineage of one run, exactly as the durable
+ * `workflow_run_lineage` row records it: the parent run + dispatched step that
+ * launched the run, its nesting depth, and every subworkflow ancestor's
+ * definition key above it (root-first, excluding the run itself). Absent for a
+ * top-level run.
+ */
+export type SubworkflowCanonicalLineage = {
   parentRunId: string;
   parentStepId: string;
-  /** The parent run's projected compatibility `route` JSON. */
-  parentRoute: Record<string, unknown>;
-  /** The parent run's own workflow definition key. */
-  parentDefinitionKey: string;
+  depth: number;
+  ancestorDefinitionKeys: readonly string[];
 };
 
-export type SubworkflowRouteChildLaunchPlan =
-  | {
-      ok: true;
-      /** The workflow definition key the child run launches. */
-      childDefinitionKey: string;
-      /** The workflow definition version the child run launches. */
-      childDefinitionVersion: number;
-      /** The deterministic child run id (start-or-attach idempotency anchor). */
-      childRunId: string;
-      /** The nesting depth the child run will occupy (1 = first nested level). */
-      childDepth: number;
-      /** The resolved recursion bound carried by the child config. */
-      maxDepth: number;
-      /** The `route` JSON the child run should be started with (lineage propagated). */
-      childRoute: Record<string, unknown>;
-    }
-  | { ok: false; refusal: SubworkflowRouteLaunchRefusal; reason: string };
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+export type SubworkflowCanonicalLineageResolution =
+  | { ok: true; lineage: SubworkflowCanonicalLineage }
+  | { ok: false; refusal: SubworkflowLineageRefusal; reason: string };
 
 function isNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-/** The `route.subworkflow` namespace object, or `undefined` when not a plain object. */
-function subworkflowNamespace(
-  route: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const namespace = route[SUBWORKFLOW_ROUTE_KEY];
-  return isPlainObject(namespace) ? namespace : undefined;
-}
-
-/**
- * Read the parent run's subworkflow lineage from its `route`. Pure and total: an
- * absent namespace / lineage is a legitimate top-level run (no ancestors); a
- * present-but-corrupt lineage fails closed (`lineage_invalid`). `parentDefinitionKey`
- * is the parent run's own key (read from the run row by the IO deriver), so the
- * returned {@link SubworkflowParentLineage} is ready for
- * {@link planSubworkflowChildLaunch}.
- */
-export function readSubworkflowParentLineage(
-  parentRoute: Record<string, unknown>,
-  parentDefinitionKey: string,
-): SubworkflowParentLineageResolution {
-  const namespace = subworkflowNamespace(parentRoute);
-  const rawLineage = namespace?.["lineage"];
-
-  if (rawLineage === undefined) {
-    // No lineage: a legitimate top-level (non-subworkflow-launched) run.
-    return {
-      ok: true,
-      lineage: {
-        definitionKey: parentDefinitionKey,
-        ancestorDefinitionKeys: [],
-      },
-    };
-  }
-
-  if (!isPlainObject(rawLineage)) {
-    return lineageInvalid(
-      "subworkflow lineage is present but is not an object",
-    );
-  }
-  if (!isNonBlankString(rawLineage["parentRunId"])) {
-    return lineageInvalid(
-      "subworkflow lineage parentRunId must be a non-empty string",
-    );
-  }
-  if (!isNonBlankString(rawLineage["parentStepId"])) {
-    return lineageInvalid(
-      "subworkflow lineage parentStepId must be a non-empty string",
-    );
-  }
-  const rawAncestors = rawLineage["ancestorDefinitionKeys"];
-  if (!Array.isArray(rawAncestors)) {
-    return lineageInvalid(
-      "subworkflow lineage ancestorDefinitionKeys must be an array",
-    );
-  }
-  if (!rawAncestors.every((key) => isNonBlankString(key))) {
-    return lineageInvalid(
-      "subworkflow lineage ancestorDefinitionKeys must be non-empty strings",
-    );
-  }
-
-  return {
-    ok: true,
-    lineage: {
-      definitionKey: parentDefinitionKey,
-      ancestorDefinitionKeys: rawAncestors as string[],
-    },
-  };
-}
-
-function lineageInvalid(detail: string): SubworkflowParentLineageResolution {
+function lineageInvalid(detail: string): {
+  ok: false;
+  refusal: SubworkflowLineageRefusal;
+  reason: string;
+} {
   return {
     ok: false,
     refusal: "lineage_invalid",
@@ -224,51 +97,124 @@ export function deriveChildSubworkflowRunId(
   return `${parentRunId}::${parentStepId}::child`;
 }
 
-export type DeriveChildSubworkflowRouteInput = {
-  parentRunId: string;
-  parentStepId: string;
-  parentDefinitionKey: string;
-  parentLineage: SubworkflowParentLineage;
-  childDepth: number;
-};
-
 /**
- * Build the compatibility `route` object a child run should be started with. The
- * child's ancestry is the parent's ancestry plus the parent's own definition key
- * (root-first), so a grandchild launch sees every ancestor above it and the cycle /
- * depth checks stay sound across nesting levels. The child run gets a fresh route
- * carrying only the propagated lineage; canonical persistence stores it in
- * `workflow_run_lineage`, and any authored child-of-child config is set separately.
+ * Validate a raw canonical `workflow_run_lineage` row into a
+ * {@link SubworkflowCanonicalLineage}. Pure and total: a present-but-corrupt row
+ * (blank ids, non-positive depth, malformed / duplicated ancestry, or a
+ * depth / ancestry mismatch) fails closed (`lineage_invalid`) — silently
+ * resetting corrupt lineage to top-level would defeat the recursion bound. An
+ * absent row is the caller's legitimate top-level case and never reaches here.
  */
-export function deriveChildSubworkflowRoute(
-  input: DeriveChildSubworkflowRouteInput,
-): Record<string, unknown> {
-  const lineage: SubworkflowRouteLineage = {
-    parentRunId: input.parentRunId,
-    parentStepId: input.parentStepId,
-    depth: input.childDepth,
-    ancestorDefinitionKeys: [
-      ...input.parentLineage.ancestorDefinitionKeys,
-      input.parentDefinitionKey,
-    ],
+export function readSubworkflowCanonicalLineage(
+  runId: string,
+  row: {
+    parentRunId: string;
+    parentStepId: string;
+    depth: number;
+    ancestorDefinitionKeysJson: string;
+  },
+): SubworkflowCanonicalLineageResolution {
+  if (!isNonBlankString(row.parentRunId)) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage parentRunId must be a non-blank string`,
+    );
+  }
+  if (!isNonBlankString(row.parentStepId)) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage parentStepId must be a non-blank string`,
+    );
+  }
+  if (
+    typeof row.depth !== "number" ||
+    !Number.isInteger(row.depth) ||
+    row.depth <= 0
+  ) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage depth must be a positive integer`,
+    );
+  }
+  let ancestors: unknown;
+  try {
+    ancestors = JSON.parse(row.ancestorDefinitionKeysJson);
+  } catch {
+    return lineageInvalid(
+      `run ${runId} canonical lineage ancestorDefinitionKeys is not valid JSON`,
+    );
+  }
+  if (
+    !Array.isArray(ancestors) ||
+    !ancestors.every((key) => isNonBlankString(key))
+  ) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage ancestorDefinitionKeys must be an array of non-blank strings`,
+    );
+  }
+  if (row.depth !== ancestors.length) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage depth must equal ancestorDefinitionKeys.length`,
+    );
+  }
+  if (new Set(ancestors).size !== ancestors.length) {
+    return lineageInvalid(
+      `run ${runId} canonical lineage ancestorDefinitionKeys must not repeat a definition`,
+    );
+  }
+  return {
+    ok: true,
+    lineage: {
+      parentRunId: row.parentRunId,
+      parentStepId: row.parentStepId,
+      depth: row.depth,
+      ancestorDefinitionKeys: ancestors as string[],
+    },
   };
-  return { [SUBWORKFLOW_ROUTE_KEY]: { lineage } };
 }
 
-/**
- * Compose route-sourced config validation + lineage read + the recursion decider
- * into the single decision the daemon-lane IO deriver forwards. Pure and total: any
- * refusal (missing / invalid child config, corrupt lineage, or unsafe recursion)
- * returns `{ ok: false }` with a typed refusal and an operator-facing reason the
- * caller routes to manual recovery; a launchable child returns its definition key,
- * deterministic child run id, resolved depth bound, and the propagated child route.
- */
-export function planSubworkflowChildLaunchFromRoute(
-  input: PlanSubworkflowChildLaunchFromRouteInput,
-): SubworkflowRouteChildLaunchPlan {
-  const namespace = subworkflowNamespace(input.parentRoute);
+export type PlanSubworkflowChildLaunchFromStepInput = {
+  parentRunId: string;
+  parentStepId: string;
+  /** The parent run's own workflow definition key. */
+  parentDefinitionKey: string;
+  /** The claimed step's parsed `workflow_steps.executor_config_json` object. */
+  stepExecutorConfig: Record<string, unknown>;
+  /** The parent run's canonical lineage row, or `null` for a top-level run. */
+  parentLineage: SubworkflowCanonicalLineage | null;
+};
 
-  const configValidation = validateSubworkflowChildConfig(namespace?.["child"]);
+export type SubworkflowStepChildLaunchPlan =
+  | {
+      ok: true;
+      /** The workflow definition key the child run launches. */
+      childDefinitionKey: string;
+      /** The workflow definition version the child run launches. */
+      childDefinitionVersion: number;
+      /** The deterministic child run id (start-or-attach idempotency anchor). */
+      childRunId: string;
+      /** The nesting depth the child run will occupy (1 = first nested level). */
+      childDepth: number;
+      /** The resolved recursion bound carried by the child config. */
+      maxDepth: number;
+      /** The explicit canonical lineage the child run is persisted with. */
+      childLineage: SubworkflowCanonicalLineage;
+    }
+  | { ok: false; refusal: SubworkflowRouteLaunchRefusal; reason: string };
+
+/**
+ * Compose the canonical-state child-launch decision the daemon-lane IO deriver
+ * forwards: validate the step-owned `child` intent from the claimed step's
+ * `executor_config_json`, treat the canonical lineage row (or its absence) as the
+ * only ancestry authority, and apply the existing recursion-safety planner. Pure
+ * and total: any refusal returns `{ ok: false }` with a typed refusal the caller
+ * routes to manual recovery; a launchable child returns its definition ref, the
+ * deterministic child run id, and the explicit child lineage the
+ * start-persistence seam inserts atomically with the child run.
+ */
+export function planSubworkflowChildLaunchFromStep(
+  input: PlanSubworkflowChildLaunchFromStepInput,
+): SubworkflowStepChildLaunchPlan {
+  const configValidation = validateSubworkflowChildConfig(
+    input.stepExecutorConfig["child"],
+  );
   if (!configValidation.ok) {
     return {
       ok: false,
@@ -277,22 +223,11 @@ export function planSubworkflowChildLaunchFromRoute(
     };
   }
 
-  const lineageResolution = readSubworkflowParentLineage(
-    input.parentRoute,
-    input.parentDefinitionKey,
-  );
-  if (!lineageResolution.ok) {
-    return {
-      ok: false,
-      refusal: lineageResolution.refusal,
-      reason: lineageResolution.reason,
-    };
-  }
-
-  const launchPlan = planSubworkflowChildLaunch(
-    configValidation.config,
-    lineageResolution.lineage,
-  );
+  const parentAncestors = input.parentLineage?.ancestorDefinitionKeys ?? [];
+  const launchPlan = planSubworkflowChildLaunch(configValidation.config, {
+    definitionKey: input.parentDefinitionKey,
+    ancestorDefinitionKeys: parentAncestors,
+  });
   if (!launchPlan.ok) {
     return {
       ok: false,
@@ -311,12 +246,11 @@ export function planSubworkflowChildLaunchFromRoute(
     ),
     childDepth: launchPlan.childDepth,
     maxDepth: launchPlan.maxDepth,
-    childRoute: deriveChildSubworkflowRoute({
+    childLineage: {
       parentRunId: input.parentRunId,
       parentStepId: input.parentStepId,
-      parentDefinitionKey: input.parentDefinitionKey,
-      parentLineage: lineageResolution.lineage,
-      childDepth: launchPlan.childDepth,
-    }),
+      depth: launchPlan.childDepth,
+      ancestorDefinitionKeys: [...parentAncestors, input.parentDefinitionKey],
+    },
   };
 }

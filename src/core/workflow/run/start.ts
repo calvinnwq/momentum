@@ -99,6 +99,7 @@ export const WORKFLOW_RUN_START_ERROR_CODES = [
   "approval_boundary_invalid",
   "issue_scope_invalid",
   "route_invalid",
+  "lineage_invalid",
 ] as const;
 export type WorkflowRunStartErrorCode =
   (typeof WORKFLOW_RUN_START_ERROR_CODES)[number];
@@ -107,6 +108,20 @@ export type WorkflowRunStartError = {
   code: WorkflowRunStartErrorCode;
   message: string;
   path?: string;
+};
+
+/**
+ * The explicit canonical lineage a subworkflow child-run start supplies: the
+ * parent run + dispatched step that launches the child, the child's nesting
+ * depth, and its root-first subworkflow ancestry. Persisted as the child's
+ * `workflow_run_lineage` row in the same transaction as the run itself; the
+ * retired `route.subworkflow` namespace is no longer accepted at start.
+ */
+export type WorkflowRunStartLineage = {
+  parentRunId: string;
+  parentStepId: string;
+  depth: number;
+  ancestorDefinitionKeys: readonly string[];
 };
 
 /**
@@ -122,6 +137,7 @@ export type WorkflowRunStartInput = {
   now: number;
   issueScope?: Record<string, unknown>;
   route?: Record<string, unknown>;
+  lineage?: WorkflowRunStartLineage;
   approvalBoundary?: string | null;
   skillRevision?: string | null;
   source?: string;
@@ -140,6 +156,7 @@ export type WorkflowRunStartRun = {
   objective: string;
   issueScope: Record<string, unknown>;
   route: Record<string, unknown>;
+  lineage: WorkflowRunStartLineage | null;
   approvalBoundary: WorkflowApprovalBoundary | null;
   skillRevision: string | null;
   definitionKey: string;
@@ -244,7 +261,16 @@ export function materializeWorkflowRunStart(
       message: "Route must be a plain object.",
       path: "route",
     });
+  } else if (input.route !== undefined && "subworkflow" in input.route) {
+    errors.push({
+      code: "route_invalid",
+      message:
+        "The route.subworkflow start namespace is retired; supply child lineage through the explicit lineage input.",
+      path: "route.subworkflow",
+    });
   }
+
+  errors.push(...validateStartLineage(input.lineage, input.runId));
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -287,6 +313,7 @@ export function materializeWorkflowRunStart(
     objective: input.objective,
     issueScope: input.issueScope ?? {},
     route: input.route ?? {},
+    lineage: input.lineage ?? null,
     approvalBoundary: resolvedBoundary,
     skillRevision: input.skillRevision ?? null,
     definitionKey: definition.key,
@@ -297,6 +324,62 @@ export function materializeWorkflowRunStart(
   };
 
   return { ok: true, plan: { run, steps } };
+}
+
+const START_LINEAGE_KEYS = new Set([
+  "parentRunId",
+  "parentStepId",
+  "depth",
+  "ancestorDefinitionKeys",
+]);
+
+function validateStartLineage(
+  lineage: unknown,
+  runId: string,
+): WorkflowRunStartError[] {
+  if (lineage === undefined) return [];
+  const invalid = (message: string): WorkflowRunStartError[] => [
+    { code: "lineage_invalid", message, path: "lineage" },
+  ];
+  if (!isPlainObject(lineage)) {
+    return invalid("Lineage must be a plain object.");
+  }
+  for (const key of Object.keys(lineage)) {
+    if (!START_LINEAGE_KEYS.has(key)) {
+      return invalid(`Lineage key '${key}' is not recognized.`);
+    }
+  }
+  if (!isNonBlankString(lineage["parentRunId"])) {
+    return invalid("Lineage parentRunId must be a non-blank string.");
+  }
+  if (!isNonBlankString(lineage["parentStepId"])) {
+    return invalid("Lineage parentStepId must be a non-blank string.");
+  }
+  const depth = lineage["depth"];
+  if (typeof depth !== "number" || !Number.isInteger(depth) || depth <= 0) {
+    return invalid("Lineage depth must be a positive integer.");
+  }
+  const ancestors = lineage["ancestorDefinitionKeys"];
+  if (
+    !Array.isArray(ancestors) ||
+    !ancestors.every((key) => isNonBlankString(key))
+  ) {
+    return invalid(
+      "Lineage ancestorDefinitionKeys must be an array of non-blank strings.",
+    );
+  }
+  if (depth !== ancestors.length) {
+    return invalid("Lineage depth must equal ancestorDefinitionKeys.length.");
+  }
+  if (new Set(ancestors).size !== ancestors.length) {
+    return invalid(
+      "Lineage ancestorDefinitionKeys must not repeat a definition.",
+    );
+  }
+  if (lineage["parentRunId"] === runId) {
+    return invalid("Lineage parentRunId must differ from the run id.");
+  }
+  return [];
 }
 
 function isKnownRetainedBuiltInDefinition(definition: unknown): boolean {
