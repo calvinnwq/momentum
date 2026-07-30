@@ -310,71 +310,92 @@ function validateSubworkflowShape(
 
   let lineage: ValidatedRouteLineage | null = null;
   if (raw["lineage"] !== undefined) {
-    const at = "$.subworkflow.lineage";
-    const value = raw["lineage"];
-    if (!isPlainObject(value))
-      invalidLineage(runId, at, "lineage must be an object");
-    validateKnownKeys(runId, at, value, LINEAGE_KEYS);
-    const parentRunId = requiredNonBlankString(
+    lineage = validateLineageFields(
       runId,
-      `${at}.parentRunId`,
-      value["parentRunId"],
-      true,
+      "$.subworkflow.lineage",
+      raw["lineage"],
     );
-    const parentStepId = requiredNonBlankString(
-      runId,
-      `${at}.parentStepId`,
-      value["parentStepId"],
-      true,
-    );
-    const depth = requiredPositiveInteger(
-      runId,
-      `${at}.depth`,
-      value["depth"],
-      true,
-    );
-    const ancestors = value["ancestorDefinitionKeys"];
-    if (
-      !Array.isArray(ancestors) ||
-      !ancestors.every(
-        (key) => typeof key === "string" && key.trim().length > 0,
-      )
-    ) {
-      invalidLineage(
-        runId,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must be an array of non-blank strings",
-      );
-    }
-    if (depth !== ancestors.length) {
-      invalidLineage(
-        runId,
-        `${at}.depth`,
-        "depth must equal ancestorDefinitionKeys.length",
-      );
-    }
-    if (new Set(ancestors).size !== ancestors.length) {
-      invalidLineage(
-        runId,
-        `${at}.ancestorDefinitionKeys`,
-        "ancestorDefinitionKeys must not repeat a definition",
-      );
-    }
-    if (parentRunId === runId) {
-      invalidLineage(
-        runId,
-        `${at}.parentRunId`,
-        "parentRunId must differ from the child run id",
-      );
-    }
-    lineage = {
-      parentRunId,
-      parentStepId,
-      depth,
-      ancestorDefinitionKeys: ancestors,
-    };
   }
   return { child, lineage };
+}
+
+/**
+ * Validate the explicit run-lineage input a workflow-run start supplies for a
+ * subworkflow child run — the same field contract the durable
+ * `workflow_run_lineage` row enforces. Throws a fail-closed
+ * `route_state_lineage_invalid` on any malformed value.
+ */
+export function validateExplicitRunLineage(
+  runId: string,
+  raw: unknown,
+): ValidatedRouteLineage {
+  return validateLineageFields(runId, "$lineage", raw);
+}
+
+function validateLineageFields(
+  runId: string,
+  at: string,
+  value: unknown,
+): ValidatedRouteLineage {
+  if (!isPlainObject(value))
+    invalidLineage(runId, at, "lineage must be an object");
+  validateKnownKeys(runId, at, value, LINEAGE_KEYS);
+  const parentRunId = requiredNonBlankString(
+    runId,
+    `${at}.parentRunId`,
+    value["parentRunId"],
+    true,
+  );
+  const parentStepId = requiredNonBlankString(
+    runId,
+    `${at}.parentStepId`,
+    value["parentStepId"],
+    true,
+  );
+  const depth = requiredPositiveInteger(
+    runId,
+    `${at}.depth`,
+    value["depth"],
+    true,
+  );
+  const ancestors = value["ancestorDefinitionKeys"];
+  if (
+    !Array.isArray(ancestors) ||
+    !ancestors.every((key) => typeof key === "string" && key.trim().length > 0)
+  ) {
+    invalidLineage(
+      runId,
+      `${at}.ancestorDefinitionKeys`,
+      "ancestorDefinitionKeys must be an array of non-blank strings",
+    );
+  }
+  if (depth !== ancestors.length) {
+    invalidLineage(
+      runId,
+      `${at}.depth`,
+      "depth must equal ancestorDefinitionKeys.length",
+    );
+  }
+  if (new Set(ancestors).size !== ancestors.length) {
+    invalidLineage(
+      runId,
+      `${at}.ancestorDefinitionKeys`,
+      "ancestorDefinitionKeys must not repeat a definition",
+    );
+  }
+  if (parentRunId === runId) {
+    invalidLineage(
+      runId,
+      `${at}.parentRunId`,
+      "parentRunId must differ from the child run id",
+    );
+  }
+  return {
+    parentRunId,
+    parentStepId,
+    depth,
+    ancestorDefinitionKeys: ancestors,
+  };
 }
 
 function planQuotaPolicy(runId: string, raw: unknown): string | null {

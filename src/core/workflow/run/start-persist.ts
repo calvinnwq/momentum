@@ -177,16 +177,10 @@ export function persistWorkflowRunStart(
       definitionVersion: run.definitionVersion,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
+      ...(run.lineage === null ? {} : { lineage: run.lineage }),
     });
   } catch (error) {
-    if (!(error instanceof RouteStateMigrationError)) throw error;
-    throw new InvalidWorkflowRunStartError([
-      {
-        code: "route_invalid",
-        message: error.message,
-        path: error.jsonPath,
-      },
-    ]);
+    throw invalidStartFromRouteStateError(error);
   }
 
   db.exec("BEGIN IMMEDIATE");
@@ -199,6 +193,7 @@ export function persistWorkflowRunStart(
       definitionVersion: run.definitionVersion,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
+      ...(run.lineage === null ? {} : { lineage: run.lineage }),
     });
     const existing = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
@@ -260,6 +255,7 @@ export function persistWorkflowRunStart(
       definitionVersion: run.definitionVersion,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt,
+      ...(run.lineage === null ? {} : { lineage: run.lineage }),
       ...(definitionAgentConfigs === undefined
         ? {}
         : { definitionAgentConfigs }),
@@ -305,13 +301,7 @@ export function persistWorkflowRunStart(
       throw new WorkflowRunStartConflictError(run.runId);
     }
     if (error instanceof RouteStateMigrationError) {
-      throw new InvalidWorkflowRunStartError([
-        {
-          code: "route_invalid",
-          message: error.message,
-          path: error.jsonPath,
-        },
-      ]);
+      throw invalidStartFromRouteStateError(error);
     }
     throw error;
   }
@@ -328,6 +318,27 @@ export function persistWorkflowRunStart(
     stepCount: steps.length,
     inserted: true,
   };
+}
+
+/**
+ * Map an adapter route-state refusal onto the start refusal taxonomy: lineage
+ * validation failures surface as `lineage_invalid` (the explicit start input
+ * they now guard), everything else stays `route_invalid`. Non-route-state
+ * errors pass through unchanged.
+ */
+function invalidStartFromRouteStateError(error: unknown): unknown {
+  if (!(error instanceof RouteStateMigrationError)) return error;
+  const lineageCodes = new Set([
+    "route_state_lineage_invalid",
+    "route_state_lineage_parent_missing",
+  ]);
+  return new InvalidWorkflowRunStartError([
+    {
+      code: lineageCodes.has(error.code) ? "lineage_invalid" : "route_invalid",
+      message: error.message,
+      path: error.jsonPath,
+    },
+  ]);
 }
 
 function readImplementationEngine(

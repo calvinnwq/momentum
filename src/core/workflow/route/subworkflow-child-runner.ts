@@ -57,13 +57,14 @@ import {
   WorkflowRunStartConflictError,
 } from "../run/start-persist.js";
 import { loadWorkflowRunDetail } from "../run/status.js";
+import type { SubworkflowCanonicalLineage } from "./subworkflow.js";
 
 /**
  * Everything the builder needs to resolve and drive a dispatched `subworkflow`
  * step's child run. The daemon-lane deriver assembles it from the parent run's
- * durable facts and iteration 2's route-sourced launch plan: `childRunId`,
- * `childDefinitionKey`, and `childRoute` come from
- * {@link planSubworkflowChildLaunchFromRoute}; `repoPath` / `objective` come from
+ * durable facts and the canonical-state launch plan: `childRunId`,
+ * `childDefinitionKey`, and `childLineage` come from
+ * {@link planSubworkflowChildLaunchFromStep}; `repoPath` / `objective` come from
  * the parent run row.
  */
 export type BuildDispatchedSubworkflowChildRunnerInput = {
@@ -74,8 +75,8 @@ export type BuildDispatchedSubworkflowChildRunnerInput = {
   childDefinitionKey: string;
   /** The workflow definition version the child run launches (resolved here). */
   childDefinitionVersion: number;
-  /** The `route` JSON the child run is started with (lineage propagated). */
-  childRoute: Record<string, unknown>;
+  /** The explicit canonical lineage the child run is persisted with. */
+  childLineage: SubworkflowCanonicalLineage;
   /** The repo the child run operates on (inherited from the parent run). */
   repoPath: string;
   /** The child run's objective (inherited / shaped from the parent run). */
@@ -141,7 +142,7 @@ function startOrAttachAndObserveChildRun(
   input: BuildDispatchedSubworkflowChildRunnerInput,
   definition: WorkflowDefinition,
 ) {
-  const { db, childRunId, childRoute, repoPath, objective, now } = input;
+  const { db, childRunId, childLineage, repoPath, objective, now } = input;
 
   try {
     persistWorkflowRunStart(db, {
@@ -149,7 +150,7 @@ function startOrAttachAndObserveChildRun(
       runId: childRunId,
       repoPath,
       objective,
-      route: childRoute,
+      lineage: childLineage,
       now,
     });
   } catch (error) {

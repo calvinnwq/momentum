@@ -66,6 +66,7 @@ describe("materializeWorkflowRunStart", () => {
       objective: "Implement NGX-346",
       issueScope: {},
       route: {},
+      lineage: null,
       approvalBoundary: null,
       skillRevision: null,
       definitionKey: "sample-workflow",
@@ -283,6 +284,7 @@ describe("materializeWorkflowRunStart", () => {
       "approval_boundary_invalid",
       "issue_scope_invalid",
       "route_invalid",
+      "lineage_invalid",
     ]);
   });
 

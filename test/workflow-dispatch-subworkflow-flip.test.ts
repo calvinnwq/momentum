@@ -76,6 +76,12 @@ const PARENT_DEFINITION: WorkflowDefinition = {
       executor: "subworkflow",
       order: 1,
       required: true,
+      config: {
+        child: {
+          childDefinitionKey: CHILD_DEFINITION.key,
+          childDefinitionVersion: CHILD_DEFINITION.version,
+        },
+      },
     },
   ],
 };
@@ -100,9 +106,10 @@ function makeTempDir(prefix = "momentum-sub-flip-"): string {
 /**
  * Seed a migrated DB with the parent + child definitions and an approved
  * top-level parent run whose single `subworkflow` step is ready to dispatch. The
- * authored child-launch config is supplied through the compatibility `route`
- * object, then persisted canonically in `workflow_steps.executor_config_json` and
- * read back through the adapter-owned route projection.
+ * authored child-launch config lives in the step definition's portable config;
+ * start persistence snapshots it into the owning
+ * `workflow_steps.executor_config_json` row, which the daemon lane reads
+ * directly.
  */
 function seedParentRun(dataDir: string, repoPath: string, runId: string): void {
   const db = openDb(dataDir);
@@ -114,14 +121,6 @@ function seedParentRun(dataDir: string, repoPath: string, runId: string): void {
       runId,
       repoPath,
       objective: "Dogfood NGX-498 production subworkflow flip",
-      route: {
-        subworkflow: {
-          child: {
-            childDefinitionKey: CHILD_DEFINITION.key,
-            childDefinitionVersion: CHILD_DEFINITION.version,
-          },
-        },
-      },
       now: NOW,
     });
     db.prepare(
@@ -204,19 +203,24 @@ describe("subworkflow production flip — configured step dispatches through dae
       expect(child?.run.state).toBe("pending");
       expect(child?.steps).toHaveLength(CHILD_DEFINITION.steps.length);
 
-      // The child run carries the propagated recursion lineage so its own
-      // subworkflow steps can detect a cycle / depth bound.
-      const childRoute = loadCanonicalWorkflowRunRoute(
-        db,
-        childRunId(runId),
-      ) as {
-        subworkflow?: { lineage?: Record<string, unknown> };
-      };
-      expect(childRoute.subworkflow?.lineage).toMatchObject({
-        parentRunId: runId,
-        parentStepId: PARENT_STEP_ID,
-        ancestorDefinitionKeys: [PARENT_DEFINITION.key],
+      // The child run carries its canonical recursion lineage row so its own
+      // subworkflow steps can detect a cycle / depth bound, while the
+      // compatibility projection emits no subworkflow namespace.
+      expect(
+        db
+          .prepare(
+            `SELECT parent_run_id, parent_step_id, depth,
+                    ancestor_definition_keys_json
+               FROM workflow_run_lineage WHERE run_id = ?`,
+          )
+          .get(childRunId(runId)),
+      ).toEqual({
+        parent_run_id: runId,
+        parent_step_id: PARENT_STEP_ID,
+        depth: 1,
+        ancestor_definition_keys_json: JSON.stringify([PARENT_DEFINITION.key]),
       });
+      expect(loadCanonicalWorkflowRunRoute(db, childRunId(runId))).toEqual({});
 
       // The dispatch lease stays held so a later tick can re-check the child.
       expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();

@@ -12,6 +12,7 @@ import { RouteStateMigrationError } from "./route-state-errors.js";
 import {
   isPlainObject,
   parseWorkflowRoute,
+  validateExplicitRunLineage,
   validateWorkflowRoute,
   type ValidatedRouteLineage,
 } from "./route-state-validation.js";
@@ -178,9 +179,11 @@ export function validateWorkflowRouteLineage(
     definitionVersion: number | null;
     createdAt: number;
     updatedAt: number;
+    /** Explicit child-run lineage supplied by the start-persistence seam. */
+    lineage?: unknown;
   },
 ): void {
-  const validated = validateWorkflowRoute(input);
+  const validated = resolveValidatedRouteWithExplicitLineage(input);
   if (validated.lineage === null) {
     return;
   }
@@ -203,7 +206,9 @@ export function validateWorkflowRouteLineage(
   );
   validateLineageChain(
     run,
-    "$.subworkflow.lineage",
+    input.lineage === undefined || input.lineage === null
+      ? "$.subworkflow.lineage"
+      : "$lineage",
     validated.lineage,
     lineageRuns,
     parentFacts,
@@ -224,9 +229,11 @@ export function writeCanonicalWorkflowRunRouteState(
     definitionAgentConfigs?: ReadonlyMap<string, Record<string, string>>;
     canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>;
     definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>;
+    /** Explicit child-run lineage supplied by the start-persistence seam. */
+    lineage?: unknown;
   },
 ): void {
-  const validated = validateWorkflowRoute(input);
+  const validated = resolveValidatedRouteWithExplicitLineage(input);
   const run: RunRow = {
     id: input.runId,
     source: input.source,
@@ -260,6 +267,26 @@ export function writeCanonicalWorkflowRunRouteState(
     input.runId,
   );
   applyRouteStatePlan(db, { runs: [plan] });
+}
+
+/**
+ * Validate the route and overlay the explicit start-persistence lineage input
+ * when one is supplied. The explicit input is the active lineage authority for
+ * fresh child runs; the route-carried lineage remains only for legacy
+ * route_json migration.
+ */
+function resolveValidatedRouteWithExplicitLineage(input: {
+  runId: string;
+  source: string;
+  route: Record<string, unknown>;
+  lineage?: unknown;
+}): ReturnType<typeof validateWorkflowRoute> {
+  const validated = validateWorkflowRoute(input);
+  if (input.lineage === undefined || input.lineage === null) return validated;
+  return {
+    ...validated,
+    lineage: validateExplicitRunLineage(input.runId, input.lineage),
+  };
 }
 
 export function projectValidatedLegacyWorkflowRunRoute(
@@ -1139,7 +1166,11 @@ function assertProjectionEquivalence(
   );
   for (const item of plan.runs) {
     const projected = projectedByRunId.get(item.run.id);
-    if (!isDeepStrictEqual(projected, item.parsedRoute)) {
+    // The subworkflow namespace is canonical-only: child intent lives on the
+    // owning step's executor config and lineage in workflow_run_lineage, and
+    // the compatibility projection deliberately no longer reconstructs it.
+    const { subworkflow: _subworkflow, ...expectedRoute } = item.parsedRoute;
+    if (!isDeepStrictEqual(projected, expectedRoute)) {
       throw new RouteStateMigrationError({
         runId: item.run.id,
         jsonPath: "$",
@@ -1280,20 +1311,20 @@ function validateProjectedCanonicalRoutes(
     canonicalLineageByRunId,
     validatedRoutes,
   );
+  // The projection no longer reconstructs a subworkflow namespace, so canonical
+  // lineage rows are validated directly: every read still proves the durable
+  // parent-step linkage and ancestry chain before canonical facts are trusted.
   for (const run of projectedRunsById.values()) {
-    const route = validatedRoutes.get(run.id);
-    if (route === undefined) continue;
-    const subworkflow = planSubworkflow(db, run, route, projectedRunsById);
-    if (subworkflow.lineage !== null) {
-      validateLineageChain(
-        run,
-        "$.subworkflow.lineage",
-        subworkflow.lineage,
-        projectedRunsById,
-        parentFacts,
-        canonicalLineageByRunId,
-      );
-    }
+    const lineage = canonicalLineageByRunId.get(run.id);
+    if (lineage === undefined) continue;
+    validateLineageChain(
+      run,
+      "$canonical.workflow_run_lineage",
+      lineage,
+      projectedRunsById,
+      parentFacts,
+      canonicalLineageByRunId,
+    );
   }
 }
 

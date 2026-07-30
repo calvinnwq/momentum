@@ -100,16 +100,12 @@ const PARENT_DEFINITION: WorkflowDefinition = {
   ),
 };
 
-/** A propagated child route, as iteration 2's `deriveChildSubworkflowRoute` builds. */
-const CHILD_ROUTE = {
-  subworkflow: {
-    lineage: {
-      parentRunId: PARENT_RUN_ID,
-      parentStepId: STEP_ID,
-      depth: 1,
-      ancestorDefinitionKeys: [PARENT_DEFINITION.key],
-    },
-  },
+/** The explicit child lineage, as `planSubworkflowChildLaunchFromStep` derives. */
+const CHILD_LINEAGE = {
+  parentRunId: PARENT_RUN_ID,
+  parentStepId: STEP_ID,
+  depth: 1,
+  ancestorDefinitionKeys: [PARENT_DEFINITION.key],
 };
 
 const tempRoots: string[] = [];
@@ -166,7 +162,7 @@ function buildRunner(
     childDefinitionKey: overrides.childDefinitionKey ?? CHILD_DEFINITION_KEY,
     childDefinitionVersion:
       overrides.childDefinitionVersion ?? CHILD_DEFINITION.version,
-    childRoute: CHILD_ROUTE,
+    childLineage: CHILD_LINEAGE,
     repoPath: "/repos/momentum",
     objective: "RC-4b child workflow run",
     now: NOW,
@@ -196,16 +192,28 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
     expect(child?.steps).toHaveLength(CHILD_DEFINITION.steps.length);
   });
 
-  it("starts the child run with the propagated child route", async () => {
+  it("starts the child run with its canonical lineage row and no subworkflow route namespace", async () => {
     const db = openSeededDb();
     const resolution = buildRunner(db);
     if (!resolution.ok) throw new Error(resolution.reason);
 
     await resolution.run();
 
-    expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual(
-      CHILD_ROUTE,
-    );
+    expect(
+      db
+        .prepare(
+          `SELECT parent_run_id, parent_step_id, depth,
+                  ancestor_definition_keys_json
+             FROM workflow_run_lineage WHERE run_id = ?`,
+        )
+        .get(CHILD_RUN_ID),
+    ).toEqual({
+      parent_run_id: PARENT_RUN_ID,
+      parent_step_id: STEP_ID,
+      depth: 1,
+      ancestor_definition_keys_json: JSON.stringify([PARENT_DEFINITION.key]),
+    });
+    expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual({});
   });
 
   it("starts the child workflow run from the configured definition version", async () => {

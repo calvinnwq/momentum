@@ -496,18 +496,11 @@ describe("persistWorkflowRunStart", () => {
         persistWorkflowRunStart(
           db,
           baseInput({
-            route: {
-              subworkflow: {
-                lineage: {
-                  parentRunId: "parent-run",
-                  parentStepId: "child",
-                  depth: 2,
-                  ancestorDefinitionKeys: [
-                    "parent-workflow",
-                    "parent-workflow",
-                  ],
-                },
-              },
+            lineage: {
+              parentRunId: "parent-run",
+              parentStepId: "child",
+              depth: 2,
+              ancestorDefinitionKeys: ["parent-workflow", "parent-workflow"],
             },
           }),
         ),
@@ -545,15 +538,11 @@ describe("persistWorkflowRunStart", () => {
         baseInput({
           definition: parentDefinition,
           runId: "parent-run",
-          route: {
-            subworkflow: {
-              lineage: {
-                parentRunId: "grandparent-run",
-                parentStepId: "dispatch",
-                depth: 1,
-                ancestorDefinitionKeys: ["grandparent-workflow"],
-              },
-            },
+          lineage: {
+            parentRunId: "grandparent-run",
+            parentStepId: "dispatch",
+            depth: 1,
+            ancestorDefinitionKeys: ["grandparent-workflow"],
           },
         }),
       );
@@ -572,18 +561,14 @@ describe("persistWorkflowRunStart", () => {
           db,
           baseInput({
             runId: "child-run",
-            route: {
-              subworkflow: {
-                lineage: {
-                  parentRunId: "parent-run",
-                  parentStepId: "dispatch",
-                  depth: 2,
-                  ancestorDefinitionKeys: [
-                    "grandparent-workflow",
-                    "wrong-workflow",
-                  ],
-                },
-              },
+            lineage: {
+              parentRunId: "parent-run",
+              parentStepId: "dispatch",
+              depth: 2,
+              ancestorDefinitionKeys: [
+                "grandparent-workflow",
+                "wrong-workflow",
+              ],
             },
           }),
         );
@@ -594,8 +579,8 @@ describe("persistWorkflowRunStart", () => {
       expect(refusal).toBeDefined();
       expect(refusal?.errors).toContainEqual(
         expect.objectContaining({
-          code: "route_invalid",
-          path: "$.subworkflow.lineage.ancestorDefinitionKeys",
+          code: "lineage_invalid",
+          path: "$lineage.ancestorDefinitionKeys",
         }),
       );
       expect(

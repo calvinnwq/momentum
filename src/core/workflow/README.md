@@ -139,12 +139,14 @@ workflow run's observed state into defer / mirror evidence,
 runner and reconciles the parent only after terminal child evidence,
 `dispatch/subworkflow-dispatch.ts` provides the daemon-lane entry-point factory, and
 `dispatch/scheduler.ts` can recheck a deferred child run by heartbeating or reacquiring
-the parent dispatch lease. The production deriver reads the adapter-owned
-compatibility projection of child config and lineage from `route.subworkflow`,
-whose canonical sources are `workflow_steps.executor_config_json` and
-`workflow_run_lineage`; it resolves the child definition by key, refuses unsafe
-recursion / unsupported attachment, and keeps manual-recovery behavior for
-missing or ambiguous child state.
+the parent dispatch lease. The production deriver reads canonical state
+directly: child intent from the claimed step's own
+`workflow_steps.executor_config_json` row and parent / depth / ancestry from
+`workflow_run_lineage` (no `route.subworkflow` compatibility projection is
+consulted, and the projector emits no subworkflow keys); it resolves the child
+definition by key, refuses unsafe recursion / unsupported attachment, persists
+the child run with an explicit start-persistence lineage input, and keeps
+manual-recovery behavior for missing or ambiguous child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
 `profiles/coding-workflow-live-wrapper.profile.json`: the daemon live

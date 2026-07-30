@@ -307,6 +307,12 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         executor: "subworkflow",
         order: 1,
         required: true,
+        config: {
+          child: {
+            childDefinitionKey: "dogfood-subworkflow-child",
+            childDefinitionVersion: 1,
+          },
+        },
       },
     ],
   };
@@ -325,14 +331,6 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         runId,
         repoPath: repoDir,
         objective: "Dogfood subworkflow adapter-owned dispatch proof",
-        route: {
-          subworkflow: {
-            child: {
-              childDefinitionKey: childDefinition.key,
-              childDefinitionVersion: childDefinition.version,
-            },
-          },
-        },
         now,
       });
       db.prepare(

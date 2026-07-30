@@ -29,7 +29,6 @@ import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CODING_ROUTE_STEPS_KEY,
 } from "../src/core/workflow/route/coding.js";
-import { SUBWORKFLOW_ROUTE_KEY } from "../src/core/workflow/route/subworkflow.js";
 import { resolveWorkflowStepDispatchRouteSelection } from "../src/core/workflow/dispatch/execute.js";
 import {
   listWorkflowRunSummaries,
@@ -90,6 +89,18 @@ function columnNames(db: DatabaseSync, table: string): string[] {
   return (
     db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>
   ).map((row) => row.name);
+}
+
+/**
+ * The compatibility projection is subworkflow-free: child intent and lineage
+ * stay canonical-only (step executor config + workflow_run_lineage), so a
+ * migrated route projects to its released value minus that namespace.
+ */
+function stripSubworkflowNamespace(
+  route: Record<string, unknown>,
+): Record<string, unknown> {
+  const { subworkflow: _subworkflow, ...rest } = route;
+  return rest;
 }
 
 function captureLegacyRoutes(dataDir: string): Map<
@@ -244,7 +255,9 @@ describe("workflow route-state migration", () => {
       CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
       "profile",
       CODING_ROUTE_STEPS_KEY,
-      SUBWORKFLOW_ROUTE_KEY,
+      // Legacy migration input vocabulary only: the compatibility projection
+      // no longer emits a subworkflow namespace.
+      "subworkflow",
       "mode",
       "risk",
       "quotaPolicy",
@@ -481,7 +494,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("projects every migrated route structurally equal to its released value", () => {
+  it("projects every migrated route structurally equal to its released value minus the canonical-only subworkflow namespace", () => {
     const dataDir = seedReleasedFixture();
     const legacy = captureLegacyRoutes(dataDir);
     const db = openDb(dataDir);
@@ -490,7 +503,7 @@ describe("workflow route-state migration", () => {
         expect(
           projectLegacyWorkflowRunRoute(db, runId, expected),
           runId,
-        ).toEqual(expected.route);
+        ).toEqual(stripSubworkflowNamespace(expected.route));
       }
       const nativeFull = projectLegacyWorkflowRunRoute(
         db,
@@ -507,7 +520,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("preserves imported subworkflow lineage through canonical projection", () => {
+  it("migrates imported subworkflow lineage into the canonical row without projecting subworkflow keys", () => {
     const dataDir = seedReleasedFixture();
     const expectedRoute = {
       mode: "implementation",
@@ -533,13 +546,29 @@ describe("workflow route-state migration", () => {
     migrated.close();
     const canonical = openDb(dataDir);
     try {
+      // The lineage fact migrated into its canonical row...
+      expect(
+        canonical
+          .prepare(
+            `SELECT parent_run_id, parent_step_id, depth,
+                    ancestor_definition_keys_json
+               FROM workflow_run_lineage WHERE run_id = 'cwfp-imported'`,
+          )
+          .get(),
+      ).toEqual({
+        parent_run_id: "subworkflow-parent",
+        parent_step_id: "child-one",
+        depth: 1,
+        ancestor_definition_keys_json: JSON.stringify(["fixture-parent"]),
+      });
+      // ...and the compatibility projection emits no subworkflow keys.
       expect(
         projectLegacyWorkflowRunRoute(canonical, "cwfp-imported", {
           source: "agent-workflow",
           definitionKey: null,
           definitionVersion: null,
         }),
-      ).toEqual(expectedRoute);
+      ).toEqual(stripSubworkflowNamespace(expectedRoute));
     } finally {
       canonical.close();
     }
@@ -590,7 +619,7 @@ describe("workflow route-state migration", () => {
     }
   });
 
-  it("projects structurally equal subworkflow child config regardless of property order", () => {
+  it("keeps step-owned subworkflow child config canonical-only in the projection", () => {
     const dataDir = seedReleasedFixture();
     const db = openDb(dataDir);
     try {
@@ -611,21 +640,15 @@ describe("workflow route-state migration", () => {
         "child-two",
       );
 
+      // Child intent stays on the owning step rows; the compatibility
+      // projection emits no subworkflow namespace for the parent run.
       expect(
         projectLegacyWorkflowRunRoute(db, "subworkflow-parent", {
           source: "workflow-definition",
           definitionKey: "fixture-parent",
           definitionVersion: 1,
         }),
-      ).toEqual({
-        subworkflow: {
-          child: {
-            childDefinitionKey: "fixture-nested",
-            childDefinitionVersion: 1,
-            maxDepth: 3,
-          },
-        },
-      });
+      ).toEqual({});
     } finally {
       db.close();
     }
@@ -703,7 +726,9 @@ describe("workflow route-state migration", () => {
         })),
       );
       for (const row of rows) {
-        expect(projected.get(row.id)).toEqual(legacy.get(row.id)?.route);
+        expect(projected.get(row.id)).toEqual(
+          stripSubworkflowNamespace(legacy.get(row.id)?.route ?? {}),
+        );
       }
       expect(loadWorkflowRunDetail(db, "native-full")?.run.route).toEqual(
         legacy.get("native-full")?.route,
@@ -1371,7 +1396,29 @@ describe("workflow route-state migration", () => {
     });
   });
 
-  it("refuses incomplete canonical subworkflow child fan-out", () => {
+  it("refuses a canonical lineage row that disagrees with the durable parent chain on read", () => {
+    const dataDir = seedReleasedFixture();
+    const migrated = openDb(dataDir);
+    migrated.close();
+    withRawDb(dataDir, (db) => {
+      db.prepare(
+        `UPDATE workflow_run_lineage
+            SET ancestor_definition_keys_json = '["fixture-parent","fixture-leaf"]'
+          WHERE run_id = 'subworkflow-grandchild'`,
+      ).run();
+    });
+    expectCanonicalAuditRefusal(dataDir, {
+      runId: "subworkflow-grandchild",
+      jsonPath: "$canonical.workflow_run_lineage.ancestorDefinitionKeys",
+      code: "route_state_lineage_invalid",
+    });
+  });
+
+  it("leaves per-step subworkflow child config divergence to the dispatch-time guard", () => {
+    // Child intent is step-owned canonical state: one subworkflow step losing
+    // its child config no longer poisons whole-run projection reads. The
+    // affected step fails closed at dispatch (missing_child_config) while
+    // sibling steps and every read surface keep working.
     const dataDir = seedReleasedFixture();
     const migrated = openDb(dataDir);
     migrated.close();
@@ -1382,11 +1429,18 @@ describe("workflow route-state migration", () => {
           WHERE run_id = 'subworkflow-parent' AND step_id = 'child-two'`,
       ).run();
     });
-    expectCanonicalAuditRefusal(dataDir, {
-      runId: "subworkflow-parent",
-      jsonPath: "$.subworkflow.child",
-      code: "route_state_projection_mismatch",
-    });
+    const db = openDb(dataDir);
+    try {
+      expect(
+        projectLegacyWorkflowRunRoute(db, "subworkflow-parent", {
+          source: "workflow-definition",
+          definitionKey: "fixture-parent",
+          definitionVersion: 1,
+        }),
+      ).toEqual({});
+    } finally {
+      db.close();
+    }
   });
 
   it("persists an empty compatibility marker for native coding routes that project to empty", () => {
