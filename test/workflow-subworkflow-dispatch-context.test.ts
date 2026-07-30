@@ -243,6 +243,56 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
     expect(loadCanonicalWorkflowRunRoute(db, CHILD_RUN_ID)).toEqual({});
   });
 
+  it("validates only the requested run's canonical lineage closure", async () => {
+    const db = openSeededDb({
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      },
+    });
+    const resolution = deriveDispatchedSubworkflowContext(
+      claim(db),
+      context(db),
+    );
+    if (!resolution.ok) throw new Error(resolution.reason);
+    await resolution.runSubworkflowChild();
+
+    persistWorkflowRunStart(db, {
+      definition: parentDefinitionWithChildConfig({
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version,
+      }),
+      runId: "run-unrelated-lineage",
+      repoPath: REPO_PATH,
+      objective: "Unrelated run with corrupt canonical lineage",
+      now: NOW,
+    });
+    db.prepare(
+      `INSERT INTO workflow_run_lineage (
+         run_id, parent_run_id, parent_step_id, depth,
+         ancestor_definition_keys_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "run-unrelated-lineage",
+      PARENT_RUN_ID,
+      STEP_ID,
+      1,
+      "{not-json",
+      NOW,
+      NOW,
+    );
+
+    expect(loadSubworkflowRunLineageRow(db, CHILD_RUN_ID)).toEqual({
+      ok: true,
+      lineage: {
+        parentRunId: PARENT_RUN_ID,
+        parentStepId: STEP_ID,
+        depth: 1,
+        ancestorDefinitionKeys: [CODING_WORKFLOW_DEFINITION_KEY],
+      },
+    });
+  });
+
   it("chooses canonical child intent over stale compatibility-shaped route state", async () => {
     const db = openSeededDb({
       childConfig: {

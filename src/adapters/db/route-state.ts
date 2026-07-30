@@ -229,11 +229,18 @@ export function validateCanonicalWorkflowRunLineage(
     .get(runId) as RunRow | undefined;
   if (run === undefined) return;
 
-  const canonicalLineageByRunId = loadCanonicalLineageFields(db);
+  if (!tableExists(db, "workflow_run_lineage")) return;
+  const lineageRuns = loadCanonicalValidationRunClosure(
+    db,
+    new Set([runId]),
+  );
+  const canonicalLineageByRunId = loadCanonicalLineageFields(
+    db,
+    new Set(lineageRuns.keys()),
+  );
   const lineage = canonicalLineageByRunId.get(runId);
   if (lineage === undefined) return;
 
-  const lineageRuns = loadLineageValidationRuns(db, run);
   const parentFacts = loadLineageParentFacts(
     db,
     lineageRuns,
@@ -967,21 +974,48 @@ function loadLineageValidationRuns(
 
 function loadCanonicalLineageFields(
   db: MomentumDb,
+  requestedIds?: ReadonlySet<string>,
 ): Map<string, LineageFields> {
   if (!tableExists(db, "workflow_run_lineage")) return new Map();
-  const rows = db
-    .prepare(
-      `SELECT run_id, parent_run_id, parent_step_id, depth,
-              ancestor_definition_keys_json
-         FROM workflow_run_lineage`,
-    )
-    .all() as Array<{
+  type CanonicalLineageRow = {
     run_id: string;
     parent_run_id: string;
     parent_step_id: string;
     depth: number;
     ancestor_definition_keys_json: string;
-  }>;
+  };
+  const rows: CanonicalLineageRow[] = [];
+  if (requestedIds === undefined) {
+    rows.push(
+      ...(db
+        .prepare(
+          `SELECT run_id, parent_run_id, parent_step_id, depth,
+                  ancestor_definition_keys_json
+             FROM workflow_run_lineage`,
+        )
+        .all() as CanonicalLineageRow[]),
+    );
+  } else {
+    const ids = [...requestedIds];
+    for (
+      let offset = 0;
+      offset < ids.length;
+      offset += VALIDATION_QUERY_CHUNK_SIZE
+    ) {
+      const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      rows.push(
+        ...(db
+          .prepare(
+            `SELECT run_id, parent_run_id, parent_step_id, depth,
+                    ancestor_definition_keys_json
+               FROM workflow_run_lineage
+              WHERE run_id IN (${placeholders})`,
+          )
+          .all(...chunk) as CanonicalLineageRow[]),
+      );
+    }
+  }
   return new Map(
     rows.map((row) => {
       let ancestors: unknown;
