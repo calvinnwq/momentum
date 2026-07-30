@@ -153,8 +153,8 @@ function startOrAttachAndObserveChildRun(
     });
   } catch (error) {
     // Attach: a prior tick already started this child run. Idempotent re-entry —
-    // never start a second child run; verify the existing row is the expected
-    // child definition, then fall through to observe it.
+    // never start a second child run; verify the existing row has the expected
+    // child definition and canonical lineage, then fall through to observe it.
     // Any other failure (e.g. an invalid run-start the parent facts should have
     // precluded) propagates so the entry-point factory parks the step for manual
     // recovery rather than silently mis-observing.
