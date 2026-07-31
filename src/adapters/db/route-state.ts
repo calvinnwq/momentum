@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
 ) STRICT`,
   },
 ] as const;
+const LEGACY_IMPORT_METADATA_TABLE_DEFINITION = `
+CREATE TABLE workflow_run_import_metadata (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+  mode TEXT,
+  profile TEXT,
+  risk TEXT,
+  quota_policy_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK (mode IS NULL OR trim(mode) <> ''),
+  CHECK (profile IS NULL OR trim(profile) <> ''),
+  CHECK (risk IS NULL OR trim(risk) <> '')
+) STRICT`;
 const VALIDATION_QUERY_CHUNK_SIZE = 500;
 
 type RunRow = {
@@ -481,9 +494,16 @@ export function readWorkflowRunImportMetadata(
   db: MomentumDb,
   runId: string,
 ): WorkflowRunImportMetadataReadback | undefined {
+  const sourceFormatSelect = columnExists(
+    db,
+    "workflow_run_import_metadata",
+    "source_format",
+  )
+    ? "source_format"
+    : "NULL AS source_format";
   const row = db
     .prepare(
-      `SELECT mode, profile, risk, quota_policy_json, source_format,
+      `SELECT mode, profile, risk, quota_policy_json, ${sourceFormatSelect},
               created_at, updated_at
          FROM workflow_run_import_metadata
         WHERE run_id = ?`,
@@ -512,7 +532,6 @@ export function readWorkflowRunImportMetadata(
 }
 
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
-  upgradeWorkflowRunImportMetadataSchema(db);
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return false;
   if (hasBlockingBaseSchemaMalformation(baseState)) {
@@ -541,14 +560,21 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
         "all canonical destination objects already exist while legacy route_json still carries state",
     });
   }
+  if (workflowRunImportMetadataSchemaMigrationNeeded(db)) return true;
   return false;
 }
 
+export function workflowRunImportMetadataSchemaMigrationNeeded(
+  db: MomentumDb,
+): boolean {
+  return (
+    hasRouteStateBaseTables(db) &&
+    tableExists(db, "workflow_run_import_metadata") &&
+    !columnExists(db, "workflow_run_import_metadata", "source_format")
+  );
+}
+
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
-  // Databases whose canonical destinations landed before the imported
-  // source-format column must be brought to the current exact destination
-  // contract before the schema state below is inspected.
-  upgradeWorkflowRunImportMetadataSchema(db);
   const dataVersion = databaseDataVersion(db);
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return { runs: [], dataVersion };
@@ -671,42 +697,29 @@ export function refreshWorkflowRouteStatePlan(
 
 /**
  * Additive upgrade for databases whose canonical destinations were created
- * before the imported source-format column existed: rebuild
- * `workflow_run_import_metadata` in place with the current contract so exact
- * destination-schema validation keeps matching fresh databases. Rebuilt rows
- * record the honest absent source format. No-op when the table is absent
- * (route migration not yet applied) or already current.
+ * before the imported source-format column existed.
  */
-function upgradeWorkflowRunImportMetadataSchema(db: MomentumDb): void {
+export function upgradeWorkflowRunImportMetadataSchemaInTransaction(
+  db: MomentumDb,
+): void {
   if (!tableExists(db, "workflow_run_import_metadata")) return;
   if (columnExists(db, "workflow_run_import_metadata", "source_format")) return;
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    // Re-check under the write lock so a concurrent opener that already
-    // rebuilt the table leaves this a no-op instead of a double rename.
-    if (!columnExists(db, "workflow_run_import_metadata", "source_format")) {
-      const definition = DESTINATION_TABLES.find(
-        (contract) => contract.name === "workflow_run_import_metadata",
-      )!.definition;
-      db.exec(
-        "ALTER TABLE workflow_run_import_metadata RENAME TO workflow_run_import_metadata_upgrade",
-      );
-      db.exec(definition);
-      db.exec(
-        `INSERT INTO workflow_run_import_metadata
-           (run_id, mode, profile, risk, quota_policy_json, source_format,
-            created_at, updated_at)
-         SELECT run_id, mode, profile, risk, quota_policy_json, NULL,
-                created_at, updated_at
-           FROM workflow_run_import_metadata_upgrade`,
-      );
-      db.exec("DROP TABLE workflow_run_import_metadata_upgrade");
-    }
-    db.exec("COMMIT");
-  } catch (error) {
-    safeRollback(db);
-    throw error;
-  }
+  const definition = DESTINATION_TABLES.find(
+    (contract) => contract.name === "workflow_run_import_metadata",
+  )!.definition;
+  db.exec(
+    "ALTER TABLE workflow_run_import_metadata RENAME TO workflow_run_import_metadata_upgrade",
+  );
+  db.exec(definition);
+  db.exec(
+    `INSERT INTO workflow_run_import_metadata
+       (run_id, mode, profile, risk, quota_policy_json, source_format,
+        created_at, updated_at)
+     SELECT run_id, mode, profile, risk, quota_policy_json, NULL,
+            created_at, updated_at
+       FROM workflow_run_import_metadata_upgrade`,
+  );
+  db.exec("DROP TABLE workflow_run_import_metadata_upgrade");
 }
 
 export function createRouteStateDestinations(db: MomentumDb): void {
@@ -739,6 +752,7 @@ export function applyWorkflowRouteStateMigrationInTransaction(
   plan?: WorkflowRouteStatePlan,
 ): void {
   if (!hasRouteStateBaseTables(db)) return;
+  upgradeWorkflowRunImportMetadataSchemaInTransaction(db);
   const routeStatePlan = plan ?? preScanRouteState(db);
   try {
     createRouteStateDestinations(db);
@@ -1829,9 +1843,16 @@ function loadCanonicalImportMetadataRows(
   ) {
     const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
     const placeholders = chunk.map(() => "?").join(", ");
+    const sourceFormatSelect = columnExists(
+      db,
+      "workflow_run_import_metadata",
+      "source_format",
+    )
+      ? "source_format"
+      : "NULL AS source_format";
     const rows = db
       .prepare(
-        `SELECT run_id, mode, profile, risk, quota_policy_json, source_format,
+        `SELECT run_id, mode, profile, risk, quota_policy_json, ${sourceFormatSelect},
                 created_at, updated_at
            FROM workflow_run_import_metadata
           WHERE run_id IN (${placeholders})`,
@@ -1948,10 +1969,12 @@ function destinationTableMatchesContract(
   const row = db
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
     .get(contract.name) as { sql: string | null } | undefined;
+  if (row?.sql === null || row?.sql === undefined) return false;
+  const normalizedSql = normalizeSchemaSql(row.sql);
+  if (normalizedSql === normalizeSchemaSql(contract.definition)) return true;
   return (
-    row?.sql !== null &&
-    row?.sql !== undefined &&
-    normalizeSchemaSql(row.sql) === normalizeSchemaSql(contract.definition)
+    contract.name === "workflow_run_import_metadata" &&
+    normalizedSql === normalizeSchemaSql(LEGACY_IMPORT_METADATA_TABLE_DEFINITION)
   );
 }
 

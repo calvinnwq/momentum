@@ -1157,7 +1157,7 @@ State and filter compose: passing both returns runs whose literal state matches 
         "selectedProfile": null,
         "importMetadata": {
           "mode": "execute-ready",
-          "profile": "momentum-m7",
+          "profile": "imported-profile",
           "risk": null,
           "quotaPolicy": null,
           "sourceFormat": "agent-workflow-plan@v1",

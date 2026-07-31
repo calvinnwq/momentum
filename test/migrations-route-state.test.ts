@@ -864,6 +864,62 @@ describe("workflow route-state migration", () => {
     }
   });
 
+  it("rolls back the source-format rebuild when later route validation fails", () => {
+    const dataDir = seedReleasedFixture();
+    const db = openDb(dataDir);
+    db.close();
+    withRawDb(dataDir, (raw) => {
+      raw.exec("PRAGMA foreign_keys = OFF");
+      raw.exec(`
+        ALTER TABLE workflow_run_import_metadata
+          RENAME TO workflow_run_import_metadata_old;
+        CREATE TABLE workflow_run_import_metadata (
+          run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+          mode TEXT,
+          profile TEXT,
+          risk TEXT,
+          quota_policy_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          CHECK (mode IS NULL OR trim(mode) <> ''),
+          CHECK (profile IS NULL OR trim(profile) <> ''),
+          CHECK (risk IS NULL OR trim(risk) <> '')
+        ) STRICT;
+        INSERT INTO workflow_run_import_metadata
+          (run_id, mode, profile, risk, quota_policy_json,
+           created_at, updated_at)
+        SELECT run_id, mode, profile, risk, quota_policy_json,
+               created_at, updated_at
+          FROM workflow_run_import_metadata_old;
+        DROP TABLE workflow_run_import_metadata_old;
+      `);
+    });
+
+    const migrationDb = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const plan = preScanRouteState(migrationDb);
+      migrationDb.exec("PRAGMA ignore_check_constraints = ON");
+      migrationDb
+        .prepare(
+          `UPDATE workflow_run_import_metadata
+              SET profile = ''
+            WHERE run_id = 'cwfp-imported'`,
+        )
+        .run();
+      const before = databaseHash(dataDir);
+
+      expect(() => applyQueueMigrations(migrationDb, {}, plan)).toThrow(
+        RouteStateMigrationError,
+      );
+      expect(databaseHash(dataDir)).toBe(before);
+      expect(
+        columnNames(migrationDb, "workflow_run_import_metadata"),
+      ).not.toContain("source_format");
+    } finally {
+      migrationDb.close();
+    }
+  });
+
   it("migrates released route state for read-only callers", () => {
     const dataDir = seedReleasedFixture();
     const db = openExistingDbMigratedReadOnly(dataDir);
