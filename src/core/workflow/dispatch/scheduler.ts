@@ -1238,6 +1238,11 @@ export type AsyncWorkflowStepDispatch = (
   context: WorkflowStepDispatchContext,
 ) => MaybePromise<WorkflowStepDispatchResult>;
 
+export type WorkflowStepPreClaim = (input: {
+  db: MomentumDb;
+  candidate: RunnableWorkflowStep;
+}) => void;
+
 /**
  * The lane's durable primitives, overridable for tests (mirrors the dependency
  * injection `runDaemonLoop` uses for `runWorker` / `now` / `sleep`). Production
@@ -1257,6 +1262,7 @@ export type RunWorkflowSchedulerOnceInput = {
   runId?: string;
   /** The executor-dispatch seam invoked with a successfully claimed step. */
   dispatch: WorkflowStepDispatch;
+  preClaim?: WorkflowStepPreClaim;
   /** Tick clock. Defaults to `Date.now`. */
   now?: WorkflowSchedulerNow;
   /** Clock-skew tolerance forwarded to recovery / scan / claim. Defaults to 0. */
@@ -2157,6 +2163,7 @@ function runWorkflowSchedulerOnceCore(
         continuationPollIntervalMs,
       }))
   ) {
+    input.preClaim?.({ db, candidate: activeClaim });
     const refreshedClaim = heartbeatActiveDispatchClaim(db, {
       claim: activeClaim,
       now: tickNow,
@@ -2195,6 +2202,8 @@ function runWorkflowSchedulerOnceCore(
         : {}),
     };
   }
+
+  input.preClaim?.({ db, candidate });
 
   const claimResult = claimStep(db, {
     runId: candidate.runId,

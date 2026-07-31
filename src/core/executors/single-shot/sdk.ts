@@ -718,7 +718,10 @@ function assertResumableDispatchBinding(
     );
   }
   const detail = bindingCheckpoint?.detail;
-  if (detail == null || !accepted.has(detail)) {
+  const mechanismCompleted = checkpoints.some(
+    (checkpoint) => checkpoint.stage === "mechanism_completed",
+  );
+  if (detail == null || (!accepted.has(detail) && !mechanismCompleted)) {
     throw new Error(
       `Single-shot round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
     );

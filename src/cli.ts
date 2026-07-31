@@ -562,6 +562,9 @@ async function daemonStart(
       // explicit fixture opt-in is set.
       workflowLane: {
         dispatch: workflowDispatchResolution.dispatch,
+        ...(workflowDispatchResolution.preClaim === undefined
+          ? {}
+          : { preClaim: workflowDispatchResolution.preClaim }),
         claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),
         ...(workflowDispatchResolution.leaseDurationMs !== undefined
           ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }

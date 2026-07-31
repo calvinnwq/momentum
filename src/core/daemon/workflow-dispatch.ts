@@ -169,6 +169,7 @@ import {
 import type {
   AsyncWorkflowStepDispatch,
   WorkflowStepDispatch,
+  WorkflowStepPreClaim,
 } from "../workflow/dispatch/scheduler.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
@@ -191,7 +192,12 @@ export type DaemonWorkflowDispatchDeps = {
 };
 
 export type DaemonWorkflowDispatchResolution =
-  | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
+  | {
+      ok: true;
+      dispatch: AsyncWorkflowStepDispatch;
+      leaseDurationMs?: number;
+      preClaim?: WorkflowStepPreClaim;
+    }
   | { ok: false; message: string };
 
 const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
@@ -204,6 +210,35 @@ const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
 function isNativeHostBindingExecutorIdentity(executorName: string): boolean {
   return NATIVE_HOST_BINDING_EXECUTORS.has(
     canonicalExecutorIdentity(executorName),
+  );
+}
+
+function assertNativeHostBindingsConfigured(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+): void {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName)
+  ) {
+    return;
+  }
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  if (
+    attempt !== undefined &&
+    hasUnclassifiedCompletedNativeMechanism(db, attempt.attemptId)
+  ) {
+    return;
+  }
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native ${runtime.executorName} host bindings`,
   );
 }
 
@@ -332,6 +367,11 @@ export function resolveDaemonWorkflowStepDispatch(
     hostBindings.status === "not_configured"
       ? createMissingHostBindingsNativeDispatch(baseDispatch)
       : undefined;
+  const missingHostBindingsPreClaim: WorkflowStepPreClaim | undefined =
+    hostBindings.status === "not_configured"
+      ? ({ db, candidate }) =>
+          assertNativeHostBindingsConfigured(db, candidate)
+      : undefined;
 
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
@@ -351,9 +391,24 @@ export function resolveDaemonWorkflowStepDispatch(
           runtime.ok &&
           !durablyClaimed &&
           isNativeHostBindingExecutorIdentity(runtime.executorName) &&
-          missingHostBindingsDispatch !== undefined
+          hostBindings.status === "not_configured"
         ) {
-          return missingHostBindingsDispatch(claim, context);
+          const attempt = loadLatestExecutorAttemptForStep(
+            context.db,
+            claim.runId,
+            claim.stepId,
+          );
+          if (
+            attempt !== undefined &&
+            hasUnclassifiedCompletedNativeMechanism(
+              context.db,
+              attempt.attemptId,
+            ) &&
+            missingHostBindingsDispatch !== undefined
+          ) {
+            return missingHostBindingsDispatch(claim, context);
+          }
+          assertNativeHostBindingsConfigured(context.db, claim);
         }
         return runtime.ok &&
           (durablyClaimed || !isBuiltInExecutorIdentity(runtime.executorName))
@@ -363,6 +418,9 @@ export function resolveDaemonWorkflowStepDispatch(
       ...(legacy.leaseDurationMs !== undefined
         ? { leaseDurationMs: legacy.leaseDurationMs }
         : {}),
+      ...(missingHostBindingsPreClaim === undefined
+        ? {}
+        : { preClaim: missingHostBindingsPreClaim }),
     };
   }
 
@@ -435,15 +493,33 @@ export function resolveDaemonWorkflowStepDispatch(
         runtime.ok &&
         !durablyClaimed &&
         isNativeHostBindingExecutorIdentity(runtime.executorName) &&
-        missingHostBindingsDispatch !== undefined
+        hostBindings.status === "not_configured"
       ) {
-        return missingHostBindingsDispatch(claim, context);
+        const attempt = loadLatestExecutorAttemptForStep(
+          context.db,
+          claim.runId,
+          claim.stepId,
+        );
+        if (
+          attempt !== undefined &&
+          hasUnclassifiedCompletedNativeMechanism(
+            context.db,
+            attempt.attemptId,
+          ) &&
+          missingHostBindingsDispatch !== undefined
+        ) {
+          return missingHostBindingsDispatch(claim, context);
+        }
+        assertNativeHostBindingsConfigured(context.db, claim);
       }
       return legacy.dispatch(claim, context);
     },
     ...(legacy.leaseDurationMs !== undefined
       ? { leaseDurationMs: legacy.leaseDurationMs }
       : {}),
+    ...(missingHostBindingsPreClaim === undefined
+      ? {}
+      : { preClaim: missingHostBindingsPreClaim }),
   };
 }
 

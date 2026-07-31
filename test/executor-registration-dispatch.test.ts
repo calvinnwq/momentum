@@ -251,23 +251,21 @@ describe("profile-backed built-in registration", () => {
     );
     if (!production.ok) throw new Error(production.message);
 
-    await production.dispatch(claim.claim, {
-      db,
-      workerId: "missing-native-profile-worker",
-      now: NOW + 1,
-    });
+    await expect(
+      production.dispatch(claim.claim, {
+        db,
+        workerId: "missing-native-profile-worker",
+        now: NOW + 1,
+      }),
+    ).rejects.toMatchObject({ recoveryCode: "runtime_unavailable" });
 
     expect(
       db
         .prepare(
-          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ?",
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
         )
         .get("missing-native-profile-run"),
-    ).toEqual({
-      state: "manual_recovery_required",
-      recovery_code: "runtime_unavailable",
-      summary: expect.stringContaining(DAEMON_HOST_BINDINGS_FILE_ENV_VAR),
-    });
+    ).toEqual({ count: 0 });
     db.close();
   });
 
@@ -2210,44 +2208,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       }),
     ).toThrow("changed dispatch inputs: agentProvider, model");
 
-    for (const changedHostBindings of [
-      {
-        ...migratedHostBindings,
-        selection: {
-          ...hostBindings.selection,
-          timeoutMs: 6_000,
-        },
-      },
-      {
-        ...migratedHostBindings,
-        selection: {
-          ...hostBindings.selection,
-          maxRounds: 9,
-        },
-      },
-      {
-        ...migratedHostBindings,
-        selection: {
-          ...hostBindings.selection,
-          policyEnvelope: "changed-policy",
-        },
-      },
-      {
-        ...migratedHostBindings,
-        hostBindingIdentity: "sha256:changed-runner",
-      },
-    ]) {
-      expect(() =>
-        executor.tick({
-          state: envelope.snapshot(),
-          config: {},
-          hostBindings: changedHostBindings,
-          envelope: envelope.facade,
-          signal: new AbortController().signal,
-        }),
-      ).toThrow("changed portable config or host inputs");
-    }
-
     await driveExecutorTicks({
       db,
       attemptId,
@@ -2255,6 +2215,7 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       config: {},
       hostBindings: {
         ...migratedHostBindings,
+        hostBindingIdentity: "sha256:changed-runner",
         runRound: () => {
           mechanisms += 1;
           throw new Error("checkpointed mechanism reran");

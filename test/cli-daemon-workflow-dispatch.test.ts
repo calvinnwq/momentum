@@ -9,7 +9,6 @@ import { openDb } from "../src/adapters/db.js";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
 import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
-import { terminalizeDispatchedExecutorAttempt } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
@@ -2011,7 +2010,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
-  it("records fail-closed native executor evidence through daemon start --max-*", async () => {
+  it("rejects native dispatch before daemon start claims the workflow step", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const runId = "ngx367-dispatch";
@@ -2029,86 +2028,42 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json",
     ]);
 
-    expect(result.code).toBe(0);
-    expect(result.stderr).toBe("");
-    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
     const loop = payload["loop"] as Record<string, unknown>;
-    // The shipped managed loop is no longer inert: it claimed and dispatched the
-    // approved workflow step and surfaces that as stable loop-summary evidence.
-    expect(loop["workflowStepsDispatched"]).toBe(1);
-    expect(loop["lastWorkflowCode"]).toBe("dispatched");
+    expect(loop["workflowStepsDispatched"]).toBe(0);
+    expect(loop["lastWorkflowCode"]).toBeNull();
+    expect(loop["error"]).toContain("runtime_unavailable");
 
-    // The dispatched step created durable executor_attempts / executor_rounds
-    // rows through the production path, observable after the daemon exits.
     const db = openDb(dataDir);
     try {
-      const attempts = db
-        .prepare(
-          "SELECT step_key, executor, state FROM executor_attempts WHERE workflow_run_id = ?",
-        )
-        .all(runId) as Array<{
-        step_key: string;
-        executor: string;
-        state: string;
-      }>;
-      expect(attempts).toEqual([
-        {
-          step_key: "preflight",
-          executor: "agent-once",
-          state: "manual_recovery_required",
-        },
-      ]);
-
-      const rounds = db
-        .prepare(
-          "SELECT step_key, round_index, state FROM executor_rounds WHERE workflow_run_id = ?",
-        )
-        .all(runId) as Array<{
-        step_key: string;
-        round_index: number;
-        state: string;
-      }>;
-      expect(rounds).toEqual([
-        {
-          step_key: "preflight",
-          round_index: 0,
-          state: "manual_recovery_required",
-        },
-      ]);
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      expect(
+        db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+          )
+          .get(runId),
+      ).toEqual({ state: "approved" });
     } finally {
       db.close();
     }
-
-    // Process-loss observability: status and monitor report the post-dispatch
-    // state from durable rows, without any in-memory daemon handle.
-    const statusResult = await run([
-      "workflow",
-      "status",
-      runId,
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
-    expect(statusResult.code).toBe(0);
-    const statusPayload = JSON.parse(statusResult.stdout) as {
-      steps: Array<{ stepId: string; state: string }>;
-    };
-    const preflight = statusPayload.steps.find((s) => s.stepId === "preflight");
-    expect(preflight?.state).toBe("running");
-
-    const monitorResult = await run([
-      "workflow",
-      "run",
-      "monitor",
-      runId,
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
-    expect(monitorResult.code).toBe(0);
   });
 
-  it("does not bypass a missing-binding recovery gate after terminal evidence changes", async () => {
+  it("keeps a native workflow untouched across repeated missing-binding daemon starts", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const runId = "ngx390-second-dispatch";
@@ -2125,53 +2080,10 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       dataDir,
       "--json",
     ]);
-    expect(firstDispatch.code).toBe(0);
-    expect(JSON.parse(firstDispatch.stdout).loop.workflowStepsDispatched).toBe(
-      1,
+    expect(firstDispatch.code).toBe(1);
+    expect(JSON.parse(firstDispatch.stderr).loop.workflowStepsDispatched).toBe(
+      0,
     );
-
-    const db = openDb(dataDir);
-    try {
-      db.prepare(
-        `UPDATE workflow_leases
-            SET heartbeat_at = ?, expires_at = ?
-          WHERE run_id = ? AND lease_kind = ?`,
-      ).run(1, 2, runId, "dispatch");
-      terminalizeDispatchedExecutorAttempt({
-        db,
-        runId,
-        stepId: "preflight",
-        now: Date.now(),
-        result: {
-          ok: true,
-          result: {
-            state: "succeeded",
-            summary: "test terminalizes preflight before second dispatch",
-            checkpoints: [],
-            artifacts: [],
-            resultDigest: "sha256:cli-second-dispatch-preflight",
-            errorCode: null,
-            errorMessage: null,
-            retryHint: null,
-            recoveryHint: null,
-          },
-          executorLogPath: path.join(
-            repoDir,
-            ".agent-workflows",
-            runId,
-            "executor.log",
-          ),
-          resultJsonPath: path.join(
-            repoDir,
-            ".agent-workflows",
-            runId,
-            "result.json",
-          ),
-        },
-      });
-    } finally {
-      db.close();
-    }
 
     const recoverLease = await run([
       "daemon",
@@ -2184,12 +2096,12 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       dataDir,
       "--json",
     ]);
-    expect(recoverLease.code).toBe(0);
-    const loop = JSON.parse(recoverLease.stdout).loop as Record<
+    expect(recoverLease.code).toBe(1);
+    const loop = JSON.parse(recoverLease.stderr).loop as Record<
       string,
       unknown
     >;
-    expect(loop["exitReason"]).toBe("max_loop_iterations");
+    expect(loop["exitReason"]).toBe("internal_error");
     expect(loop["iterations"]).toBe(1);
     expect(loop["workflowStepsDispatched"]).toBe(0);
 
@@ -2201,7 +2113,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         )
         .all(runId) as Array<{ step_id: string; state: string }>;
       expect(steps.slice(0, 2)).toEqual([
-        { step_id: "preflight", state: "running" },
+        { step_id: "preflight", state: "approved" },
         { step_id: "implementation", state: "approved" },
       ]);
 
@@ -2214,13 +2126,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         executor: string;
         state: string;
       }>;
-      expect(attempts).toEqual([
-        {
-          step_key: "preflight",
-          executor: "agent-once",
-          state: "manual_recovery_required",
-        },
-      ]);
+      expect(attempts).toEqual([]);
     } finally {
       finalDb.close();
     }
@@ -2247,29 +2153,21 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       { [DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR]: "1" },
     );
 
-    expect(result.code).toBe(0);
-    expect(result.stderr).toBe("");
-    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
-    expect(loop["workflowStepsDispatched"]).toBe(1);
-    expect(loop["iterations"]).toBe(5);
-    expect(loop["exitReason"]).toBe("max_loop_iterations");
-    expect(loop["lastWorkflowCode"]).toBe("idle");
+    expect(result.code).toBe(1);
+    const loop = JSON.parse(result.stderr).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(0);
+    expect(loop["exitReason"]).toBe("internal_error");
+    expect(loop["error"]).toContain("runtime_unavailable");
 
     const db = openDb(dataDir);
     try {
-      const attempt = db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
-        )
-        .get(runId) as { state: string } | undefined;
-      expect(attempt?.state).toBe("manual_recovery_required");
-      const runState = db
-        .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
-        .get(runId) as { needs_manual_recovery: number } | undefined;
-      expect(runState?.needs_manual_recovery).toBe(1);
-
-      // The dispatch lease taken for each step was released on terminal — no
-      // lease corruption strands the run.
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
       const openLeases = db
         .prepare(
           "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL",
@@ -2299,18 +2197,20 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json",
     ]);
 
-    expect(result.code).toBe(0);
-    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
-    expect(loop["workflowStepsDispatched"]).toBe(1);
+    expect(result.code).toBe(1);
+    const loop = JSON.parse(result.stderr).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(0);
+    expect(loop["error"]).toContain("runtime_unavailable");
 
     const db = openDb(dataDir);
     try {
-      const attempt = db
-        .prepare(
-          "SELECT state FROM executor_attempts WHERE workflow_run_id = ?",
-        )
-        .get(runId) as { state: string } | undefined;
-      expect(attempt?.state).toBe("manual_recovery_required");
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
     } finally {
       db.close();
     }

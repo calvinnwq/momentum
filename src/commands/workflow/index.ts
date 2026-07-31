@@ -74,7 +74,10 @@ import {
   resolveWorkflowStepDispatchRouteSelection,
 } from "../../core/workflow/dispatch/execute.js";
 import { resolveClaimedWorkflowStepExecutor } from "../../core/workflow/dispatch/persist.js";
-import { legacyApprovalBoundarySynonyms } from "../../core/workflow/definition/legacy.js";
+import {
+  canonicalExecutorIdentity,
+  legacyApprovalBoundarySynonyms,
+} from "../../core/workflow/definition/legacy.js";
 import { resolveWorkflowGateAndResumeRegisteredExecutor } from "../../core/workflow/dispatch/executor-gate.js";
 import {
   resolveDaemonWorkflowStepDispatch,
@@ -82,7 +85,7 @@ import {
 } from "../../core/daemon/workflow-dispatch.js";
 import {
   DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
-  RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR,
+  readDaemonHostBindingsSource,
   resolveDaemonHostBindings,
 } from "../../core/workflow/live-wrapper/daemon-host-bindings.js";
 import {
@@ -2565,14 +2568,10 @@ async function workflowRunWatch(
     });
   }
 
-  // The retired live-wrapper-profile selector is refused at the command
-  // boundary, before either database mode is attempted, so every watch path
-  // (including the read-only busy fallback) fails with the migration
-  // diagnostic and persists nothing.
-  const retiredFailure = workflowWatchRetiredSelectorFailure(io.env ?? {});
-  if (retiredFailure !== null) {
+  const hostBindingsFailure = workflowWatchHostBindingsFailure(io.env ?? {});
+  if (hostBindingsFailure !== null) {
     return emitWorkflowRunWatchFailure(parsed, io, {
-      ...retiredFailure,
+      ...hostBindingsFailure,
       dataDir,
       runId,
     });
@@ -2909,7 +2908,13 @@ function isWorkflowWatchHostBindingsRequired(
     runId: envelope.runId,
     stepId,
   });
-  return resolution.ok && resolution.executor === "delegate-supervisor";
+  return (
+    resolution.ok &&
+    (resolution.executor === "delegate-supervisor" ||
+      ["agent-loop", "agent-once", "script"].includes(
+        canonicalExecutorIdentity(resolution.executor),
+      ))
+  );
 }
 
 function hasDaemonHostBindingsConfigured(
@@ -2918,38 +2923,16 @@ function hasDaemonHostBindingsConfigured(
   return (env[DAEMON_HOST_BINDINGS_FILE_ENV_VAR] ?? "").trim().length > 0;
 }
 
-/**
- * Whether the retired live-wrapper-profile selector is still present. The
- * watch gate defers to the shared dispatch resolver in that case so the
- * refusal is the precise migration diagnostic, not a generic "required" hint.
- */
-function hasRetiredLiveWrapperProfileSelector(
-  env: Record<string, string | undefined>,
-): boolean {
-  return (env[RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR] ?? "").trim().length > 0;
-}
-
-/**
- * The whenever-present retired-selector refusal shared by the watch command
- * boundary and the dispatcher tick: the precise migration diagnostic from the
- * canonical resolver, produced without reading any source.
- */
-function workflowWatchRetiredSelectorFailure(
+function workflowWatchHostBindingsFailure(
   env: Record<string, string | undefined>,
 ): WorkflowWatchDispatchFailure | null {
-  if (!hasRetiredLiveWrapperProfileSelector(env)) return null;
-  const retired = resolveDaemonHostBindings(env, {
-    loadSource: () => ({
-      ok: false,
-      error: "retired selector refusal must not read any source",
-    }),
+  const resolution = resolveDaemonHostBindings(env, {
+    loadSource: readDaemonHostBindingsSource,
   });
+  if (resolution.status !== "invalid") return null;
   return {
     code: "daemon_host_bindings_invalid",
-    message:
-      retired.status === "invalid"
-        ? retired.error
-        : `${RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR} is retired; set ${DAEMON_HOST_BINDINGS_FILE_ENV_VAR}.`,
+    message: resolution.error,
   };
 }
 
@@ -2959,11 +2942,8 @@ async function runWorkflowWatchDispatcherTick(
   env: Record<string, string | undefined>,
   deps: CliDeps,
 ): Promise<WorkflowWatchDispatchFailure | null> {
-  // Defense in depth: the command boundary already refused the retired
-  // selector before opening the database; a future caller of this tick must
-  // keep the same whenever-present refusal.
-  const retiredFailure = workflowWatchRetiredSelectorFailure(env);
-  if (retiredFailure !== null) return retiredFailure;
+  const hostBindingsFailure = workflowWatchHostBindingsFailure(env);
+  if (hostBindingsFailure !== null) return hostBindingsFailure;
   const stepId = envelope.nextAction.stepId;
   const canDispatchNextStep =
     envelope.nextAction.code === "advance_to_step" && stepId !== null;
@@ -2988,7 +2968,6 @@ async function runWorkflowWatchDispatcherTick(
     if (
       isWorkflowWatchHostBindingsRequired(db, envelope) &&
       !hasDaemonHostBindingsConfigured(env) &&
-      !hasRetiredLiveWrapperProfileSelector(env) &&
       resolveWorkflowStepDispatchRouteSelection(db, {
         runId: envelope.runId,
         stepId,

@@ -295,7 +295,7 @@ function assertGoalLoopRoundMatchesHost(
     const mechanismCompleted = checkpoints.some(
       (checkpoint) => checkpoint.stage === "mechanism_completed",
     );
-    if (binding?.detail !== null || !mechanismCompleted) {
+    if (!mechanismCompleted) {
       throw new Error(
         `Goal-loop round ${round.roundId} cannot reattach with changed portable config or host inputs.`,
       );

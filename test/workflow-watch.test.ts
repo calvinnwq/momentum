@@ -860,6 +860,67 @@ describe("momentum workflow run watch", () => {
     }
   });
 
+  it("refuses an unreadable host-binding source before opening an idle watch run", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-invalid-bindings-idle";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise invalid host bindings refusal on an idle run",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      {
+        MOMENTUM_HOST_BINDINGS_FILE: path.join(
+          dataDir,
+          "missing-host-bindings.json",
+        ),
+      },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("source_unreadable");
+
+    const after = openDb(dataDir);
+    try {
+      const runRow = after
+        .prepare(
+          "SELECT monitor_last_seen_digest, monitor_last_seen_at FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId) as {
+        monitor_last_seen_digest: string | null;
+        monitor_last_seen_at: number | null;
+      };
+      expect(runRow.monitor_last_seen_digest).toBeNull();
+      expect(runRow.monitor_last_seen_at).toBeNull();
+    } finally {
+      after.close();
+    }
+  });
+
   it("refuses the retired selector even when the writable open falls back to a read-only snapshot", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-watch-retired-selector-busy";
