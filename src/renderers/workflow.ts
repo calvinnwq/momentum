@@ -140,7 +140,7 @@ export function emitWorkflowRunStartFailure(
  * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
  * (`workflow run preview-coding`). The envelope mirrors the fields a
  * `workflow run start-coding` would durably persist - run id, repo, objective,
- * issue scope, route/profile, implementation engine, and per-step route
+ * issue scope, compatibility route/profile and implementation label, and per-step route
  * selections, approval boundary, definition key/version, and the ordered steps
  * each with its executor, optional effective agent config, and on-start state -
  * but carries an explicit
@@ -1686,11 +1686,12 @@ export function renderWorkflowRunLogsText(
   lines.push(`Schema version: ${envelope.schemaVersion}`);
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
-  const implementationEngine = workflowRunImplementationEngine(
-    envelope.detail.run.route,
-  );
-  if (implementationEngine !== null) {
-    lines.push(`Implementation engine: ${implementationEngine}`);
+  // Historical read-back from the canonical compatibility reader, never from
+  // the retired route projection keys.
+  if (envelope.detail.run.implementationEngine !== null) {
+    lines.push(
+      `Implementation engine: ${envelope.detail.run.implementationEngine}`,
+    );
   }
   lines.push(`Steps: ${envelope.detail.steps.length}`);
   lines.push(`Approvals: ${envelope.detail.approvals.length}`);
@@ -1803,15 +1804,6 @@ export function renderWorkflowRunLogsText(
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");
-}
-
-function workflowRunImplementationEngine(
-  route: Record<string, unknown>,
-): string | null {
-  const value = route["implementationEngine"];
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function workflowRoundOutcome(round: WorkflowRunLogRound): string {
@@ -1937,6 +1929,26 @@ export function workflowRunToJsonShape(
     objective: run.objective,
     issueScope: run.issueScope,
     route: run.route,
+    // Canonical read-back replacing the retired route projection keys: the
+    // historical engine label and imported audit metadata come from their
+    // direct typed canonical readers. Envelope schema versions deliberately do
+    // not change here: shrinking the compatibility `route` object follows the
+    // subworkflow-key precedent, and the final route/profile surface and
+    // schema cleanup is owned by the follow-up surface-removal issue.
+    implementationEngine: run.implementationEngine,
+    selectedProfile: run.selectedProfile,
+    importMetadata:
+      run.importMetadata === null
+        ? null
+        : {
+            mode: run.importMetadata.mode,
+            profile: run.importMetadata.profile,
+            risk: run.importMetadata.risk,
+            quotaPolicy: run.importMetadata.quotaPolicy,
+            sourceFormat: run.importMetadata.sourceFormat,
+            createdAt: run.importMetadata.createdAt,
+            updatedAt: run.importMetadata.updatedAt,
+          },
     approvalBoundary: run.approvalBoundary,
     skillRevision: run.skillRevision,
     goalId: run.goalId,

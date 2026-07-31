@@ -29,20 +29,6 @@ export type WorkflowRunRouteProjectionInput =
     runId: string;
   };
 
-type CompatibilityRow = {
-  run_id: string;
-  implementation_engine: string | null;
-  selected_profile: string | null;
-};
-
-type ImportMetadataRow = {
-  run_id: string;
-  mode: string | null;
-  profile: string | null;
-  risk: string | null;
-  quota_policy_json: string | null;
-};
-
 type NativeStepRow = {
   run_id: string;
   step_id: string;
@@ -71,24 +57,10 @@ export function projectLegacyWorkflowRunRoute(
   runId: string,
   run: WorkflowRunRouteProjectionSource,
 ): Record<string, unknown> {
-  if (run.source === "agent-workflow") {
-    const row = db
-      .prepare(
-        `SELECT mode, profile, risk, quota_policy_json
-           FROM workflow_run_import_metadata
-          WHERE run_id = ?`,
-      )
-      .get(runId) as Omit<ImportMetadataRow, "run_id"> | undefined;
-    return projectImportedRouteFromRows(runId, row);
-  }
+  // Imported runs keep their metadata canonical-only in
+  // workflow_run_import_metadata; the compatibility projection emits nothing.
+  if (run.source === "agent-workflow") return {};
 
-  const compatibility = db
-    .prepare(
-      `SELECT implementation_engine, selected_profile
-         FROM workflow_run_coding_compatibility
-        WHERE run_id = ?`,
-    )
-    .get(runId) as Omit<CompatibilityRow, "run_id"> | undefined;
   const stepRows = db
     .prepare(
       `SELECT ws.step_id, ws.kind, ws.agent_config_json
@@ -97,7 +69,7 @@ export function projectLegacyWorkflowRunRoute(
         ORDER BY ws.step_order, ws.step_id`,
     )
     .all(runId) as Array<Omit<NativeStepRow, "run_id">>;
-  return projectNativeRouteFromRows(runId, compatibility, stepRows);
+  return projectNativeRouteFromRows(runId, stepRows);
 }
 
 export function projectLegacyWorkflowRunRoutes(
@@ -107,24 +79,6 @@ export function projectLegacyWorkflowRunRoutes(
   const runsById = new Map(runs.map((run) => [run.runId, run]));
   if (runsById.size === 0) return new Map();
   const runIds = [...runsById.keys()];
-  const compatibilityByRunId = new Map(
-    queryRunScopedRows<CompatibilityRow>(
-      db,
-      `SELECT run_id, implementation_engine, selected_profile
-         FROM workflow_run_coding_compatibility
-        WHERE run_id`,
-      runIds,
-    ).map((row) => [row.run_id, row]),
-  );
-  const importMetadataByRunId = new Map(
-    queryRunScopedRows<ImportMetadataRow>(
-      db,
-      `SELECT run_id, mode, profile, risk, quota_policy_json
-         FROM workflow_run_import_metadata
-        WHERE run_id`,
-      runIds,
-    ).map((row) => [row.run_id, row]),
-  );
   const stepRowsByRunId = groupByRunId(
     queryRunScopedRows<NativeStepRow>(
       db,
@@ -139,20 +93,13 @@ export function projectLegacyWorkflowRunRoutes(
   const projected = new Map<string, Record<string, unknown>>();
   for (const run of runsById.values()) {
     if (run.source === "agent-workflow") {
-      projected.set(
-        run.runId,
-        projectImportedRouteFromRows(
-          run.runId,
-          importMetadataByRunId.get(run.runId),
-        ),
-      );
+      projected.set(run.runId, {});
       continue;
     }
     projected.set(
       run.runId,
       projectNativeRouteFromRows(
         run.runId,
-        compatibilityByRunId.get(run.runId),
         stepRowsByRunId.get(run.runId) ?? [],
       ),
     );
@@ -162,18 +109,12 @@ export function projectLegacyWorkflowRunRoutes(
 
 function projectNativeRouteFromRows(
   runId: string,
-  compatibility:
-    Omit<CompatibilityRow, "run_id"> | CompatibilityRow | undefined,
   stepRows: ReadonlyArray<Omit<NativeStepRow, "run_id"> | NativeStepRow>,
 ): Record<string, unknown> {
+  // Implementation-engine and profile compatibility values stay canonical-only
+  // in workflow_run_coding_compatibility; only the step-selection namespace is
+  // still projected for later-issue consumers.
   const route: Record<string, unknown> = {};
-  if (compatibility?.implementation_engine != null) {
-    route["implementationEngine"] = compatibility.implementation_engine;
-  }
-  if (compatibility?.selected_profile != null) {
-    route["profile"] = compatibility.selected_profile;
-  }
-
   const steps: Record<string, unknown> = {};
   for (const row of stepRows) {
     const agentConfig = parseObject(
@@ -193,24 +134,6 @@ function projectNativeRouteFromRows(
     steps[row.kind] = agentConfig;
   }
   if (Object.keys(steps).length > 0) route["steps"] = steps;
-  return route;
-}
-
-function projectImportedRouteFromRows(
-  runId: string,
-  row: Omit<ImportMetadataRow, "run_id"> | ImportMetadataRow | undefined,
-): Record<string, unknown> {
-  const route: Record<string, unknown> = {};
-  if (row?.mode != null) route["mode"] = row.mode;
-  if (row?.profile != null) route["profile"] = row.profile;
-  if (row?.risk != null) route["risk"] = row.risk;
-  if (row?.quota_policy_json != null) {
-    route["quotaPolicy"] = parseObject(
-      row.quota_policy_json,
-      runId,
-      "$.quotaPolicy",
-    );
-  }
   return route;
 }
 

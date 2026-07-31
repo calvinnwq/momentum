@@ -125,6 +125,117 @@ export function validateWorkflowRoute(input: {
   };
 }
 
+export type CanonicalCodingCompatibilityValues = {
+  implementationEngine: string | null;
+  selectedProfile: string | null;
+};
+
+/**
+ * Validate a canonical `workflow_run_coding_compatibility` row on read. The
+ * compatibility projection no longer reconstructs these values, so direct
+ * readers keep the same absent / malformed / unsupported / valid distinctions
+ * the route-shaped validation enforced.
+ */
+export function validateCanonicalCodingCompatibility(
+  runId: string,
+  row: {
+    implementation_engine: string | null;
+    selected_profile: string | null;
+  },
+): CanonicalCodingCompatibilityValues {
+  const at = "$canonical.workflow_run_coding_compatibility";
+  const implementationEngine = canonicalOptionalNonBlankString(
+    runId,
+    `${at}.implementation_engine`,
+    row.implementation_engine,
+  );
+  if (
+    implementationEngine !== null &&
+    !IMPLEMENTATION_ENGINES.has(implementationEngine)
+  ) {
+    invalidValue(
+      runId,
+      `${at}.implementation_engine`,
+      "implementation engine is not a recognized compatibility label",
+    );
+  }
+  const selectedProfile = canonicalOptionalNonBlankString(
+    runId,
+    `${at}.selected_profile`,
+    row.selected_profile,
+  );
+  return { implementationEngine, selectedProfile };
+}
+
+export type CanonicalImportMetadataValues = {
+  mode: string | null;
+  profile: string | null;
+  risk: string | null;
+  quotaPolicy: Record<string, unknown> | null;
+  sourceFormat: string | null;
+};
+
+/** Validate a canonical `workflow_run_import_metadata` row on read. */
+export function validateCanonicalImportMetadata(
+  runId: string,
+  row: {
+    mode: string | null;
+    profile: string | null;
+    risk: string | null;
+    quota_policy_json: string | null;
+    source_format: string | null;
+  },
+): CanonicalImportMetadataValues {
+  const at = "$canonical.workflow_run_import_metadata";
+  const mode = canonicalOptionalNonBlankString(runId, `${at}.mode`, row.mode);
+  const profile = canonicalOptionalNonBlankString(
+    runId,
+    `${at}.profile`,
+    row.profile,
+  );
+  const risk = canonicalOptionalNonBlankString(runId, `${at}.risk`, row.risk);
+  const sourceFormat = canonicalOptionalNonBlankString(
+    runId,
+    `${at}.source_format`,
+    row.source_format,
+  );
+  let quotaPolicy: Record<string, unknown> | null = null;
+  if (row.quota_policy_json !== null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.quota_policy_json);
+    } catch {
+      throw new RouteStateMigrationError({
+        runId,
+        jsonPath: `${at}.quota_policy_json`,
+        code: "route_state_json_malformed",
+        detail: "persisted quota policy is not valid JSON",
+      });
+    }
+    if (!isPlainObject(parsed)) {
+      invalidValue(
+        runId,
+        `${at}.quota_policy_json`,
+        "quotaPolicy must be an object",
+      );
+    }
+    quotaPolicy = parsed;
+  }
+  return { mode, profile, risk, quotaPolicy, sourceFormat };
+}
+
+function canonicalOptionalNonBlankString(
+  runId: string,
+  jsonPath: string,
+  value: string | null,
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    invalidValue(runId, jsonPath, "value must be a non-blank string");
+  }
+  return value;
+}
+
 export function validateWorkflowRouteShape(input: {
   runId: string;
   source: string;

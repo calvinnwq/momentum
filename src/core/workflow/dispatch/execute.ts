@@ -76,18 +76,12 @@ import type {
   ExecutorRoundRecord,
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
+import { effectiveStepExecutor } from "../definition/legacy.js";
 import {
-  canonicalWorkflowStepKind,
-  effectiveStepExecutor,
-} from "../definition/legacy.js";
-import {
-  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
   CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
   GNHF_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   isCodingImplementationEngine,
-  readCodingStepRouteOverrides,
-  resolveCodingStepExecutorSelection,
   type CodingImplementationEngine,
   type CodingStepExecutorSelection,
 } from "../route/coding.js";
@@ -575,86 +569,6 @@ export function resolveWorkflowStepDispatchRouteSelection(
   claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
 ): WorkflowStepDispatchRouteSelectionResolution {
   return resolveWorkflowStepDispatchRoute(db, claim).selection;
-}
-
-/**
- * Resolve the compatibility projection consumed by retained legacy executors.
- *
- * The native registered dispatch lane uses the canonical workflow-step reader
- * above, while legacy daemon consumers must continue to read the projected
- * route state until their later consumer cutover.
- */
-export function resolveLegacyWorkflowStepDispatchRouteSelection(
-  db: MomentumDb,
-  claim: Pick<ClaimedWorkflowStep, "runId" | "stepId">,
-): WorkflowStepDispatchRouteSelectionResolution {
-  const row = db
-    .prepare(
-      `SELECT source, workflow_definition_key, workflow_definition_version
-         FROM workflow_runs
-        WHERE id = ?`,
-    )
-    .get(claim.runId) as DispatchRouteRow | undefined;
-  if (row === undefined) {
-    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
-  }
-  if (
-    row.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
-    row.workflow_definition_key !== CODING_WORKFLOW_DEFINITION_KEY
-  ) {
-    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
-  }
-
-  let route: Record<string, unknown>;
-  try {
-    route = projectValidatedLegacyWorkflowRunRoute(db, claim.runId, {
-      source: row.source,
-      definitionKey: row.workflow_definition_key,
-      definitionVersion: row.workflow_definition_version,
-    });
-  } catch (error) {
-    if (!(error instanceof RouteStateMigrationError)) throw error;
-    return {
-      ok: false,
-      reason:
-        `Native coding run ${claim.runId} route is corrupt at ${error.jsonPath}; ` +
-        "routing to manual recovery.",
-    };
-  }
-
-  const implementationEngine = readCodingImplementationEngine(
-    claim.runId,
-    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY],
-  );
-  if (!implementationEngine.ok) {
-    return { ok: false, reason: implementationEngine.reason };
-  }
-  if (
-    claim.stepId === "implementation" &&
-    implementationEngine.engine === CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
-  ) {
-    return {
-      ok: false,
-      reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${GNHF_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`,
-    };
-  }
-
-  const overrides = readCodingStepRouteOverrides(route);
-  if (!overrides.ok) {
-    return {
-      ok: false,
-      reason: `Native coding run ${claim.runId} route.steps is invalid (${overrides.refusal}${
-        overrides.path === undefined ? "" : ` at ${overrides.path}`
-      }): ${overrides.reason}`,
-    };
-  }
-  return {
-    ok: true,
-    selection: resolveCodingStepExecutorSelection(
-      overrides.overrides,
-      canonicalWorkflowStepKind(claim.stepId) ?? claim.stepId,
-    ),
-  };
 }
 
 export function resolveWorkflowStepDispatchRoute(

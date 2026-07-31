@@ -69,6 +69,12 @@ export type WorkflowRunImportRun = {
   objective: string | null;
   issueScope: Record<string, unknown>;
   route: Record<string, unknown>;
+  /**
+   * The imported source-artifact format derived from the plan's declared
+   * `schemaVersion` (for example `agent-workflow-plan@v1`); `null` when the
+   * plan or its schema version is absent or unrecognized.
+   */
+  sourceFormat: string | null;
   approvalBoundary: string | null;
   skillRevision: string | null;
   state: WorkflowRunState;
@@ -329,6 +335,7 @@ export function parseWorkflowRunImport(
     objective: plan ? stringField(plan, "objective") : null,
     issueScope,
     route,
+    sourceFormat: plan ? extractSourceFormat(plan) : null,
     approvalBoundary,
     skillRevision,
     state: deriveRunStateFromSteps(steps),
@@ -924,6 +931,25 @@ function extractIssueScope(
     return {};
   }
   return scope as Record<string, unknown>;
+}
+
+/**
+ * Derive the imported source-artifact format from the plan's declared
+ * `schemaVersion`. The plan file is the import's source artifact, so its
+ * schema version is the durable format fact `workflow_run_import_metadata`
+ * preserves; an absent or non-positive-integer version yields `null` rather
+ * than inventing a format.
+ */
+function extractSourceFormat(plan: Record<string, unknown>): string | null {
+  const schemaVersion = plan["schemaVersion"];
+  if (
+    typeof schemaVersion !== "number" ||
+    !Number.isInteger(schemaVersion) ||
+    schemaVersion <= 0
+  ) {
+    return null;
+  }
+  return `agent-workflow-plan@v${schemaVersion}`;
 }
 
 function extractRoute(plan: Record<string, unknown>): Record<string, unknown> {

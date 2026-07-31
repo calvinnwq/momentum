@@ -261,6 +261,7 @@ export function persistWorkflowRunImport(
       definitionVersion: null,
       createdAt: existing?.created_at ?? now,
       updatedAt: now,
+      importSourceFormat: run.sourceFormat,
     });
 
     const approvalStmt = db.prepare(

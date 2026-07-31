@@ -414,9 +414,11 @@ export type WorkflowCodingPlanStep = {
  * A frozen, pre-execution preview of the coding workflow a native start would
  * materialize. It is a pure projection of the version-pinned
  * {@link WorkflowDefinition} plus the run-start parameters: the same definition
- * key/version, repo, objective, issue scope, compatibility route, effective
- * per-step agent config, and approval boundary a `workflow run start-coding`
- * would canonically persist and project.
+ * key/version, repo, objective, issue scope, compatibility input fields,
+ * effective per-step agent config, and approval boundary a `workflow run
+ * start-coding` would canonically persist and project.
+ * Active executor identity and portable step config still come from the
+ * version-pinned definition.
  * Because the projection is
  * deterministic and the built-in definition is immutable per version, the same
  * preview can be reconstructed from the durable run later for approval/dispatch

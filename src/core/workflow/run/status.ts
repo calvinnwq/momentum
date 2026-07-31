@@ -20,6 +20,12 @@ import type { MomentumDb } from "../../../adapters/db.js";
 import {
   projectValidatedLegacyWorkflowRunRoute,
   projectValidatedLegacyWorkflowRunRoutes,
+  readWorkflowRunCodingCompatibilities,
+  readWorkflowRunCodingCompatibility,
+  readWorkflowRunImportMetadata,
+  readWorkflowRunImportMetadataForRuns,
+  type WorkflowRunCodingCompatibilityReadback,
+  type WorkflowRunImportMetadataReadback,
 } from "../../../adapters/db/route-state.js";
 import {
   listWorkflowGatesForRun,
@@ -66,6 +72,25 @@ export type WorkflowRunRow = {
   objective: string | null;
   issueScope: Record<string, unknown>;
   route: Record<string, unknown>;
+  /**
+   * Historical implementation-engine label read directly from the canonical
+   * `workflow_run_coding_compatibility` row — read-back only, never execution
+   * authority. `null` when no marker row or label exists.
+   */
+  implementationEngine: string | null;
+  /**
+   * Historical selected profile read directly from the canonical
+   * `workflow_run_coding_compatibility` row — read-back only; it never
+   * influences host-binding or command selection. `null` when no marker row
+   * or profile exists.
+   */
+  selectedProfile: string | null;
+  /**
+   * Imported audit metadata read directly from the canonical
+   * `workflow_run_import_metadata` row — historical metadata only; it never
+   * influences executor or host selection. `null` when no row exists.
+   */
+  importMetadata: WorkflowRunImportMetadataReadback | null;
   approvalBoundary: WorkflowApprovalBoundary | null;
   skillRevision: string | null;
   monitorLastSeenState: string | null;
@@ -269,8 +294,19 @@ export function listWorkflowRunSummaries(
       definitionVersion: row.workflow_definition_version,
     })),
   );
+  const runIds = rows.map((row) => row.id);
+  const compatibilities = readWorkflowRunCodingCompatibilities(db, runIds);
+  const importMetadataByRunId = readWorkflowRunImportMetadataForRuns(
+    db,
+    runIds,
+  );
   const runs = rows.map((row) =>
-    parseRunRow(row, projectedRoutes.get(row.id)!),
+    parseRunRow(
+      row,
+      projectedRoutes.get(row.id)!,
+      compatibilities.get(row.id),
+      importMetadataByRunId.get(row.id) ?? null,
+    ),
   );
   if (runs.length === 0) return [];
 
@@ -328,6 +364,8 @@ export function loadWorkflowRunDetail(
       definitionKey: runRow.workflow_definition_key,
       definitionVersion: runRow.workflow_definition_version,
     }),
+    readWorkflowRunCodingCompatibility(db, runRow.id),
+    readWorkflowRunImportMetadata(db, runRow.id) ?? null,
   );
   const includeAgentConfig =
     runRow.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
@@ -573,6 +611,8 @@ type LeaseRow = {
 function parseRunRow(
   row: RunRow,
   projectedRoute: Record<string, unknown>,
+  compatibility: WorkflowRunCodingCompatibilityReadback | undefined,
+  importMetadata: WorkflowRunImportMetadataReadback | null,
 ): WorkflowRunRow {
   return {
     runId: row.id,
@@ -584,6 +624,9 @@ function parseRunRow(
     objective: row.objective,
     issueScope: parseJsonRecord(row.issue_scope_json) ?? {},
     route: projectedRoute,
+    implementationEngine: compatibility?.implementationEngine ?? null,
+    selectedProfile: compatibility?.selectedProfile ?? null,
+    importMetadata,
     approvalBoundary:
       row.approval_boundary === null
         ? null

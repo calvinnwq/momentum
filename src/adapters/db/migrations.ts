@@ -6,6 +6,8 @@ import {
   preScanRouteState,
   refreshWorkflowRouteStatePlan,
   routeStateMigrationNeeded,
+  upgradeWorkflowRunImportMetadataSchemaInTransaction,
+  workflowRunImportMetadataSchemaMigrationNeeded,
   type WorkflowRouteStatePlan,
 } from "./route-state.js";
 
@@ -1744,6 +1746,7 @@ function migrateWorkflowVocabulary(
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
+    upgradeWorkflowRunImportMetadataSchemaInTransaction(db);
     if (
       routeStatePlan !== undefined &&
       routeStatePlan.deferredUntilBaseComplete !== true
@@ -2001,6 +2004,8 @@ function workflowVocabularyMigrationNeeded(
   db: MomentumDb,
   options: QueueMigrationOptions,
 ): boolean {
+  if (workflowRunImportMetadataSchemaMigrationNeeded(db)) return true;
+
   for (const [table, column] of [
     ["executor_attempts", "executor_family"],
     ["executor_rounds", "executor_family"],

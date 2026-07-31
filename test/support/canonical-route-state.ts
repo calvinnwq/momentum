@@ -1,5 +1,9 @@
 import type { MomentumDb } from "../../src/adapters/db.js";
 import { projectLegacyWorkflowRunRoute } from "../../src/adapters/db/route-projection.js";
+import {
+  readWorkflowRunCodingCompatibility,
+  readWorkflowRunImportMetadata,
+} from "../../src/adapters/db/route-state.js";
 
 export function seedCanonicalCodingCompatibilityMarker(
   db: MomentumDb,
@@ -16,6 +20,12 @@ export function seedCanonicalCodingCompatibilityMarker(
   ).run(now, now, runId);
 }
 
+/**
+ * Reconstruct the run's canonical route facts for test assertions: the
+ * compatibility projection now carries only the `steps` namespace, so the
+ * historical engine / profile and imported metadata values are read back
+ * through the direct typed canonical readers instead.
+ */
 export function loadCanonicalWorkflowRunRoute(
   db: MomentumDb,
   runId: string,
@@ -41,9 +51,33 @@ export function loadCanonicalWorkflowRunRoute(
       `Expected canonical-only route persistence for run '${runId}', got ${String(run.route_json)}`,
     );
   }
-  return projectLegacyWorkflowRunRoute(db, runId, {
+  const route = projectLegacyWorkflowRunRoute(db, runId, {
     source: run.source,
     definitionKey: run.workflow_definition_key,
     definitionVersion: run.workflow_definition_version,
   });
+  if (run.source === "agent-workflow") {
+    const importMetadata = readWorkflowRunImportMetadata(db, runId);
+    if (importMetadata !== undefined) {
+      if (importMetadata.mode !== null) route["mode"] = importMetadata.mode;
+      if (importMetadata.profile !== null) {
+        route["profile"] = importMetadata.profile;
+      }
+      if (importMetadata.risk !== null) route["risk"] = importMetadata.risk;
+      if (importMetadata.quotaPolicy !== null) {
+        route["quotaPolicy"] = importMetadata.quotaPolicy;
+      }
+    }
+    return route;
+  }
+  const compatibility = readWorkflowRunCodingCompatibility(db, runId);
+  if (compatibility !== undefined) {
+    if (compatibility.implementationEngine !== null) {
+      route["implementationEngine"] = compatibility.implementationEngine;
+    }
+    if (compatibility.selectedProfile !== null) {
+      route["profile"] = compatibility.selectedProfile;
+    }
+  }
+  return route;
 }

@@ -12,8 +12,12 @@ import { RouteStateMigrationError } from "./route-state-errors.js";
 import {
   isPlainObject,
   parseWorkflowRoute,
+  validateCanonicalCodingCompatibility,
+  validateCanonicalImportMetadata,
   validateExplicitRunLineage,
   validateWorkflowRoute,
+  type CanonicalCodingCompatibilityValues,
+  type CanonicalImportMetadataValues,
   type ValidatedRouteLineage,
 } from "./route-state-validation.js";
 import { mergePortableAgentConfig } from "../../shared/agent-config.js";
@@ -97,14 +101,29 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
   profile TEXT,
   risk TEXT,
   quota_policy_json TEXT,
+  source_format TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK (mode IS NULL OR trim(mode) <> ''),
+  CHECK (profile IS NULL OR trim(profile) <> ''),
+  CHECK (risk IS NULL OR trim(risk) <> ''),
+  CHECK (source_format IS NULL OR trim(source_format) <> '')
+) STRICT`,
+  },
+] as const;
+const LEGACY_IMPORT_METADATA_TABLE_DEFINITION = `
+CREATE TABLE workflow_run_import_metadata (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+  mode TEXT,
+  profile TEXT,
+  risk TEXT,
+  quota_policy_json TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   CHECK (mode IS NULL OR trim(mode) <> ''),
   CHECK (profile IS NULL OR trim(profile) <> ''),
   CHECK (risk IS NULL OR trim(risk) <> '')
-) STRICT`,
-  },
-] as const;
+) STRICT`;
 const VALIDATION_QUERY_CHUNK_SIZE = 500;
 
 type RunRow = {
@@ -127,6 +146,7 @@ type ImportMetadataPlan = {
   profile: string | null;
   risk: string | null;
   quotaPolicyJson: string | null;
+  sourceFormat: string | null;
 };
 
 type LineagePlan = {
@@ -271,6 +291,11 @@ export function writeCanonicalWorkflowRunRouteState(
     definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>;
     /** Explicit child-run lineage supplied by the start-persistence seam. */
     lineage?: unknown;
+    /**
+     * The imported source-artifact format supplied by the import-persistence
+     * seam; canonical import metadata for imported runs, absent otherwise.
+     */
+    importSourceFormat?: string | null;
   },
 ): void {
   const validated = resolveValidatedRouteWithExplicitLineage(input);
@@ -293,6 +318,7 @@ export function writeCanonicalWorkflowRunRouteState(
     lineageRuns,
     validated,
     input.canonicalAgentConfigs,
+    input.importSourceFormat ?? null,
   );
   if (plan.lineage !== null && lineageRuns !== undefined) {
     validateLineagePlans(db, { runs: [plan] }, lineageRuns);
@@ -370,6 +396,141 @@ export function projectValidatedLegacyWorkflowRunRoutes(
   }
 }
 
+export type WorkflowRunCodingCompatibilityReadback =
+  CanonicalCodingCompatibilityValues;
+
+/**
+ * Direct typed reader over `workflow_run_coding_compatibility` — the canonical
+ * owner of the historical implementation-engine label and selected profile.
+ * Read-back and refusal semantics only; never execution authority. Returns
+ * `undefined` when no marker row exists and fails closed on malformed or
+ * unsupported persisted values.
+ */
+export function readWorkflowRunCodingCompatibility(
+  db: MomentumDb,
+  runId: string,
+): WorkflowRunCodingCompatibilityReadback | undefined {
+  const row = db
+    .prepare(
+      `SELECT implementation_engine, selected_profile
+         FROM workflow_run_coding_compatibility
+        WHERE run_id = ?`,
+    )
+    .get(runId) as
+    | { implementation_engine: string | null; selected_profile: string | null }
+    | undefined;
+  if (row === undefined) return undefined;
+  try {
+    return validateCanonicalCodingCompatibility(runId, row);
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
+  }
+}
+
+/**
+ * Batched variant of {@link readWorkflowRunCodingCompatibility} for listing
+ * surfaces: one chunked query per run set instead of one statement per run.
+ * Runs without a marker row are absent from the returned map.
+ */
+export function readWorkflowRunCodingCompatibilities(
+  db: MomentumDb,
+  runIds: readonly string[],
+): Map<string, WorkflowRunCodingCompatibilityReadback> {
+  const readbacks = new Map<string, WorkflowRunCodingCompatibilityReadback>();
+  try {
+    for (const [runId, row] of loadCanonicalCompatibilityRows(
+      db,
+      new Set(runIds),
+    )) {
+      readbacks.set(runId, validateCanonicalCodingCompatibility(runId, row));
+    }
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
+  }
+  return readbacks;
+}
+
+export type WorkflowRunImportMetadataReadback =
+  CanonicalImportMetadataValues & {
+    createdAt: number;
+    updatedAt: number;
+  };
+
+/**
+ * Direct typed reader over `workflow_run_import_metadata` — the canonical
+ * owner of imported `mode`, legacy `profile`, `risk`, `quotaPolicy`, and the
+ * import timestamps. Historical metadata only; it must never influence local
+ * command or host-binding selection. Returns `undefined` when no row exists
+ * and fails closed on malformed persisted values.
+ */
+/**
+ * Batched variant of {@link readWorkflowRunImportMetadata} for listing
+ * surfaces: one chunked query per run set instead of one statement per run.
+ * Runs without a metadata row are absent from the returned map.
+ */
+export function readWorkflowRunImportMetadataForRuns(
+  db: MomentumDb,
+  runIds: readonly string[],
+): Map<string, WorkflowRunImportMetadataReadback> {
+  const readbacks = new Map<string, WorkflowRunImportMetadataReadback>();
+  try {
+    for (const [runId, row] of loadCanonicalImportMetadataRows(
+      db,
+      new Set(runIds),
+    )) {
+      readbacks.set(runId, {
+        ...validateCanonicalImportMetadata(runId, row),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      });
+    }
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
+  }
+  return readbacks;
+}
+
+export function readWorkflowRunImportMetadata(
+  db: MomentumDb,
+  runId: string,
+): WorkflowRunImportMetadataReadback | undefined {
+  const sourceFormatSelect = columnExists(
+    db,
+    "workflow_run_import_metadata",
+    "source_format",
+  )
+    ? "source_format"
+    : "NULL AS source_format";
+  const row = db
+    .prepare(
+      `SELECT mode, profile, risk, quota_policy_json, ${sourceFormatSelect},
+              created_at, updated_at
+         FROM workflow_run_import_metadata
+        WHERE run_id = ?`,
+    )
+    .get(runId) as
+    | {
+        mode: string | null;
+        profile: string | null;
+        risk: string | null;
+        quota_policy_json: string | null;
+        source_format: string | null;
+        created_at: number;
+        updated_at: number;
+      }
+    | undefined;
+  if (row === undefined) return undefined;
+  try {
+    return {
+      ...validateCanonicalImportMetadata(runId, row),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  } catch (error) {
+    throw normalizeRouteStateMigrationError(error);
+  }
+}
+
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return false;
@@ -399,7 +560,18 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
         "all canonical destination objects already exist while legacy route_json still carries state",
     });
   }
+  if (workflowRunImportMetadataSchemaMigrationNeeded(db)) return true;
   return false;
+}
+
+export function workflowRunImportMetadataSchemaMigrationNeeded(
+  db: MomentumDb,
+): boolean {
+  return (
+    hasRouteStateBaseTables(db) &&
+    tableExists(db, "workflow_run_import_metadata") &&
+    !columnExists(db, "workflow_run_import_metadata", "source_format")
+  );
 }
 
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
@@ -523,6 +695,33 @@ export function refreshWorkflowRouteStatePlan(
   }
 }
 
+/**
+ * Additive upgrade for databases whose canonical destinations were created
+ * before the imported source-format column existed.
+ */
+export function upgradeWorkflowRunImportMetadataSchemaInTransaction(
+  db: MomentumDb,
+): void {
+  if (!tableExists(db, "workflow_run_import_metadata")) return;
+  if (columnExists(db, "workflow_run_import_metadata", "source_format")) return;
+  const definition = DESTINATION_TABLES.find(
+    (contract) => contract.name === "workflow_run_import_metadata",
+  )!.definition;
+  db.exec(
+    "ALTER TABLE workflow_run_import_metadata RENAME TO workflow_run_import_metadata_upgrade",
+  );
+  db.exec(definition);
+  db.exec(
+    `INSERT INTO workflow_run_import_metadata
+       (run_id, mode, profile, risk, quota_policy_json, source_format,
+        created_at, updated_at)
+     SELECT run_id, mode, profile, risk, quota_policy_json, NULL,
+            created_at, updated_at
+       FROM workflow_run_import_metadata_upgrade`,
+  );
+  db.exec("DROP TABLE workflow_run_import_metadata_upgrade");
+}
+
 export function createRouteStateDestinations(db: MomentumDb): void {
   for (const contract of DESTINATION_COLUMNS) {
     if (!columnExists(db, contract.table, contract.column)) {
@@ -553,6 +752,7 @@ export function applyWorkflowRouteStateMigrationInTransaction(
   plan?: WorkflowRouteStatePlan,
 ): void {
   if (!hasRouteStateBaseTables(db)) return;
+  upgradeWorkflowRunImportMetadataSchemaInTransaction(db);
   const routeStatePlan = plan ?? preScanRouteState(db);
   try {
     createRouteStateDestinations(db);
@@ -573,6 +773,10 @@ function planRun(
   lineageRuns?: ReadonlyMap<string, RunRow>,
   validated?: ReturnType<typeof validateWorkflowRoute>,
   canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
+  // Legacy route_json never carried a source format, so the migration path
+  // records the honest absent value; only the import-persistence seam
+  // supplies one.
+  importSourceFormat: string | null = null,
 ): RouteRunPlan {
   const route =
     validated ??
@@ -605,6 +809,7 @@ function planRun(
           profile: route.profile,
           risk: route.risk,
           quotaPolicyJson: route.quotaPolicyJson,
+          sourceFormat: importSourceFormat,
         }
       : null;
   return {
@@ -1176,8 +1381,9 @@ function applyRouteStatePlan(
   );
   const insertImport = db.prepare(
     `INSERT INTO workflow_run_import_metadata
-       (run_id, mode, profile, risk, quota_policy_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (run_id, mode, profile, risk, quota_policy_json, source_format,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertLineage = db.prepare(
     `INSERT INTO workflow_run_lineage
@@ -1210,6 +1416,7 @@ function applyRouteStatePlan(
         item.importMetadata.profile,
         item.importMetadata.risk,
         item.importMetadata.quotaPolicyJson,
+        item.importMetadata.sourceFormat,
         item.run.created_at,
         item.run.updated_at,
       );
@@ -1243,10 +1450,21 @@ function assertProjectionEquivalence(
   );
   for (const item of plan.runs) {
     const projected = projectedByRunId.get(item.run.id);
-    // The subworkflow namespace is canonical-only: child intent lives on the
-    // owning step's executor config and lineage in workflow_run_lineage, and
-    // the compatibility projection deliberately no longer reconstructs it.
-    const { subworkflow: _subworkflow, ...expectedRoute } = item.parsedRoute;
+    // These namespaces are canonical-only: child intent lives on the owning
+    // step's executor config, lineage in workflow_run_lineage, the
+    // implementation-engine label and selected profile in
+    // workflow_run_coding_compatibility, and import metadata in
+    // workflow_run_import_metadata. The compatibility projection deliberately
+    // no longer reconstructs any of them.
+    const {
+      subworkflow: _subworkflow,
+      implementationEngine: _implementationEngine,
+      profile: _profile,
+      mode: _mode,
+      risk: _risk,
+      quotaPolicy: _quotaPolicy,
+      ...expectedRoute
+    } = item.parsedRoute;
     if (!isDeepStrictEqual(projected, expectedRoute)) {
       throw new RouteStateMigrationError({
         runId: item.run.id,
@@ -1255,6 +1473,79 @@ function assertProjectionEquivalence(
         detail: "canonical destinations do not reconstruct the legacy route",
       });
     }
+    assertCanonicalDestinationEquivalence(db, item);
+  }
+}
+
+/**
+ * Prove the retired route namespaces reached their canonical destinations:
+ * the written compatibility and import-metadata rows must reconstruct the
+ * migrated values exactly, since the compatibility projection no longer
+ * carries them through the route-shaped equivalence check above.
+ */
+function assertCanonicalDestinationEquivalence(
+  db: MomentumDb,
+  item: RouteRunPlan,
+): void {
+  const compatibility = db
+    .prepare(
+      `SELECT implementation_engine, selected_profile
+         FROM workflow_run_coding_compatibility
+        WHERE run_id = ?`,
+    )
+    .get(item.run.id) as CanonicalCompatibilityRow | undefined;
+  const expectedCompatibility =
+    item.compatibility === null
+      ? undefined
+      : {
+          implementation_engine: item.compatibility.implementationEngine,
+          selected_profile: item.compatibility.selectedProfile,
+        };
+  if (
+    !isDeepStrictEqual(
+      compatibility === undefined ? undefined : { ...compatibility },
+      expectedCompatibility,
+    )
+  ) {
+    throw new RouteStateMigrationError({
+      runId: item.run.id,
+      jsonPath: "$canonical.workflow_run_coding_compatibility",
+      code: "route_state_projection_mismatch",
+      detail:
+        "canonical compatibility row does not reconstruct the migrated values",
+    });
+  }
+  const importMetadata = db
+    .prepare(
+      `SELECT mode, profile, risk, quota_policy_json, source_format
+         FROM workflow_run_import_metadata
+        WHERE run_id = ?`,
+    )
+    .get(item.run.id) as
+    Omit<CanonicalImportMetadataRow, "created_at" | "updated_at"> | undefined;
+  const expectedImportMetadata =
+    item.importMetadata === null
+      ? undefined
+      : {
+          mode: item.importMetadata.mode,
+          profile: item.importMetadata.profile,
+          risk: item.importMetadata.risk,
+          quota_policy_json: item.importMetadata.quotaPolicyJson,
+          source_format: item.importMetadata.sourceFormat,
+        };
+  if (
+    !isDeepStrictEqual(
+      importMetadata === undefined ? undefined : { ...importMetadata },
+      expectedImportMetadata,
+    )
+  ) {
+    throw new RouteStateMigrationError({
+      runId: item.run.id,
+      jsonPath: "$canonical.workflow_run_import_metadata",
+      code: "route_state_projection_mismatch",
+      detail:
+        "canonical import metadata row does not reconstruct the migrated values",
+    });
   }
 }
 
@@ -1343,14 +1634,13 @@ function validateProjectedCanonicalRoutes(
   projectedByRunId: ReadonlyMap<string, Record<string, unknown>>,
 ): void {
   assertCanonicalRowsMatchRunSources(db, rowsById);
-  const nativeRunIds = new Set(
-    [...rowsById.values()]
-      .filter((run) => run.source === "momentum-native-coding")
-      .map((run) => run.id),
-  );
-  const compatibilityRunIds = loadCanonicalCompatibilityRunIds(
+  const compatibilityRows = loadCanonicalCompatibilityRows(
     db,
-    nativeRunIds,
+    new Set(rowsById.keys()),
+  );
+  const importMetadataRows = loadCanonicalImportMetadataRows(
+    db,
+    new Set(rowsById.keys()),
   );
   const projectedRunsById = new Map<string, RunRow>();
   const validatedRoutes = new Map<
@@ -1358,9 +1648,14 @@ function validateProjectedCanonicalRoutes(
     ReturnType<typeof validateWorkflowRoute>
   >();
   for (const run of rowsById.values()) {
+    // The projection no longer reconstructs implementation, profile, or import
+    // metadata keys, so the canonical rows are validated directly: every read
+    // still keeps the absent / malformed / unsupported distinctions before the
+    // canonical facts are trusted.
+    const compatibility = compatibilityRows.get(run.id);
     if (
       run.source === "momentum-native-coding" &&
-      !compatibilityRunIds.has(run.id)
+      compatibility === undefined
     ) {
       throw new RouteStateMigrationError({
         runId: run.id,
@@ -1368,6 +1663,13 @@ function validateProjectedCanonicalRoutes(
         code: "route_state_canonical_conflict",
         detail: "native coding run is missing its compatibility marker row",
       });
+    }
+    if (compatibility !== undefined) {
+      validateCanonicalCodingCompatibility(run.id, compatibility);
+    }
+    const importMetadata = importMetadataRows.get(run.id);
+    if (importMetadata !== undefined) {
+      validateCanonicalImportMetadata(run.id, importMetadata);
     }
     const projectedRoute = projectedByRunId.get(run.id) ?? {};
     const validated = validateWorkflowRoute({
@@ -1483,11 +1785,16 @@ function assertCanonicalRowsMatchRunSources(
   }
 }
 
-function loadCanonicalCompatibilityRunIds(
+type CanonicalCompatibilityRow = {
+  implementation_engine: string | null;
+  selected_profile: string | null;
+};
+
+function loadCanonicalCompatibilityRows(
   db: MomentumDb,
   runIds: ReadonlySet<string>,
-): Set<string> {
-  const compatibilityRunIds = new Set<string>();
+): Map<string, CanonicalCompatibilityRow> {
+  const rowsByRunId = new Map<string, CanonicalCompatibilityRow>();
   const ids = [...runIds];
   for (
     let offset = 0;
@@ -1498,14 +1805,72 @@ function loadCanonicalCompatibilityRunIds(
     const placeholders = chunk.map(() => "?").join(", ");
     const rows = db
       .prepare(
-        `SELECT run_id
+        `SELECT run_id, implementation_engine, selected_profile
            FROM workflow_run_coding_compatibility
           WHERE run_id IN (${placeholders})`,
       )
-      .all(...chunk) as Array<{ run_id: string }>;
-    for (const row of rows) compatibilityRunIds.add(row.run_id);
+      .all(...chunk) as Array<CanonicalCompatibilityRow & { run_id: string }>;
+    for (const row of rows) {
+      rowsByRunId.set(row.run_id, {
+        implementation_engine: row.implementation_engine,
+        selected_profile: row.selected_profile,
+      });
+    }
   }
-  return compatibilityRunIds;
+  return rowsByRunId;
+}
+
+type CanonicalImportMetadataRow = {
+  mode: string | null;
+  profile: string | null;
+  risk: string | null;
+  quota_policy_json: string | null;
+  source_format: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+function loadCanonicalImportMetadataRows(
+  db: MomentumDb,
+  runIds: ReadonlySet<string>,
+): Map<string, CanonicalImportMetadataRow> {
+  const rowsByRunId = new Map<string, CanonicalImportMetadataRow>();
+  const ids = [...runIds];
+  for (
+    let offset = 0;
+    offset < ids.length;
+    offset += VALIDATION_QUERY_CHUNK_SIZE
+  ) {
+    const chunk = ids.slice(offset, offset + VALIDATION_QUERY_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const sourceFormatSelect = columnExists(
+      db,
+      "workflow_run_import_metadata",
+      "source_format",
+    )
+      ? "source_format"
+      : "NULL AS source_format";
+    const rows = db
+      .prepare(
+        `SELECT run_id, mode, profile, risk, quota_policy_json, ${sourceFormatSelect},
+                created_at, updated_at
+           FROM workflow_run_import_metadata
+          WHERE run_id IN (${placeholders})`,
+      )
+      .all(...chunk) as Array<CanonicalImportMetadataRow & { run_id: string }>;
+    for (const row of rows) {
+      rowsByRunId.set(row.run_id, {
+        mode: row.mode,
+        profile: row.profile,
+        risk: row.risk,
+        quota_policy_json: row.quota_policy_json,
+        source_format: row.source_format,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      });
+    }
+  }
+  return rowsByRunId;
 }
 
 function clearMigratedRouteJson(
@@ -1604,10 +1969,13 @@ function destinationTableMatchesContract(
   const row = db
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
     .get(contract.name) as { sql: string | null } | undefined;
+  if (row?.sql === null || row?.sql === undefined) return false;
+  const normalizedSql = normalizeSchemaSql(row.sql);
+  if (normalizedSql === normalizeSchemaSql(contract.definition)) return true;
   return (
-    row?.sql !== null &&
-    row?.sql !== undefined &&
-    normalizeSchemaSql(row.sql) === normalizeSchemaSql(contract.definition)
+    contract.name === "workflow_run_import_metadata" &&
+    normalizedSql ===
+      normalizeSchemaSql(LEGACY_IMPORT_METADATA_TABLE_DEFINITION)
   );
 }
 
