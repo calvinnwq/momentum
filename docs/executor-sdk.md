@@ -146,7 +146,7 @@ The built-in `delegate-supervisor` uses the same interface.
 Its strict portable config is `{ "tool": "<adapter-name>" }`.
 The resolved adapter's declared `name` must exactly match that selected tool or the executor treats the adapter as unavailable.
 The current coding definition uses `gnhf` for implementation and `no-mistakes` for validation without adding either tool as a new executor identity.
-Profile-backed tool bindings are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
+Binding-backed tool adapters are host-local; a configured third-party executor does not receive them through `MOMENTUM_EXECUTOR_CONFIG`.
 
 ### Delegate-supervisor lifecycle
 
@@ -195,7 +195,7 @@ Each unchanged running read still refreshes durable liveness, but it carries for
 After four minutes without semantic progress or terminal evidence, the attempt enters `manual_recovery_required` with `external_state_inconsistent` so an operator can inspect the external run before clearing recovery.
 
 Terminal success requires a full 40-character observed head SHA, a matching handoff run id and branch, no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
-Profile-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
+Binding-backed adapters additionally bind that terminal SHA to the repository's current `HEAD`.
 Terminal evidence captured by the handoff is persisted in the same envelope as a settlement candidate, but a fresh adapter read must corroborate the same run, branch, and exact full head SHA before the executor can settle it.
 On reattachment, the no-mistakes adapter may reload a missing in-envelope candidate from the step-scoped `launched` receipt only when the receipt's schema, run id, branch, full launch head, full terminal head, and external identity all match and Git proves the terminal head descends from the launch head.
 A lagging `running` response can corroborate the candidate only when it reports no active step, passed or absent CI, no findings or selected findings, and no unresolved decisions.
@@ -205,7 +205,7 @@ Unreadable state, cancelled state, contradictory completion, and identity drift 
 
 Third-party modules loaded only through `MOMENTUM_EXECUTOR_CONFIG` currently receive an empty `hostBindings` object.
 The public registration surface does not inject machine-local commands, credentials, or clients into those modules.
-Profile-backed built-ins use Momentum's internal host-binding resolver for live-wrapper execution.
+Binding-backed built-ins use Momentum's internal host-binding resolver for their machine-local execution.
 
 ## Registered dispatch lifecycle
 

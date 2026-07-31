@@ -37,7 +37,7 @@
  * workflow step and lineage destinations.
  * `route.profile` (the recorded operator profile) stays distinct from these
  * per-step selections and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE`
- * execution profile; none of them are conflated here.
+ * execution host bindings; none of them are conflated here.
  *
  * Field mapping. Each per-step override carries the operator-facing
  * harness/model/effort vocabulary (the same `harness`/`model` keys the workflow

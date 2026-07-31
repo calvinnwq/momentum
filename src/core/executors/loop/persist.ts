@@ -8,7 +8,7 @@
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * scheduler lane is owned separately by `src/core/workflow/dispatch/scheduler.ts`; the
  * native agent-loop and agent-once / script SDK paths plus the legacy no-mistakes
- * mirror and delegate-supervisor profile-backed paths layer on top of this
+ * mirror and delegate-supervisor binding-backed paths layer on top of this
  * persistence spine,
  * exactly as `src/core/workflow/definition/persist.ts` is the storage twin of
  * `src/core/workflow/definition/definition.ts`.

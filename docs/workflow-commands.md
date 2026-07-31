@@ -299,7 +299,7 @@ Behaviour:
   The delegate attempt and step reconcile only after a later external-state read receives a daemon-accepted terminal classification.
   Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
   Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
-  Runtime profile requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-host-bindings).
+  Host-binding requirements, native binding failures, and the no-fallback rule are owned by [Daemon commands](daemon.md#workflow-host-bindings).
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
 ### JSON envelope (success)
@@ -456,7 +456,7 @@ Optional arguments:
   Provider-specific model aliases are normalized when the merged step selection also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
   Unknown harness/model values remain free-form after structural validation, so future provider model ids can still be passed through before Momentum learns a shorthand for them.
   During native daemon dispatch, the canonical step-row selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields, including retry and reattachment round materialization, and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
-  `route.steps` (the per-step selection) stays distinct from `run.selectedProfile` (the recorded operator profile read-back) and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE` execution profile.
+  `route.steps` (the per-step selection) stays distinct from `run.selectedProfile` (the recorded operator profile read-back) and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE` execution host bindings.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
   When omitted, the latest known built-in version is used.
   Existing native runs continue resolving the built-in version recorded on the run after future built-in versions are added.
@@ -1849,10 +1849,10 @@ It does not resolve approvals, gates, manual recovery, or other operator decisio
 When `--once` is eligible to dispatch a binding-backed step, including native
 `agent-loop`, `agent-once`, `script`, or `delegate-supervisor`,
 `MOMENTUM_HOST_BINDINGS_FILE` must be configured.
-Without that profile, watch refuses before moving the step to `running` so a
+Without that host-binding file, watch refuses before moving the step to `running` so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
 evidence.
-When the profile is configured, the watch dispatcher uses the same repo lock,
+When host bindings are configured, the watch dispatcher uses the same repo lock,
 ignored run-directory check, verification config fallback, and verify -> commit
 / reset finalization path as managed-loop `daemon start`.
 
@@ -2467,7 +2467,7 @@ The retry reads that run first.
 A matching failed or cancelled state permits one fresh launch; every other status reruns failed local finalization before the same run is reattached for supervision.
 
 Terminal success requires a full 40-character observed head SHA and matching external run id and branch; a head advanced from launch must carry adapter-verified descendant proof.
-Profile-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
+Binding-backed adapters additionally require that exact full SHA to match the repository's current `HEAD`.
 It also requires no active step or findings, no unresolved current or previously mirrored decisions, and CI `passed` or `none`.
 For no-mistakes, every pending or running canonical steps-table row counts as an active step.
 Terminal state cached during handoff settles only after a fresh read corroborates that identity and clean state; pending CI or another head cannot reuse it.

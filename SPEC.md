@@ -35,7 +35,7 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 
 Built-in executor identities currently include `agent-loop`, `agent-once`,
 `script`, `delegate-supervisor`, `external-apply`, and `subworkflow`.
-Profile-backed registration and native binding details are owned by [Executor SDK](docs/executor-sdk.md#config-and-host-bindings).
+Binding-backed registration and native binding details are owned by [Executor SDK](docs/executor-sdk.md#config-and-host-bindings).
 Step definitions may also name arbitrary valid permanent identities supplied by
 the configured executor registry.
 Recorded definitions stay byte-for-byte immutable, so retired spellings remain
@@ -523,7 +523,7 @@ Momentum still does not post webhooks, wake external lanes, remove external moni
 Native tail recovery is hardened without changing the default route.
 Failed required `merge-cleanup` and `tracker-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `tracker-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`.
-The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
+The checked-in coding-workflow host-binding file executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `tracker-refresh` tail work.
 The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no runner evidence.
 For the `validate` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.

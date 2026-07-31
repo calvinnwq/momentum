@@ -21,7 +21,7 @@
  *     directly; and
  *   - the single-shot executors - `single-shot/mechanism.ts`, imported
  *     directly; and
- *   - the production live-step SDK finalizer, reused by the profile-backed
+ *   - the production live-step SDK finalizer, reused by the binding-backed
  *     delegate-tool bridge before handoff evidence becomes durable.
  *
  * The ordered contract this transaction enforces:
@@ -53,7 +53,7 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The agent-loop, single-shot, and profile-backed delegate paths project the
+ * The agent-loop, single-shot, and binding-backed delegate paths project the
  * run-level recovery outcomes this seam surfaces (`manual_recovery_required`,
  * `result_missing`, `result_invalid`, unsafe finalization failures such as
  * `reset_failed`, `repo_lock_lost`, `git_failed`, `commit_failed`, or

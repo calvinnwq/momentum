@@ -21,10 +21,10 @@
  * (a real adapter is wired for the kind) but refuses at execute time with
  * `runtime_unavailable` — the established prerequisite-missing class — instead of
  * fabricating a fake `succeeded`. That keeps production honest by default: with no
- * profile injected, dispatch never resolves to a fake success.
+ * host bindings injected, dispatch never resolves to a fake success.
  *
- * The profile is supplied by dependency injection only. This module deliberately
- * does not read environment variables or the filesystem to discover a profile.
+ * Host bindings are supplied by dependency injection only. This module deliberately
+ * does not read environment variables or the filesystem to discover host bindings.
  * Resolving a production config source is left to callers that own that decision,
  * including the daemon-default host-binding lane.
  */

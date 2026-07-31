@@ -91,7 +91,7 @@ tests that need substrate smoke coverage.
 
 Registered executor dispatch supersedes the interim live-wrapper composition.
 `dispatch/registered-executor.ts` creates the durable scaffold, resolves the executor by permanent name, drives bounded SDK ticks, and reconciles daemon-owned classification.
-Profile-backed `agent-loop` uses `executors/agent-loop/sdk.ts`, `agent-once` and `script` use `executors/single-shot/sdk.ts`, delegated tools use `executors/delegate-supervisor/executor.ts`, and the legacy `no-mistakes` identity uses `executors/live-step/sdk-executor.ts`.
+Binding-backed `agent-loop` uses `executors/agent-loop/sdk.ts`, `agent-once` and `script` use `executors/single-shot/sdk.ts`, delegated tools use `executors/delegate-supervisor/executor.ts`, and the legacy `no-mistakes` identity uses `executors/live-step/sdk-executor.ts`.
 The native agent-loop, single-shot, and live-step lifecycles record replay-safe `mechanism_completed` evidence before daemon classification, so reattachment classifies durable completed work without rerunning the bounded mechanism.
 `dispatch/executor-evidence.ts` and `dispatch/executor-recovery.ts` retain neutral settlement helpers used by external-apply and subworkflow; they are not an alternate live-wrapper execution lane.
 
@@ -150,8 +150,8 @@ manual-recovery behavior for invalid canonical lineage, missing or ambiguous
 child state.
 
 `live-wrapper/coding-workflow.ts` is an opt-in dogfood helper for
-`bindings/coding-workflow.host-bindings.json`: the daemon live
-profile still owns process supervision and result-file placement, while this
+`bindings/coding-workflow.host-bindings.json`: the daemon host-binding file
+still owns process supervision and result-file placement, while this
 helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
 command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
 so command failures become durable `success: false` results rather than stranded
@@ -166,7 +166,7 @@ It parks missing branch-start state and current no-mistakes cancellation status 
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves success, guarded `clear-recovery` can reconcile only the failed required `validate` step with either legacy `no-mistakes:<run-id>#checks-passed` evidence or a readable structured deterministic evidence JSON file.
 The structured record must carry the workflow run id, issue scope, branch/head SHA, pull request id/head/check state when present, no-mistakes run id, successful outcome, zero unresolved findings and decisions, and explicit review/test/docs/lint/format/push/PR/CI phase statuses.
 `recovery/no-mistakes-evidence.ts` refuses unknown schemas, stale identity, unresolved findings, partial phase evidence, and pending/failed/unknown checks before the failed step can be marked succeeded.
-The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `tracker-refresh` tail work.
+The checked-in host-binding file runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `tracker-refresh` tail work.
 For `merge-cleanup`, `live-wrapper/merge-cleanup-preflight.ts` and `live-wrapper/merge-cleanup-lifecycle.ts` keep preflight -> apply -> reconcile inside the tail step. The wrapper requires explicit GitHub auth in the filtered environment, a run-local `merge_cleanup` target block (PR id, expected head SHA, cleanup branch), and a live `gh pr view` readback proving the PR is open, non-draft, mergeable, and still at the expected head before the command is spawned. Already-merged or already-deleted cleanup state becomes reconcile guidance rather than a second external mutation.
 External-side-effect tail failures (`merge-cleanup` / `tracker-refresh`) use the shared step-kind set in `run/reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
 Renderer next-action shapes expose this as `actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`; interrupted no-mistakes evidence reconciliation exposes `actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
