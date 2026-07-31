@@ -49,7 +49,7 @@ the controller after a tick returns.
 The controller also rejects classification decisions whose attempt or round
 state is inconsistent with the classification before writing any settlement.
 `agent-loop/sdk.ts` and `single-shot/sdk.ts` are the native profile-backed built-ins: `agent-loop`, `agent-once`, and `script` implement the same `Executor` interface and accept narrow runner adapters as lifecycle extension points.
-`delegate-supervisor/executor.ts` remains the default coding implementation route, while `live-step/sdk-executor.ts` retains the compatibility `no-mistakes` identity.
+`delegate-supervisor/executor.ts` remains the default executor for the coding implementation step, while `live-step/sdk-executor.ts` retains the compatibility `no-mistakes` identity.
 These native agent-loop, single-shot, and live-step lifecycles record replay-safe mechanism completion before daemon classification.
 The built-in runner
 mechanisms supervise process groups asynchronously below a crash-surviving

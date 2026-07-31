@@ -140,7 +140,7 @@ export function emitWorkflowRunStartFailure(
  * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
  * (`workflow run preview-coding`). The envelope mirrors the fields a
  * `workflow run start-coding` would durably persist - run id, repo, objective,
- * issue scope, route/profile, implementation engine, and per-step route
+ * issue scope, compatibility route/profile and implementation label, and per-step route
  * selections, approval boundary, definition key/version, and the ordered steps
  * each with its executor, optional effective agent config, and on-start state -
  * but carries an explicit

@@ -3,12 +3,12 @@
  *
  * `workflow run start-coding` and `workflow run
  * preview-coding` gave operators an explicit native door and a read-only frozen
- * plan, but the planned implementation route and harness/model/effort selections
- * were not yet explicit: the run-level `route.profile` was the only operator
- * route input, and nothing per-step. CWFP already lets an operator inspect and
- * adjust the implementation path plus planned harness/model choices before
- * approving execution; this module is the keystone that lets the native door
- * carry the same durable route control while keeping canonical persistence
+ * plan, but the historical implementation label and harness/model/effort
+ * selections were not yet explicit: the run-level `route.profile` was the only
+ * operator route input, and nothing per-step. CWFP already lets an operator
+ * inspect the intended implementation path plus planned harness/model choices
+ * before approving execution; this module is the keystone that lets the native
+ * door carry the same compatibility inputs while keeping canonical persistence
  * separate from the compatibility route projection.
  *
  * This module owns ONLY the pure representation + validation half (no SQLite, no
@@ -18,16 +18,18 @@
  * fail-closed contract is exhaustively testable on its own. The CLI
  * start/preview doors build overrides from `--steps-json`, the detail/read-back
  * surfaces expose the selected config through canonical run state and the
- * compatibility route projection, while executor rounds freeze it, and daemon dispatch consumes the same canonical step row when it freezes
- * per-step agent/model/effort selection for execution or fails closed when the
- * row is corrupt.
+ * compatibility route projection, while executor rounds freeze it, and daemon
+ * dispatch consumes the same canonical step row when it freezes per-step
+ * agent/model/effort selection for execution or fails closed when the row is
+ * corrupt.
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} may carry
  * portable recipe-level executor and agent config, while the selected
- * implementation path and operator harness/model/effort overrides are run-specific.
+ * historical implementation label and operator harness/model/effort overrides
+ * are run-specific.
  * Canonical run state is owned by the database adapter: per-step overrides live in
- * `workflow_steps.agent_config_json`, and the implementation path/profile live in
- * the coding-compatibility destination. This module operates on the start-time
+ * `workflow_steps.agent_config_json`, and the historical implementation
+ * label/profile live in the coding-compatibility destination. This module operates on the start-time
  * operator route input under `route.implementationEngine`, `route.steps`, and
  * `route.profile` plus the projected `route.steps` namespace; the persisted
  * implementation-engine / profile values are canonical-only (read through the
@@ -56,16 +58,16 @@ import type { StepDefinition } from "../definition/definition.js";
 import { canonicalWorkflowStepKind } from "../definition/legacy.js";
 import { mergePortableAgentConfig } from "../../../shared/agent-config.js";
 
-/** The run-`route` field that records the selected coding implementation engine. */
+/** The run-`route` field that records the historical coding implementation label. */
 export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
 
-/** The honest GNHF implementation route selected by new coding starts. */
+/** The honest GNHF compatibility label recorded by new coding starts. */
 export const GNHF_IMPLEMENTATION_ENGINE = "gnhf";
 
 /** Legacy label retained for persisted runs and explicit compatibility input. */
 export const NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE = "native-goal-loop";
 
-/** The explicit compatibility route that keeps the current GNHF/CWFP path selectable. */
+/** The explicit compatibility label for the current GNHF/CWFP refusal path. */
 export const CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE = "current-gnhf-cwfp";
 
 export const CODING_IMPLEMENTATION_ENGINES = [

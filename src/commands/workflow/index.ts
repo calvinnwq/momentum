@@ -470,7 +470,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): Promise<number> {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
- *   - it builds the coding implementation engine compatibility value exposed as
+ *   - it builds the historical coding implementation label exposed as
  *     `route.implementationEngine`, defaulting to the honest `gnhf` label while
  *     retaining persisted `native-goal-loop` compatibility and
  *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
@@ -502,7 +502,7 @@ function workflowRunStartCoding(
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, route/profile, implementation engine, and per-step route
+ * approval boundary, compatibility route/profile and implementation label, and per-step route
  * selections, definition key/version, and every step with its executor identity,
  * optional portable config, and effective agent config - before approving or
  * executing it. The preview is a pure projection of the version-pinned built-in
@@ -1132,12 +1132,13 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the compatibility route projection from the recorded implementation
-  // engine (route.implementationEngine), operator profile (route.profile), and
+  // Compose the compatibility input from the historical implementation label
+  // (route.implementationEngine), operator profile (route.profile), and
   // validated per-step overrides (route.steps). Canonical persistence owns the
   // destination rows; the engine marker is still built for native coding starts
-  // even when profile and per-step overrides are omitted, so readback can
-  // distinguish the selected implementation path from the compatibility route.
+  // even when profile and per-step overrides are omitted, so read-back can
+  // preserve the operator's compatibility evidence without making it executor
+  // authority.
   let route: Record<string, unknown> = {};
   if (coding) {
     route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;
