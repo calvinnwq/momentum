@@ -19,7 +19,10 @@ export async function resolve(specifier, context, nextResolve) {
       specifier.endsWith(".js") &&
       context.parentURL?.startsWith("file:")
     ) {
-      const tsUrl = new URL(specifier.replace(/\.js$/, ".ts"), context.parentURL);
+      const tsUrl = new URL(
+        specifier.replace(/\.js$/, ".ts"),
+        context.parentURL,
+      );
       try {
         await access(fileURLToPath(tsUrl));
         return { url: tsUrl.href, shortCircuit: true };
@@ -37,7 +40,7 @@ export async function load(url, context, nextLoad) {
     return {
       format: "module",
       shortCircuit: true,
-      source: stripTypeScriptTypes(source, { mode: "strip" })
+      source: stripTypeScriptTypes(source, { mode: "strip" }),
     };
   }
   return nextLoad(url, context);

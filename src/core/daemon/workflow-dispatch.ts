@@ -369,8 +369,7 @@ export function resolveDaemonWorkflowStepDispatch(
       : undefined;
   const missingHostBindingsPreClaim: WorkflowStepPreClaim | undefined =
     hostBindings.status === "not_configured"
-      ? ({ db, candidate }) =>
-          assertNativeHostBindingsConfigured(db, candidate)
+      ? ({ db, candidate }) => assertNativeHostBindingsConfigured(db, candidate)
       : undefined;
 
   if (executorConfig.status === "not_configured") {
