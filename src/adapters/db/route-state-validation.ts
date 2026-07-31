@@ -172,6 +172,7 @@ export type CanonicalImportMetadataValues = {
   profile: string | null;
   risk: string | null;
   quotaPolicy: Record<string, unknown> | null;
+  sourceFormat: string | null;
 };
 
 /** Validate a canonical `workflow_run_import_metadata` row on read. */
@@ -182,6 +183,7 @@ export function validateCanonicalImportMetadata(
     profile: string | null;
     risk: string | null;
     quota_policy_json: string | null;
+    source_format: string | null;
   },
 ): CanonicalImportMetadataValues {
   const at = "$canonical.workflow_run_import_metadata";
@@ -192,6 +194,11 @@ export function validateCanonicalImportMetadata(
     row.profile,
   );
   const risk = canonicalOptionalNonBlankString(runId, `${at}.risk`, row.risk);
+  const sourceFormat = canonicalOptionalNonBlankString(
+    runId,
+    `${at}.source_format`,
+    row.source_format,
+  );
   let quotaPolicy: Record<string, unknown> | null = null;
   if (row.quota_policy_json !== null) {
     let parsed: unknown;
@@ -214,7 +221,7 @@ export function validateCanonicalImportMetadata(
     }
     quotaPolicy = parsed;
   }
-  return { mode, profile, risk, quotaPolicy };
+  return { mode, profile, risk, quotaPolicy, sourceFormat };
 }
 
 function canonicalOptionalNonBlankString(

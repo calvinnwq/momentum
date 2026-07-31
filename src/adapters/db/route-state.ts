@@ -101,11 +101,13 @@ CREATE TABLE IF NOT EXISTS workflow_run_import_metadata (
   profile TEXT,
   risk TEXT,
   quota_policy_json TEXT,
+  source_format TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   CHECK (mode IS NULL OR trim(mode) <> ''),
   CHECK (profile IS NULL OR trim(profile) <> ''),
-  CHECK (risk IS NULL OR trim(risk) <> '')
+  CHECK (risk IS NULL OR trim(risk) <> ''),
+  CHECK (source_format IS NULL OR trim(source_format) <> '')
 ) STRICT`,
   },
 ] as const;
@@ -131,6 +133,7 @@ type ImportMetadataPlan = {
   profile: string | null;
   risk: string | null;
   quotaPolicyJson: string | null;
+  sourceFormat: string | null;
 };
 
 type LineagePlan = {
@@ -275,6 +278,11 @@ export function writeCanonicalWorkflowRunRouteState(
     definitionExecutorConfigs?: ReadonlyMap<string, Record<string, unknown>>;
     /** Explicit child-run lineage supplied by the start-persistence seam. */
     lineage?: unknown;
+    /**
+     * The imported source-artifact format supplied by the import-persistence
+     * seam; canonical import metadata for imported runs, absent otherwise.
+     */
+    importSourceFormat?: string | null;
   },
 ): void {
   const validated = resolveValidatedRouteWithExplicitLineage(input);
@@ -297,6 +305,7 @@ export function writeCanonicalWorkflowRunRouteState(
     lineageRuns,
     validated,
     input.canonicalAgentConfigs,
+    input.importSourceFormat ?? null,
   );
   if (plan.lineage !== null && lineageRuns !== undefined) {
     validateLineagePlans(db, { runs: [plan] }, lineageRuns);
@@ -474,7 +483,8 @@ export function readWorkflowRunImportMetadata(
 ): WorkflowRunImportMetadataReadback | undefined {
   const row = db
     .prepare(
-      `SELECT mode, profile, risk, quota_policy_json, created_at, updated_at
+      `SELECT mode, profile, risk, quota_policy_json, source_format,
+              created_at, updated_at
          FROM workflow_run_import_metadata
         WHERE run_id = ?`,
     )
@@ -484,6 +494,7 @@ export function readWorkflowRunImportMetadata(
         profile: string | null;
         risk: string | null;
         quota_policy_json: string | null;
+        source_format: string | null;
         created_at: number;
         updated_at: number;
       }
@@ -501,6 +512,7 @@ export function readWorkflowRunImportMetadata(
 }
 
 export function routeStateMigrationNeeded(db: MomentumDb): boolean {
+  upgradeWorkflowRunImportMetadataSchema(db);
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return false;
   if (hasBlockingBaseSchemaMalformation(baseState)) {
@@ -533,6 +545,10 @@ export function routeStateMigrationNeeded(db: MomentumDb): boolean {
 }
 
 export function preScanRouteState(db: MomentumDb): WorkflowRouteStatePlan {
+  // Databases whose canonical destinations landed before the imported
+  // source-format column must be brought to the current exact destination
+  // contract before the schema state below is inspected.
+  upgradeWorkflowRunImportMetadataSchema(db);
   const dataVersion = databaseDataVersion(db);
   const baseState = routeStateBaseSchemaState(db);
   if (baseState.present === 0) return { runs: [], dataVersion };
@@ -653,6 +669,46 @@ export function refreshWorkflowRouteStatePlan(
   }
 }
 
+/**
+ * Additive upgrade for databases whose canonical destinations were created
+ * before the imported source-format column existed: rebuild
+ * `workflow_run_import_metadata` in place with the current contract so exact
+ * destination-schema validation keeps matching fresh databases. Rebuilt rows
+ * record the honest absent source format. No-op when the table is absent
+ * (route migration not yet applied) or already current.
+ */
+function upgradeWorkflowRunImportMetadataSchema(db: MomentumDb): void {
+  if (!tableExists(db, "workflow_run_import_metadata")) return;
+  if (columnExists(db, "workflow_run_import_metadata", "source_format")) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    // Re-check under the write lock so a concurrent opener that already
+    // rebuilt the table leaves this a no-op instead of a double rename.
+    if (!columnExists(db, "workflow_run_import_metadata", "source_format")) {
+      const definition = DESTINATION_TABLES.find(
+        (contract) => contract.name === "workflow_run_import_metadata",
+      )!.definition;
+      db.exec(
+        "ALTER TABLE workflow_run_import_metadata RENAME TO workflow_run_import_metadata_upgrade",
+      );
+      db.exec(definition);
+      db.exec(
+        `INSERT INTO workflow_run_import_metadata
+           (run_id, mode, profile, risk, quota_policy_json, source_format,
+            created_at, updated_at)
+         SELECT run_id, mode, profile, risk, quota_policy_json, NULL,
+                created_at, updated_at
+           FROM workflow_run_import_metadata_upgrade`,
+      );
+      db.exec("DROP TABLE workflow_run_import_metadata_upgrade");
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    safeRollback(db);
+    throw error;
+  }
+}
+
 export function createRouteStateDestinations(db: MomentumDb): void {
   for (const contract of DESTINATION_COLUMNS) {
     if (!columnExists(db, contract.table, contract.column)) {
@@ -703,6 +759,10 @@ function planRun(
   lineageRuns?: ReadonlyMap<string, RunRow>,
   validated?: ReturnType<typeof validateWorkflowRoute>,
   canonicalAgentConfigs?: ReadonlyMap<string, Record<string, string>>,
+  // Legacy route_json never carried a source format, so the migration path
+  // records the honest absent value; only the import-persistence seam
+  // supplies one.
+  importSourceFormat: string | null = null,
 ): RouteRunPlan {
   const route =
     validated ??
@@ -735,6 +795,7 @@ function planRun(
           profile: route.profile,
           risk: route.risk,
           quotaPolicyJson: route.quotaPolicyJson,
+          sourceFormat: importSourceFormat,
         }
       : null;
   return {
@@ -1306,8 +1367,9 @@ function applyRouteStatePlan(
   );
   const insertImport = db.prepare(
     `INSERT INTO workflow_run_import_metadata
-       (run_id, mode, profile, risk, quota_policy_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (run_id, mode, profile, risk, quota_policy_json, source_format,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertLineage = db.prepare(
     `INSERT INTO workflow_run_lineage
@@ -1340,6 +1402,7 @@ function applyRouteStatePlan(
         item.importMetadata.profile,
         item.importMetadata.risk,
         item.importMetadata.quotaPolicyJson,
+        item.importMetadata.sourceFormat,
         item.run.created_at,
         item.run.updated_at,
       );
@@ -1440,11 +1503,12 @@ function assertCanonicalDestinationEquivalence(
   }
   const importMetadata = db
     .prepare(
-      `SELECT mode, profile, risk, quota_policy_json
+      `SELECT mode, profile, risk, quota_policy_json, source_format
          FROM workflow_run_import_metadata
         WHERE run_id = ?`,
     )
-    .get(item.run.id) as CanonicalImportMetadataRow | undefined;
+    .get(item.run.id) as
+    Omit<CanonicalImportMetadataRow, "created_at" | "updated_at"> | undefined;
   const expectedImportMetadata =
     item.importMetadata === null
       ? undefined
@@ -1453,6 +1517,7 @@ function assertCanonicalDestinationEquivalence(
           profile: item.importMetadata.profile,
           risk: item.importMetadata.risk,
           quota_policy_json: item.importMetadata.quotaPolicyJson,
+          source_format: item.importMetadata.sourceFormat,
         };
   if (
     !isDeepStrictEqual(
@@ -1746,6 +1811,7 @@ type CanonicalImportMetadataRow = {
   profile: string | null;
   risk: string | null;
   quota_policy_json: string | null;
+  source_format: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -1765,7 +1831,7 @@ function loadCanonicalImportMetadataRows(
     const placeholders = chunk.map(() => "?").join(", ");
     const rows = db
       .prepare(
-        `SELECT run_id, mode, profile, risk, quota_policy_json,
+        `SELECT run_id, mode, profile, risk, quota_policy_json, source_format,
                 created_at, updated_at
            FROM workflow_run_import_metadata
           WHERE run_id IN (${placeholders})`,
@@ -1777,6 +1843,7 @@ function loadCanonicalImportMetadataRows(
         profile: row.profile,
         risk: row.risk,
         quota_policy_json: row.quota_policy_json,
+        source_format: row.source_format,
         created_at: row.created_at,
         updated_at: row.updated_at,
       });

@@ -412,7 +412,7 @@ describe("workflow route-state migration", () => {
       expect(
         db
           .prepare(
-            `SELECT mode, profile, risk, quota_policy_json
+            `SELECT mode, profile, risk, quota_policy_json, source_format
                FROM workflow_run_import_metadata
               WHERE run_id = 'cwfp-imported'`,
           )
@@ -422,6 +422,9 @@ describe("workflow route-state migration", () => {
         profile: "fixture-import",
         risk: "medium",
         quota_policy_json: '{"maxTurns":12,"overflow":"refuse"}',
+        // Legacy route_json never carried a source format, so migrated rows
+        // record the honest absent value.
+        source_format: null,
       });
       expect(
         db
@@ -781,6 +784,83 @@ describe("workflow route-state migration", () => {
       }
     } finally {
       db.close();
+    }
+  });
+
+  it("rebuilds a pre-source-format import-metadata table in place on reopen", () => {
+    const dataDir = seedReleasedFixture();
+    const migrated = openDb(dataDir);
+    migrated.close();
+    // Reconstruct the destination shape a previous release created: the same
+    // table without the source_format column, with the migrated row intact.
+    withRawDb(dataDir, (db) => {
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.exec(`
+        ALTER TABLE workflow_run_import_metadata
+          RENAME TO workflow_run_import_metadata_old;
+        CREATE TABLE workflow_run_import_metadata (
+          run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id),
+          mode TEXT,
+          profile TEXT,
+          risk TEXT,
+          quota_policy_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          CHECK (mode IS NULL OR trim(mode) <> ''),
+          CHECK (profile IS NULL OR trim(profile) <> ''),
+          CHECK (risk IS NULL OR trim(risk) <> '')
+        ) STRICT;
+        INSERT INTO workflow_run_import_metadata
+          (run_id, mode, profile, risk, quota_policy_json,
+           created_at, updated_at)
+        SELECT run_id, mode, profile, risk, quota_policy_json,
+               created_at, updated_at
+          FROM workflow_run_import_metadata_old;
+        DROP TABLE workflow_run_import_metadata_old;
+      `);
+    });
+
+    const reopened = openDb(dataDir);
+    try {
+      expect(
+        reopened
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json, source_format
+               FROM workflow_run_import_metadata
+              WHERE run_id = 'cwfp-imported'`,
+          )
+          .get(),
+      ).toEqual({
+        mode: "implementation",
+        profile: "fixture-import",
+        risk: "medium",
+        quota_policy_json: '{"maxTurns":12,"overflow":"refuse"}',
+        source_format: null,
+      });
+    } finally {
+      reopened.close();
+    }
+
+    // The rebuilt table matches a fresh database's exact schema text.
+    const freshDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "momentum-source-format-fresh-"),
+    );
+    tempRoots.push(freshDir);
+    const fresh = openDb(freshDir);
+    const rebuilt = openExistingDbReadOnly(dataDir)!;
+    try {
+      const sql = (db: DatabaseSync) =>
+        (
+          db
+            .prepare(
+              "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workflow_run_import_metadata'",
+            )
+            .get() as { sql: string }
+        ).sql;
+      expect(sql(rebuilt)).toBe(sql(fresh));
+    } finally {
+      fresh.close();
+      rebuilt.close();
     }
   });
 

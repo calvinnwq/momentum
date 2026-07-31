@@ -1326,7 +1326,8 @@ describe("persistWorkflowRunImport", () => {
       expect(
         db
           .prepare(
-            `SELECT mode, profile, risk, quota_policy_json, created_at
+            `SELECT mode, profile, risk, quota_policy_json, source_format,
+                    created_at
                FROM workflow_run_import_metadata
               WHERE run_id = ?`,
           )
@@ -1336,6 +1337,7 @@ describe("persistWorkflowRunImport", () => {
         profile: "momentum-m7",
         risk: "medium",
         quota_policy_json: '{"maxTurns":12,"overflow":"refuse"}',
+        source_format: "agent-workflow-plan@v1",
         created_at: 1_700_000_000,
       });
 
@@ -1369,8 +1371,8 @@ describe("persistWorkflowRunImport", () => {
       expect(
         db
           .prepare(
-            `SELECT mode, profile, risk, quota_policy_json, created_at,
-                    updated_at
+            `SELECT mode, profile, risk, quota_policy_json, source_format,
+                    created_at, updated_at
                FROM workflow_run_import_metadata
               WHERE run_id = ?`,
           )
@@ -1380,6 +1382,7 @@ describe("persistWorkflowRunImport", () => {
         profile: "momentum-m7",
         risk: "high",
         quota_policy_json: '{"maxTurns":24,"overflow":"refuse"}',
+        source_format: "agent-workflow-plan@v1",
         created_at: 1_700_000_000,
         updated_at: 1_700_000_500,
       });

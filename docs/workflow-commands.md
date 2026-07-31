@@ -1159,7 +1159,10 @@ State and filter compose: passing both returns runs whose literal state matches 
           "mode": "execute-ready",
           "profile": "momentum-m7",
           "risk": null,
-          "quotaPolicy": null
+          "quotaPolicy": null,
+          "sourceFormat": "agent-workflow-plan@v1",
+          "createdAt": 1730000000000,
+          "updatedAt": 1730000600000
         },
         "needsManualRecovery": false,
         "startedAt": 1730000000000,
@@ -1301,7 +1304,7 @@ step shape without that field.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route` is a read-only compatibility projection over explicit canonical destinations; new writes leave `workflow_runs.route_json` empty, and the projection now carries only the `steps` namespace.
-`run.selectedProfile` reads `workflow_run_coding_compatibility.selected_profile` directly, and `run.importMetadata` reads the imported `mode`, legacy `profile`, `risk`, and `quotaPolicy` values directly from `workflow_run_import_metadata` for imported runs (`null` otherwise); the retired `route.profile`, `route.mode`, `route.risk`, and `route.quotaPolicy` keys are no longer emitted.
+`run.selectedProfile` reads `workflow_run_coding_compatibility.selected_profile` directly, and `run.importMetadata` reads the imported `mode`, legacy `profile`, `risk`, `quotaPolicy`, `sourceFormat`, and marker `createdAt` / `updatedAt` timestamps directly from `workflow_run_import_metadata` for imported runs (`null` otherwise); the retired `route.profile`, `route.mode`, `route.risk`, and `route.quotaPolicy` keys are no longer emitted.
 The import table also owns the imported marker timestamps, which remain database audit fields rather than duplicated route values.
 For CLI-created runs, `--profile` records the non-imported value for status, list, handoff, and logs read-back; the monitor detail loader reads the same canonical value before deriving its compact envelope, while daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `run.implementationEngine` reads the historical coding implementation label directly from `workflow_run_coding_compatibility.implementation_engine`: `gnhf`, legacy `native-goal-loop`, or `current-gnhf-cwfp`; the retired `route.implementationEngine` key is no longer emitted.

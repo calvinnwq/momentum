@@ -75,6 +75,7 @@ function seedImportedRun(
   db: MomentumDb,
   runId: string,
   route: Record<string, unknown>,
+  importSourceFormat: string | null = null,
 ): void {
   db.prepare(
     `INSERT INTO workflow_runs (
@@ -90,6 +91,7 @@ function seedImportedRun(
     definitionVersion: null,
     createdAt: NOW,
     updatedAt: NOW,
+    importSourceFormat,
   });
 }
 
@@ -222,6 +224,7 @@ describe("readWorkflowRunImportMetadata — direct typed import read-back", () =
         seedImportedRun(db, "cwfp-roundtrip", testCase.route);
         expect(readWorkflowRunImportMetadata(db, "cwfp-roundtrip")).toEqual({
           ...testCase.expected,
+          sourceFormat: null,
           createdAt: NOW,
           updatedAt: NOW,
         });
@@ -241,9 +244,38 @@ describe("readWorkflowRunImportMetadata — direct typed import read-back", () =
         profile: null,
         risk: null,
         quotaPolicy: null,
+        sourceFormat: null,
         createdAt: NOW,
         updatedAt: NOW,
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("round-trips the imported source format alongside route-carried metadata", () => {
+    const db = openTempDb();
+    try {
+      seedImportedRun(
+        db,
+        "cwfp-source-format",
+        { mode: "execute-ready" },
+        "agent-workflow-plan@v1",
+      );
+      expect(readWorkflowRunImportMetadata(db, "cwfp-source-format")).toEqual({
+        mode: "execute-ready",
+        profile: null,
+        risk: null,
+        quotaPolicy: null,
+        sourceFormat: "agent-workflow-plan@v1",
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      expect(
+        readWorkflowRunImportMetadataForRuns(db, ["cwfp-source-format"]).get(
+          "cwfp-source-format",
+        ),
+      ).toMatchObject({ sourceFormat: "agent-workflow-plan@v1" });
     } finally {
       db.close();
     }
@@ -392,12 +424,17 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
   it("carries imported metadata on the imported run JSON shape", () => {
     const db = openTempDb();
     try {
-      seedImportedRun(db, "cwfp-json-readback", {
-        mode: "execute-ready",
-        profile: "imported-profile",
-        risk: "medium",
-        quotaPolicy: { maxTurns: 12, overflow: "refuse" },
-      });
+      seedImportedRun(
+        db,
+        "cwfp-json-readback",
+        {
+          mode: "execute-ready",
+          profile: "imported-profile",
+          risk: "medium",
+          quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        },
+        "agent-workflow-plan@v1",
+      );
       const detail = loadWorkflowRunDetail(db, "cwfp-json-readback");
       const shape = workflowRunToJsonShape(detail!.run);
       expect(shape["route"]).toEqual({});
@@ -408,6 +445,9 @@ describe("run JSON read-back exposes canonical metadata through typed fields", (
         profile: "imported-profile",
         risk: "medium",
         quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        sourceFormat: "agent-workflow-plan@v1",
+        createdAt: NOW,
+        updatedAt: NOW,
       });
     } finally {
       db.close();
