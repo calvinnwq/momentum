@@ -1974,7 +1974,8 @@ function destinationTableMatchesContract(
   if (normalizedSql === normalizeSchemaSql(contract.definition)) return true;
   return (
     contract.name === "workflow_run_import_metadata" &&
-    normalizedSql === normalizeSchemaSql(LEGACY_IMPORT_METADATA_TABLE_DEFINITION)
+    normalizedSql ===
+      normalizeSchemaSql(LEGACY_IMPORT_METADATA_TABLE_DEFINITION)
   );
 }
 
