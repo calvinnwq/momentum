@@ -1,6 +1,5 @@
 {
-  "name": "coding-workflow-live-wrapper",
-  "wrappers": {
+  "bindings": {
     "preflight": {
       "command": "/usr/bin/env",
       "args": [

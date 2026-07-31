@@ -467,6 +467,27 @@ async function daemonStart(
   const pid = process.pid;
   const host = os.hostname() || null;
 
+  // Host-binding configuration is resolved before any durable read or
+  // startup recovery so a retired or invalid selector refuses without
+  // mutating daemon-run, lock, or workflow state.
+  let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
+    ok: true,
+    dispatch: executeWorkflowStepDispatch,
+  };
+  if (loopRequested) {
+    workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
+      io.env ?? {},
+      executeWorkflowStepDispatch,
+      deps,
+    );
+    if (!workflowDispatchResolution.ok) {
+      return emitDaemonStartFailure(parsed, io, {
+        code: "daemon_host_bindings_invalid",
+        message: workflowDispatchResolution.message,
+      });
+    }
+  }
+
   const db = openDb(dataDir);
   try {
     let existing = getActiveDaemonRun(db);
@@ -488,24 +509,6 @@ async function daemonStart(
           : `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`,
         existing: existingSummary,
       });
-    }
-
-    let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
-      ok: true,
-      dispatch: executeWorkflowStepDispatch,
-    };
-    if (loopRequested) {
-      workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
-        io.env ?? {},
-        executeWorkflowStepDispatch,
-        deps,
-      );
-      if (!workflowDispatchResolution.ok) {
-        return emitDaemonStartFailure(parsed, io, {
-          code: "daemon_live_wrapper_profile_invalid",
-          message: workflowDispatchResolution.message,
-        });
-      }
     }
 
     let runId: string;
@@ -554,9 +557,9 @@ async function daemonStart(
       // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
       // drive the workflow scheduler lane. Register-only `daemon start` returns
       // above and never reaches here, so it stays inert. The lane is harmlessly
-      // idle when no workflow run has a runnable step. Without a live-wrapper
-      // profile, the dogfood resolver keeps the default dispatch unchanged
-      // unless its explicit fixture opt-in is set.
+      // idle when no workflow run has a runnable step. Without host bindings,
+      // the dogfood resolver keeps the default dispatch unchanged unless its
+      // explicit fixture opt-in is set.
       workflowLane: {
         dispatch: workflowDispatchResolution.dispatch,
         claimedExecutorNames: configuredExecutorNames(io.env ?? process.env),

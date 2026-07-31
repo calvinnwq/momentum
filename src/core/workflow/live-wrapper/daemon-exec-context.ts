@@ -10,7 +10,7 @@
  * This module owns that decision. It is split into a pure resolver
  * ({@link resolveDispatchedStepExecutorContext}) and the injected IO loader
  * ({@link loadDispatchedStepRunProvenance}) that reads the durable run row — the
- * same pure-decision / injected-IO split `live-wrapper/daemon-profile.ts` uses.
+ * same pure-decision / injected-IO split `live-wrapper/daemon-host-bindings.ts` uses.
  *
  * Run-dir layout (the deferred design decision, now settled to match existing
  * precedent):

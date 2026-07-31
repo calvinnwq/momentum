@@ -11,9 +11,9 @@ import {
   planWorkflowHarnessSmoke,
 } from "../src/core/executors/smoke/workflow-harness.js";
 import {
-  REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR,
+  REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR,
   buildHarnessProbeEnv,
-  loadRawWorkflowProfileFromEnv,
+  loadRawWorkflowHostBindingsFromEnv,
   runHarnessProbe,
 } from "../src/adapters/real-workflow-probe.js";
 
@@ -27,11 +27,11 @@ import {
  *
  * Two tiers live here, mirroring `test/real-linear-read-smoke.test.ts`:
  *   - **CI-safe** unit coverage of the execution helpers themselves
- *     (`runHarnessProbe`, `loadRawWorkflowProfileFromEnv`). These spawn only a
+ *     (`runHarnessProbe`, `loadRawWorkflowHostBindingsFromEnv`). These spawn only a
  *     cheap, local `process.execPath` (node) child or read a temp file, so they
  *     never reach an external system and always run.
  *   - The **opt-in real probe smoke**, skipped unless an operator points
- *     `MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE` at a live-wrapper profile and sets
+ *     `MOMENTUM_REAL_SMOKE_WORKFLOW_HOST_BINDINGS` at a live-wrapper profile and sets
  *     `MOMENTUM_REAL_SMOKE_WORKFLOW=1` (plus a `MOMENTUM_REAL_SMOKE_WORKFLOW_KIND`).
  *     It runs the configured wrapper's pre-flight probe (the safe probe-only
  *     dry-run), classifies the outcome, and records evidence under gitignored
@@ -40,7 +40,7 @@ import {
  * Manual run (probe-only dry-run of, e.g., the validate wrapper):
  *   MOMENTUM_REAL_SMOKE_WORKFLOW=1 \
  *   MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=validate \
- *   MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json \
+ *   MOMENTUM_REAL_SMOKE_WORKFLOW_HOST_BINDINGS=/abs/path/to/live-wrappers.json \
  *     pnpm vitest run --config vitest.integration.config.ts test/real-workflow-probe-smoke.test.ts
  *
  * External writes stay closed: a `tracker-refresh` (external-apply) probe needs
@@ -161,22 +161,21 @@ describe("buildHarnessProbeEnv (NGX-372)", () => {
   });
 });
 
-describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
+describe("loadRawWorkflowHostBindingsFromEnv (NGX-372)", () => {
   it("returns undefined when the profile env var is unset", () => {
-    expect(loadRawWorkflowProfileFromEnv({})).toBeUndefined();
+    expect(loadRawWorkflowHostBindingsFromEnv({})).toBeUndefined();
   });
 
   it("parses the JSON profile document at the configured path", () => {
     const dir = makeTempDir();
     const file = path.join(dir, "live-wrappers.json");
     const doc = {
-      name: "smoke",
-      wrappers: { validate: { command: "/usr/bin/true" } },
+      bindings: { validate: { command: "/usr/bin/true" } },
     };
     fs.writeFileSync(file, JSON.stringify(doc));
     expect(
-      loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
+      loadRawWorkflowHostBindingsFromEnv({
+        [REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR]: file,
       }),
     ).toEqual(doc);
   });
@@ -184,8 +183,11 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
   it("returns undefined when the configured profile path does not exist", () => {
     const dir = makeTempDir();
     expect(
-      loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: path.join(dir, "missing.json"),
+      loadRawWorkflowHostBindingsFromEnv({
+        [REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR]: path.join(
+          dir,
+          "missing.json",
+        ),
       }),
     ).toBeUndefined();
   });
@@ -195,8 +197,8 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     const file = path.join(dir, "broken.json");
     fs.writeFileSync(file, "{ not valid json");
     expect(
-      loadRawWorkflowProfileFromEnv({
-        [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
+      loadRawWorkflowHostBindingsFromEnv({
+        [REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR]: file,
       }),
     ).toBeUndefined();
   });
@@ -207,8 +209,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     fs.writeFileSync(
       file,
       JSON.stringify({
-        name: "smoke",
-        wrappers: {
+        bindings: {
           validate: {
             command: NODE,
             args: ["-e", "process.exit(0)"],
@@ -228,11 +229,11 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     const env = {
       [REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR]: "1",
       [REAL_SMOKE_WORKFLOW_KIND_ENV_VAR]: "validate",
-      [REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR]: file,
+      [REAL_SMOKE_WORKFLOW_HOST_BINDINGS_ENV_VAR]: file,
     };
     const plan = planWorkflowHarnessSmoke(
       env,
-      loadRawWorkflowProfileFromEnv(env),
+      loadRawWorkflowHostBindingsFromEnv(env),
     );
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
@@ -244,7 +245,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
 
 const smokePlan = planWorkflowHarnessSmoke(
   process.env,
-  loadRawWorkflowProfileFromEnv(process.env),
+  loadRawWorkflowHostBindingsFromEnv(process.env),
 );
 const shouldRunProbeSmoke =
   smokePlan.mode === "run" && smokePlan.probeOnly && smokePlan.probe !== null;

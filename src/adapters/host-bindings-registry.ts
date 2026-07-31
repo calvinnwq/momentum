@@ -9,142 +9,141 @@ import { canonicalWorkflowStepKind } from "../core/workflow/definition/legacy.js
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../shared/process-limits.js";
 
 /**
- * Live workflow-step wrapper configuration and registry.
+ * Machine-local host-binding configuration and registry.
  *
- * Momentum invokes live workflow steps that wrap the existing
- * OpenClaw engines (GNHF, postflight, no-mistakes, merge-cleanup,
- * tracker-refresh). The runtime uses a *wrapper registry keyed by
- * `WorkflowStepKind`* whose entries resolve from durable per-profile
- * configuration rather than hard-coded local paths.
+ * Momentum invokes live workflow steps through machine-local executable
+ * bindings. The runtime uses a *binding registry keyed by `WorkflowStepKind`*
+ * whose entries resolve from the operator's host-binding file rather than
+ * hard-coded local paths.
  *
  * This module owns only the typed-config + registry-resolution layer:
  *
- *   - `parseLiveWrapperConfig` validates a single wrapper spec (explicit
- *     absolute `command`, argv `args`, `cwd`, bounded `timeout_sec`,
- *     `env_allow`, `result_file`, and an optional pre-flight `probe`).
- *     Durable snake_case keys are canonical; the retired transitional
- *     camelCase aliases (`timeoutSec`, `envAllow`, `resultFile`,
- *     `probe.timeoutSec`) are rejected whenever present.
- *   - `parseLiveWrapperProfile` validates a named profile whose `wrappers`
- *     mapping is keyed by `WorkflowStepKind`.
- *   - `resolveLiveWrapper` resolves the wrapper config for a requested step
- *     kind, refusing unknown or unconfigured kinds instead of guessing.
+ *   - `parseHostBinding` validates a single binding (explicit absolute
+ *     `command`, argv `args`, `cwd`, bounded `timeout_sec`, `env_allow`,
+ *     `result_file`, and an optional pre-flight `probe`). Durable snake_case
+ *     keys are canonical; the retired transitional camelCase aliases
+ *     (`timeoutSec`, `envAllow`, `resultFile`, `probe.timeoutSec`) are
+ *     rejected whenever present.
+ *   - `parseHostBindings` validates the strict top-level `{ "bindings": ... }`
+ *     document whose mapping is keyed by `WorkflowStepKind`.
+ *     The retired live-wrapper profile shape (`name` / `wrappers`) is refused
+ *     with a precise migration diagnostic, never read as a fallback.
+ *   - `resolveHostBinding` resolves the binding for a requested step kind,
+ *     refusing unknown or unconfigured kinds instead of guessing.
  *
- * It does NOT execute anything: spawning the live engines, lease/heartbeat
+ * It does NOT execute anything: spawning the bound commands, lease/heartbeat
  * persistence, result-file capture, and verification/commit transactions are
  * composed by the live step wrapper / executor / orchestrator layers. Missing
  * or malformed configuration refuses here, before any workflow state is
  * mutated, per SPEC.md.
  */
 
-export type LiveWrapperCwd = "repo" | "iteration";
+export type HostBindingCwd = "repo" | "iteration";
 
-export type LiveWrapperProbeConfig = {
+export type HostBindingProbeConfig = {
   command: string;
   args: readonly string[];
   timeoutSec: number;
 };
 
-export type LiveWrapperConfig = {
+export type HostBindingConfig = {
   commandIdentity?: string;
   command: string;
   args: readonly string[];
-  cwd: LiveWrapperCwd;
+  cwd: HostBindingCwd;
   timeoutSec: number;
   envAllow: readonly string[];
   resultFile: string;
-  probe: LiveWrapperProbeConfig | undefined;
+  probe: HostBindingProbeConfig | undefined;
 };
 
-export type LiveWrapperProfile = {
-  name: string;
-  wrappers: ReadonlyMap<WorkflowStepKind, LiveWrapperConfig>;
+export type HostBindings = {
+  bindings: ReadonlyMap<WorkflowStepKind, HostBindingConfig>;
 };
 
 /**
- * Stable refusal vocabulary for the live wrapper config + registry layer.
+ * Stable refusal vocabulary for the host-binding config + registry layer.
  * These are configuration-time refusals, distinct from the execution-time
  * recovery taxonomy (`runtime_unavailable`, `command_failed`, ...) mapped by
  * the live process execution layers.
  */
-export const LIVE_WRAPPER_REFUSAL_CODES = [
-  "live_wrapper_config_missing",
-  "live_wrapper_config_invalid",
-  "live_wrapper_profile_missing",
-  "live_wrapper_profile_invalid",
-  "live_wrapper_unsupported_kind",
-  "live_wrapper_not_configured",
+export const HOST_BINDING_REFUSAL_CODES = [
+  "host_binding_missing",
+  "host_binding_invalid",
+  "host_bindings_missing",
+  "host_bindings_invalid",
+  "host_binding_unsupported_kind",
+  "host_binding_not_configured",
 ] as const;
 
-export type LiveWrapperRefusalCode =
-  (typeof LIVE_WRAPPER_REFUSAL_CODES)[number];
+export type HostBindingRefusalCode =
+  (typeof HOST_BINDING_REFUSAL_CODES)[number];
 
-export type LiveWrapperConfigErrorCode =
-  "live_wrapper_config_missing" | "live_wrapper_config_invalid";
+export type HostBindingConfigErrorCode =
+  "host_binding_missing" | "host_binding_invalid";
 
-export type LiveWrapperProfileErrorCode =
-  "live_wrapper_profile_missing" | "live_wrapper_profile_invalid";
+export type HostBindingsErrorCode =
+  "host_bindings_missing" | "host_bindings_invalid";
 
-export type LiveWrapperResolveErrorCode =
-  "live_wrapper_unsupported_kind" | "live_wrapper_not_configured";
+export type HostBindingResolveErrorCode =
+  "host_binding_unsupported_kind" | "host_binding_not_configured";
 
-export type LiveWrapperConfigError = {
+export type HostBindingConfigError = {
   ok: false;
-  code: LiveWrapperConfigErrorCode;
+  code: HostBindingConfigErrorCode;
   error: string;
 };
 
-export type LiveWrapperConfigSuccess = {
+export type HostBindingConfigSuccess = {
   ok: true;
-  config: LiveWrapperConfig;
+  config: HostBindingConfig;
 };
 
-export type LiveWrapperConfigParse =
-  LiveWrapperConfigSuccess | LiveWrapperConfigError;
+export type HostBindingConfigParse =
+  HostBindingConfigSuccess | HostBindingConfigError;
 
-export type LiveWrapperProfileError = {
+export type HostBindingsError = {
   ok: false;
-  code: LiveWrapperProfileErrorCode;
+  code: HostBindingsErrorCode;
   error: string;
 };
 
-export type LiveWrapperProfileSuccess = {
+export type HostBindingsSuccess = {
   ok: true;
-  profile: LiveWrapperProfile;
+  bindings: HostBindings;
 };
 
-export type LiveWrapperProfileParse =
-  LiveWrapperProfileSuccess | LiveWrapperProfileError;
+export type HostBindingsParse = HostBindingsSuccess | HostBindingsError;
 
-export type LiveWrapperResolveError = {
+export type HostBindingResolveError = {
   ok: false;
-  code: LiveWrapperResolveErrorCode;
+  code: HostBindingResolveErrorCode;
   error: string;
 };
 
-export type LiveWrapperResolveSuccess = {
+export type HostBindingResolveSuccess = {
   ok: true;
   kind: WorkflowStepKind;
-  config: LiveWrapperConfig;
+  config: HostBindingConfig;
 };
 
-export type LiveWrapperResolveResult =
-  LiveWrapperResolveSuccess | LiveWrapperResolveError;
+export type HostBindingResolveResult =
+  HostBindingResolveSuccess | HostBindingResolveError;
 
-export const DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC = 30;
+export const DEFAULT_HOST_BINDING_PROBE_TIMEOUT_SEC = 30;
 
-export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
+export function parseHostBinding(value: unknown): HostBindingConfigParse {
   if (value === undefined || value === null) {
     return {
       ok: false,
-      code: "live_wrapper_config_missing",
+      code: "host_binding_missing",
       error:
-        "Live wrapper config is missing; a wrapper requires at least an absolute `command`.",
+        "Host binding is missing; a binding requires at least an absolute `command`.",
     };
   }
   if (!isRecord(value)) {
     return configInvalid(
-      "Live wrapper config must be a mapping with at least a `command` field.",
+      "Host binding must be a mapping with at least a `command` field.",
     );
   }
 
@@ -165,7 +164,7 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
     !isPortableScriptCommandIdentity(rawCommandIdentity)
   ) {
     return configInvalid(
-      "Live wrapper `command_identity` must be a portable command identity.",
+      "Host binding `command_identity` must be a portable command identity.",
     );
   }
   const commandIdentity = rawCommandIdentity as string | undefined;
@@ -212,122 +211,126 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   };
 }
 
-export function parseLiveWrapperProfile(
-  value: unknown,
-): LiveWrapperProfileParse {
+export function parseHostBindings(value: unknown): HostBindingsParse {
   if (value === undefined || value === null) {
     return {
       ok: false,
-      code: "live_wrapper_profile_missing",
+      code: "host_bindings_missing",
       error:
-        "Live wrapper profile is missing; configure a `name` and at least one wrapper keyed by workflow step kind.",
+        "Host bindings are missing; configure a strict top-level `bindings` mapping keyed by workflow step kind.",
     };
   }
   if (!isRecord(value)) {
-    return profileInvalid(
-      "Live wrapper profile must be a mapping with `name` and `wrappers` fields.",
+    return bindingsInvalid(
+      "Host bindings must be a mapping with a single top-level `bindings` field.",
     );
   }
 
-  const rawName = value["name"];
-  if (typeof rawName !== "string" || rawName.trim().length === 0) {
-    return profileInvalid(
-      "Live wrapper profile `name` is required and must be a non-empty string.",
+  // The retired live-wrapper profile shape must never be read as a fallback:
+  // refuse it with a precise migration diagnostic before anything else.
+  if ("wrappers" in value) {
+    return bindingsInvalid(
+      "Host bindings use the strict top-level `bindings` mapping; the retired profile `wrappers` shape is not read. Move each entry under a top-level `bindings` key and remove the profile `name`.",
     );
   }
-  const name = rawName.trim();
-
-  const rawWrappers = value["wrappers"];
-  if (rawWrappers === undefined || rawWrappers === null) {
-    return profileInvalid(
-      "Live wrapper profile `wrappers` is required and must map workflow step kinds to wrapper configs.",
-    );
-  }
-  if (!isRecord(rawWrappers)) {
-    return profileInvalid(
-      "Live wrapper profile `wrappers` must be a mapping keyed by workflow step kind.",
+  const unknownKey = Object.keys(value).find((key) => key !== "bindings");
+  if (unknownKey !== undefined) {
+    return bindingsInvalid(
+      `Host bindings have an unknown top-level key "${unknownKey}"; the strict shape has a single top-level \`bindings\` mapping.`,
     );
   }
 
-  const entries = Object.entries(rawWrappers);
+  const rawBindings = value["bindings"];
+  if (rawBindings === undefined || rawBindings === null) {
+    return bindingsInvalid(
+      "Host bindings `bindings` is required and must map workflow step kinds to binding configs.",
+    );
+  }
+  if (!isRecord(rawBindings)) {
+    return bindingsInvalid(
+      "Host bindings `bindings` must be a mapping keyed by workflow step kind.",
+    );
+  }
+
+  const entries = Object.entries(rawBindings);
   if (entries.length === 0) {
-    return profileInvalid(
-      `Live wrapper profile "${name}" must configure at least one wrapper.`,
+    return bindingsInvalid(
+      "Host bindings must configure at least one binding.",
     );
   }
 
-  const selectedWrappers = new Map<
+  const selectedBindings = new Map<
     WorkflowStepKind,
     { rawKind: string; rawConfig: unknown }
   >();
   for (const [kind, rawConfig] of entries) {
     const canonicalKind = canonicalWorkflowStepKind(kind);
     if (canonicalKind === undefined) {
-      return profileInvalid(
-        `Live wrapper profile "${name}" has an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
+      return bindingsInvalid(
+        `Host bindings have an unknown workflow step kind "${kind}"; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
       );
     }
-    const existing = selectedWrappers.get(canonicalKind);
+    const existing = selectedBindings.get(canonicalKind);
     if (existing?.rawKind === canonicalKind) continue;
-    selectedWrappers.set(canonicalKind, { rawKind: kind, rawConfig });
+    selectedBindings.set(canonicalKind, { rawKind: kind, rawConfig });
   }
 
-  const wrappers = new Map<WorkflowStepKind, LiveWrapperConfig>();
-  for (const [kind, selected] of selectedWrappers) {
-    const parsed = parseLiveWrapperConfig(selected.rawConfig);
+  const bindings = new Map<WorkflowStepKind, HostBindingConfig>();
+  for (const [kind, selected] of selectedBindings) {
+    const parsed = parseHostBinding(selected.rawConfig);
     if (!parsed.ok) {
-      return profileInvalid(
-        `Live wrapper profile "${name}" wrapper "${selected.rawKind}" is invalid: ${parsed.error}`,
+      return bindingsInvalid(
+        `Host binding "${selected.rawKind}" is invalid: ${parsed.error}`,
       );
     }
-    wrappers.set(kind, parsed.config);
+    bindings.set(kind, parsed.config);
   }
 
-  return { ok: true, profile: { name, wrappers } };
+  return { ok: true, bindings: { bindings } };
 }
 
-export function resolveLiveWrapper(
-  profile: LiveWrapperProfile,
+export function resolveHostBinding(
+  hostBindings: HostBindings,
   kind: string,
-): LiveWrapperResolveResult {
+): HostBindingResolveResult {
   const canonicalKind = canonicalWorkflowStepKind(kind);
   if (canonicalKind === undefined) {
     return {
       ok: false,
-      code: "live_wrapper_unsupported_kind",
-      error: `Live wrapper kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
+      code: "host_binding_unsupported_kind",
+      error: `Host binding kind "${kind}" is not a workflow step kind; supported kinds: ${WORKFLOW_STEP_KINDS.join(", ")}.`,
     };
   }
-  const config = profile.wrappers.get(canonicalKind);
+  const config = hostBindings.bindings.get(canonicalKind);
   if (config === undefined) {
     return {
       ok: false,
-      code: "live_wrapper_not_configured",
-      error: `Live wrapper profile "${profile.name}" has no wrapper configured for step kind "${kind}".`,
+      code: "host_binding_not_configured",
+      error: `Host bindings have no binding configured for step kind "${kind}".`,
     };
   }
   return { ok: true, kind: canonicalKind, config };
 }
 
-export function listConfiguredLiveWrapperKinds(
-  profile: LiveWrapperProfile,
+export function listConfiguredHostBindingKinds(
+  hostBindings: HostBindings,
 ): readonly WorkflowStepKind[] {
-  return WORKFLOW_STEP_KINDS.filter((kind) => profile.wrappers.has(kind));
+  return WORKFLOW_STEP_KINDS.filter((kind) => hostBindings.bindings.has(kind));
 }
 
 function parseAbsoluteCommand(
   raw: unknown,
   field: "command" | "probe.command",
-): { ok: true; value: string } | LiveWrapperConfigError {
+): { ok: true; value: string } | HostBindingConfigError {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be a non-empty string.`,
+      `Host binding \`${field}\` is required and must be a non-empty string.`,
     );
   }
   const value = raw.trim();
   if (!path.isAbsolute(value)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be an absolute executable path.`,
+      `Host binding \`${field}\` must be an absolute executable path.`,
     );
   }
   return { ok: true, value };
@@ -336,13 +339,13 @@ function parseAbsoluteCommand(
 function parseStringArray(
   raw: unknown,
   field: "args" | "probe.args",
-): { ok: true; value: string[] } | LiveWrapperConfigError {
+): { ok: true; value: string[] } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: [] };
   }
   if (!Array.isArray(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be an array of strings or numbers.`,
+      `Host binding \`${field}\` must be an array of strings or numbers.`,
     );
   }
   const out: string[] = [];
@@ -354,7 +357,7 @@ function parseStringArray(
       out.push(String(entry));
     } else {
       return configInvalid(
-        `Live wrapper \`${field}[${i}]\` must be a string or number.`,
+        `Host binding \`${field}[${i}]\` must be a string or number.`,
       );
     }
   }
@@ -364,10 +367,10 @@ function parseStringArray(
 function parseRequiredStringArray(
   raw: unknown,
   field: "args",
-): { ok: true; value: string[] } | LiveWrapperConfigError {
+): { ok: true; value: string[] } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be an array of strings or numbers.`,
+      `Host binding \`${field}\` is required and must be an array of strings or numbers.`,
     );
   }
   return parseStringArray(raw, field);
@@ -375,7 +378,7 @@ function parseRequiredStringArray(
 
 /**
  * Refuse a retired transitional camelCase alias whenever it is present in
- * serialized wrapper input, even alongside its canonical snake_case key, so
+ * serialized binding input, even alongside its canonical snake_case key, so
  * durable configs cannot keep leaning on the removed alias vocabulary.
  */
 function rejectDeprecatedAlias(
@@ -383,24 +386,24 @@ function rejectDeprecatedAlias(
   aliasKey: "timeoutSec" | "envAllow" | "resultFile",
   canonicalKey: "timeout_sec" | "env_allow" | "result_file",
   fieldPrefix = "",
-): LiveWrapperConfigError | undefined {
+): HostBindingConfigError | undefined {
   if (!(aliasKey in record)) return undefined;
   return configInvalid(
-    `Live wrapper \`${fieldPrefix}${aliasKey}\` is a removed deprecated alias; use the canonical \`${fieldPrefix}${canonicalKey}\` key.`,
+    `Host binding \`${fieldPrefix}${aliasKey}\` is a removed deprecated alias; use the canonical \`${fieldPrefix}${canonicalKey}\` key.`,
   );
 }
 
 function parseEnvAllow(
   raw: unknown,
-): { ok: true; value: string[] } | LiveWrapperConfigError {
+): { ok: true; value: string[] } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      "Live wrapper `env_allow` is required and must be an array of environment variable names.",
+      "Host binding `env_allow` is required and must be an array of environment variable names.",
     );
   }
   if (!Array.isArray(raw)) {
     return configInvalid(
-      "Live wrapper `env_allow` must be an array of environment variable names.",
+      "Host binding `env_allow` must be an array of environment variable names.",
     );
   }
   const out: string[] = [];
@@ -408,7 +411,7 @@ function parseEnvAllow(
     const entry = raw[i];
     if (typeof entry !== "string" || !isValidEnvName(entry)) {
       return configInvalid(
-        `Live wrapper \`env_allow[${i}]\` must be a valid environment variable name.`,
+        `Host binding \`env_allow[${i}]\` must be a valid environment variable name.`,
       );
     }
     out.push(entry);
@@ -418,14 +421,14 @@ function parseEnvAllow(
 
 function parseCwd(
   raw: unknown,
-): { ok: true; value: LiveWrapperCwd } | LiveWrapperConfigError {
+): { ok: true; value: HostBindingCwd } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      'Live wrapper `cwd` is required and must be "repo" or "iteration".',
+      'Host binding `cwd` is required and must be "repo" or "iteration".',
     );
   }
   if (raw !== "repo" && raw !== "iteration") {
-    return configInvalid('Live wrapper `cwd` must be "repo" or "iteration".');
+    return configInvalid('Host binding `cwd` must be "repo" or "iteration".');
   }
   return { ok: true, value: raw };
 }
@@ -433,20 +436,20 @@ function parseCwd(
 function parseRequiredTimeoutSec(
   raw: unknown,
   field: "timeout_sec" | "probe.timeout_sec",
-): { ok: true; value: number } | LiveWrapperConfigError {
+): { ok: true; value: number } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      `Live wrapper \`${field}\` is required and must be a positive integer (seconds).`,
+      `Host binding \`${field}\` is required and must be a positive integer (seconds).`,
     );
   }
   if (!isPositiveInteger(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be a positive integer (seconds).`,
+      `Host binding \`${field}\` must be a positive integer (seconds).`,
     );
   }
   if (raw > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
     return configInvalid(
-      `Live wrapper \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
+      `Host binding \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
     );
   }
   return { ok: true, value: raw };
@@ -455,18 +458,18 @@ function parseRequiredTimeoutSec(
 function parseOptionalTimeoutSec(
   raw: unknown,
   field: "probe.timeout_sec",
-): { ok: true; value: number | undefined } | LiveWrapperConfigError {
+): { ok: true; value: number | undefined } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
   }
   if (!isPositiveInteger(raw)) {
     return configInvalid(
-      `Live wrapper \`${field}\` must be a positive integer (seconds).`,
+      `Host binding \`${field}\` must be a positive integer (seconds).`,
     );
   }
   if (raw > MAX_BUILT_IN_PROCESS_TIMEOUT_SEC) {
     return configInvalid(
-      `Live wrapper \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
+      `Host binding \`${field}\` must not exceed ${MAX_BUILT_IN_PROCESS_TIMEOUT_SEC} seconds.`,
     );
   }
   return { ok: true, value: raw };
@@ -474,15 +477,15 @@ function parseOptionalTimeoutSec(
 
 function parseResultFile(
   raw: unknown,
-): { ok: true; value: string } | LiveWrapperConfigError {
+): { ok: true; value: string } | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return configInvalid(
-      "Live wrapper `result_file` is required and must be a relative path inside the iteration artifact directory.",
+      "Host binding `result_file` is required and must be a relative path inside the iteration artifact directory.",
     );
   }
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return configInvalid(
-      "Live wrapper `result_file` must be a non-empty string.",
+      "Host binding `result_file` must be a non-empty string.",
     );
   }
   const value = raw.trim();
@@ -495,7 +498,7 @@ function parseResultFile(
     normalized === "./"
   ) {
     return configInvalid(
-      "Live wrapper `result_file` must be a relative path inside the iteration artifact directory.",
+      "Host binding `result_file` must be a relative path inside the iteration artifact directory.",
     );
   }
   return { ok: true, value };
@@ -504,14 +507,14 @@ function parseResultFile(
 function parseProbe(
   raw: unknown,
 ):
-  | { ok: true; value: LiveWrapperProbeConfig | undefined }
-  | LiveWrapperConfigError {
+  | { ok: true; value: HostBindingProbeConfig | undefined }
+  | HostBindingConfigError {
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
   }
   if (!isRecord(raw)) {
     return configInvalid(
-      "Live wrapper `probe` must be a mapping with at least a `command` field, or omitted entirely.",
+      "Host binding `probe` must be a mapping with at least a `command` field, or omitted entirely.",
     );
   }
 
@@ -542,7 +545,7 @@ function parseProbe(
     value: {
       command: commandResult.value,
       args: argsResult.value,
-      timeoutSec: timeoutResult.value ?? DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC,
+      timeoutSec: timeoutResult.value ?? DEFAULT_HOST_BINDING_PROBE_TIMEOUT_SEC,
     },
   };
 }
@@ -564,12 +567,12 @@ function isValidEnvName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
 
-function configInvalid(message: string): LiveWrapperConfigError {
-  return { ok: false, code: "live_wrapper_config_invalid", error: message };
+function configInvalid(message: string): HostBindingConfigError {
+  return { ok: false, code: "host_binding_invalid", error: message };
 }
 
-function profileInvalid(message: string): LiveWrapperProfileError {
-  return { ok: false, code: "live_wrapper_profile_invalid", error: message };
+function bindingsInvalid(message: string): HostBindingsError {
+  return { ok: false, code: "host_bindings_invalid", error: message };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

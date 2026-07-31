@@ -14,9 +14,9 @@ import {
   type WorkflowStepExecutorKind,
 } from "../src/core/workflow/step/executor.js";
 import {
-  parseLiveWrapperProfile,
-  type LiveWrapperProfile,
-} from "../src/adapters/live-wrapper-registry.js";
+  parseHostBindings,
+  type HostBindings,
+} from "../src/adapters/host-bindings-registry.js";
 
 /**
  * RC-5 (NGX-485): real `WorkflowStepExecutor` adapters replace the shipped fake
@@ -83,13 +83,12 @@ const VALID_RESULT_JSON = JSON.stringify({
 });
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
-function profileWith(
+function bindingsWith(
   kind: WorkflowStepExecutorKind,
   args: string[],
-): LiveWrapperProfile {
-  const parsed = parseLiveWrapperProfile({
-    name: "real-adapter-test",
-    wrappers: {
+): HostBindings {
+  const parsed = parseHostBindings({
+    bindings: {
       [kind]: {
         command: "/bin/sh",
         args,
@@ -100,8 +99,8 @@ function profileWith(
       },
     },
   });
-  if (!parsed.ok) throw new Error(`test setup: bad profile: ${parsed.error}`);
-  return parsed.profile;
+  if (!parsed.ok) throw new Error(`test setup: bad bindings: ${parsed.error}`);
+  return parsed.bindings;
 }
 
 describe("buildRealWorkflowStepExecutorRegistry", () => {
@@ -135,7 +134,7 @@ describe("buildRealWorkflowStepExecutorRegistry", () => {
     const repoPath = makeTempDir("momentum-real-adapter-repo-");
     const runDir = makeTempDir("momentum-real-adapter-run-");
     const registry = buildRealWorkflowStepExecutorRegistry({
-      profile: profileWith("implementation", ["-c", WRITE_VALID_RESULT]),
+      bindings: bindingsWith("implementation", ["-c", WRITE_VALID_RESULT]),
     });
     const out = adapterFor(registry, "implementation").execute(
       makeInput({
@@ -156,7 +155,7 @@ describe("buildRealWorkflowStepExecutorRegistry", () => {
     const repoPath = makeTempDir("momentum-real-adapter-repo-");
     const runDir = makeTempDir("momentum-real-adapter-run-");
     const registry = buildRealWorkflowStepExecutorRegistry({
-      profile: profileWith("implementation", ["-c", "exit 9"]),
+      bindings: bindingsWith("implementation", ["-c", "exit 9"]),
     });
     const out = adapterFor(registry, "implementation").execute(
       makeInput({
@@ -173,7 +172,7 @@ describe("buildRealWorkflowStepExecutorRegistry", () => {
 
   it("leaves the other canonical kinds runtime_unavailable when only one is configured", () => {
     const registry = buildRealWorkflowStepExecutorRegistry({
-      profile: profileWith("implementation", ["-c", "true"]),
+      bindings: bindingsWith("implementation", ["-c", "true"]),
     });
     const out = adapterFor(registry, "postflight").execute(
       makeInput({ kind: "postflight" }),

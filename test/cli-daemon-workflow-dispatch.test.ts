@@ -8,7 +8,7 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 import { terminalizeDispatchedExecutorAttempt } from "../src/core/workflow/dispatch/executor-evidence.js";
 import { acquireRepoLock } from "../src/core/repo/locks.js";
 
@@ -146,8 +146,7 @@ JSON`;
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "daemon-default-test",
-      wrappers: {
+      bindings: {
         preflight: {
           command: "/bin/sh",
           args: ["-c", script],
@@ -173,8 +172,7 @@ sqlite3 "$MOMENTUM_TEST_DB" "UPDATE workflow_leases SET released_at = 1700000000
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "daemon-lease-loss-test",
-      wrappers: {
+      bindings: {
         preflight: {
           command: "/bin/sh",
           args: ["-c", script],
@@ -200,8 +198,7 @@ JSON`;
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "daemon-env-test",
-      wrappers: {
+      bindings: {
         preflight: {
           command: "/bin/sh",
           args: ["-c", script],
@@ -222,8 +219,7 @@ function writeCodingWorkflowWrapperPreflightProfile(dir: string): string {
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "daemon-coding-wrapper-test",
-      wrappers: {
+      bindings: {
         preflight: {
           command: process.execPath,
           args: [
@@ -251,6 +247,58 @@ function writeCodingWorkflowWrapperPreflightProfile(dir: string): string {
 }
 
 describe("daemon start production workflow lane (NGX-367)", () => {
+  it("refuses the retired live-wrapper selector before stale-daemon startup recovery mutates state", async () => {
+    const dataDir = makeTempDir();
+    const { startDaemonRun, getActiveDaemonRun } =
+      await import("../src/core/daemon/runs.js");
+    let staleRunId: string;
+    const db = openDb(dataDir);
+    try {
+      // Started long ago so the run is well past the stale-heartbeat cutoff
+      // and would normally be recovered by managed-loop startup recovery.
+      ({ runId: staleRunId } = startDaemonRun(db, { pid: 77, now: 100 }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-idle-cycles",
+        "1",
+        "--json",
+        "--data-dir",
+        dataDir,
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stdout || result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(failure.message).toContain("retired");
+
+    // The refusal happened before startup recovery: the stale daemon run row
+    // is untouched and still the active run.
+    const after = openDb(dataDir);
+    try {
+      const active = getActiveDaemonRun(after);
+      expect(active?.id).toBe(staleRunId);
+      const row = after
+        .prepare("SELECT state, heartbeat_at FROM daemon_runs WHERE id = ?")
+        .get(staleRunId) as { state: string; heartbeat_at: number };
+      expect(row.state).toBe("running");
+      expect(row.heartbeat_at).toBe(100);
+    } finally {
+      after.close();
+    }
+  });
+
   it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -272,7 +320,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -351,7 +399,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -437,7 +485,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -490,7 +538,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -563,7 +611,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         "--json",
       ],
       {
-        [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
+        [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath,
         MOMENTUM_TEST_DB: path.join(dataDir, "momentum.db"),
       },
     );
@@ -1737,7 +1785,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -1782,7 +1830,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
           "--json",
         ],
         {
-          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
+          [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath,
           MOMENTUM_TEST_TOKEN: "from-cli-io",
         },
       );
@@ -1839,7 +1887,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -1917,7 +1965,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         dataDir,
         "--json",
       ],
-      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
     );
 
     expect(result.code).toBe(0);

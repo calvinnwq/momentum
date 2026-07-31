@@ -12,7 +12,7 @@ import {
   runLiveStepWrapperAsync,
   type LiveStepWrapperInput,
 } from "../src/adapters/live-step-wrapper.js";
-import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
+import type { HostBindingConfig } from "../src/adapters/host-bindings-registry.js";
 
 const tempRoots: string[] = [];
 
@@ -49,8 +49,8 @@ const VALID_RESULT_JSON = JSON.stringify({
 const WRITE_VALID_RESULT = `printf '%s' '${VALID_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
 function makeConfig(
-  overrides: Partial<LiveWrapperConfig> = {},
-): LiveWrapperConfig {
+  overrides: Partial<HostBindingConfig> = {},
+): HostBindingConfig {
   return {
     command: "/bin/sh",
     args: [],
@@ -64,7 +64,7 @@ function makeConfig(
 }
 
 type SetupOverrides = {
-  config?: Partial<LiveWrapperConfig>;
+  config?: Partial<HostBindingConfig>;
   repoPath?: string;
   iterationDir?: string;
   executorLogPath?: string;

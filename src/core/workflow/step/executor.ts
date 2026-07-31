@@ -199,7 +199,7 @@ export type WorkflowStepExecutorRegistry = ReadonlyMap<
  * with `runtime_unavailable` — the established prerequisite-missing class —
  * rather than fabricating a terminal result. The dispatcher then treats it as a
  * missing prerequisite, never as a clean success. `step/executor-real-adapters.ts`
- * reuses this for canonical kinds a live-wrapper profile does not configure.
+ * reuses this for canonical kinds the host bindings do not configure.
  */
 export function createUnconfiguredWorkflowStepExecutor(
   kind: WorkflowStepExecutorKind,
@@ -210,7 +210,7 @@ export function createUnconfiguredWorkflowStepExecutor(
     execute: (input) => ({
       ok: false,
       code: "runtime_unavailable",
-      error: `No live workflow-step wrapper is configured for step kind "${kind}"; configure a live-wrapper profile to execute it.`,
+      error: `No live workflow-step wrapper is configured for step kind "${kind}"; configure host bindings to execute it.`,
       executorLogPath: input.executorLogPath,
       resultJsonPath: input.resultJsonPath,
     }),
@@ -218,10 +218,10 @@ export function createUnconfiguredWorkflowStepExecutor(
 }
 
 /**
- * The production default registry (the real-adapter seam). With no live-wrapper profile supplied,
+ * The production default registry (the real-adapter seam). With no host bindings supplied,
  * every canonical kind resolves to the honest unconfigured adapter: lookup/dispatch
  * never resolves to a fake success by default. Daemon callers that resolve a
- * configured live-wrapper profile pass an explicit registry instead.
+ * configured host bindings pass an explicit registry instead.
  */
 const DEFAULT_REGISTRY: WorkflowStepExecutorRegistry = new Map(
   WORKFLOW_STEP_EXECUTOR_KINDS.map(

@@ -36,7 +36,7 @@
  * direct compatibility reader), and canonical subworkflow state is owned by the
  * workflow step and lineage destinations.
  * `route.profile` (the recorded operator profile) stays distinct from these
- * per-step selections and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE`
+ * per-step selections and from the daemon's `MOMENTUM_HOST_BINDINGS_FILE`
  * execution profile; none of them are conflated here.
  *
  * Field mapping. Each per-step override carries the operator-facing

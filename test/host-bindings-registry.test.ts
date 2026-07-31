@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC,
-  LIVE_WRAPPER_REFUSAL_CODES,
-  listConfiguredLiveWrapperKinds,
-  parseLiveWrapperConfig,
-  parseLiveWrapperProfile,
-  resolveLiveWrapper,
-} from "../src/adapters/live-wrapper-registry.js";
+  DEFAULT_HOST_BINDING_PROBE_TIMEOUT_SEC,
+  HOST_BINDING_REFUSAL_CODES,
+  listConfiguredHostBindingKinds,
+  parseHostBinding,
+  parseHostBindings,
+  resolveHostBinding,
+} from "../src/adapters/host-bindings-registry.js";
 
-const validWrapper = {
+const validBinding = {
   command: "/usr/bin/gnhf-runner",
   args: ["--run", "1"],
   cwd: "repo",
@@ -27,26 +27,26 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-describe("parseLiveWrapperConfig missing", () => {
-  it("returns live_wrapper_config_missing when value is undefined", () => {
-    const result = parseLiveWrapperConfig(undefined);
+describe("parseHostBinding missing", () => {
+  it("returns host_binding_missing when value is undefined", () => {
+    const result = parseHostBinding(undefined);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_missing");
+    expect(result.code).toBe("host_binding_missing");
   });
 
-  it("returns live_wrapper_config_missing when value is null", () => {
-    const result = parseLiveWrapperConfig(null);
+  it("returns host_binding_missing when value is null", () => {
+    const result = parseHostBinding(null);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_missing");
+    expect(result.code).toBe("host_binding_missing");
   });
 });
 
-describe("parseLiveWrapperConfig shape", () => {
+describe("parseHostBinding shape", () => {
   it("maps a fully specified wrapper into a typed config", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       command_identity: "repo-cleanup",
     });
     expect(result.ok).toBe(true);
@@ -66,21 +66,21 @@ describe("parseLiveWrapperConfig shape", () => {
   });
 
   it("rejects an unsafe portable command identity", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       command_identity: "/tmp/repo-cleanup",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("command_identity");
   });
 
   it.each(["@scope:cleanup", "cleanup+safe"])(
     "accepts SDK-compatible portable command identity %s",
     (commandIdentity) => {
-      const result = parseLiveWrapperConfig({
-        ...clone(validWrapper),
+      const result = parseHostBinding({
+        ...clone(validBinding),
         command_identity: commandIdentity,
       });
       expect(result.ok).toBe(true);
@@ -95,14 +95,14 @@ describe("parseLiveWrapperConfig shape", () => {
       ["envAllow", "env_allow"],
       ["resultFile", "result_file"],
     ] as const) {
-      const raw = clone(validWrapper) as Record<string, unknown>;
+      const raw = clone(validBinding) as Record<string, unknown>;
       raw[alias] = raw[canonical];
       delete raw[canonical];
 
-      const result = parseLiveWrapperConfig(raw);
+      const result = parseHostBinding(raw);
       expect(result.ok, `expected invalid for ${alias}`).toBe(false);
       if (result.ok) continue;
-      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.code).toBe("host_binding_invalid");
       expect(result.error).toContain(alias);
       expect(result.error).toContain(canonical);
     }
@@ -114,13 +114,13 @@ describe("parseLiveWrapperConfig shape", () => {
       ["envAllow", ["PATH", "HOME"]],
       ["resultFile", "result.json"],
     ] as const) {
-      const result = parseLiveWrapperConfig({
-        ...clone(validWrapper),
+      const result = parseHostBinding({
+        ...clone(validBinding),
         [alias]: aliasValue,
       });
       expect(result.ok, `expected invalid for ${alias}`).toBe(false);
       if (result.ok) continue;
-      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.code).toBe("host_binding_invalid");
       expect(result.error).toContain(alias);
     }
   });
@@ -132,73 +132,73 @@ describe("parseLiveWrapperConfig shape", () => {
       ["resultFile", "result_file", "result.json"],
     ] as const) {
       // No `command`, `args`, or `cwd`: the alias refusal must still win.
-      const result = parseLiveWrapperConfig({ [alias]: aliasValue });
+      const result = parseHostBinding({ [alias]: aliasValue });
       expect(result.ok, `expected invalid for ${alias}`).toBe(false);
       if (result.ok) continue;
-      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.code).toBe("host_binding_invalid");
       expect(result.error).toContain(alias);
       expect(result.error).toContain(canonical);
     }
   });
 
   it("still tolerates unrelated unknown keys", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       nickname: "gnhf",
     });
     expect(result.ok).toBe(true);
   });
 
   it("rejects a non-mapping value", () => {
-    const result = parseLiveWrapperConfig("nope");
+    const result = parseHostBinding("nope");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects an array value", () => {
-    const result = parseLiveWrapperConfig(["nope"]);
+    const result = parseHostBinding(["nope"]);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 });
 
-describe("parseLiveWrapperConfig command", () => {
+describe("parseHostBinding command", () => {
   it("rejects a missing command", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["command"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("command");
   });
 
   it("rejects an empty command", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       command: "   ",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a relative command path", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       command: "gnhf-runner",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("absolute");
   });
 
   it("trims surrounding whitespace from an absolute command", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       command: "  /usr/bin/gnhf-runner  ",
     });
     expect(result.ok).toBe(true);
@@ -207,20 +207,20 @@ describe("parseLiveWrapperConfig command", () => {
   });
 });
 
-describe("parseLiveWrapperConfig args", () => {
+describe("parseHostBinding args", () => {
   it("rejects a missing args array", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["args"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("args");
   });
 
   it("coerces numeric argv entries to strings", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       args: ["--iteration", 7],
     });
     expect(result.ok).toBe(true);
@@ -229,40 +229,40 @@ describe("parseLiveWrapperConfig args", () => {
   });
 
   it("rejects a non-array args", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       args: "x",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a non-string/number argv entry", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       args: [{}],
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 });
 
-describe("parseLiveWrapperConfig cwd", () => {
+describe("parseHostBinding cwd", () => {
   it("rejects a missing cwd", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["cwd"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("cwd");
   });
 
   it("accepts cwd iteration", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       cwd: "iteration",
     });
     expect(result.ok).toBe(true);
@@ -271,138 +271,138 @@ describe("parseLiveWrapperConfig cwd", () => {
   });
 
   it("rejects an unknown cwd value", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       cwd: "home",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 });
 
-describe("parseLiveWrapperConfig timeout_sec", () => {
+describe("parseHostBinding timeout_sec", () => {
   it("rejects a missing timeout_sec", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["timeout_sec"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("timeout_sec");
   });
 
   it("rejects a non-positive timeout_sec", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       timeout_sec: 0,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a fractional timeout_sec", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       timeout_sec: 1.5,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a timeout_sec above the built-in supervisor limit", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       timeout_sec: 2_147_454,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("must not exceed 2147453 seconds");
   });
 });
 
-describe("parseLiveWrapperConfig env_allow", () => {
+describe("parseHostBinding env_allow", () => {
   it("rejects a missing env_allow array", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["env_allow"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("env_allow");
   });
 
   it("rejects a non-array env_allow", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       env_allow: "PATH",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects an invalid environment variable name", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       env_allow: ["1BAD"],
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 });
 
-describe("parseLiveWrapperConfig result_file", () => {
+describe("parseHostBinding result_file", () => {
   it("rejects a missing result_file", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["result_file"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("result_file");
   });
 
   it("rejects an absolute result_file", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       result_file: "/tmp/result.json",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a result_file that escapes the iteration directory", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       result_file: "../escape.json",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a result_file that resolves to the iteration directory", () => {
     for (const resultFile of [".", "./", "nested/..", "nested\\.."]) {
-      const result = parseLiveWrapperConfig({
-        ...clone(validWrapper),
+      const result = parseHostBinding({
+        ...clone(validBinding),
         result_file: resultFile,
       });
       expect(result.ok, `expected invalid for ${resultFile}`).toBe(false);
       if (result.ok) continue;
-      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.code).toBe("host_binding_invalid");
       expect(result.error).toContain("result_file");
     }
   });
 
   it("accepts a nested relative result_file", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       result_file: "live/result.json",
     });
     expect(result.ok).toBe(true);
@@ -411,56 +411,56 @@ describe("parseLiveWrapperConfig result_file", () => {
   });
 });
 
-describe("parseLiveWrapperConfig probe", () => {
+describe("parseHostBinding probe", () => {
   it("leaves probe undefined when omitted", () => {
-    const raw = clone(validWrapper) as Record<string, unknown>;
+    const raw = clone(validBinding) as Record<string, unknown>;
     delete raw["probe"];
-    const result = parseLiveWrapperConfig(raw);
+    const result = parseHostBinding(raw);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.probe).toBeUndefined();
   });
 
   it("defaults the probe timeout when omitted", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: { command: "/usr/bin/gnhf-probe" },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.config.probe?.timeoutSec).toBe(
-      DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC,
+      DEFAULT_HOST_BINDING_PROBE_TIMEOUT_SEC,
     );
   });
 
   it("rejects the retired probe timeoutSec alias when it replaces probe.timeout_sec", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("probe.timeoutSec");
     expect(result.error).toContain("probe.timeout_sec");
   });
 
   it("names the retired probe timeoutSec alias even when the probe is otherwise malformed", () => {
     // No probe `command`: the alias refusal must still win.
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: { timeoutSec: 20 },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("probe.timeoutSec");
     expect(result.error).toContain("probe.timeout_sec");
   });
 
   it("rejects the retired probe timeoutSec alias even when probe.timeout_sec is also present", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: {
         command: "/usr/bin/gnhf-probe",
         timeout_sec: 15,
@@ -469,13 +469,13 @@ describe("parseLiveWrapperConfig probe", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("probe.timeoutSec");
   });
 
   it("rejects a probe timeout above the built-in supervisor limit", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: {
         command: "/usr/bin/gnhf-probe",
         timeout_sec: 2_147_454,
@@ -483,228 +483,250 @@ describe("parseLiveWrapperConfig probe", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("must not exceed 2147453 seconds");
   });
 
   it("rejects a probe without a command", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: { args: ["--check"] },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 
   it("rejects a probe with a relative command path", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: { command: "gnhf-probe" },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
     expect(result.error).toContain("absolute");
   });
 
   it("rejects a non-mapping probe", () => {
-    const result = parseLiveWrapperConfig({
-      ...clone(validWrapper),
+    const result = parseHostBinding({
+      ...clone(validBinding),
       probe: "always",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.code).toBe("host_binding_invalid");
   });
 });
 
-describe("parseLiveWrapperProfile", () => {
-  it("returns live_wrapper_profile_missing when undefined", () => {
-    const result = parseLiveWrapperProfile(undefined);
+describe("parseHostBindings", () => {
+  it("returns host_bindings_missing when undefined", () => {
+    const result = parseHostBindings(undefined);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_missing");
+    expect(result.code).toBe("host_bindings_missing");
   });
 
-  it("returns live_wrapper_profile_missing when null", () => {
-    const result = parseLiveWrapperProfile(null);
+  it("returns host_bindings_missing when null", () => {
+    const result = parseHostBindings(null);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_missing");
+    expect(result.code).toBe("host_bindings_missing");
   });
 
-  it("rejects a non-mapping profile", () => {
-    const result = parseLiveWrapperProfile("nope");
+  it("rejects a non-mapping document", () => {
+    const result = parseHostBindings("nope");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
+    expect(result.code).toBe("host_bindings_invalid");
   });
 
-  it("rejects a profile without a name", () => {
-    const result = parseLiveWrapperProfile({
-      wrappers: { implementation: clone(validWrapper) },
+  it("parses a strict top-level bindings mapping keyed by step capability", () => {
+    const result = parseHostBindings({
+      bindings: { implementation: clone(validBinding) },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.bindings.bindings.has("implementation")).toBe(true);
+  });
+
+  it("rejects the retired live-wrapper profile shape with a migration diagnostic", () => {
+    const result = parseHostBindings({
+      name: "daemon-default",
+      wrappers: { implementation: clone(validBinding) },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
-    expect(result.error).toContain("name");
-  });
-
-  it("rejects a profile without wrappers", () => {
-    const result = parseLiveWrapperProfile({ name: "openclaw-live" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
+    expect(result.code).toBe("host_bindings_invalid");
+    expect(result.error).toContain("bindings");
     expect(result.error).toContain("wrappers");
   });
 
-  it("rejects an empty wrappers mapping", () => {
-    const result = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: {},
+  it("rejects the retired wrappers mapping even alongside a valid bindings mapping", () => {
+    const result = parseHostBindings({
+      bindings: { implementation: clone(validBinding) },
+      wrappers: { implementation: clone(validBinding) },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
+    expect(result.code).toBe("host_bindings_invalid");
+    expect(result.error).toContain("wrappers");
+  });
+
+  it("rejects unknown top-level keys even alongside a valid bindings mapping", () => {
+    const result = parseHostBindings({
+      bindings: { implementation: clone(validBinding) },
+      name: "extra-identity",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("host_bindings_invalid");
+    expect(result.error).toContain("name");
+  });
+
+  it("rejects a document without a bindings mapping", () => {
+    const result = parseHostBindings({});
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("host_bindings_invalid");
+    expect(result.error).toContain("bindings");
+  });
+
+  it("rejects an empty bindings mapping", () => {
+    const result = parseHostBindings({ bindings: {} });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("host_bindings_invalid");
   });
 
   it("rejects an unknown workflow step kind key", () => {
-    const result = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: { teleport: clone(validWrapper) },
+    const result = parseHostBindings({
+      bindings: { teleport: clone(validBinding) },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
+    expect(result.code).toBe("host_bindings_invalid");
     expect(result.error).toContain("teleport");
   });
 
-  it("surfaces a malformed wrapper with its step kind", () => {
-    const broken = clone(validWrapper) as Record<string, unknown>;
+  it("surfaces a malformed binding with its step kind", () => {
+    const broken = clone(validBinding) as Record<string, unknown>;
     delete broken["command"];
-    const result = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: { implementation: broken },
+    const result = parseHostBindings({
+      bindings: { implementation: broken },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_profile_invalid");
+    expect(result.code).toBe("host_bindings_invalid");
     expect(result.error).toContain("implementation");
   });
 
-  it("parses a profile with multiple wrappers", () => {
-    const result = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: {
-        implementation: clone(validWrapper),
-        postflight: { ...clone(validWrapper), command: "/usr/bin/postflight" },
+  it("parses a document with multiple bindings", () => {
+    const result = parseHostBindings({
+      bindings: {
+        implementation: clone(validBinding),
+        postflight: { ...clone(validBinding), command: "/usr/bin/postflight" },
       },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.profile.name).toBe("openclaw-live");
-    expect(result.profile.wrappers.size).toBe(2);
-    expect(result.profile.wrappers.get("implementation")?.command).toBe(
+    expect(result.bindings.bindings.size).toBe(2);
+    expect(result.bindings.bindings.get("implementation")?.command).toBe(
       "/usr/bin/gnhf-runner",
     );
-    expect(result.profile.wrappers.get("postflight")?.command).toBe(
+    expect(result.bindings.bindings.get("postflight")?.command).toBe(
       "/usr/bin/postflight",
     );
   });
 
-  it("uses the canonical wrapper before validating a legacy alias", () => {
-    const result = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: {
-        validate: clone(validWrapper),
+  it("uses the canonical binding before validating a legacy alias", () => {
+    const result = parseHostBindings({
+      bindings: {
+        validate: clone(validBinding),
         "no-mistakes": {},
       },
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.profile.wrappers.get("validate")?.command).toBe(
+    expect(result.bindings.bindings.get("validate")?.command).toBe(
       "/usr/bin/gnhf-runner",
     );
   });
 });
 
-describe("resolveLiveWrapper", () => {
-  const profile = (() => {
-    const parsed = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: { implementation: clone(validWrapper) },
+describe("resolveHostBinding", () => {
+  const bindings = (() => {
+    const parsed = parseHostBindings({
+      bindings: { implementation: clone(validBinding) },
     });
-    if (!parsed.ok) throw new Error("fixture profile failed to parse");
-    return parsed.profile;
+    if (!parsed.ok) throw new Error("fixture bindings failed to parse");
+    return parsed.bindings;
   })();
 
   it("resolves a configured step kind", () => {
-    const result = resolveLiveWrapper(profile, "implementation");
+    const result = resolveHostBinding(bindings, "implementation");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.kind).toBe("implementation");
     expect(result.config.command).toBe("/usr/bin/gnhf-runner");
   });
 
-  it("resolves a legacy step kind through its canonical wrapper", () => {
-    const parsed = parseLiveWrapperProfile({
-      name: "legacy-openclaw-live",
-      wrappers: { "no-mistakes": clone(validWrapper) },
+  it("resolves a legacy step kind through its canonical binding", () => {
+    const parsed = parseHostBindings({
+      bindings: { "no-mistakes": clone(validBinding) },
     });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
 
-    const result = resolveLiveWrapper(parsed.profile, "no-mistakes");
+    const result = resolveHostBinding(parsed.bindings, "no-mistakes");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.kind).toBe("validate");
     expect(result.config.command).toBe("/usr/bin/gnhf-runner");
   });
 
-  it("refuses an unknown step kind with live_wrapper_unsupported_kind", () => {
-    const result = resolveLiveWrapper(profile, "teleport");
+  it("refuses an unknown step kind with host_binding_unsupported_kind", () => {
+    const result = resolveHostBinding(bindings, "teleport");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_unsupported_kind");
+    expect(result.code).toBe("host_binding_unsupported_kind");
   });
 
-  it("refuses a known but unconfigured step kind with live_wrapper_not_configured", () => {
-    const result = resolveLiveWrapper(profile, "postflight");
+  it("refuses a known but unconfigured step kind with host_binding_not_configured", () => {
+    const result = resolveHostBinding(bindings, "postflight");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.code).toBe("live_wrapper_not_configured");
+    expect(result.code).toBe("host_binding_not_configured");
   });
 });
 
-describe("listConfiguredLiveWrapperKinds", () => {
+describe("listConfiguredHostBindingKinds", () => {
   it("returns configured kinds in canonical workflow-step order", () => {
-    const parsed = parseLiveWrapperProfile({
-      name: "openclaw-live",
-      wrappers: {
-        postflight: { ...clone(validWrapper), command: "/usr/bin/postflight" },
-        implementation: clone(validWrapper),
+    const parsed = parseHostBindings({
+      bindings: {
+        postflight: { ...clone(validBinding), command: "/usr/bin/postflight" },
+        implementation: clone(validBinding),
       },
     });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(listConfiguredLiveWrapperKinds(parsed.profile)).toEqual([
+    expect(listConfiguredHostBindingKinds(parsed.bindings)).toEqual([
       "implementation",
       "postflight",
     ]);
   });
 });
 
-describe("LIVE_WRAPPER_REFUSAL_CODES", () => {
+describe("HOST_BINDING_REFUSAL_CODES", () => {
   it("pins the stable refusal vocabulary", () => {
-    expect([...LIVE_WRAPPER_REFUSAL_CODES]).toEqual([
-      "live_wrapper_config_missing",
-      "live_wrapper_config_invalid",
-      "live_wrapper_profile_missing",
-      "live_wrapper_profile_invalid",
-      "live_wrapper_unsupported_kind",
-      "live_wrapper_not_configured",
+    expect([...HOST_BINDING_REFUSAL_CODES]).toEqual([
+      "host_binding_missing",
+      "host_binding_invalid",
+      "host_bindings_missing",
+      "host_bindings_invalid",
+      "host_binding_unsupported_kind",
+      "host_binding_not_configured",
     ]);
   });
 });

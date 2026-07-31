@@ -2,7 +2,7 @@
  * Live workflow-step executor bridge.
  *
  * `runLiveStepWrapper` (`live-step-wrapper.ts`) is the pure execution core that
- * runs a resolved `LiveWrapperConfig` as an
+ * runs a resolved `HostBindingConfig` as an
  * explicit local child process and classifies the outcome into the live-wrapper
  * execution recovery vocabulary (`LIVE_STEP_WRAPPER_RECOVERY_CODES`).
  * `live-wrapper-registry.ts` owns the typed config plus a
@@ -25,7 +25,7 @@
  *     collapsed into generic failure text: the precise
  *     `LiveStepWrapperRecoveryCode` is preserved on `liveRecoveryCode` even when
  *     two live codes map onto one coarser dispatch `errorCode`.
- *   - `createLiveWorkflowStepExecutor` / `createLiveWorkflowStepExecutorsFromProfile`
+ *   - `createLiveWorkflowStepExecutor` / `createLiveWorkflowStepExecutorsFromBindings`
  *     wrap the two functions plus `runLiveStepWrapper` into `WorkflowStepExecutor`
  *     values keyed by `WorkflowStepKind`, resolvable from a profile.
  *
@@ -47,11 +47,11 @@ import {
   type LiveStepWrapperResult,
 } from "../../../adapters/live-step-wrapper.js";
 import {
-  listConfiguredLiveWrapperKinds,
-  resolveLiveWrapper,
-  type LiveWrapperConfig,
-  type LiveWrapperProfile,
-} from "../../../adapters/live-wrapper-registry.js";
+  listConfiguredHostBindingKinds,
+  resolveHostBinding,
+  type HostBindingConfig,
+  type HostBindings,
+} from "../../../adapters/host-bindings-registry.js";
 import type { WorkflowStepKind } from "../../workflow/run/reducer.js";
 import type {
   WorkflowStepExecutor,
@@ -114,7 +114,7 @@ export type LiveStepExecutorOptions = {
  */
 export function buildLiveStepWrapperInput(
   input: WorkflowStepExecutorInput,
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   options?: LiveStepExecutorOptions,
 ): LiveStepWrapperInput {
   return {
@@ -206,7 +206,7 @@ export function mapLiveStepWrapperResult(
  */
 export function createLiveWorkflowStepExecutor(
   kind: WorkflowStepKind,
-  config: LiveWrapperConfig,
+  config: HostBindingConfig,
   options?: LiveStepExecutorOptions,
 ): WorkflowStepExecutor {
   return {
@@ -220,17 +220,17 @@ export function createLiveWorkflowStepExecutor(
 }
 
 /**
- * Build live executors for every step kind a profile configures, keyed by
+ * Build live executors for every step kind the host bindings configure, keyed by
  * kind. Unconfigured kinds are simply absent from the map; resolution refusals
- * (which `listConfiguredLiveWrapperKinds` already filters out) are skipped.
+ * (which `listConfiguredHostBindingKinds` already filters out) are skipped.
  */
-export function createLiveWorkflowStepExecutorsFromProfile(
-  profile: LiveWrapperProfile,
+export function createLiveWorkflowStepExecutorsFromBindings(
+  bindings: HostBindings,
   options?: LiveStepExecutorOptions,
 ): Map<WorkflowStepKind, WorkflowStepExecutor> {
   const executors = new Map<WorkflowStepKind, WorkflowStepExecutor>();
-  for (const kind of listConfiguredLiveWrapperKinds(profile)) {
-    const resolved = resolveLiveWrapper(profile, kind);
+  for (const kind of listConfiguredHostBindingKinds(bindings)) {
+    const resolved = resolveHostBinding(bindings, kind);
     if (!resolved.ok) continue;
     executors.set(
       kind,

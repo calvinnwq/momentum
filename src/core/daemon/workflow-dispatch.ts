@@ -13,9 +13,9 @@ import {
   resolvePreparedDelegateCommitEvidence,
 } from "../../adapters/profile-backed-delegate-tool-adapter.js";
 import type {
-  LiveWrapperConfig,
-  LiveWrapperProfile,
-} from "../../adapters/live-wrapper-registry.js";
+  HostBindingConfig,
+  HostBindings,
+} from "../../adapters/host-bindings-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 import { inspectRepo, type PreparedCommitEvidence } from "../repo/guard.js";
@@ -103,10 +103,10 @@ import {
   resolveDispatchedStepExecutorContext,
 } from "../workflow/live-wrapper/daemon-exec-context.js";
 import {
-  readDaemonLiveWrapperProfileSource,
-  resolveDaemonLiveWrapperProfile,
-  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR,
-} from "../workflow/live-wrapper/daemon-profile.js";
+  readDaemonHostBindingsSource,
+  resolveDaemonHostBindings,
+  DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
+} from "../workflow/live-wrapper/daemon-host-bindings.js";
 import {
   buildCodingWorkflowChildEnv,
   loadCodingWorkflowWrapperConfig,
@@ -194,15 +194,17 @@ export type DaemonWorkflowDispatchResolution =
   | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
   | { ok: false; message: string };
 
-const NATIVE_PROFILE_EXECUTORS: ReadonlySet<string> = new Set([
+const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
   "agent-loop",
   "agent-once",
   "script",
 ]);
 
-/** Whether a recorded identity resolves to a native profile-backed built-in. */
-function isNativeProfileExecutorIdentity(executorName: string): boolean {
-  return NATIVE_PROFILE_EXECUTORS.has(canonicalExecutorIdentity(executorName));
+/** Whether a recorded identity resolves to a native binding-backed built-in. */
+function isNativeHostBindingExecutorIdentity(executorName: string): boolean {
+  return NATIVE_HOST_BINDING_EXECUTORS.has(
+    canonicalExecutorIdentity(executorName),
+  );
 }
 
 /**
@@ -235,18 +237,23 @@ export function resolveDaemonWorkflowStepDispatch(
   baseDispatch: WorkflowStepDispatch,
   deps: DaemonWorkflowDispatchDeps,
 ): DaemonWorkflowDispatchResolution {
-  const profile = resolveDaemonLiveWrapperProfile(env, {
-    loadSource: readDaemonLiveWrapperProfileSource,
+  const hostBindings = resolveDaemonHostBindings(env, {
+    loadSource: readDaemonHostBindingsSource,
   });
 
-  if (profile.status === "invalid") {
+  if (hostBindings.status === "invalid") {
     return {
       ok: false,
-      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`,
+      message:
+        hostBindings.code === "retired_selector"
+          ? hostBindings.error
+          : `Invalid ${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} (${hostBindings.source}): ${hostBindings.code}: ${hostBindings.error}`,
     };
   }
   const builtIns =
-    profile.status === "resolved" ? buildProfileBackedSdkExecutors() : [];
+    hostBindings.status === "resolved"
+      ? buildHostBindingBackedSdkExecutors()
+      : [];
   const executorConfig = resolveDaemonExecutorRegistry(env, builtIns);
   if (executorConfig.status === "invalid") {
     return {
@@ -266,7 +273,7 @@ export function resolveDaemonWorkflowStepDispatch(
   );
 
   let legacy: DaemonWorkflowDispatchResolution;
-  if (profile.status === "not_configured") {
+  if (hostBindings.status === "not_configured") {
     legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
@@ -279,7 +286,7 @@ export function resolveDaemonWorkflowStepDispatch(
     };
   } else {
     const liveRegistry = buildRealWorkflowStepExecutorRegistry({
-      profile: profile.profile,
+      bindings: hostBindings.bindings,
     });
     const registry = new Map(
       builtIns.map((executor) => [executor.name, executor]),
@@ -287,10 +294,10 @@ export function resolveDaemonWorkflowStepDispatch(
     const resolveHostBindings = createLiveStepHostBindingsResolver(
       env,
       liveRegistry,
-      profile.profile,
+      hostBindings.bindings,
     );
     const resolveOwnedRoundMaterializer =
-      createNativeOwnedRoundMaterializerResolver(env, profile.profile);
+      createNativeOwnedRoundMaterializerResolver(env, hostBindings.bindings);
     legacy = {
       ok: true,
       dispatch: withSubworkflowDispatch(
@@ -316,14 +323,14 @@ export function resolveDaemonWorkflowStepDispatch(
           deps,
         ),
       ),
-      leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile),
+      leaseDurationMs: maxHostBindingTimeoutMs(hostBindings.bindings),
     };
   }
   if (!legacy.ok) return legacy;
 
-  const missingProfileDispatch =
-    profile.status === "not_configured"
-      ? createMissingProfileNativeDispatch(baseDispatch)
+  const missingHostBindingsDispatch =
+    hostBindings.status === "not_configured"
+      ? createMissingHostBindingsNativeDispatch(baseDispatch)
       : undefined;
 
   if (executorConfig.status === "not_configured") {
@@ -343,10 +350,10 @@ export function resolveDaemonWorkflowStepDispatch(
         if (
           runtime.ok &&
           !durablyClaimed &&
-          isNativeProfileExecutorIdentity(runtime.executorName) &&
-          missingProfileDispatch !== undefined
+          isNativeHostBindingExecutorIdentity(runtime.executorName) &&
+          missingHostBindingsDispatch !== undefined
         ) {
-          return missingProfileDispatch(claim, context);
+          return missingHostBindingsDispatch(claim, context);
         }
         return runtime.ok &&
           (durablyClaimed || !isBuiltInExecutorIdentity(runtime.executorName))
@@ -361,17 +368,19 @@ export function resolveDaemonWorkflowStepDispatch(
 
   let registeredDispatch: AsyncWorkflowStepDispatch | undefined;
   let registeredLoad: ExecutorRegistryLoadResult | undefined;
-  const profileHostBindings =
-    profile.status === "resolved"
+  const boundHostBindingsResolver =
+    hostBindings.status === "resolved"
       ? createLiveStepHostBindingsResolver(
           env,
-          buildRealWorkflowStepExecutorRegistry({ profile: profile.profile }),
-          profile.profile,
+          buildRealWorkflowStepExecutorRegistry({
+            bindings: hostBindings.bindings,
+          }),
+          hostBindings.bindings,
         )
       : undefined;
-  const profileOwnedRoundMaterializer =
-    profile.status === "resolved"
-      ? createNativeOwnedRoundMaterializerResolver(env, profile.profile)
+  const boundOwnedRoundMaterializer =
+    hostBindings.status === "resolved"
+      ? createNativeOwnedRoundMaterializerResolver(env, hostBindings.bindings)
       : undefined;
   return {
     ok: true,
@@ -408,13 +417,12 @@ export function resolveDaemonWorkflowStepDispatch(
               registry: loaded.registry,
               canonicalBuiltInExecutorNames,
               unavailableReasons,
-              ...(profileHostBindings !== undefined
-                ? { resolveHostBindings: profileHostBindings }
+              ...(boundHostBindingsResolver !== undefined
+                ? { resolveHostBindings: boundHostBindingsResolver }
                 : {}),
-              ...(profileOwnedRoundMaterializer !== undefined
+              ...(boundOwnedRoundMaterializer !== undefined
                 ? {
-                    resolveOwnedRoundMaterializer:
-                      profileOwnedRoundMaterializer,
+                    resolveOwnedRoundMaterializer: boundOwnedRoundMaterializer,
                   }
                 : {}),
             },
@@ -426,10 +434,10 @@ export function resolveDaemonWorkflowStepDispatch(
       if (
         runtime.ok &&
         !durablyClaimed &&
-        isNativeProfileExecutorIdentity(runtime.executorName) &&
-        missingProfileDispatch !== undefined
+        isNativeHostBindingExecutorIdentity(runtime.executorName) &&
+        missingHostBindingsDispatch !== undefined
       ) {
-        return missingProfileDispatch(claim, context);
+        return missingHostBindingsDispatch(claim, context);
       }
       return legacy.dispatch(claim, context);
     },
@@ -439,17 +447,17 @@ export function resolveDaemonWorkflowStepDispatch(
   };
 }
 
-function createMissingProfileNativeDispatch(
+function createMissingHostBindingsNativeDispatch(
   baseDispatch: WorkflowStepDispatch,
 ): AsyncWorkflowStepDispatch {
   const registry = new Map(
-    buildProfileBackedSdkExecutors()
-      .filter((executor) => NATIVE_PROFILE_EXECUTORS.has(executor.name))
+    buildHostBindingBackedSdkExecutors()
+      .filter((executor) => NATIVE_HOST_BINDING_EXECUTORS.has(executor.name))
       .map((executor) => [executor.name, executor]),
   );
   return createRegisteredExecutorWorkflowDispatch(baseDispatch, {
     registry,
-    canonicalBuiltInExecutorNames: new Set(NATIVE_PROFILE_EXECUTORS),
+    canonicalBuiltInExecutorNames: new Set(NATIVE_HOST_BINDING_EXECUTORS),
     resolveHostBindings: ({ claim, context, executorName }) => {
       const attempt = loadLatestExecutorAttemptForStep(
         context.db,
@@ -469,7 +477,7 @@ function createMissingProfileNativeDispatch(
           : undefined;
       throw new RegisteredExecutorHostBindingsError(
         "runtime_unavailable",
-        `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required for native ${executorName} host bindings`,
+        `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native ${executorName} host bindings`,
         settleRepoOwnership === undefined
           ? undefined
           : () => settleRepoOwnership(false),
@@ -478,7 +486,7 @@ function createMissingProfileNativeDispatch(
   });
 }
 
-export function buildProfileBackedSdkExecutors(): Executor[] {
+export function buildHostBindingBackedSdkExecutors(): Executor[] {
   // Canonical built-ins register under their new names; the retained legacy
   // `no-mistakes` identity stays registered as-is so recorded definitions keep
   // selecting the exact executor they recorded.
@@ -511,7 +519,7 @@ export function buildProfileBackedSdkExecutors(): Executor[] {
 
 function createNativeOwnedRoundMaterializerResolver(
   env: Record<string, string | undefined>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -539,7 +547,7 @@ function createNativeOwnedRoundMaterializerResolver(
       input.claim.stepId,
     );
     if (step === undefined) return undefined;
-    const wrapper = profile.wrappers.get(step.kind);
+    const wrapper = hostBindings.bindings.get(step.kind);
     if (wrapper === undefined) return undefined;
 
     return ({ attempt, selection, now, roundId: requestedRoundId }) => {
@@ -569,7 +577,9 @@ function createNativeOwnedRoundMaterializerResolver(
               ...(typeof input.config.maxRounds === "number"
                 ? { maxRounds: input.config.maxRounds }
                 : {}),
-              policyEnvelope: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelope: input.config.policyEnvelope }
+                : {}),
             },
           })
         : resolveSingleShotRoundSelection({
@@ -582,7 +592,9 @@ function createNativeOwnedRoundMaterializerResolver(
                   }
                 : {}),
               timeoutMs: wrapper.timeoutSec * 1_000,
-              policyEnvelope: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelope: input.config.policyEnvelope }
+                : {}),
             },
           });
       const capability =
@@ -590,7 +602,6 @@ function createNativeOwnedRoundMaterializerResolver(
           ? (wrapper.commandIdentity ?? step.kind)
           : step.kind;
       const hostBindingIdentity = nativeHostBindingIdentity({
-        profile: profile.name,
         capability,
         command: wrapper.command,
         args: wrapper.args,
@@ -729,7 +740,7 @@ function goalLoopInputDigest(
 function createLiveStepHostBindingsResolver(
   env: Record<string, string | undefined>,
   liveRegistry: ReturnType<typeof buildRealWorkflowStepExecutorRegistry>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ) {
   return (input: {
     claim: Parameters<AsyncWorkflowStepDispatch>[0];
@@ -843,7 +854,7 @@ function createLiveStepHostBindingsResolver(
     };
     const noMistakesRuntime =
       delegateTool === "no-mistakes"
-        ? resolveNoMistakesStatusRuntime(env, profile)
+        ? resolveNoMistakesStatusRuntime(env, hostBindings)
         : undefined;
     if (
       isDelegate &&
@@ -1027,12 +1038,14 @@ function createLiveStepHostBindingsResolver(
       return failRecoveredNativeRepoOwnership(new Error(selection.reason));
     }
     const nativeWrapper =
-      isSingleShot || isGoalLoop ? profile.wrappers.get(step.kind) : undefined;
+      isSingleShot || isGoalLoop
+        ? hostBindings.bindings.get(step.kind)
+        : undefined;
     if ((isSingleShot || isGoalLoop) && nativeWrapper === undefined) {
       return failRecoveredNativeRepoOwnership(
         new RegisteredExecutorHostBindingsError(
           "runtime_unavailable",
-          `live-wrapper profile ${profile.name} has no ${step.kind} binding for native ${input.executor.name}`,
+          `host bindings have no ${step.kind} binding for native ${input.executor.name}`,
         ),
       );
     }
@@ -1045,18 +1058,6 @@ function createLiveStepHostBindingsResolver(
         new RegisteredExecutorHostBindingsError(
           "host_binding_mismatch",
           "portable agent-loop timeoutMs does not match resolved host timeout",
-        ),
-      );
-    }
-    if (
-      isGoalLoop &&
-      typeof input.config.policyEnvelope === "string" &&
-      input.config.policyEnvelope !== profile.name
-    ) {
-      return failRecoveredNativeRepoOwnership(
-        new RegisteredExecutorHostBindingsError(
-          "host_binding_mismatch",
-          "portable agent-loop policyEnvelope does not match resolved host policy",
         ),
       );
     }
@@ -1085,7 +1086,7 @@ function createLiveStepHostBindingsResolver(
           repoPath: safety.repoPath,
           attemptNumber,
           repoSafety: safety.repoSafety,
-          runnerWindowMs: maxDaemonLiveWrapperProfileTimeoutMs(profile),
+          runnerWindowMs: maxHostBindingTimeoutMs(hostBindings),
           reclaimHandoffAttempt: isDelegate
             ? findInterruptedDelegateHandoffAttempt(
                 context.db,
@@ -1170,7 +1171,7 @@ function createLiveStepHostBindingsResolver(
         path.basename(safety.repoSafety.verificationLogPath),
       );
       const promptPath = path.join(roundArtifactDirectory, "prompt.md");
-      // Profiles must be safe on case-insensitive filesystems too.
+      // Host bindings must be safe on case-insensitive filesystems too.
       const resultPathIdentity = path.normalize(roundResultPath).toLowerCase();
       const collidingArtifact = Object.entries({
         executorLog: roundLogPath,
@@ -1259,11 +1260,12 @@ function createLiveStepHostBindingsResolver(
             ...(typeof input.config.maxRounds === "number"
               ? { maxRounds: input.config.maxRounds }
               : {}),
-            policyEnvelope: profile.name,
+            ...(typeof input.config.policyEnvelope === "string"
+              ? { policyEnvelope: input.config.policyEnvelope }
+              : {}),
           },
         }),
         hostBindingIdentity: nativeHostBindingIdentity({
-          profile: profile.name,
           capability: step.kind,
           command: nativeWrapper!.command,
           args: nativeWrapper!.args,
@@ -1371,7 +1373,9 @@ function createLiveStepHostBindingsResolver(
               kind: step.kind,
               env,
               hostIdentity: {
-                policyEnvelope: profile.name,
+                ...(typeof input.config.policyEnvelope === "string"
+                  ? { policyEnvelope: input.config.policyEnvelope }
+                  : {}),
                 agent: {
                   ...(selection.selection.agentProvider !== null
                     ? { harness: selection.selection.agentProvider }
@@ -1400,7 +1404,9 @@ function createLiveStepHostBindingsResolver(
               cwd: wrapper.cwd === "repo" ? safety.repoPath : runDir,
               repoPath: safety.repoPath,
               timeoutSec: wrapper.timeoutSec,
-              policyEnvelopeIdentity: profile.name,
+              ...(typeof input.config.policyEnvelope === "string"
+                ? { policyEnvelopeIdentity: input.config.policyEnvelope }
+                : {}),
               env: buildLiveStepRuntimeEnvironment(
                 {
                   kind: step.kind,
@@ -1467,11 +1473,12 @@ function createLiveStepHostBindingsResolver(
                 }
               : {}),
             timeoutMs: wrapper.timeoutSec * 1_000,
-            policyEnvelope: profile.name,
+            ...(typeof input.config.policyEnvelope === "string"
+              ? { policyEnvelope: input.config.policyEnvelope }
+              : {}),
           },
         }),
         hostBindingIdentity: nativeHostBindingIdentity({
-          profile: profile.name,
           capability:
             singleShot.name === "script"
               ? (wrapper.commandIdentity ?? step.kind)
@@ -1633,8 +1640,16 @@ function completedMechanismRepoOwnership(
   };
 }
 
+/**
+ * The version-2 digest deliberately carries no binding-set name: durable state
+ * must never embed profile or binding-set identity. Profile-era version-1
+ * digests hashed the retired profile name, which durable state never stored in
+ * the clear, so they are unrecomputable by design; a nonterminal native round
+ * recorded before the cutover reattaches only through the existing
+ * changed-host-inputs manual-recovery lane (`workflow run clear-recovery`
+ * prepares the fresh attempt), exactly like an edited binding file.
+ */
 function nativeHostBindingIdentity(input: {
-  profile: string;
   capability: string;
   command: string;
   args: readonly string[];
@@ -1646,8 +1661,7 @@ function nativeHostBindingIdentity(input: {
     .createHash("sha256")
     .update(
       JSON.stringify({
-        version: 1,
-        profile: input.profile,
+        version: 2,
         capability: input.capability,
         command: input.command,
         args: [...input.args],
@@ -1940,24 +1954,24 @@ export function resolveProfileBackedDelegateToolStepKind(
 
 function resolveNoMistakesStatusRuntime(
   daemonEnv: Record<string, string | undefined>,
-  profile: LiveWrapperProfile,
+  hostBindings: HostBindings,
 ): {
   command: string;
   argsPrefix: readonly string[];
   env: Record<string, string | undefined>;
 } {
-  // The status wrapper drives the external no-mistakes TOOL. New profiles key
-  // it under the canonical `validate` step kind; legacy profiles keyed it
-  // under the tool's own `no-mistakes` spelling, which stays readable.
+  // The status wrapper drives the external no-mistakes TOOL. New host-binding
+  // files key it under the canonical `validate` step kind; legacy configs
+  // keyed it under the tool's own `no-mistakes` spelling, which stays readable.
   const outerWrapper =
-    profile.wrappers.get("validate") ??
-    (profile.wrappers as ReadonlyMap<string, LiveWrapperConfig>).get(
+    hostBindings.bindings.get("validate") ??
+    (hostBindings.bindings as ReadonlyMap<string, HostBindingConfig>).get(
       "no-mistakes",
     );
   if (outerWrapper === undefined) {
     throw new RegisteredExecutorHostBindingsError(
       "runtime_unavailable",
-      "no-mistakes live-wrapper config is unavailable for status polling",
+      "no-mistakes host binding is unavailable for status polling",
     );
   }
   const wrapperEnv: NodeJS.ProcessEnv = {};
@@ -3046,11 +3060,9 @@ function loadWorkflowRunObjective(
   return objective === undefined || objective.length === 0 ? null : objective;
 }
 
-function maxDaemonLiveWrapperProfileTimeoutMs(
-  profile: LiveWrapperProfile,
-): number {
+function maxHostBindingTimeoutMs(hostBindings: HostBindings): number {
   let maxSeconds = 0;
-  for (const wrapper of profile.wrappers.values()) {
+  for (const wrapper of hostBindings.bindings.values()) {
     maxSeconds = Math.max(
       maxSeconds,
       wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0),

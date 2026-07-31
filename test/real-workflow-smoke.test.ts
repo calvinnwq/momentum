@@ -44,7 +44,7 @@ function profile(
     "tracker-refresh": wrapper(),
   },
 ): unknown {
-  return { name: "smoke", wrappers };
+  return { bindings: wrappers };
 }
 
 function optedInEnv(
@@ -84,17 +84,16 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     const plan = planWorkflowHarnessSmoke(optedInEnv(), undefined);
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
-    expect(plan.reason).toBe("profile_unavailable");
+    expect(plan.reason).toBe("host_bindings_unavailable");
   });
 
   it("skips with profile_unavailable when the profile is invalid", () => {
     const plan = planWorkflowHarnessSmoke(optedInEnv(), {
-      name: "",
-      wrappers: {},
+      bindings: {},
     });
     expect(plan.mode).toBe("skip");
     if (plan.mode !== "skip") throw new Error("expected skip");
-    expect(plan.reason).toBe("profile_unavailable");
+    expect(plan.reason).toBe("host_bindings_unavailable");
   });
 
   it("skips with kind_missing when no step kind is requested", () => {

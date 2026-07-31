@@ -159,13 +159,12 @@ const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
 
 const WRITE_VALID_WRAPPER_RESULT = `printf 'watch wrapper ran\\n' > "$MOMENTUM_REPO_PATH/watch-wrapper.txt" && printf '%s' '${VALID_WRAPPER_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
-function writeLiveWrapperProfile(root: string, stepKind: string): string {
+function writeHostBindings(root: string, stepKind: string): string {
   const profilePath = path.join(root, "watch-live-wrapper-profile.json");
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "watch-live-wrapper",
-      wrappers: {
+      bindings: {
         [stepKind]: {
           command: "/bin/sh",
           args: ["-c", WRITE_VALID_WRAPPER_RESULT],
@@ -583,7 +582,7 @@ describe("momentum workflow run watch", () => {
     const repoPath = path.join(dataDir, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
     initRepo(repoPath);
-    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
+    const profilePath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-dispatch-approved";
     const db = openDb(dataDir);
     try {
@@ -616,7 +615,7 @@ describe("momentum workflow run watch", () => {
         dataDir,
         "--json",
       ],
-      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath },
+      { MOMENTUM_HOST_BINDINGS_FILE: profilePath },
     );
 
     expect(result.code).toBe(0);
@@ -702,9 +701,9 @@ describe("momentum workflow run watch", () => {
       message: string;
     };
     expect(failure).toMatchObject({
-      code: "daemon_live_wrapper_profile_required",
+      code: "daemon_host_bindings_required",
     });
-    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
     expect(failure.message).toContain("preflight");
 
     const after = openDb(dataDir);
@@ -729,6 +728,183 @@ describe("momentum workflow run watch", () => {
       expect(leaseCount.count).toBe(0);
     } finally {
       after.close();
+    }
+  });
+
+  it("refuses the retired MOMENTUM_LIVE_WRAPPER_PROFILE selector with a migration diagnostic before any dispatch", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired live-wrapper selector refusal",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'",
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(failure.message).toContain("retired");
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+      const attemptCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(attemptCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses the retired selector even when no step is dispatch-eligible and persists no monitor baseline", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector-idle";
+    const db = openDb(dataDir);
+    try {
+      // No approvals: the run's next action is an approval, not a dispatch, so
+      // the watch tick would otherwise skip dispatch entirely and succeed.
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired selector refusal on an idle run",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+    );
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure.code).toBe("daemon_host_bindings_invalid");
+    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+    expect(failure.message).toContain("retired");
+
+    const after = openDb(dataDir);
+    try {
+      const runRow = after
+        .prepare(
+          "SELECT monitor_last_seen_digest, monitor_last_seen_at FROM workflow_runs WHERE id = ?",
+        )
+        .get(runId) as {
+        monitor_last_seen_digest: string | null;
+        monitor_last_seen_at: number | null;
+      };
+      expect(runRow.monitor_last_seen_digest).toBeNull();
+      expect(runRow.monitor_last_seen_at).toBeNull();
+      const attemptCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(attemptCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses the retired selector even when the writable open falls back to a read-only snapshot", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-retired-selector-busy";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise retired selector refusal under writer contention",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+    } finally {
+      db.close();
+    }
+
+    const releaseWriter = await holdWriterLock(
+      path.join(dataDir, "momentum.db"),
+    );
+    try {
+      const result = await run(
+        [
+          "workflow",
+          "run",
+          "watch",
+          runId,
+          "--once",
+          "--data-dir",
+          dataDir,
+          "--json",
+        ],
+        { MOMENTUM_LIVE_WRAPPER_PROFILE: "/legacy/profile.json" },
+      );
+
+      expect(result.code).toBe(1);
+      const failure = JSON.parse(result.stderr) as {
+        code: string;
+        message: string;
+      };
+      expect(failure.code).toBe("daemon_host_bindings_invalid");
+      expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+      expect(failure.message).toContain("retired");
+    } finally {
+      await releaseWriter();
     }
   });
 
@@ -776,7 +952,7 @@ describe("momentum workflow run watch", () => {
         message: string;
       };
       expect(failure).toMatchObject({
-        code: "daemon_live_wrapper_profile_required",
+        code: "daemon_host_bindings_required",
       });
       expect(failure.message).toContain(target.stepId);
 
@@ -1148,7 +1324,7 @@ describe("momentum workflow run watch", () => {
     const repoPath = path.join(dataDir, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
     initRepo(repoPath);
-    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
+    const profilePath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-live-wrapper";
     const db = openDb(dataDir);
     try {
@@ -1181,7 +1357,7 @@ describe("momentum workflow run watch", () => {
         dataDir,
         "--json",
       ],
-      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath },
+      { MOMENTUM_HOST_BINDINGS_FILE: profilePath },
     );
 
     expect(result.code, `stderr: ${result.stderr}`).toBe(0);

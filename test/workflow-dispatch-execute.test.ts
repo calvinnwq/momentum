@@ -18,7 +18,7 @@ vi.mock("../src/adapters/db/route-state.js", async (importOriginal) => {
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { projectValidatedLegacyWorkflowRunRoute } from "../src/adapters/db/route-state.js";
 import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { DAEMON_HOST_BINDINGS_FILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_V1,
@@ -104,8 +104,7 @@ JSON`;
   fs.writeFileSync(
     profilePath,
     JSON.stringify({
-      name: "legacy-route-test",
-      wrappers: {
+      bindings: {
         validate: {
           command: "/bin/sh",
           args: ["-c", script],
@@ -585,7 +584,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     try {
       const production = resolveDaemonWorkflowStepDispatch(
-        { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath },
+        { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: profilePath },
         executeWorkflowStepDispatch,
         {},
       );

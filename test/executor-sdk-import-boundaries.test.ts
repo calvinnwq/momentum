@@ -26,7 +26,7 @@ const ADAPTER_EXECUTOR_CORE_EDGE_DISPOSITIONS = new Map<string, string>([
     "official SDK RunnerResult type surface",
   ],
   [
-    "src/adapters/live-wrapper-registry.ts -> src/core/executors/sdk/portable-command.ts",
+    "src/adapters/host-bindings-registry.ts -> src/core/executors/sdk/portable-command.ts",
     "official dependency-free SDK portable command identity validator",
   ],
   [
@@ -97,8 +97,8 @@ const README_MARKER_BY_EDGE = new Map<string, string>([
     "`live-step-wrapper.ts` → `runner/result.ts` and `runner/types.ts`",
   ],
   [
-    "src/adapters/live-wrapper-registry.ts -> src/core/executors/sdk/portable-command.ts",
-    "`live-wrapper-registry.ts` → `sdk/portable-command.ts`",
+    "src/adapters/host-bindings-registry.ts -> src/core/executors/sdk/portable-command.ts",
+    "`host-bindings-registry.ts` → `sdk/portable-command.ts`",
   ],
   ...[
     "src/adapters/no-mistakes-executor.ts -> src/core/executors/loop/persist.ts",

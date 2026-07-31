@@ -118,8 +118,8 @@ evidence only after the child reaches a terminal state.
 Missing child config, invalid canonical lineage, unsafe recursion,
 unresolved child definitions, unsupported child attachments, invalid child state,
 or ambiguous child terminals park the parent run for manual recovery. When
-`MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow step wrapper profile,
-the managed loop also runs genuinely dispatched profile-backed step wrappers in
+`MOMENTUM_HOST_BINDINGS_FILE` points at a valid host-binding file,
+the managed loop also runs genuinely dispatched binding-backed step wrappers in
 the same tick.
 For ordinary live-wrapper executors, it records terminal executor evidence on
 the dispatch scaffold and lets the reconciliation seam finalize the step or park
@@ -155,26 +155,26 @@ When the variable is unset or blank, native `agent-loop`, `agent-once`, and
 another execution mechanism.
 Other supported live-wrapper-owned steps keep the durable start scaffold for a
 later executor path.
-A configured profile that omits the dispatched step-kind binding also fails
-with `runtime_unavailable` without falling back to another mechanism.
+A configured host-binding file that omits the dispatched step-kind binding also
+fails with `runtime_unavailable` without falling back to another mechanism.
 If a claimed step cannot be resolved or carries an invalid executor identity,
 the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
 if the run row vanished before that gate can be written, it still releases the
 dispatch lease so no claim is stranded. Register-only `daemon start` exits before
 the managed loop and never runs the workflow scheduler lane, reads
-`MOMENTUM_LIVE_WRAPPER_PROFILE` or `MOMENTUM_EXECUTOR_CONFIG`, attempts external
+`MOMENTUM_HOST_BINDINGS_FILE` or `MOMENTUM_EXECUTOR_CONFIG`, attempts external
 apply, or dispatches subworkflow children.
 
 ### Dogfood terminalizing dispatch
 
-`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH` wraps the managed loop's unprofiled
+`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH` wraps the managed loop's unbound
 built-in workflow-family lane with a terminalize-and-continue fixture that marks
 each successfully dispatched local step reaching that lane `succeeded` without
 running a real executor, so a single daemon process can exercise multi-step
 dispatch.
-It applies only when `MOMENTUM_LIVE_WRAPPER_PROFILE` is not configured; when a
-live-wrapper profile is set, profile-backed executors run normally and this
+It applies only when `MOMENTUM_HOST_BINDINGS_FILE` is not configured; when a
+host-binding file is set, binding-backed executors run normally and this
 flag has no effect, so it never suppresses configured real executor work.
 Steps handled by an executor registered through `MOMENTUM_EXECUTOR_CONFIG` also
 bypass this fixture.
@@ -213,33 +213,50 @@ Registered executors are normally driven one bounded tick per daemon scheduler
 pass, and a `continue` recommendation leaves the attempt resumable for the
 next pass after the configured poll interval.
 Executor registration and portable/host binding matching are specified by [Executor SDK](executor-sdk.md#config-and-host-bindings).
-The daemon supplies profile-backed host bindings from the resolved live-wrapper profile.
-Only the first completed profile-backed delegate handoff in an attempt may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
+The daemon supplies binding-backed host bindings from the resolved host-binding file.
+Only the first completed binding-backed delegate handoff in an attempt may receive a second bounded tick in the same pass so fresh external state corroborates that first handoff immediately.
 Later passes and retry attempts use one tick, including a retry that launches a fresh external run after a conclusively failed or cancelled prior run.
 The dispatch lease is heartbeated independently while a tick runs and every
 executor evidence write remains fenced by the live lease identity.
-The profile-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
+The binding-backed repo lock is leased for at least the longest configured wrapper/probe window plus the full verification-command budget, so a bounded handoff retains repository ownership until clean finalization or durable handoff evidence releases it.
 For an unresolved handoff intent, the next dispatcher may take over the matching active lock after it expires or immediately after the scheduler proves and releases the same stale dispatch owner.
 Repository, run, job, previous-holder, attempt, and deadline compare-and-swap checks prevent a concurrent or newer owner from being displaced.
 Heartbeat and settlement then require the replacement holder and attempt, preventing the former owner from mutating the lock.
 If a crash instead leaves an attempt at `waiting_operator` before gate parking finishes, stale dispatch recovery reuses or recreates that gate from the persisted decision selector and unresolved decision before releasing the exact stale lease.
 If the crash happens before classification after a delegate has persisted a mirrored gate checkpoint, gate-eligible decision, and `waiting_operator` observation, stale recovery makes the unclassified round resumable so the same attempt can finish classification and gate parking.
 
-### Workflow live-wrapper profile
+### Workflow host bindings
 
 Managed-loop `daemon start` can execute workflow steps through local commands by
-setting `MOMENTUM_LIVE_WRAPPER_PROFILE` to a readable JSON file:
+setting `MOMENTUM_HOST_BINDINGS_FILE` to a readable JSON file:
 
 ```sh
-MOMENTUM_LIVE_WRAPPER_PROFILE=/path/to/live-wrapper-profile.json \
+MOMENTUM_HOST_BINDINGS_FILE=/path/to/host-bindings.json \
   momentum daemon start --max-idle-cycles 1 --json
 ```
 
-The profile has a non-empty `name` and a `wrappers` object keyed by
-non-`external-apply` workflow step kind (`preflight`, `implementation`,
-`postflight`, `validate`, or `merge-cleanup`). The built-in `tracker-refresh`
+`MOMENTUM_HOST_BINDINGS_FILE` is the only active selector for machine-local
+execution bindings.
+The retired `MOMENTUM_LIVE_WRAPPER_PROFILE` selector is refused whenever it is
+present: the daemon and `workflow run watch --once` fail with a migration
+diagnostic naming `MOMENTUM_HOST_BINDINGS_FILE`, consult no fallback source,
+launch no process, and mutate no workflow state.
+Settle in-flight work before migrating: reattachment digests recorded under the
+retired selector cannot be recomputed without the retired profile identity, so
+a native `agent-loop`, `agent-once`, or `script` round that was still
+nonterminal at cutover reattaches only through the existing manual-recovery
+lane (`workflow run clear-recovery` prepares the fresh attempt), exactly like a
+binding file edited mid-flight.
+All terminal durable evidence remains readable unchanged.
+
+The host-binding file has a strict top-level shape: a single `bindings` object
+keyed by non-`external-apply` workflow step kind (`preflight`,
+`implementation`, `postflight`, `validate`, or `merge-cleanup`). The retired
+live-wrapper profile shape (`name` / `wrappers`) is rejected with a migration
+diagnostic. The built-in `tracker-refresh`
 step is handled by the daemon's policy-gated `external-apply` adapter, not a
-live-wrapper command. Each wrapper requires:
+host-bound command; a `tracker-refresh` (or legacy `linear-refresh`) binding is
+refused as invalid. Each binding requires:
 
 - `command` — absolute executable path.
 - `command_identity` - optional portable capability name for script steps.
@@ -255,16 +272,15 @@ live-wrapper command. Each wrapper requires:
   string/number `args`, and optional `timeout_sec`; its timeout defaults to 30
   seconds and uses the same 2,147,453-second maximum.
 
-Serialized profiles must use the canonical `command_identity`, `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
+Serialized bindings must use the canonical `command_identity`, `timeout_sec`, `env_allow`, `result_file`, and `probe.timeout_sec` keys.
 The retired `timeoutSec`, `envAllow`, `resultFile`, and `probe.timeoutSec` aliases are rejected whenever present, including alongside their canonical replacements, and the refusal names the alias and replacement.
-This targeted compatibility refusal does not make wrapper objects strict; unrelated unknown keys remain tolerated.
+This targeted compatibility refusal does not make binding objects strict; unrelated unknown keys inside a binding remain tolerated, while unknown top-level keys beside `bindings` are refused.
 
 Example:
 
 ```json
 {
-  "name": "local-workflow",
-  "wrappers": {
+  "bindings": {
     "preflight": {
       "command": "/usr/local/bin/momentum-preflight",
       "args": [],
@@ -300,12 +316,13 @@ Provider-aware aliases from the merged native selection are normalized before pe
 Unknown or non-agent harness/model values still pass through unchanged after structural validation.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
-`$MOMENTUM_RESULT_PATH`. A valid profile may configure only the
+`$MOMENTUM_RESULT_PATH`. A valid host-binding file may configure only the
 live-wrapper-owned step kinds it can run; a dispatched live-wrapper-owned kind
-missing from the profile routes to manual recovery rather than fake success. An
-unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
+missing from the bindings routes to manual recovery rather than fake success. An
+unreadable, invalid JSON, or schema-invalid host-binding file - and a still-set
+retired `MOMENTUM_LIVE_WRAPPER_PROFILE` selector - causes `daemon start`
 managed-loop mode to fail before registering a daemon run with
-`code: "daemon_live_wrapper_profile_invalid"`.
+`code: "daemon_host_bindings_invalid"`.
 
 The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in `workflow_run_coding_compatibility.selected_profile`; status, list, handoff, and logs read it back through the typed `run.selectedProfile` field, while the monitor detail loader reads the same canonical row before deriving its compact envelope, and a blank profile is refused before durable writes.
 `workflow run preview-coding --profile <name>` reports that same selected profile in its frozen read-only plan but does not persist a run.
@@ -318,14 +335,14 @@ A persisted `current-gnhf-cwfp` selection fails closed before the implementation
 The `--steps-json <json>` option on `workflow run start-coding` merges and freezes per-step harness/model/effort selections in `workflow_steps.agent_config_json`, and the read-only `route.steps` projection plus `workflow run preview-coding --steps-json <json>` report the same normalized selection without persisting a preview run.
 Provider-aware model aliases are normalized in both paths when the merged step selection supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 Native dispatch, including retry and reattachment round materialization, validates compatibility values only for their refusal semantics, then resolves the active executor from the recorded definition key/version and the frozen agent selection from the canonical step row rather than `route.steps`; stale or conflicting compatibility route data cannot override either.
-The command-line profile selector does not load or select the executable wrapper profile for the daemon.
-Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
-`workflow run watch --once` resolves the same profile for its bounded run-scoped dispatcher tick when it is eligible to dispatch a non-tail step, so an invalid profile can also fail that supervisor command with `daemon_live_wrapper_profile_invalid`.
-The checked-in coding-workflow live-wrapper profile runs the shared coding
+The command-line profile selector does not load or select the executable host bindings for the daemon.
+Managed-loop execution still uses the JSON host-binding file pointed to by `MOMENTUM_HOST_BINDINGS_FILE`.
+`workflow run watch --once` resolves the same host bindings for its bounded run-scoped dispatcher tick when it is eligible to dispatch a non-tail step, so invalid host bindings can also fail that supervisor command with `daemon_host_bindings_invalid`.
+The checked-in `bindings/coding-workflow.host-bindings.json` file runs the shared coding
 workflow wrapper for `preflight`, `implementation`, `postflight`,
 `validate`, and `merge-cleanup`. That wrapper also requires
 `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` to point at the run-local command
-configuration. If the profile is present but that run-local config is missing,
+configuration. If the host bindings are present but that run-local config is missing,
 unreadable, invalid, or lacks the current step, the wrapper exits as an operator
 setup failure without writing normalized runner evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
@@ -335,7 +352,7 @@ The top-level object may only contain `steps`, and each step only accepts `comma
 Unknown top-level or step keys are setup failures before any child command is spawned.
 `env_allow`, `timeout_sec`, and `result_file` use those names when present.
 When present, `timeout_sec` must be an integer between 1 and 2,147,453 seconds.
-When present, `result_file` must be a safe relative path that resolves to the same file as the live-wrapper profile's `result_file` injected through `MOMENTUM_RESULT_PATH`.
+When present, `result_file` must be a safe relative path that resolves to the same file as the host-binding file's `result_file` injected through `MOMENTUM_RESULT_PATH`.
 `envAllow`, `timeoutSec`, `resultFile`, or `runnerProfile` are rejected with setup guidance that
 points to the config path and key to fix.
 For example, this command block is valid:
@@ -361,7 +378,7 @@ Momentum supports the no-mistakes agent choices `claude`, `codex`, `opencode`, a
 Before spawning no-mistakes, the wrapper reads `HOME/.no-mistakes/config.yaml` with strict YAML parsing and requires the top-level `agent` plus the top-level `agent_path_override.<agent>` entry to match the runner profile.
 Duplicate keys, malformed YAML, tab indentation, missing YAML key separators, nested-only `agent_path_override` entries, non-mapping overrides, or non-absolute override paths fail closed before no-mistakes starts.
 YAML aliases and either order of the top-level `agent` and `agent_path_override` entries are accepted because validation follows YAML semantics instead of line-scanner order.
-For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrapper process, and the run-local `env_allow` must forward it to the child process before no-mistakes starts:
+For Codex, the checked-in host-binding file allows `CODEX_HOME` into the wrapper process, and the run-local `env_allow` must forward it to the child process before no-mistakes starts:
 
 ```json
 {
@@ -461,7 +478,7 @@ Delegate-supervisor adapter, handoff, unreadable or inconsistent external-state 
 The retry inserts a fresh immutable attempt that keeps the step-scoped dispatch correlation for handoff and repo-lock identity, preserves a valid non-terminal handoff and prior decisions, and starts a fresh semantic-stall window.
 It sends a prior handoff through adapter recovery before reuse.
 For a locally failed no-mistakes receipt, a correlated failed or cancelled run permits one fresh launch; every other status reruns local finalization before the same run is reattached for supervision.
-For profile-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
+For binding-backed no-mistakes, a conclusively failed or cancelled prior external run remains evidence but permits one fresh launch on the newer attempt.
 An `unsupported_platform` refusal is separately retryable for every dispatched
 step after the workflow moves to Linux or macOS and recovery is cleared there.
 The coding-workflow wrapper also treats known no-mistakes runner lifecycle

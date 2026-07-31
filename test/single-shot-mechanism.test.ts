@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
-import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
+import type { HostBindingConfig } from "../src/adapters/host-bindings-registry.js";
 import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import { MAX_BUILT_IN_PROCESS_TIMEOUT_SEC } from "../src/shared/process-limits.js";
 import {
@@ -506,7 +506,7 @@ describe("single-shot concrete mechanisms", () => {
   it("kills an in-flight agent-once wrapper when the SDK signal aborts", async () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: "/bin/sh",
       args: [
         "-c",
@@ -894,7 +894,7 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
     const marker = path.join(repoPath, "should-not-launch.txt");
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: "/bin/sh",
       args: ["-c", `printf launched > ${JSON.stringify(marker)}`],
       cwd: "iteration",
@@ -935,7 +935,7 @@ describe("single-shot concrete mechanisms", () => {
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
     const verificationLogPath = path.join(artifactRoot, "verify.log");
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
@@ -986,7 +986,7 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const verificationLogPath = path.join(artifactRoot, "verify.log");
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
@@ -1026,7 +1026,7 @@ describe("single-shot concrete mechanisms", () => {
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
     fs.writeFileSync(path.join(repoPath, "preexisting.txt"), "dirty\n");
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
@@ -1070,7 +1070,7 @@ describe("single-shot concrete mechanisms", () => {
   it("rejects relative agent-once log paths before launching the wrapper", () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
@@ -1107,7 +1107,7 @@ describe("single-shot concrete mechanisms", () => {
     const artifactRoot = makeTempDir();
     const blockedParent = path.join(artifactRoot, "blocked-parent");
     fs.writeFileSync(blockedParent, "not a directory\n");
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: ["-e", "process.exit(0)"],
       cwd: "iteration",
@@ -1158,7 +1158,7 @@ describe("single-shot concrete mechanisms", () => {
         ...args,
       );
     }) as typeof fs.writeSync);
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
@@ -2058,7 +2058,7 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
-    const config: LiveWrapperConfig = {
+    const config: HostBindingConfig = {
       command: process.execPath,
       args: [
         "-e",
