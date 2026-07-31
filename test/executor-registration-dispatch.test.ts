@@ -252,12 +252,14 @@ describe("profile-backed built-in registration", () => {
     if (!production.ok) throw new Error(production.message);
 
     await expect(
-      production.dispatch(claim.claim, {
-        db,
-        workerId: "missing-native-profile-worker",
-        now: NOW + 1,
-      }),
-    ).rejects.toMatchObject({ recoveryCode: "runtime_unavailable" });
+      Promise.resolve().then(() =>
+        production.dispatch(claim.claim, {
+          db,
+          workerId: "missing-native-profile-worker",
+          now: NOW + 1,
+        }),
+      ),
+    ).rejects.toHaveProperty("recoveryCode", "runtime_unavailable");
 
     expect(
       db

@@ -210,8 +210,16 @@ export async function runDaemonLoop(
         };
 
   const markInternalError = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    const recoveryCode =
+      typeof error === "object" &&
+      error !== null &&
+      "recoveryCode" in error &&
+      typeof (error as { recoveryCode?: unknown }).recoveryCode === "string"
+        ? (error as { recoveryCode: string }).recoveryCode
+        : null;
     internalErrorMessage =
-      error instanceof Error ? error.message : String(error);
+      recoveryCode === null ? message : `${recoveryCode}: ${message}`;
     exitReason = "internal_error";
   };
 

@@ -2932,7 +2932,10 @@ function workflowWatchHostBindingsFailure(
   if (resolution.status !== "invalid") return null;
   return {
     code: "daemon_host_bindings_invalid",
-    message: resolution.error,
+    message:
+      resolution.code === "retired_selector"
+        ? resolution.error
+        : `Invalid ${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} (${resolution.source}): ${resolution.code}: ${resolution.error}`,
   };
 }
 

@@ -1453,6 +1453,7 @@ describe("momentum workflow run watch", () => {
 
   it("releases the dispatch lease when the watch dispatcher tick throws", async () => {
     const dataDir = makeTempDir();
+    const hostBindingsPath = writeHostBindings(dataDir, "implementation");
     const runId = "mwf-watch-dispatch-throws";
     const db = openDb(dataDir);
     try {
@@ -1481,16 +1482,19 @@ describe("momentum workflow run watch", () => {
       db.close();
     }
 
-    const result = await run([
-      "workflow",
-      "run",
-      "watch",
-      runId,
-      "--once",
-      "--data-dir",
-      dataDir,
-      "--json",
-    ]);
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json",
+      ],
+      { MOMENTUM_HOST_BINDINGS_FILE: hostBindingsPath },
+    );
 
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {

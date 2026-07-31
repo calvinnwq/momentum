@@ -73,9 +73,8 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
       boundary: "through-implementation",
     });
 
-    // daemon start --max-*: the shipped bounded managed loop claims and
-    // dispatches the approved workflow step through the production workflowLane
-    // with no test-only dependency injection. The lane is no longer inert.
+    // daemon start --max-*: the shipped bounded managed loop refuses the
+    // native step before claiming it when host bindings are not configured.
     const daemon = runCliBinary([
       "daemon",
       "start",
@@ -87,16 +86,16 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
       dataDir,
       "--json",
     ]);
-    expect(daemon.code, `daemon start stderr: ${daemon.stderr}`).toBe(0);
-    expect(daemon.stderr).toBe("");
-    const daemonPayload = JSON.parse(daemon.stdout) as {
+    expect(daemon.code, `daemon start stderr: ${daemon.stderr}`).toBe(1);
+    expect(daemon.stdout).toBe("");
+    const daemonPayload = JSON.parse(daemon.stderr) as {
       loop: Record<string, unknown>;
     };
-    expect(daemonPayload.loop["workflowStepsDispatched"]).toBe(1);
-    expect(daemonPayload.loop["lastWorkflowCode"]).toBe("dispatched");
+    expect(daemonPayload.loop["workflowStepsDispatched"]).toBe(0);
+    expect(daemonPayload.loop["lastWorkflowCode"]).toBeNull();
+    expect(daemonPayload.loop["error"]).toContain("runtime_unavailable");
 
-    // Durable executor rows exist through the production path, observable from
-    // SQLite after the daemon process has exited.
+    // The fail-closed refusal leaves the workflow untouched.
     const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
       const attempts = db
@@ -108,13 +107,7 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
         executor: string;
         state: string;
       }>;
-      expect(attempts).toEqual([
-        {
-          step_key: "preflight",
-          executor: "agent-once",
-          state: "manual_recovery_required",
-        },
-      ]);
+      expect(attempts).toEqual([]);
 
       const rounds = db
         .prepare(
@@ -125,26 +118,26 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
         round_index: number;
         state: string;
       }>;
-      expect(rounds).toEqual([
-        {
-          step_key: "preflight",
-          round_index: 0,
-          state: "manual_recovery_required",
-        },
-      ]);
+      expect(rounds).toEqual([]);
+      const step = db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'",
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
     } finally {
       db.close();
     }
 
     // Process-loss observability: status, handoff, and monitor all report the
-    // post-dispatch state from durable rows, with no in-memory daemon handle.
+    // unchanged durable state from the workflow run.
     const status = workflowStatusJson(dataDir, [runId]);
     const statusSteps = status["steps"] as Array<{
       stepId: string;
       state: string;
     }>;
     expect(statusSteps.find((step) => step.stepId === "preflight")?.state).toBe(
-      "running",
+      "approved",
     );
 
     const handoff = workflowHandoffJson(dataDir, runId);
@@ -156,7 +149,7 @@ describe("Milestone 10 production workflow-lane dispatch smoke (NGX-367)", () =>
     }>;
     expect(
       handoffSteps.find((step) => step.stepId === "preflight")?.state,
-    ).toBe("running");
+    ).toBe("approved");
 
     const monitor = workflowRunMonitorJson(dataDir, runId);
     expect(monitor).toMatchObject({ ok: true, runId });
