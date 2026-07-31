@@ -1293,6 +1293,106 @@ describe("persistWorkflowRunImport", () => {
     }
   });
 
+  it("re-imports import-owned metadata additively without touching operator-owned step transitions", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-metadata-reimport";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        risk: "medium",
+        quotaPolicy: { maxTurns: 12, overflow: "refuse" },
+        taskFlow: { childTasks: [{ stepId: "implementation" }] },
+        approvalsRequired: [],
+      }),
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-17T10:01:00Z",
+      },
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000,
+      });
+      // Every imported field round-trips through the canonical table...
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json, created_at
+               FROM workflow_run_import_metadata
+              WHERE run_id = ?`,
+          )
+          .get(runId),
+      ).toEqual({
+        mode: "execute-ready",
+        profile: "momentum-m7",
+        risk: "medium",
+        quota_policy_json: '{"maxTurns":12,"overflow":"refuse"}',
+        created_at: 1_700_000_000,
+      });
+
+      // ...an operator-owned transition lands between imports...
+      db.prepare(
+        `UPDATE workflow_steps
+            SET state = 'succeeded',
+                operator_reason = 'operator verified completion',
+                operator_actor = 'test-operator',
+                operator_transition_at = 1700000250,
+                finished_at = 1700000250,
+                updated_at = 1700000250
+          WHERE run_id = ? AND step_id = 'implementation'`,
+      ).run(runId);
+
+      // ...and a re-import with changed import-owned metadata updates only
+      // the metadata, preserving the operator-owned step transition.
+      writeJsonFile(
+        path.join(runDir, "plan.json"),
+        basePlan(runId, {
+          mode: "implementation",
+          risk: "high",
+          quotaPolicy: { maxTurns: 24, overflow: "refuse" },
+          taskFlow: { childTasks: [{ stepId: "implementation" }] },
+          approvalsRequired: [],
+        }),
+      );
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500,
+      });
+      expect(
+        db
+          .prepare(
+            `SELECT mode, profile, risk, quota_policy_json, created_at,
+                    updated_at
+               FROM workflow_run_import_metadata
+              WHERE run_id = ?`,
+          )
+          .get(runId),
+      ).toEqual({
+        mode: "implementation",
+        profile: "momentum-m7",
+        risk: "high",
+        quota_policy_json: '{"maxTurns":24,"overflow":"refuse"}',
+        created_at: 1_700_000_000,
+        updated_at: 1_700_000_500,
+      });
+      expect(readWorkflowSteps(db, runId)[0]).toMatchObject({
+        step_id: "implementation",
+        state: "succeeded",
+        finished_at: 1_700_000_250,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("preserves operator-transitioned step state across stale re-imports", () => {
     const dataDir = makeTempDir("momentum-data-");
     const artifactRoot = makeTempDir();

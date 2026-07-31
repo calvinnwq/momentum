@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
+import { readWorkflowRunCodingCompatibility } from "../src/adapters/db/route-state.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 import { loadCanonicalWorkflowRunRoute } from "./support/canonical-route-state.js";
@@ -475,7 +476,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       db.close();
     }
 
-    // The captured profile is explainable from Momentum state alone.
+    // The captured profile is explainable from Momentum state alone through
+    // the canonical compatibility reader; the status projection no longer
+    // carries the retired route.profile key.
     const status = await run([
       "workflow",
       "status",
@@ -485,10 +488,18 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       "--json",
     ]);
     expect(status.code).toBe(0);
-    const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
-    expect(JSON.stringify(statusPayload)).toContain(
-      "coding-workflow-live-wrapper",
-    );
+    const statusPayload = JSON.parse(status.stdout) as {
+      run: { route: Record<string, unknown> };
+    };
+    expect(statusPayload.run.route).not.toHaveProperty("profile");
+    const readbackDb = openDb(dataDir);
+    try {
+      expect(
+        readWorkflowRunCodingCompatibility(readbackDb, "ngx-508-profile"),
+      ).toMatchObject({ selectedProfile: "coding-workflow-live-wrapper" });
+    } finally {
+      readbackDb.close();
+    }
   });
 
   it("records the honest GNHF implementation engine when no runtime profile is selected", async () => {

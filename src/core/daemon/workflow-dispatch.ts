@@ -145,7 +145,6 @@ import {
 } from "../workflow/dispatch/executor-context.js";
 import {
   deriveDispatchCorrelationId,
-  resolveLegacyWorkflowStepDispatchRouteSelection,
   resolveWorkflowStepDispatchRouteSelection,
 } from "../workflow/dispatch/execute.js";
 import {
@@ -1018,10 +1017,11 @@ function createLiveStepHostBindingsResolver(
         new Error("workflow_step_not_found"),
       );
     }
+    // Every retained lane, including the legacy live-wrapper step, resolves
+    // its selection from canonical run / step state; compatibility route
+    // projection is never consulted for dispatch.
     const selection = guardRecoveredNativeRepoOwnership(() =>
-      isLiveStep
-        ? resolveLegacyWorkflowStepDispatchRouteSelection(context.db, claim)
-        : resolveWorkflowStepDispatchRouteSelection(context.db, claim),
+      resolveWorkflowStepDispatchRouteSelection(context.db, claim),
     );
     if (!selection.ok) {
       return failRecoveredNativeRepoOwnership(new Error(selection.reason));

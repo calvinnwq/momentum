@@ -27,10 +27,12 @@
  * implementation path and operator harness/model/effort overrides are run-specific.
  * Canonical run state is owned by the database adapter: per-step overrides live in
  * `workflow_steps.agent_config_json`, and the implementation path/profile live in
- * the coding-compatibility destination. This module operates on their stable
- * compatibility projection under `route.implementationEngine`, `route.steps`, and
- * `route.profile`; canonical subworkflow state is owned by the workflow step and
- * lineage destinations instead of this compatibility projection.
+ * the coding-compatibility destination. This module operates on the start-time
+ * operator route input under `route.implementationEngine`, `route.steps`, and
+ * `route.profile` plus the projected `route.steps` namespace; the persisted
+ * implementation-engine / profile values are canonical-only (read through the
+ * direct compatibility reader), and canonical subworkflow state is owned by the
+ * workflow step and lineage destinations.
  * `route.profile` (the recorded operator profile) stays distinct from these
  * per-step selections and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE`
  * execution profile; none of them are conflated here.

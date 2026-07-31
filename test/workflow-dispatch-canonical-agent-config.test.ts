@@ -105,6 +105,158 @@ function claimImplementation(db: MomentumDb, runId: string) {
 }
 
 describe("native dispatch canonical agent config", () => {
+  it("selects the canonical implementation over conflicting stale compatibility rows", () => {
+    // North-star regression (NGX-667): `workflow_runs` records D@V, the
+    // matching step definition and frozen `workflow_steps.executor_config_json`
+    // specify implementation A, while `workflow_run_coding_compatibility`
+    // carries a conflicting historical engine label B and a stale selected
+    // profile. Production dispatch must select A; B stays readable history.
+    const runId = "canonical-vs-stale-compatibility";
+    const db = seedNativeImplementationRun(runId);
+    try {
+      db.prepare(
+        `UPDATE workflow_run_coding_compatibility
+            SET implementation_engine = 'native-goal-loop',
+                selected_profile = 'stale-live-profile'
+          WHERE run_id = ?`,
+      ).run(runId);
+
+      const result = executeWorkflowStepDispatch(
+        claimImplementation(db, runId),
+        {
+          db,
+          workerId: WORKER,
+          now: NOW + 1,
+        },
+      );
+
+      expect(result.status).toBe("executor_dispatched");
+      // The stale label cannot rewrite the recorded definition identity...
+      expect(
+        db
+          .prepare(
+            `SELECT workflow_definition_key AS definitionKey,
+                    workflow_definition_version AS definitionVersion
+               FROM workflow_runs
+              WHERE id = ?`,
+          )
+          .get(runId),
+      ).toEqual({
+        definitionKey: CODING_WORKFLOW_DEFINITION.key,
+        definitionVersion: CODING_WORKFLOW_DEFINITION.version,
+      });
+      // ...or the definition-owned executor identity...
+      expect(
+        db
+          .prepare(
+            "SELECT executor FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ executor: "delegate-supervisor" });
+      // ...or the frozen step-owned portable selection (implementation A).
+      expect(
+        db
+          .prepare(
+            `SELECT agent_provider AS agentProvider, model, effort
+               FROM executor_rounds
+              WHERE workflow_run_id = ? AND step_run_id = 'implementation'`,
+          )
+          .get(runId),
+      ).toEqual({
+        agentProvider: "codex",
+        model: "gpt-5.6-codex",
+        effort: "high",
+      });
+      // The conflicting values remain readable historical evidence only.
+      expect(
+        db
+          .prepare(
+            `SELECT implementation_engine AS implementationEngine,
+                    selected_profile AS selectedProfile
+               FROM workflow_run_coding_compatibility
+              WHERE run_id = ?`,
+          )
+          .get(runId),
+      ).toEqual({
+        implementationEngine: "native-goal-loop",
+        selectedProfile: "stale-live-profile",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed on an unsupported stale compatibility engine before executor work", () => {
+    const runId = "canonical-vs-unsupported-compatibility";
+    const db = seedNativeImplementationRun(runId);
+    try {
+      db.prepare(
+        `UPDATE workflow_run_coding_compatibility
+            SET implementation_engine = 'retired-unsupported-engine'
+          WHERE run_id = ?`,
+      ).run(runId);
+
+      const result = executeWorkflowStepDispatch(
+        claimImplementation(db, runId),
+        {
+          db,
+          workerId: WORKER,
+          now: NOW + 1,
+        },
+      );
+
+      expect(result.status).toBe("manual_recovery_gated");
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      expect(listWorkflowGatesForRun(db, runId)).toEqual([
+        expect.objectContaining({
+          evidence: "route_config_invalid",
+          reason: expect.stringContaining("retired-unsupported-engine"),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed when the canonical compatibility marker row is missing", () => {
+    const runId = "canonical-missing-compatibility-marker";
+    const db = seedNativeImplementationRun(runId);
+    try {
+      db.prepare(
+        "DELETE FROM workflow_run_coding_compatibility WHERE run_id = ?",
+      ).run(runId);
+
+      const result = executeWorkflowStepDispatch(
+        claimImplementation(db, runId),
+        {
+          db,
+          workerId: WORKER,
+          now: NOW + 1,
+        },
+      );
+
+      expect(result.status).toBe("manual_recovery_gated");
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+          )
+          .get(runId),
+      ).toEqual({ count: 0 });
+      expect(listWorkflowGatesForRun(db, runId)).toEqual([
+        expect.objectContaining({ evidence: "route_config_invalid" }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("dispatches from the frozen step row and never from stale route.steps", () => {
     const runId = "canonical-agent-config-wins";
     const db = seedNativeImplementationRun(runId);

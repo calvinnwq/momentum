@@ -516,7 +516,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
-  it("keeps retained legacy host bindings on the compatibility route projection", async () => {
+  it("resolves retained legacy live-wrapper selection from canonical step state, never the route projection", async () => {
     const repoPath = makeTempDir();
     initGitRepo(repoPath);
     const profilePath = writeLegacyRouteProfile(makeTempDir());
@@ -569,6 +569,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       "no-mistakes",
     );
     const claim = approveAndClaim(db, "no-mistakes", runId);
+    // Even when the compatibility projection reports a stale conflicting
+    // selection, the retained legacy live-wrapper lane must dispatch from the
+    // canonical frozen step row.
     const projectedRoute = vi.mocked(projectValidatedLegacyWorkflowRunRoute);
     projectedRoute.mockImplementation(() => ({
       steps: {
@@ -603,7 +606,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
           "SELECT summary FROM executor_rounds WHERE workflow_run_id = ?",
         )
         .get(runId),
-    ).toEqual({ summary: "claude|compatibility-model|low" });
+    ).toEqual({ summary: "codex|canonical-model|high" });
   });
 
   it("applies a retained linear-refresh route override through tracker-refresh", () => {

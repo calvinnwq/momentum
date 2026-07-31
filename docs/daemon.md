@@ -307,9 +307,9 @@ unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
 managed-loop mode to fail before registering a daemon run with
 `code: "daemon_live_wrapper_profile_invalid"`.
 
-The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in `workflow_run_coding_compatibility.selected_profile`; the read-only `route.profile` projection preserves the existing reader shape, and a blank profile is refused before durable writes.
-`workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
-The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `workflow_run_coding_compatibility.implementation_engine`; the read-only `route.implementationEngine` projection preserves the existing reader shape, and when omitted, coding starts persist `gnhf`.
+The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in `workflow_run_coding_compatibility.selected_profile`; status, handoff, and logs read it back through the typed `run.selectedProfile` field, and a blank profile is refused before durable writes.
+`workflow run preview-coding --profile <name>` reports that same selected profile in its frozen read-only plan but does not persist a run.
+The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `workflow_run_coding_compatibility.implementation_engine`; status, handoff, and logs read it back through the typed `run.implementationEngine` field, and when omitted, coding starts persist `gnhf`.
 `workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
 Accepted values are `gnhf`, legacy `native-goal-loop`, and `current-gnhf-cwfp`.
 The version-pinned built-in definition remains authoritative for the implementation executor: current version 3 uses `delegate-supervisor`, including for the default `gnhf` route and the accepted legacy `native-goal-loop` label; retained version 1 projects its recorded `goal-loop` executor according to the raw-identity compatibility rule in [SPEC.md](../SPEC.md), while retained version 2 keeps its recorded `delegate-supervisor` implementation and delegated tool configuration.
