@@ -611,13 +611,14 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 ```
 
-Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes the `plan.json`, `ledger.jsonl`, `approval-*.json`, and advisory `monitor.json` artifacts into durable `workflow_runs`, `workflow_steps`, and `workflow_approvals` rows.
+Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes the `plan.json`, `ledger.jsonl`, `approval-*.json`, and advisory `monitor.json` artifacts into durable `workflow_runs`, `workflow_steps`, `workflow_approvals`, and imported metadata rows.
 
 `--path <run-dir>` is required. The directory basename should match the `cwfp-` / `cwfb-` / `overnight-` run ID convention; alternatively, `plan.json` may supply `runId` when it is a safe path segment. An unsafe `plan.json.runId` emits `evidence_format_invalid` with reason `plan_run_id_invalid` and import falls back to the directory basename.
 
 ### Processing rules
 
 - **Idempotent re-import**: running `workflow import` on the same directory twice produces no duplicate rows. `created_at` is preserved on upsert; `updated_at` is bumped.
+- **Canonical imported metadata**: imported `mode`, legacy `profile`, `risk`, `quotaPolicy`, and `sourceFormat` are persisted in `workflow_run_import_metadata`; `sourceFormat` is derived from a positive integer `plan.json.schemaVersion` as `agent-workflow-plan@v<n>`, or remains `null` when that version is absent or unrecognized. The metadata is historical read-back state only and never selects an executor or host binding; its marker timestamps follow the idempotent upsert contract described in [Data directory layout](data-directory.md).
 - **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`, `monitor_last_seen_at`, `monitor_last_emitted_at`) so status / handoff / monitor / logs drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same state columns from durable rows and clear the digest / timestamp fields, so later views do not report drift against a stale pre-mutation monitor tick.
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
@@ -1529,6 +1530,18 @@ All filters are optional and compose: passing multiple filters narrows the resul
         "repoPath": "/path/to/repo",
         "objective": "land workflow status CLI",
         "issueScope": {},
+        "route": {},
+        "implementationEngine": null,
+        "selectedProfile": null,
+        "importMetadata": {
+          "mode": "execute-ready",
+          "profile": "imported-profile",
+          "risk": null,
+          "quotaPolicy": null,
+          "sourceFormat": "agent-workflow-plan@v1",
+          "createdAt": 1730000000000,
+          "updatedAt": 1730000600000
+        },
         "needsManualRecovery": false,
         "startedAt": 1730000000000,
         "finishedAt": null,
