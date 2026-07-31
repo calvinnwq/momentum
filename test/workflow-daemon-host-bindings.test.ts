@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { openDb } from "../src/adapters/db.js";
+import { resolveDaemonWorkflowStepDispatch } from "../src/core/daemon/workflow-dispatch.js";
 import {
   DAEMON_HOST_BINDINGS_FILE_ENV_VAR,
   RETIRED_LIVE_WRAPPER_PROFILE_ENV_VAR,
@@ -10,6 +13,11 @@ import {
   resolveDaemonHostBindings,
   type DaemonHostBindingsSourceLoad,
 } from "../src/core/workflow/live-wrapper/daemon-host-bindings.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
+import { runWorkflowSchedulerOnceAsync } from "../src/core/workflow/dispatch/scheduler.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 
 /**
@@ -313,5 +321,209 @@ describe("readDaemonHostBindingsSource", () => {
     expect(resolution.status).toBe("resolved");
     if (resolution.status !== "resolved") return;
     expect(resolution.bindings.bindings.has("implementation")).toBe(true);
+  });
+});
+
+/**
+ * Daemon pre-claim refusal through the real dispatch path: a native step the
+ * resolved environment cannot serve must be refused BEFORE the scheduler
+ * claims it. No dispatch lease, executor attempt, or round state may exist
+ * afterwards - the before-mutation refusal contract.
+ */
+describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
+  const NOW = 1_700_000_000_000;
+
+  function initRepo(): string {
+    const repoPath = makeTempDir("momentum-daemon-preclaim-repo-");
+    execFileSync("git", ["-C", repoPath, "init", "--quiet"]);
+    execFileSync("git", [
+      "-C",
+      repoPath,
+      "config",
+      "user.name",
+      "Momentum Test",
+    ]);
+    execFileSync("git", [
+      "-C",
+      repoPath,
+      "config",
+      "user.email",
+      "momentum@example.test",
+    ]);
+    fs.writeFileSync(path.join(repoPath, "README.md"), "fixture\n");
+    execFileSync("git", ["-C", repoPath, "add", "README.md"]);
+    execFileSync("git", [
+      "-C",
+      repoPath,
+      "commit",
+      "--quiet",
+      "-m",
+      "test: initialize fixture",
+    ]);
+    return repoPath;
+  }
+
+  function startApprovedRun(
+    db: ReturnType<typeof openDb>,
+    definition: WorkflowDefinition,
+    runId: string,
+    repoPath: string,
+  ): void {
+    persistWorkflowDefinition(db, definition, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition,
+      runId,
+      repoPath,
+      objective: "Prove pre-claim host-binding refusal",
+      now: NOW,
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ?",
+    ).run(runId);
+  }
+
+  function assertNothingClaimed(
+    db: ReturnType<typeof openDb>,
+    runId: string,
+  ): void {
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_attempts WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ?")
+        .get(runId),
+    ).toEqual({ state: "approved" });
+  }
+
+  it("refuses a pending delegate-supervisor step pre-claim when no bindings source is configured", async () => {
+    const repoPath = initRepo();
+    const db = openDb(makeTempDir("momentum-daemon-preclaim-data-"));
+    const runId = "delegate-preclaim-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-preclaim-delegate",
+        title: "Daemon Pre-Claim Delegate",
+        version: 1,
+        steps: [
+          {
+            key: "handoff",
+            kind: "implementation",
+            executor: "delegate-supervisor",
+            config: { tool: "gnhf" },
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+
+    // No bindings source at all: the dogfood daemon lane stays available, but
+    // a host-binding-required delegate step must be refused before claiming.
+    const production = resolveDaemonWorkflowStepDispatch(
+      {},
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+    expect(production.preClaim).toBeDefined();
+
+    await expect(
+      runWorkflowSchedulerOnceAsync({
+        db,
+        runId,
+        workerId: "delegate-preclaim-worker",
+        dispatch: production.dispatch,
+        ...(production.preClaim === undefined
+          ? {}
+          : { preClaim: production.preClaim }),
+        now: () => NOW + 1,
+      }),
+    ).rejects.toThrow(
+      `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native delegate-supervisor host bindings`,
+    );
+
+    assertNothingClaimed(db, runId);
+    db.close();
+  });
+
+  it("refuses pre-claim when a valid bindings file lacks the selected native step kind", async () => {
+    const repoPath = initRepo();
+    const configDir = makeTempDir("momentum-daemon-preclaim-bindings-");
+    const bindingsPath = path.join(configDir, "host-bindings.json");
+    // A resolvable, valid file - but it binds only `implementation`, not the
+    // `preflight` kind the pending native step selects.
+    fs.writeFileSync(bindingsPath, VALID_HOST_BINDINGS_JSON, "utf8");
+    const db = openDb(makeTempDir("momentum-daemon-preclaim-data-"));
+    const runId = "missing-binding-preclaim-run";
+    startApprovedRun(
+      db,
+      {
+        key: "daemon-preclaim-missing-binding",
+        title: "Daemon Pre-Claim Missing Binding",
+        version: 1,
+        steps: [
+          {
+            key: "preflight",
+            kind: "preflight",
+            executor: "agent-once",
+            config: {},
+            order: 0,
+            required: true,
+          },
+        ],
+      },
+      runId,
+      repoPath,
+    );
+
+    const production = resolveDaemonWorkflowStepDispatch(
+      { [DAEMON_HOST_BINDINGS_FILE_ENV_VAR]: bindingsPath },
+      executeWorkflowStepDispatch,
+      {},
+    );
+    expect(production.ok, production.ok ? "" : production.message).toBe(true);
+    if (!production.ok) return;
+    expect(production.preClaim).toBeDefined();
+
+    await expect(
+      runWorkflowSchedulerOnceAsync({
+        db,
+        runId,
+        workerId: "missing-binding-preclaim-worker",
+        dispatch: production.dispatch,
+        ...(production.preClaim === undefined
+          ? {}
+          : { preClaim: production.preClaim }),
+        now: () => NOW + 1,
+      }),
+    ).rejects.toThrow(
+      "host bindings have no preflight binding for native agent-once",
+    );
+
+    assertNothingClaimed(db, runId);
+    db.close();
   });
 });

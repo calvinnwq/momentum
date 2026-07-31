@@ -96,7 +96,9 @@ import type { ExecutorRegistry } from "../../core/executors/sdk/registry.js";
 import {
   runWorkflowSchedulerOnceAsync,
   type RecoverStaleWorkflowLeasesResult,
+  type WorkflowStepPreClaim,
 } from "../../core/workflow/dispatch/scheduler.js";
+import { RegisteredExecutorHostBindingsError } from "../../core/workflow/dispatch/registered-executor.js";
 import {
   loadWorkflowRuntimeStateRows,
   refreshWorkflowRunRuntimeState,
@@ -2964,9 +2966,6 @@ async function runWorkflowWatchDispatcherTick(
 
   const now = Date.now();
   const workerId = `workflow-watch:${envelope.runId}`;
-  let dispatchResolution: ReturnType<
-    typeof resolveDaemonWorkflowStepDispatch
-  > | null = null;
   if (canDispatchNextStep) {
     if (
       isWorkflowWatchHostBindingsRequired(db, envelope) &&
@@ -2984,18 +2983,48 @@ async function runWorkflowWatchDispatcherTick(
           "start the step without terminal live-wrapper evidence.",
       };
     }
-    dispatchResolution = resolveDaemonWorkflowStepDispatch(
-      env,
-      executeWorkflowStepDispatch,
-      deps,
-    );
-    if (!dispatchResolution.ok) {
-      return {
-        code: "daemon_host_bindings_invalid",
-        message: dispatchResolution.message,
-      };
-    }
   }
+  // Resolve eagerly for the recheck-only path too so the scheduler's
+  // pre-claim guard exists before any active claim can heartbeat.
+  const dispatchResolution = resolveDaemonWorkflowStepDispatch(
+    env,
+    executeWorkflowStepDispatch,
+    deps,
+  );
+  if (!dispatchResolution.ok) {
+    return {
+      code: "daemon_host_bindings_invalid",
+      message: dispatchResolution.message,
+    };
+  }
+  const resolvedPreClaim = dispatchResolution.preClaim;
+  const preClaim: WorkflowStepPreClaim | undefined =
+    resolvedPreClaim === undefined
+      ? undefined
+      : (preClaimInput) => {
+          // Route validation takes precedence: an invalid route must reach
+          // dispatch so it parks the run behind a route_config_invalid gate
+          // instead of refusing on missing host bindings first.
+          if (
+            !resolveWorkflowStepDispatchRouteSelection(preClaimInput.db, {
+              runId: preClaimInput.candidate.runId,
+              stepId: preClaimInput.candidate.stepId,
+            }).ok
+          ) {
+            return;
+          }
+          try {
+            resolvedPreClaim(preClaimInput);
+          } catch (error) {
+            if (error instanceof RegisteredExecutorHostBindingsError) {
+              throw new WorkflowWatchDispatchConfigError({
+                code: "daemon_host_bindings_required",
+                message: error.message,
+              });
+            }
+            throw error;
+          }
+        };
   const recovery: RecoverStaleWorkflowLeasesResult = {
     recovered: [],
     skipped: [],
@@ -3005,24 +3034,11 @@ async function runWorkflowWatchDispatcherTick(
       db,
       runId: envelope.runId,
       workerId,
-      dispatch: (claim, context) => {
-        dispatchResolution ??= resolveDaemonWorkflowStepDispatch(
-          env,
-          executeWorkflowStepDispatch,
-          deps,
-        );
-        if (!dispatchResolution.ok) {
-          throw new WorkflowWatchDispatchConfigError({
-            code: "daemon_host_bindings_invalid",
-            message: dispatchResolution.message,
-          });
-        }
-        return dispatchResolution.dispatch(claim, context);
-      },
+      dispatch: dispatchResolution.dispatch,
+      ...(preClaim === undefined ? {} : { preClaim }),
       now: () => now,
       claimedExecutorNames: configuredExecutorNames(env),
-      ...(dispatchResolution?.ok &&
-      dispatchResolution.leaseDurationMs !== undefined
+      ...(dispatchResolution.leaseDurationMs !== undefined
         ? { leaseDurationMs: dispatchResolution.leaseDurationMs }
         : {}),
       deps: {

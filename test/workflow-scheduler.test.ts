@@ -2110,6 +2110,78 @@ describe("runWorkflowSchedulerOnce: scheduler-lane tick (NGX-348)", () => {
     }
   });
 
+  it("refuses via preClaim before stale-lease recovery mutates durable state (NGX-668)", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, {
+        runId: "run-native",
+        state: "approved",
+        repoPath: "/repos/native",
+      });
+      seedStep(db, {
+        runId: "run-native",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 0,
+      });
+      // A dead worker's stale auto-release lease that recovery would release.
+      seedLease(db, {
+        runId: "run-native",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release",
+      });
+      const recorder = recordingDispatch();
+      const refusal = new Error(
+        "MOMENTUM_DAEMON_HOST_BINDINGS_FILE is required for native host bindings",
+      );
+
+      expect(() =>
+        runWorkflowSchedulerOnce({
+          db,
+          workerId: "scheduler-1",
+          dispatch: recorder.dispatch,
+          preClaim: () => {
+            throw refusal;
+          },
+          now: () => NOW,
+        }),
+      ).toThrow(refusal);
+
+      // The refusal fired before recovery: the stale lease is untouched...
+      const lease = getWorkflowLease(db, "run-native", "managed-step");
+      expect(lease?.releasedAt).toBeNull();
+      expect(lease?.expiresAt).toBe(NOW - 10_000);
+      // ...the run was not parked for manual recovery, nothing dispatched, and
+      // the stale lease is still surfaced for a properly configured daemon.
+      expect(getWorkflowRunManualRecoveryState(db, "run-native")).toMatchObject(
+        { needsManualRecovery: false },
+      );
+      expect(recorder.calls).toEqual([]);
+      expect(
+        selectRunnableWorkflowWork(db, { now: NOW }).staleLeases,
+      ).toHaveLength(1);
+
+      // Without the refusing guard the same tick recovers and dispatches.
+      const result = runWorkflowSchedulerOnce({
+        db,
+        workerId: "scheduler-1",
+        dispatch: recorder.dispatch,
+        now: () => NOW,
+      });
+      expect(result).toMatchObject({
+        code: "dispatched",
+        claim: { runId: "run-native" },
+      });
+      expect(
+        getWorkflowLease(db, "run-native", "managed-step")?.releasedAt,
+      ).toBe(NOW);
+    } finally {
+      db.close();
+    }
+  });
+
   it("alternates overdue continuations with runnable work independently of lease duration", () => {
     const db = openDb(makeTempDir());
     try {

@@ -189,6 +189,34 @@ export function selectRunnableWorkflowWork(
       "selectRunnableWorkflowWork: graceMs must be a non-negative finite number",
     );
   }
+  return scanRunnableWorkflowWork(db, {
+    now: input.now,
+    graceMs,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+    assumeStaleAutoReleaseLeasesRecovered: false,
+  });
+}
+
+/**
+ * The shared scan behind {@link selectRunnableWorkflowWork} and the pre-claim
+ * preflight. Read-only: no row is mutated.
+ *
+ * `assumeStaleAutoReleaseLeasesRecovered` classifies runs as the tick's
+ * stale-lease recovery pass would leave them, without mutating anything: runs
+ * withheld only by stale `auto-release` leases are treated as schedulable
+ * (recovery releases those leases), and runs holding a stale
+ * `manual-recovery-required` lease are skipped (recovery parks them).
+ */
+function scanRunnableWorkflowWork(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    runId?: string;
+    assumeStaleAutoReleaseLeasesRecovered: boolean;
+  },
+): WorkflowSchedulerScan {
+  const graceMs = input.graceMs;
 
   // Only non-terminal runs that are not already parked for manual recovery can
   // produce runnable work or relevant stale leases. `pending` runs (no approval
@@ -221,9 +249,21 @@ export function selectRunnableWorkflowWork(
 
   for (const run of runs) {
     const steps = loadStepRecords(db, run.id);
-    const leases = loadLeaseRecords(db, run.id);
-    const signals = collectRunLeaseSignals(leases, input.now, graceMs);
+    let leases = loadLeaseRecords(db, run.id);
+    let signals = collectRunLeaseSignals(leases, input.now, graceMs);
     staleLeases.push(...signals.staleLeases);
+
+    if (input.assumeStaleAutoReleaseLeasesRecovered) {
+      // Recovery parks a run with a stale manual-recovery lease; it can never
+      // become runnable this tick.
+      if (signals.hasStaleManualRecoveryLease) continue;
+      leases = leases.filter(
+        (lease) =>
+          classifyWorkflowLease(lease, { now: input.now, graceMs }) !==
+          "stale-auto-release",
+      );
+      signals = collectRunLeaseSignals(leases, input.now, graceMs);
+    }
 
     const derivedRunState = deriveWorkflowRunState(steps, {
       leases,
@@ -1314,6 +1354,53 @@ export type RunWorkflowSchedulerOnceResult =
       dispatch: WorkflowStepDispatchResult;
     };
 
+/**
+ * Non-terminal, non-parked runs ordered by dispatch-lease heartbeat (leaseless
+ * runs first), then creation. Shared by the active-dispatch recheck and the
+ * read-only pre-claim preflight so both walk runs in the same order.
+ */
+function scanDispatchLeaseOrderedRuns(
+  db: MomentumDb,
+  runId?: string,
+): WorkflowRunScanRow[] {
+  return runId === undefined
+    ? (db
+        .prepare(
+          `SELECT id, state, repo_path
+             FROM workflow_runs
+            WHERE needs_manual_recovery = 0
+              AND state NOT IN ('succeeded', 'failed', 'canceled')
+            ORDER BY COALESCE(
+                       (SELECT heartbeat_at
+                          FROM workflow_leases
+                         WHERE run_id = workflow_runs.id
+                           AND lease_kind = 'dispatch'),
+                       -1
+                     ) ASC,
+                     created_at ASC,
+                     id ASC`,
+        )
+        .all() as WorkflowRunScanRow[])
+    : (db
+        .prepare(
+          `SELECT id, state, repo_path
+             FROM workflow_runs
+            WHERE id = ?
+              AND needs_manual_recovery = 0
+              AND state NOT IN ('succeeded', 'failed', 'canceled')
+            ORDER BY COALESCE(
+                       (SELECT heartbeat_at
+                          FROM workflow_leases
+                         WHERE run_id = workflow_runs.id
+                           AND lease_kind = 'dispatch'),
+                       -1
+                     ) ASC,
+                     created_at ASC,
+                     id ASC`,
+        )
+        .all(runId) as WorkflowRunScanRow[]);
+}
+
 function selectActiveSubworkflowDispatchRecheck(
   db: MomentumDb,
   input: {
@@ -1333,43 +1420,7 @@ function selectActiveSubworkflowDispatchRecheck(
     WorkflowStepDispatchContext["staleDispatchTakeover"]
   >;
 } {
-  const runs =
-    input.runId === undefined
-      ? (db
-          .prepare(
-            `SELECT id, state, repo_path
-               FROM workflow_runs
-              WHERE needs_manual_recovery = 0
-                AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY COALESCE(
-                         (SELECT heartbeat_at
-                            FROM workflow_leases
-                           WHERE run_id = workflow_runs.id
-                             AND lease_kind = 'dispatch'),
-                         -1
-                       ) ASC,
-                       created_at ASC,
-                       id ASC`,
-          )
-          .all() as WorkflowRunScanRow[])
-      : (db
-          .prepare(
-            `SELECT id, state, repo_path
-               FROM workflow_runs
-              WHERE id = ?
-                AND needs_manual_recovery = 0
-                AND state NOT IN ('succeeded', 'failed', 'canceled')
-              ORDER BY COALESCE(
-                         (SELECT heartbeat_at
-                            FROM workflow_leases
-                           WHERE run_id = workflow_runs.id
-                             AND lease_kind = 'dispatch'),
-                         -1
-                       ) ASC,
-                       created_at ASC,
-                       id ASC`,
-          )
-          .all(input.runId) as WorkflowRunScanRow[]);
+  const runs = scanDispatchLeaseOrderedRuns(db, input.runId);
 
   let continuationPending = false;
   for (const run of runs) {
@@ -1694,6 +1745,25 @@ function buildActiveSubworkflowClaim(
     claimedExecutorNames?: ReadonlySet<string>;
   },
 ): ClaimedWorkflowStep | undefined {
+  const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+  return candidate === undefined ? undefined : { ...candidate, lease };
+}
+
+/**
+ * The lease-independent half of {@link buildActiveSubworkflowClaim}: the run's
+ * running step, when its latest attempt is an active deferred `subworkflow`
+ * dispatch or a resumable registered-SDK tick. Read-only, so the pre-claim
+ * preflight can predict the recheck's candidate before any lease is touched.
+ */
+function selectActiveSubworkflowCandidateStep(
+  db: MomentumDb,
+  run: WorkflowRunScanRow,
+  input: {
+    now: number;
+    graceMs: number;
+    claimedExecutorNames?: ReadonlySet<string>;
+  },
+): RunnableWorkflowStep | undefined {
   const steps = loadStepRecords(db, run.id);
   const runningStep = steps.find((step) => step.state === "running");
   if (runningStep === undefined) return undefined;
@@ -1736,7 +1806,6 @@ function buildActiveSubworkflowClaim(
       now: input.now,
       graceMs: input.graceMs,
     }),
-    lease,
   };
 }
 
@@ -2070,6 +2139,104 @@ export async function runWorkflowSchedulerOnceAsync(
   );
 }
 
+/**
+ * Read-only pre-claim preflight for {@link runWorkflowSchedulerOnceCore}.
+ *
+ * The pre-claim refusal contract is "refuse before any durable mutation": when
+ * a `preClaim` hook is wired (the daemon's fail-closed native host-bindings
+ * guard), a refusal must propagate before this tick's mutating passes —
+ * `recoverStaleLeases` releasing a stale lease, or the active-dispatch recheck
+ * taking over a stale dispatch lease — touch durable state. This preflight
+ * predicts, with reads only, the candidates the tick could act on:
+ *
+ *   - the active dispatch claim the recheck would return (including the
+ *     takeover candidate it would acquire after recovery releases a stale
+ *     auto-release dispatch lease), and
+ *   - the first runnable step as the scan would see it after stale
+ *     auto-release recovery,
+ *
+ * and invokes `preClaim` on each so a refusal throws before any lease or
+ * recovery row changes. The in-tick `preClaim` calls stay in place as the
+ * final guards for candidates only recovery itself can surface (e.g. steps
+ * reconciled from terminal dispatch evidence).
+ */
+function runWorkflowPreClaimPreflight(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    continuationPollIntervalMs: number;
+    preClaim: WorkflowStepPreClaim;
+    claimedExecutorNames?: ReadonlySet<string>;
+    runId?: string;
+  },
+): void {
+  const activeCandidate = selectActiveDispatchPreflightCandidate(db, input);
+  if (activeCandidate !== undefined) {
+    input.preClaim({ db, candidate: activeCandidate });
+  }
+  const runnableCandidate = scanRunnableWorkflowWork(db, {
+    now: input.now,
+    graceMs: input.graceMs,
+    ...(input.runId === undefined ? {} : { runId: input.runId }),
+    assumeStaleAutoReleaseLeasesRecovered: true,
+  }).runnable[0];
+  if (runnableCandidate !== undefined) {
+    input.preClaim({ db, candidate: runnableCandidate });
+  }
+}
+
+/**
+ * Predict, read-only, the claim {@link selectActiveSubworkflowDispatchRecheck}
+ * would return this tick. Mirrors the recheck's walk, but where the recheck
+ * runs after recovery (a stale auto-release dispatch lease is already
+ * released and eligible for takeover), this runs before it, so an unreleased
+ * stale auto-release lease is treated as the takeover candidate it becomes.
+ */
+function selectActiveDispatchPreflightCandidate(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    continuationPollIntervalMs: number;
+    claimedExecutorNames?: ReadonlySet<string>;
+    runId?: string;
+  },
+): RunnableWorkflowStep | undefined {
+  const runs = scanDispatchLeaseOrderedRuns(db, input.runId);
+  for (const run of runs) {
+    const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (lease !== undefined && lease.releasedAt === null) {
+      const classification = classifyWorkflowLease(lease, {
+        now: input.now,
+        graceMs: input.graceMs,
+      });
+      if (classification === "fresh") {
+        if (lease.holder !== input.holder) continue;
+        const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+        if (
+          candidate !== undefined &&
+          isActiveSubworkflowRecheckDue(lease, input)
+        ) {
+          return candidate;
+        }
+        continue;
+      }
+      // A stale manual-recovery lease parks the run during recovery; it can
+      // never surface an active claim this tick.
+      if (classification === "stale-manual-recovery-required") continue;
+      // Stale auto-release: recovery releases it, then the recheck's takeover
+      // path may re-acquire — fall through and predict that candidate.
+    }
+
+    const candidate = selectActiveSubworkflowCandidateStep(db, run, input);
+    if (candidate !== undefined) return candidate;
+  }
+  return undefined;
+}
+
 function runWorkflowSchedulerOnceCore(
   input: Omit<RunWorkflowSchedulerOnceInput, "dispatch">,
   dispatch: AsyncWorkflowStepDispatch,
@@ -2113,6 +2280,24 @@ function runWorkflowSchedulerOnceCore(
   // freshness against one consistent clock. (recover / scan validate now/graceMs.)
   const tickNow = now();
   const runScope = input.runId === undefined ? {} : { runId: input.runId };
+
+  // Refuse before any durable mutation: when a pre-claim guard is wired, run
+  // the read-only preflight ahead of stale-lease recovery so a refusal (e.g.
+  // unconfigured native host bindings) leaves stale leases and recovery state
+  // untouched. Skipped entirely when no guard is wired — no extra scan cost.
+  if (input.preClaim !== undefined) {
+    runWorkflowPreClaimPreflight(db, {
+      now: tickNow,
+      graceMs,
+      holder: workerId,
+      continuationPollIntervalMs,
+      preClaim: input.preClaim,
+      ...(input.claimedExecutorNames === undefined
+        ? {}
+        : { claimedExecutorNames: input.claimedExecutorNames }),
+      ...runScope,
+    });
+  }
 
   const recovery = recoverStaleLeases(db, {
     now: tickNow,

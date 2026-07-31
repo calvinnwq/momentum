@@ -2210,6 +2210,47 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       }),
     ).toThrow("changed dispatch inputs: agentProvider, model");
 
+    // A completed mechanism does not waive binding identity: any portable
+    // config or host input drift (including an unknown host binding digest)
+    // must still fail closed instead of reattaching foreign completed work.
+    for (const changedHostBindings of [
+      {
+        ...migratedHostBindings,
+        selection: {
+          ...hostBindings.selection,
+          timeoutMs: 6_000,
+        },
+      },
+      {
+        ...migratedHostBindings,
+        selection: {
+          ...hostBindings.selection,
+          maxRounds: 9,
+        },
+      },
+      {
+        ...migratedHostBindings,
+        selection: {
+          ...hostBindings.selection,
+          policyEnvelope: "changed-policy",
+        },
+      },
+      {
+        ...migratedHostBindings,
+        hostBindingIdentity: "sha256:changed-runner",
+      },
+    ]) {
+      expect(() =>
+        executor.tick({
+          state: envelope.snapshot(),
+          config: {},
+          hostBindings: changedHostBindings,
+          envelope: envelope.facade,
+          signal: new AbortController().signal,
+        }),
+      ).toThrow("changed portable config or host inputs");
+    }
+
     await driveExecutorTicks({
       db,
       attemptId,
@@ -2217,7 +2258,6 @@ ${NATIVE_ONE_SHOT_SCRIPT}`,
       config: {},
       hostBindings: {
         ...migratedHostBindings,
-        hostBindingIdentity: "sha256:changed-runner",
         runRound: () => {
           mechanisms += 1;
           throw new Error("checkpointed mechanism reran");

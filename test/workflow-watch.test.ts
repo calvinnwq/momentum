@@ -258,7 +258,12 @@ function seedStep(
 
 function seedLease(
   db: MomentumDb,
-  input: { runId: string; leaseKind: string; expiresAt: number },
+  input: {
+    runId: string;
+    leaseKind: string;
+    expiresAt: number;
+    holder?: string;
+  },
 ): void {
   db.prepare(
     `INSERT INTO workflow_leases
@@ -268,7 +273,7 @@ function seedLease(
   ).run(
     input.runId,
     input.leaseKind,
-    `holder:${input.runId}`,
+    input.holder ?? `holder:${input.runId}`,
     1_000,
     input.expiresAt,
     1_000,
@@ -726,6 +731,124 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { count: number };
       expect(leaseCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("refuses a running native SDK recheck before heartbeating when host bindings are not configured", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-running-native-preclaim";
+    const stepId = "preflight";
+    const attemptId = `${runId}::${stepId}::dispatch`;
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch pre-claim guard on an active native step",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'running' WHERE run_id = ? AND step_id = ?",
+      ).run(runId, stepId);
+      // A roundless running attempt on a native SDK executor is the active
+      // resumable tick the scheduler rechecks (and heartbeats) each pass.
+      db.prepare(
+        `INSERT INTO executor_attempts (
+           attempt_id, workflow_run_id, step_run_id, step_key,
+           executor, state, attempt_number, started_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        attemptId,
+        runId,
+        stepId,
+        stepId,
+        "agent-once",
+        "running",
+        1,
+        SEED_NOW,
+        SEED_NOW,
+        SEED_NOW,
+      );
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY,
+      });
+      // The watch worker already holds a fresh dispatch claim whose heartbeat
+      // is old enough that this tick would refresh it.
+      seedLease(db, {
+        runId,
+        leaseKind: "dispatch",
+        expiresAt: FRESH_EXPIRY,
+        holder: `workflow-watch:${runId}`,
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json",
+    ]);
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure).toMatchObject({
+      code: "daemon_host_bindings_required",
+    });
+    expect(failure.message).toContain("MOMENTUM_HOST_BINDINGS_FILE");
+
+    const after = openDb(dataDir);
+    try {
+      // The pre-claim refusal must fire before the heartbeat: the dispatch
+      // lease keeps its seeded heartbeat and expiry and stays unreleased.
+      const lease = after
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, expires_at AS expiresAt,
+                  released_at AS releasedAt
+             FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'`,
+        )
+        .get(runId) as {
+        heartbeatAt: number;
+        expiresAt: number;
+        releasedAt: number | null;
+      };
+      expect(lease).toEqual({
+        heartbeatAt: 1_000,
+        expiresAt: FRESH_EXPIRY,
+        releasedAt: null,
+      });
+      const attempt = after
+        .prepare(
+          "SELECT state, attempt_number AS attemptNumber FROM executor_attempts WHERE attempt_id = ?",
+        )
+        .get(attemptId) as { state: string; attemptNumber: number };
+      expect(attempt).toEqual({ state: "running", attemptNumber: 1 });
+      const roundCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_rounds WHERE workflow_run_id = ?",
+        )
+        .get(runId) as { count: number };
+      expect(roundCount.count).toBe(0);
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?",
+        )
+        .get(runId, stepId) as { state: string };
+      expect(step.state).toBe("running");
     } finally {
       after.close();
     }

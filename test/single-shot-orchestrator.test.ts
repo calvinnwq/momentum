@@ -1429,6 +1429,77 @@ describe("runSingleShotStep — single-owner enforcement", () => {
     expect(resumed.round.round.classification).toBe("complete");
   });
 
+  it.each(["agent-once", "script"] as const)(
+    "rejects %s reattach of completed work under an unknown binding digest",
+    async (executor) => {
+      const db = openStepDb();
+      const dispatchStep = (
+        runRound: () => { outcome: { ok: true }; result?: RunnerResult },
+      ) => {
+        const base = {
+          db,
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          stepKey: "implementation",
+          attemptNumber: 1,
+          selection: resolveSingleShotRoundSelection({}),
+          resolveRoundInputs: roundInputs,
+          now: monotonicClock(),
+          runRound,
+        };
+        return executor === "script"
+          ? runSingleShotStep({
+              ...base,
+              executor: "script",
+              config: { command: "test-script" },
+            })
+          : runSingleShotStep({ ...base, executor: "agent-once" });
+      };
+      db.exec(`
+        CREATE TRIGGER reject_single_shot_classification
+        BEFORE INSERT ON executor_checkpoints
+        WHEN NEW.stage = 'classified'
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated daemon crash before classification');
+        END
+      `);
+
+      await expect(
+        dispatchStep(() =>
+          executor === "script"
+            ? { outcome: { ok: true } }
+            : { outcome: { ok: true }, result: runnerResult() },
+        ),
+      ).rejects.toThrow("simulated daemon crash");
+      db.exec("DROP TRIGGER reject_single_shot_classification");
+
+      // The crash left a durable mechanism_completed outcome. Corrupt the
+      // recorded dispatch binding into a digest no current or supported legacy
+      // recomputation produces: completed evidence must not reattach without
+      // proving it belongs to the current host inputs.
+      const attemptId = singleShotAttemptId("run-1", "step-1", executor, 1);
+      const roundId = singleShotRoundId(attemptId);
+      db.prepare(
+        `UPDATE executor_checkpoints
+            SET detail = ?
+          WHERE round_id = ? AND stage = 'round_started'`,
+      ).run(`dispatch binding v2: sha256:${"0".repeat(64)}`, roundId);
+
+      let mechanismRuns = 0;
+      await expect(
+        dispatchStep(() => {
+          mechanismRuns += 1;
+          throw new Error("foreign completed work must not rerun");
+        }),
+      ).rejects.toThrow("changed portable config or host inputs");
+      expect(mechanismRuns).toBe(0);
+      expect(loadExecutorRound(db, roundId)).toMatchObject({
+        state: "capturing_result",
+        classification: null,
+      });
+    },
+  );
+
   it("mints a distinct, independent attempt for a fresh re-run attempt", async () => {
     const db = openStepDb();
     const first = await dispatch(db, 1);

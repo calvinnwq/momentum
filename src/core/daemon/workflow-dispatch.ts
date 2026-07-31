@@ -204,6 +204,7 @@ const NATIVE_HOST_BINDING_EXECUTORS: ReadonlySet<string> = new Set([
   "agent-loop",
   "agent-once",
   "script",
+  DELEGATE_SUPERVISOR_EXECUTOR_NAME,
 ]);
 
 /** Whether a recorded identity resolves to a native binding-backed built-in. */
@@ -211,6 +212,24 @@ function isNativeHostBindingExecutorIdentity(executorName: string): boolean {
   return NATIVE_HOST_BINDING_EXECUTORS.has(
     canonicalExecutorIdentity(executorName),
   );
+}
+
+/**
+ * Whether the step's latest attempt already carries completed work whose
+ * classification/settlement must never be blocked before a claim. Delegate
+ * handoffs record their completion through the live-step mechanism and
+ * handoff stages, not the unclassified native-mechanism shape.
+ */
+function hasCompletedNativeHostBindingEvidence(
+  db: MomentumDb,
+  executorName: string,
+  attemptId: string,
+): boolean {
+  return canonicalExecutorIdentity(executorName) ===
+    DELEGATE_SUPERVISOR_EXECUTOR_NAME
+    ? hasCompletedLiveStepMechanism(db, attemptId) ||
+        hasCompletedDelegateHandoff(db, attemptId)
+    : hasUnclassifiedCompletedNativeMechanism(db, attemptId);
 }
 
 function assertNativeHostBindingsConfigured(
@@ -232,13 +251,72 @@ function assertNativeHostBindingsConfigured(
   );
   if (
     attempt !== undefined &&
-    hasUnclassifiedCompletedNativeMechanism(db, attempt.attemptId)
+    hasCompletedNativeHostBindingEvidence(
+      db,
+      runtime.executorName,
+      attempt.attemptId,
+    )
   ) {
     return;
   }
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
   throw new RegisteredExecutorHostBindingsError(
     "runtime_unavailable",
     `${DAEMON_HOST_BINDINGS_FILE_ENV_VAR} is required for native ${runtime.executorName} host bindings`,
+  );
+}
+
+/**
+ * Pre-claim guard for a *resolved* bindings source that still cannot serve the
+ * selected native step kind: claiming would only create attempt/round state
+ * for the post-claim binding lookup to reject with `runtime_unavailable`.
+ * Delegate handoffs select their binding through tool config, which the
+ * post-claim resolver validates, so only kind-selected native executors are
+ * checked here. Read-only: mirrors the resolver's rejection without mutating
+ * any workflow, attempt, or round state.
+ */
+function assertSelectedNativeHostBindingPresent(
+  db: MomentumDb,
+  target: { runId: string; stepId: string },
+  hostBindings: HostBindings,
+): void {
+  const runtime = resolveWorkflowStepExecutorRuntime(db, target);
+  if (
+    !runtime.ok ||
+    hasExecutorDefinition(db, runtime.executorName) ||
+    !isNativeHostBindingExecutorIdentity(runtime.executorName) ||
+    canonicalExecutorIdentity(runtime.executorName) ===
+      DELEGATE_SUPERVISOR_EXECUTOR_NAME
+  ) {
+    return;
+  }
+  const attempt = loadLatestExecutorAttemptForStep(
+    db,
+    target.runId,
+    target.stepId,
+  );
+  if (
+    attempt !== undefined &&
+    hasCompletedNativeHostBindingEvidence(
+      db,
+      runtime.executorName,
+      attempt.attemptId,
+    )
+  ) {
+    return;
+  }
+  const step = getWorkflowStep(db, target.runId, target.stepId);
+  if (step === undefined || hostBindings.bindings.has(step.kind)) return;
+  // Route validation owns precedence: an invalid route must reach dispatch so
+  // the run parks behind a durable route_config_invalid gate instead of a
+  // pre-claim host-binding refusal.
+  if (!resolveWorkflowStepDispatchRouteSelection(db, target).ok) return;
+  throw new RegisteredExecutorHostBindingsError(
+    "runtime_unavailable",
+    `host bindings have no ${step.kind} binding for native ${runtime.executorName}`,
   );
 }
 
@@ -367,10 +445,15 @@ export function resolveDaemonWorkflowStepDispatch(
     hostBindings.status === "not_configured"
       ? createMissingHostBindingsNativeDispatch(baseDispatch)
       : undefined;
-  const missingHostBindingsPreClaim: WorkflowStepPreClaim | undefined =
+  const hostBindingsPreClaim: WorkflowStepPreClaim =
     hostBindings.status === "not_configured"
       ? ({ db, candidate }) => assertNativeHostBindingsConfigured(db, candidate)
-      : undefined;
+      : ({ db, candidate }) =>
+          assertSelectedNativeHostBindingPresent(
+            db,
+            candidate,
+            hostBindings.bindings,
+          );
 
   if (executorConfig.status === "not_configured") {
     const unavailableDispatch = createRegisteredExecutorWorkflowDispatch(
@@ -398,6 +481,8 @@ export function resolveDaemonWorkflowStepDispatch(
             claim.stepId,
           );
           if (
+            canonicalExecutorIdentity(runtime.executorName) !==
+              DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
             attempt !== undefined &&
             hasUnclassifiedCompletedNativeMechanism(
               context.db,
@@ -417,9 +502,7 @@ export function resolveDaemonWorkflowStepDispatch(
       ...(legacy.leaseDurationMs !== undefined
         ? { leaseDurationMs: legacy.leaseDurationMs }
         : {}),
-      ...(missingHostBindingsPreClaim === undefined
-        ? {}
-        : { preClaim: missingHostBindingsPreClaim }),
+      preClaim: hostBindingsPreClaim,
     };
   }
 
@@ -500,6 +583,8 @@ export function resolveDaemonWorkflowStepDispatch(
           claim.stepId,
         );
         if (
+          canonicalExecutorIdentity(runtime.executorName) !==
+            DELEGATE_SUPERVISOR_EXECUTOR_NAME &&
           attempt !== undefined &&
           hasUnclassifiedCompletedNativeMechanism(
             context.db,
@@ -516,9 +601,7 @@ export function resolveDaemonWorkflowStepDispatch(
     ...(legacy.leaseDurationMs !== undefined
       ? { leaseDurationMs: legacy.leaseDurationMs }
       : {}),
-    ...(missingHostBindingsPreClaim === undefined
-      ? {}
-      : { preClaim: missingHostBindingsPreClaim }),
+    preClaim: hostBindingsPreClaim,
   };
 }
 
