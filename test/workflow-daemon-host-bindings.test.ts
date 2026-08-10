@@ -677,7 +677,7 @@ describe("daemon pre-claim host-binding refusal (real dispatch path)", () => {
         executor: "delegate-supervisor",
         attemptNumber: 1,
         roundIndex: 0,
-        state: "running",
+        state: "capturing_result",
         classification: null,
         startedAt: NOW,
         heartbeatAt: NOW,
