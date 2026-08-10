@@ -1849,9 +1849,13 @@ It does not resolve approvals, gates, manual recovery, or other operator decisio
 When `--once` is eligible to dispatch a binding-backed step, including native
 `agent-loop`, `agent-once`, `script`, or `delegate-supervisor`,
 `MOMENTUM_HOST_BINDINGS_FILE` must be configured.
-Without that host-binding file, watch refuses before moving the step to `running` so a
+For a new step, without that host-binding file, watch refuses before the
+scheduler claim, attempt/round creation, or process launch, so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
-evidence.
+evidence. If an active native attempt already has durable completed-mechanism
+or handoff evidence, watch reattaches and classifies that evidence without
+rerunning the mechanism; an invalid host-binding source still fails before
+dispatch.
 When host bindings are configured, the watch dispatcher uses the same repo lock,
 ignored run-directory check, verification config fallback, and verify -> commit
 / reset finalization path as managed-loop `daemon start`.

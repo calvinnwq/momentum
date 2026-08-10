@@ -150,13 +150,20 @@ committed as work.
 Process-backed live-wrapper dispatch is supported on Linux and macOS.
 On native Windows, the wrapper launches no supervised command, parks the run
 with `unsupported_platform`, and preserves the refused round for recovery.
-When the variable is unset or blank, native `agent-loop`, `agent-once`, and
-`script` dispatches fail honestly with `runtime_unavailable` instead of using
-another execution mechanism.
+When the variable is unset or blank, native `agent-loop`, `agent-once`,
+`script`, and `delegate-supervisor` dispatches fail honestly with
+`runtime_unavailable` instead of using
+another execution mechanism. For a new native dispatch, that refusal occurs
+before the scheduler claims the step, creates an attempt or round, or launches
+a process. If the current attempt already has durable completed-mechanism or
+handoff evidence, the daemon reattaches and classifies that evidence without
+rerunning the mechanism; the reattachment contract is owned by [Executor SDK](executor-sdk.md#envelope-facade).
 Other supported live-wrapper-owned steps keep the durable start scaffold for a
 later executor path.
-A configured host-binding file that omits the dispatched step-kind binding also
-fails with `runtime_unavailable` without falling back to another mechanism.
+A configured host-binding file that omits the dispatched step-kind binding for
+new work also fails closed before a scheduler claim or process launch with
+`runtime_unavailable`, without falling back to another mechanism or recording
+fake success.
 If a claimed step cannot be resolved or carries an invalid executor identity,
 the dispatcher parks the run behind a
 `manual_recovery_required` workflow gate instead of silently dropping the claim;
@@ -243,7 +250,7 @@ diagnostic naming `MOMENTUM_HOST_BINDINGS_FILE`, consult no fallback source,
 launch no process, and mutate no workflow state.
 Settle in-flight work before migrating: reattachment digests recorded under the
 retired selector cannot be recomputed without the retired profile identity, so
-a native `agent-loop`, `agent-once`, or `script` round that was still
+a native `agent-loop`, `agent-once`, `script`, or `delegate-supervisor` round that was still
 nonterminal at cutover reattaches only through the existing manual-recovery
 lane (`workflow run clear-recovery` prepares the fresh attempt), exactly like a
 binding file edited mid-flight.
@@ -317,8 +324,9 @@ Unknown or non-agent harness/model values still pass through unchanged after str
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
 `$MOMENTUM_RESULT_PATH`. A valid host-binding file may configure only the
-live-wrapper-owned step kinds it can run; a dispatched live-wrapper-owned kind
-missing from the bindings routes to manual recovery rather than fake success. An
+live-wrapper-owned step kinds it can run; a new dispatch for a live-wrapper-owned
+kind missing from the bindings is refused before claim or process launch rather
+than entering the workflow as fake success. An
 unreadable, invalid JSON, or schema-invalid host-binding file - and a still-set
 retired `MOMENTUM_LIVE_WRAPPER_PROFILE` selector - causes `daemon start`
 managed-loop mode to fail before registering a daemon run with

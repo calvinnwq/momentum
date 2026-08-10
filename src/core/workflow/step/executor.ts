@@ -27,10 +27,10 @@
  * live wrappers. The deterministic fake moved behind an explicit test-only
  * seam (`test/helpers/fake-workflow-step-executor.ts`) that the workflow-run/operator-recovery/executor-loop
  * substrate smokes inject through the `registry` parameter of the three
- * entrypoints; no fake ships in `dist/`. live-wrapper owns the live-wrapper registry /
- * command configuration in `live-wrapper-registry.ts`; live local command
- * execution is layered around this boundary rather than owned by a fake
- * dispatcher.
+ * entrypoints; no fake ships in `dist/`. Host bindings own the live-wrapper
+ * registry / command configuration in `host-bindings-registry.ts`; live local
+ * command execution is layered around this boundary rather than owned by a
+ * fake dispatcher.
  */
 
 import { WORKFLOW_STEP_KINDS, type WorkflowStepKind } from "../run/reducer.js";

@@ -5,8 +5,8 @@
  * runs a resolved `HostBindingConfig` as an
  * explicit local child process and classifies the outcome into the live-wrapper
  * execution recovery vocabulary (`LIVE_STEP_WRAPPER_RECOVERY_CODES`).
- * `live-wrapper-registry.ts` owns the typed config plus a
- * `WorkflowStepKind`-keyed profile/registry.
+ * `host-bindings-registry.ts` owns the typed config plus a
+ * `WorkflowStepKind`-keyed host-binding registry.
  *
  * This module is the seam that makes that execution core usable through the
  * existing `WorkflowStepExecutor` boundary (`src/core/workflow/step/executor.ts`)
@@ -27,7 +27,7 @@
  *     two live codes map onto one coarser dispatch `errorCode`.
  *   - `createLiveWorkflowStepExecutor` / `createLiveWorkflowStepExecutorsFromBindings`
  *     wrap the two functions plus `runLiveStepWrapper` into `WorkflowStepExecutor`
- *     values keyed by `WorkflowStepKind`, resolvable from a profile.
+ *     values keyed by `WorkflowStepKind`, resolvable from host bindings.
  *
  * This module deliberately stops at the executor adapter boundary: it does not
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`

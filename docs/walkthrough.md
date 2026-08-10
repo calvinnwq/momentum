@@ -53,7 +53,7 @@ node dist/index.js daemon status --data-dir "$DATA" --json
 ```
 
 With no approved steps yet, the bounded loop exits cleanly with `loop.exitReason: "max_idle_cycles"`, `loop.lastWorkflowCode: "idle"`, and `loop.workflowStepsDispatched: 0`, and `daemon status` then reports the terminal `stopped` daemon run.
-Dispatching real work additionally requires an approval (below) and, for binding-backed executors including native `agent-loop`, `agent-once`, and `script`, a configured `MOMENTUM_HOST_BINDINGS_FILE`; see [Daemon commands](daemon.md).
+Dispatching real work additionally requires an approval (below) and, for binding-backed executors including native `agent-loop`, `agent-once`, `script`, and `delegate-supervisor`, a configured `MOMENTUM_HOST_BINDINGS_FILE`; see [Daemon commands](daemon.md).
 
 ## Inspect the run
 

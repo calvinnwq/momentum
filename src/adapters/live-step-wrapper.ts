@@ -2,9 +2,9 @@
  * Live workflow-step execution wrapper.
  *
  * Momentum invokes live workflow steps that wrap the existing
- * OpenClaw engines. The typed live-wrapper config plus a
- * `WorkflowStepKind`-keyed registry live in `live-wrapper-registry.ts`. This module
- * adds the next layer: actually running a resolved live wrapper as an explicit
+ * OpenClaw engines. The typed host-binding config plus a
+ * `WorkflowStepKind`-keyed registry live in `host-bindings-registry.ts`. This
+ * module adds the next layer: actually running a resolved live wrapper as an explicit
  * local child process and normalizing its outcome.
  *
  * `runLiveStepWrapper` is the live execution core for the `implementation`
